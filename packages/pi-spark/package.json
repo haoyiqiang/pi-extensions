@@ -1,7 +1,7 @@
 {
   "name": "pi-spark",
   "version": "0.28.0",
-  "description": "Pi package that polishes the daily experience: credits, presets, recap, titles, and a compact TUI",
+  "description": "Pi package that polishes the daily experience: credits, presets, recap, and a compact TUI",
   "type": "module",
   "main": "./index.ts",
   "exports": {

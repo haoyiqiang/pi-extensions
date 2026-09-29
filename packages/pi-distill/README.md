@@ -31,7 +31,7 @@ The distillation prompt strictly follows the current locale selected by `/config
 - Observes `bash`, `read`, `grep`, and `find` through Pi's native `tool_call` / `tool_result` events.
 - Uses the tool's `outputRequest` as the source of truth for whether and how to distill a result.
 - Treats a prompt containing only `RAW` as an explicit request for the original output.
-- Uses the current session model by default, or a configured `provider/model` override.
+- Uses the current session model by default, or a model selected from the available list in `/config:distill`.
 - Keeps diagnostic metadata such as status, character counts, compression ratio, duration, and anomalies in the tool result details.
 - Oversized output is no longer written to a file or truncated by pi-distill; it is left to Pi's own output-limiting mechanism.
 - Adds a compact audit card when the active Pi display middleware is available, with a fallback renderer otherwise. The shared display protocol is provided by `pi-extensions-tool-display`.
@@ -176,7 +176,7 @@ Configuration-file fields take precedence over environment variables. Unspecifie
 
 | Setting | Meaning |
 | --- | --- |
-| `model` | Optional `provider/model`; empty uses the current Pi session model. |
+| `model` | Optional `provider/modelId`; empty uses the current Pi session model. `/config:distill` selects from the available model list instead of free text. Model IDs may contain `/`, for example `openrouter/deepseek/deepseek-v4-flash`. |
 | `minChars` | Minimum output size before a summary is requested. |
 | `maxChars` | Distilled text is written to a temporary file when it exceeds this length. |
 | `maxOutputChars` | Maximum text returned to the Agent. Oversized text is written to a temporary file and replaced with a file pointer. |
@@ -201,7 +201,7 @@ The main environment variables are `PI_DISTILL_MODEL`, `PI_DISTILL_MIN_CHARS`, `
 ## Requirements
 
 - Node.js 22 or newer.
-- A current Pi session model, unless `model` points to an available configured model.
+- A current Pi session model, unless `model` points to an available configured model. The model row in `/config:distill` lists the models currently available.
 
 ## License
 

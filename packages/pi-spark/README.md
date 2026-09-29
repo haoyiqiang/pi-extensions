@@ -78,21 +78,6 @@ pi-spark generates a short recap of the current session after it goes idle, or o
 
 ![Recap](./assets/screenshot-recap.png)
 
-### Title
-
-pi-spark names the session automatically after the first completed turn, so it's easy to find later in the session selector.
-
-- Once the agent completes its first response and any tool calls from that turn, pi-spark generates a short title from the conversation and sets it as the session name.
-- Generation is silent: nothing is shown in the UI, and the usage is recorded in a session entry like the recap.
-- Sessions that already have a name are left untouched.
-- The title generation can use its own model, configured separately from your working model.
-
-### Scrolling write previews
-
-Long, streaming `write` tool calls keep their latest lines visible instead of pinning the preview to the beginning. The omitted-line count appears above the preview, while `ctrl+o` still expands the full content.
-
-https://github.com/user-attachments/assets/b7bb77c1-c188-46a2-aba9-6487bdf58fa0
-
 ## Configuration
 
 pi-spark reads config from `~/.pi/agent/spark.json` and from the current project's `.pi/spark.json`. Project config overrides matching global fields.
@@ -122,11 +107,6 @@ For example:
     "provider": "openai-codex",
     "model": "gpt-5.4-mini",
     "thinkingLevel": "off"
-  },
-  "title": {
-    "provider": "openai-codex",
-    "model": "gpt-5.4-mini",
-    "thinkingLevel": "off"
   }
 }
 ```
@@ -142,8 +122,6 @@ All fields are optional. Each top-level feature runs with the defaults below unl
 | `footer` | `FooterConfig` | Shows session info, extension statuses, cost, and context usage. |
 | `presets` | `{ [name]: Preset }` | Defines named model presets, keyed by name. |
 | `recap` | `RecapConfig` | Generates a session recap when idle or on demand. |
-| `title` | `TitleConfig` | Names the session automatically after the first completed turn. |
-| `write` | `{}` | Keeps the latest lines of streaming `write` tool calls visible. |
 
 #### `CreditsConfig`
 
@@ -206,16 +184,6 @@ All fields are optional. If the recap model configuration is incomplete, pi-spar
 | `provider` | string | Provider ID for the recap model. |
 | `model` | string | Model ID for the recap model. |
 | `thinkingLevel` | `ModelThinkingLevel` | Thinking level for the recap model. Defaults to `off`. |
-
-#### `TitleConfig`
-
-All fields are optional. If the title model configuration is incomplete, pi-spark falls back to the session's main model. `thinkingLevel` defaults to `off` (clamped to the model), so title generation stays cheap regardless of your working thinking level.
-
-| Field | Value | Description |
-| --- | --- | --- |
-| `provider` | string | Provider ID for the title model. |
-| `model` | string | Model ID for the title model. |
-| `thinkingLevel` | `ModelThinkingLevel` | Thinking level for the title model. Defaults to `off`. |
 
 #### `ModelThinkingLevel`
 

@@ -31,7 +31,7 @@
 - 通过 Pi 原生的 `tool_call` / `tool_result` 事件监听 `bash`、`read`、`grep` 和 `find`。
 - 以工具的 `outputRequest` 作为是否提炼、如何提炼的依据。
 - 当提示词严格只有 `RAW` 时，视为明确要求返回原始输出。
-- 默认使用当前会话模型，也可以配置独立的 `provider/model`。
+- 默认使用当前会话模型。也可以在 `/config:distill` 中从可用模型列表选择独立模型。
 - 在工具结果 details 中保留状态、字符数、压缩比、耗时和异常等诊断信息。
 - 超长输出不再由 pi-distill 写文件或截断，统一交由 Pi 自身的输出限制机制处理。
 - 当前 Pi 展示中间件可用时显示紧凑审计卡片，否则使用自己的 fallback renderer。展示协议由公共运行库 `pi-extensions-tool-display` 提供。
@@ -179,7 +179,7 @@ Agent 消费更适合当前决策的结果，并获得可审计的处理诊断
 
 | 配置项 | 含义 |
 | --- | --- |
-| `model` | 可选的 `provider/model`；为空时使用当前 Pi 会话模型。 |
+| `model` | 可选的 `provider/modelId`；为空时使用当前 Pi 会话模型。在 `/config:distill` 中从可用模型列表选择，不需要手输。模型 ID 可以包含 `/`，例如 `openrouter/deepseek/deepseek-v4-flash`。 |
 | `minChars` | 达到此输出长度后才请求提炼。 |
 | `maxChars` | 提炼结果超过此字符数时写入临时文件。 |
 | `maxOutputChars` | 最终返回给 Agent 的文本上限。超出后写入临时文件，只返回文件指针。 |
@@ -204,7 +204,7 @@ Agent 消费更适合当前决策的结果，并获得可审计的处理诊断
 ## 要求
 
 - Node.js 22 或更高版本。
-- 当前 Pi 会话需要有可用模型，除非 `model` 指向一个已配置且可用的模型。
+- 当前 Pi 会话需要有可用模型，除非 `model` 指向一个已配置且可用的模型。`/config:distill` 的模型项会列出当前可用模型。
 
 ## 许可证
 

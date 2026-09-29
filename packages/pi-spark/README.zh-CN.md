@@ -51,18 +51,6 @@ pi install git:github.com/maplezzk/pi-extensions
 - `/recap` 可随时手动生成。
 - 回顾可以使用独立配置的模型，不必使用当前工作模型。
 
-### Title
-
-首个回合完成后自动为会话命名，便于在会话选择器中查找。
-
-- 只在会话尚无名称时生成。
-- 生成过程静默进行，用量记录在会话条目中，与 recap 相同。
-- 标题生成可以使用独立配置的模型。
-
-### 流式 write 预览
-
-长时间流式输出的 `write` 工具调用会保持最新几行可见，而不是固定在开头。被省略的行数显示在预览上方；`ctrl+o` 仍可展开完整内容。
-
 ## 配置
 
 配置读取顺序：`~/.pi/agent/spark.json`（全局）与当前项目的 `.pi/spark.json`（项目覆盖同名字段）。
@@ -74,8 +62,7 @@ pi install git:github.com/maplezzk/pi-extensions
   "presets": {
     "claude-opus": { "provider": "anthropic", "model": "claude-opus-4-8", "thinkingLevel": "high" }
   },
-  "recap": { "idle": "5m", "provider": "openai-codex", "model": "gpt-5.4-mini", "thinkingLevel": "off" },
-  "title": { "provider": "openai-codex", "model": "gpt-5.4-mini", "thinkingLevel": "off" }
+  "recap": { "idle": "5m", "provider": "openai-codex", "model": "gpt-5.4-mini", "thinkingLevel": "off" }
 }
 ```
 
@@ -88,10 +75,8 @@ pi install git:github.com/maplezzk/pi-extensions
 | `footer` | `FooterConfig` | 会话信息、扩展状态、花费与上下文用量。`statusPosition` 可选 `inline`（默认）或 `below`。 |
 | `presets` | `{ [name]: Preset }` | 具名预设，每个预设必须给出 `provider`、`model`、`thinkingLevel`。 |
 | `recap` | `RecapConfig` | 空闲回顾。`idle` 接受毫秒数或 `parse-duration` 字符串，最小 5000 ms，默认 5 分钟。 |
-| `title` | `TitleConfig` | 首轮结束后的自动命名。 |
-| `write` | `{}` | 流式 `write` 预览。 |
 
-`thinkingLevel` 的合法值：`off`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`。recap 与 title 的 `thinkingLevel` 默认 `off`，并会被模型的可用等级收敛。
+`thinkingLevel` 的合法值：`off`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`。recap 的 `thinkingLevel` 默认 `off`，并会被模型的可用等级收敛。
 
 ## 主题
 

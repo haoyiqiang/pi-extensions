@@ -15,7 +15,7 @@ description: "配置与排查 pi-distill 的模型、压缩阈值、重试、工
 
 优先让用户在 Pi 中运行 `/config:distill`；`/pi-distill` 只是兼容别名。手工配置时只使用包内 `config.example.json` 已声明的字段：
 
-- `model` 留空时使用当前会话模型，否则必须是可用的 `provider/model`；
+- `model` 留空时使用当前会话模型。`/config:distill` 从当前可用模型列表选择，不要手输。保存值是 `provider/modelId`，模型 ID 可以包含 `/`，例如 `openrouter/deepseek/deepseek-v4-flash`。只有整段引用唯一匹配某个 model ID 时，才接受不带 provider 的写法；
 - `minChars` 控制何时提炼，`maxChars` 与 `maxOutputChars` 控制大结果落盘和返回上限；
 - `timeoutRetryCount`、`errorRetryCount` 是额外重试次数；
 - `summarizeErrors` 默认 `true`，控制达到 `minChars` 的错误结果是否提炼；环境变量依次为 `PI_DISTILL_SUMMARIZE_ERRORS`、旧 `PI_BASH_SUMMARY_SUMMARIZE_ERRORS`；
@@ -29,3 +29,4 @@ description: "配置与排查 pi-distill 的模型、压缩阈值、重试、工
 - 用 `/distill:stats` 查看当前会话成功、失败、回退、压缩率和模型消耗。
 - 对达到 `minChars` 的文本工具结果观察提炼；再用 `RAW` 确认完整性路径。
 - 当前会话无可用模型或模型调用失败时，必须报告原始结果被保留的 fail-open 行为，不能宣称提炼成功。
+- “配置的模型不在当前可用模型中”表示 `model` 没有匹配到可用模型。先核对第一段是不是 provider。`deepseek/deepseek-v4-flash` 通常是 OpenRouter 的 model ID，正确引用是 `openrouter/deepseek/deepseek-v4-flash`。

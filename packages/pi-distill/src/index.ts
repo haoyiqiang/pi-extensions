@@ -63,6 +63,8 @@ import {
   type DistillToolConfig,
   type OutputSummaryDecision,
 } from "./summary-utils.ts";
+import { resolveDistillRuntimeModel } from "./model-choice.ts";
+import { listDistillSelectableModels, selectDistillModel } from "./model-picker.ts";
 import { estimateHeuristicTokens } from "./token-estimator.ts";
 
 const i18n = createTranslator(loadCatalog(new URL("../locales/index.json", import.meta.url)));
@@ -780,13 +782,18 @@ async function summarizeOutput(
   signal: AbortSignal,
   completion: SummaryCompletion = complete,
 ): Promise<SummaryResult> {
-  const model = config.modelProvider && config.modelId
-    ? context.ctx.modelRegistry.find(config.modelProvider, config.modelId)
-    : context.ctx.model;
+  const configuredReference = config.modelProvider && config.modelId
+    ? `${config.modelProvider}/${config.modelId}`
+    : "";
+  const model = resolveDistillRuntimeModel(
+    configuredReference,
+    context.ctx.modelRegistry,
+    context.ctx.model,
+  );
   if (!model) {
-    throw new Error(
-      "No model is available in the current session. Select a session model or set PI_BASH_SUMMARY_MODEL=provider/model.",
-    );
+    throw new Error(configuredReference
+      ? i18n.t("modelNotFound", { model: configuredReference })
+      : i18n.t("sessionModelMissing"));
   }
 
   // 摘要请求由扩展自己发出：鉴权与 provider 会话头交给共享请求器，与 Pi 核心行为一致。
@@ -1359,17 +1366,20 @@ async function editDistillModel(
   ctx: ExtensionCommandContext,
   current: string,
 ): Promise<string | undefined> {
-  const value = await ctx.ui.input(
-    i18n.t("modelInput"),
-    current || "llm-proxy/LOW",
-  );
-  if (value === undefined) return undefined;
-  const normalized = value.trim();
-  if (normalized && !/^[^/\s]+\/[^/\s]+$/.test(normalized)) {
-    notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "error", message: i18n.t("modelInvalid") });
-    return undefined;
+  const models = listDistillSelectableModels(ctx);
+  if (models.length === 0) {
+    notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("modelPickerNoModels") });
   }
-  return normalized;
+  return selectDistillModel(ctx, models, current, {
+    title: i18n.t("modelPickerTitle"),
+    currentModel: i18n.t("currentModel"),
+    filterPlaceholder: i18n.t("modelPickerFilter"),
+    noMatch: i18n.t("modelPickerNoMatch"),
+    navigate: i18n.t("modelPickerNavigate"),
+    select: i18n.t("modelPickerSelect"),
+    cancel: i18n.t("modelPickerCancel"),
+    filter: i18n.t("modelPickerType"),
+  });
 }
 
 async function saveDistillConfigFile(

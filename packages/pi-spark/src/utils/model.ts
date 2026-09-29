@@ -42,7 +42,7 @@ export async function completeBackground(ctx: ExtensionContext, model: Model<Api
 }
 
 /**
- * Resolves the model and thinking level for a background feature (recap, title, ...).
+ * Resolves the model and thinking level for a background feature (recap).
  *
  * `feature` names the config section so warnings can point at the offending fields. When the
  * feature's model config is incomplete or unavailable, this falls back to the session's main

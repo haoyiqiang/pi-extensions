@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Breaking changes
+
+* remove automatic session title generation; use `pi-naming` for session and terminal names
+* remove the scrolling `write` preview; `write` display stays with `pi-extensions-tool-display`
+
 ## [0.28.0](https://github.com/zlliang/pi-spark/compare/v0.27.0...v0.28.0) (2026-09-22)
 
 

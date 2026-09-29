@@ -1,8 +1,10 @@
 # Background Model Calls and OpenAI Codex Sessions
 
 > This document was generated with the [Pi](https://pi.dev/) coding agent.
+>
+> Session title generation has been removed from this package. `pi-naming` owns session and terminal naming. The investigation below records the July 2026 behavior, when title generation still existed.
 
-In pi-spark, the title and recap features call the model outside Pi's main agent loop. They send a small, independent conversation through `completeSimple()` and persist only the resulting text and usage.
+In pi-spark, recap calls the model outside Pi's main agent loop. It sends a small, independent conversation through `completeSimple()` and persists only the resulting text and usage.
 
 On July 10, 2026, the day GPT-5.6 became available, I configured `openai-codex/gpt-5.6-luna` for title and recap generation while the main thread also used the `openai-codex` provider.
 

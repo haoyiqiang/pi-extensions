@@ -22,7 +22,7 @@
 | [`pi-blackhole`](./packages/pi-blackhole) | 提供确定性压缩、会话观察记忆和原始历史 Recall。 | [English](./packages/pi-blackhole/README.md) · [中文](./packages/pi-blackhole/README.zh-CN.md) |
 | [`pi-context-view`](./packages/pi-context-view) | 可视化上下文用量，并检查系统提示、工具、技能和扩展注入。 | [English](./packages/pi-context-view/README.md) · [中文](./packages/pi-context-view/README.zh-CN.md) |
 | [`pi-rewind`](./packages/pi-rewind) | 创建 Git 检查点，并恢复文件、会话状态或两者。 | [English](./packages/pi-rewind/README.md) · [中文](./packages/pi-rewind/README.zh-CN.md) |
-| [`pi-spark`](./packages/pi-spark) | 提供 provider 余额、模型预设、空闲回顾、自动会话标题，以及紧凑的 editor/footer TUI。 | [English](./packages/pi-spark/README.md) · [中文](./packages/pi-spark/README.zh-CN.md) |
+| [`pi-spark`](./packages/pi-spark) | 提供 provider 余额、模型预设、空闲回顾，以及紧凑的 editor/footer TUI。 | [English](./packages/pi-spark/README.md) · [中文](./packages/pi-spark/README.zh-CN.md) |
 | [`pi-distill`](./packages/pi-distill) | 在所有已启用 object-schema 工具的超长输出占满上下文前进行提炼。 | [English](./packages/pi-distill/README.md) · [中文](./packages/pi-distill/README.zh-CN.md) |
 | [`pi-tool-supervisor`](./packages/pi-tool-supervisor) | 根据匹配规则在工具执行前后进行审查，并对 `edit`、`write` 使用真实 diff。 | [English](./packages/pi-tool-supervisor/README.md) · [中文](./packages/pi-tool-supervisor/README.zh-CN.md) |
 | [`pi-metrics`](./packages/pi-metrics) | 在 working spinner 实时显示会话全程耗时，并在 agent 停下后给一行汇总（`on-stop`，默认），或按 `live` 模式每轮一行。 | [English](./packages/pi-metrics/README.md) · [中文](./packages/pi-metrics/README.zh-CN.md) |

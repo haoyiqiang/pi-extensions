@@ -5,8 +5,6 @@ import { editorConfigSchema } from "../features/editor/config";
 import { footerConfigSchema } from "../features/footer/config";
 import { presetsConfigSchema } from "../features/presets/config";
 import { recapConfigSchema } from "../features/recap/config";
-import { titleConfigSchema } from "../features/title/config";
-import { writeConfigSchema } from "../features/write/config";
 
 /**
  * Raw option shape for each feature. The enable/disable/default policy lives in `loadConfig`:
@@ -19,8 +17,6 @@ export const featureSchemas = {
   footer: footerConfigSchema,
   presets: presetsConfigSchema,
   recap: recapConfigSchema,
-  title: titleConfigSchema,
-  write: writeConfigSchema,
 } as const;
 
 /** Resolved config for every feature; `false` means the feature is disabled. */

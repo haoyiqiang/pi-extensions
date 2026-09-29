@@ -15,13 +15,45 @@
     "zh-CN": "请输入大于或等于 0 的整数。",
     "en-US": "Enter a non-negative integer."
   },
-  "modelInput": {
-    "zh-CN": "模型（provider/model；留空使用当前会话模型）",
-    "en-US": "Model (provider/model; leave empty to use the current session model)"
+  "modelNotFound": {
+    "zh-CN": "配置的模型 {model} 不在当前可用模型中。请用 /config:distill 从列表选择。",
+    "en-US": "Configured model {model} is not available. Select an available model in /config:distill."
   },
-  "modelInvalid": {
-    "zh-CN": "请输入 provider/model，或留空使用当前会话模型。",
-    "en-US": "Use provider/model, or leave empty to use the current session model."
+  "sessionModelMissing": {
+    "zh-CN": "当前会话没有可用模型。请先用 /model 选择会话模型，或在 /config:distill 选择提炼模型。",
+    "en-US": "No model is available in the current session. Select a session model with /model, or select a distillation model in /config:distill."
+  },
+  "modelPickerTitle": {
+    "zh-CN": "选择提炼模型",
+    "en-US": "Select distillation model"
+  },
+  "modelPickerFilter": {
+    "zh-CN": "输入以过滤模型",
+    "en-US": "Type to filter models"
+  },
+  "modelPickerNoModels": {
+    "zh-CN": "当前没有其他可用模型。可以改回当前会话模型。",
+    "en-US": "No other models are available. You can switch back to the current session model."
+  },
+  "modelPickerNoMatch": {
+    "zh-CN": "没有匹配的模型。",
+    "en-US": "No matching models."
+  },
+  "modelPickerNavigate": {
+    "zh-CN": "移动",
+    "en-US": "navigate"
+  },
+  "modelPickerSelect": {
+    "zh-CN": "选择",
+    "en-US": "select"
+  },
+  "modelPickerCancel": {
+    "zh-CN": "取消",
+    "en-US": "cancel"
+  },
+  "modelPickerType": {
+    "zh-CN": "过滤",
+    "en-US": "filter"
   },
   "configWarnings": {
     "zh-CN": "配置有警告，将以可用值打开：{warnings}",

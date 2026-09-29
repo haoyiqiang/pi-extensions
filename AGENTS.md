@@ -19,7 +19,7 @@ pi-extensions/
 │   ├── pi-blackhole/            # Deterministic compaction, observational memory, and recall
 │   ├── pi-context-view/         # Context usage and injection inspection
 │   ├── pi-rewind/               # Git-backed checkpoints and rewind
-│   ├── pi-spark/                # Provider credits, presets, recap, titles, compact TUI
+│   ├── pi-spark/                # Provider credits, presets, recap, compact TUI
 ├── scripts/                     # Repository checks and workspace helpers
 ├── .github/workflows/           # CI and release automation
 ├── README.md                    # English project documentation
@@ -57,7 +57,7 @@ Keep packages composable and independently installable. Avoid coupling one exten
 - Do not commit user-specific paths, credentials, private domains, internal service names, or machine-specific defaults.
 - Resolve user directories with `os.homedir()` or Pi's standard configuration directory. Support `PI_CODING_AGENT_DIR` where the package already exposes that configuration point.
 - Optional external tools must be detected at runtime and have a graceful fallback or noop path.
-- `pi-spark` owns provider credit reporting, model presets, idle recap and title generation, and the compact editor/footer TUI. It replaces Pi's editor and footer, so do not combine it with another extension that owns the same surfaces.
+- `pi-spark` owns provider credit reporting, model presets, idle recap, and the compact editor/footer TUI. It replaces Pi's editor and footer, so do not combine it with another extension that owns the same surfaces. Session and terminal naming belong to `pi-naming`.
 - Do not make network calls, model assumptions, or local daemon availability implicit in deterministic tests.
 - Use configuration or injected adapters for environment-specific behavior.
 
@@ -109,3 +109,4 @@ Keep unrelated refactors out of a focused pull request. Run `npm run check` befo
 ## Releases
 
 Versions and changelogs are managed by release-please. Merging a release PR publishes changed packages to npm through the repository's OIDC trusted-publishing workflow with provenance. Do not publish manually from a local machine unless the release procedure explicitly requires it.
+ase procedure explicitly requires it.
