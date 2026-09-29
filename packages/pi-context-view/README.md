@@ -1,0 +1,109 @@
+# pi-context-view
+
+<p align="center">
+  <img width="456" src="https://media.githubusercontent.com/media/dimk90/pi-context-view/9a9f9f4fafaa09c77759485d53c42f8694650755/doc/images/pi-context-view.png">
+  <br>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square" alt="License: MIT"></a>
+  <a href="https://www.npmjs.com/package/pi-context-view"><img src="https://img.shields.io/npm/v/pi-context-view?style=flat-square&amp;logoColor=white" alt="npm version"></a>
+  <a href="https://pi.dev/packages/pi-context-view"><img src="https://img.shields.io/badge/Pi-Package-6366F1?style=flat-square" alt="Pi Package"></a>
+  <a href="https://www.npmjs.com/package/pi-context-view"><img src="https://img.shields.io/npm/dm/pi-context-view?label=Downloads&style=flat-square" alt="npm downloads"></a>
+  <a href="https://discord.com/channels/1456806362351669492/1531004733873979532"><img src="https://img.shields.io/static/v1?label=%20&message=Chat&color=5865F2&labelColor=555&style=flat-square&logo=discord&logoColor=white" alt="Discord"></a>
+</p>
+
+<br>
+
+[Pi](https://pi.dev) extension that visualizes context usage and lets you inspect the parts you
+normally can't see: the system prompt, tool definitions, and instructions
+injected by other extensions.
+
+## Features
+
+- **Context usage map** - visualize used and free context space, grouped by
+  category (tools, skills, messages, and more).
+
+- **Context injections** - explore the hidden parts of the context: the
+  system prompt, tool definitions, and extension injections.
+
+## Commands
+
+- `/context` - shorthand for `/context usage`.
+- `/context usage` - open the context usage visualization.
+- `/context injections` - show the hidden parts of the context captured at
+  session start or resume.
+- `/context config` - create the global configuration file populated with
+  defaults, useful for
+  [customization](https://github.com/dimk90/pi-context-view#customization).
+
+## Demo
+
+
+### `/context`
+
+See what fills your context, for example, what survives compaction:
+
+![Context usage view showing estimated context composition](https://media.githubusercontent.com/media/dimk90/pi-context-view/e9f75e538ada31af0c1ba3517bad0a13f06050e6/doc/images/context-usage.gif)
+
+
+### `/context injections`
+
+Inspect hidden parts of the context, such as tool definitions:
+
+![Context injections view and item preview](https://media.githubusercontent.com/media/dimk90/pi-context-view/e9f75e538ada31af0c1ba3517bad0a13f06050e6/doc/images/context-injections.gif)
+
+### Zoom
+
+Zoom in for a more detailed breakdown of large context windows, such as
+1M-token windows:
+
+![Zoom feature](https://media.githubusercontent.com/media/dimk90/pi-context-view/e9f75e538ada31af0c1ba3517bad0a13f06050e6/doc/images/zoom.gif)
+
+## Install
+
+```bash
+pi install npm:pi-context-view
+```
+
+## Customization
+
+Currently, you can customize only the colors and dimensions of the `Context Usage` map.
+
+To get started, create a configuration file populated with the current defaults:
+
+```text
+/context config
+```
+> This creates `~/.pi/agent/extensions/pi-context-view.json`.
+
+See the [configuration reference](https://github.com/dimk90/pi-context-view/blob/master/doc/CONFIG.md)
+for each parameter's meaning and default value.
+
+### Category Colors
+
+You can use theme color names to match your current theme or hex values for
+colors that stay the same across themes. Here are examples of custom
+[terrain](https://github.com/dimk90/pi-context-view/blob/master/doc/palettes/terrain.json) and
+[rainbow](https://github.com/dimk90/pi-context-view/blob/master/doc/palettes/rainbow.json) palettes:
+
+![Terrain and rainbow palettes](https://media.githubusercontent.com/media/dimk90/pi-context-view/e9f75e538ada31af0c1ba3517bad0a13f06050e6/doc/images/palettes.png)
+
+See the [theme color reference](https://github.com/dimk90/pi-context-view/blob/develop/doc/PI-THEME-COLORS.md)
+for color names that follow the current theme.
+
+### Map Size
+
+You can configure the number of rows and columns in the `Context Usage` map:
+
+![Map size demo](https://media.githubusercontent.com/media/dimk90/pi-context-view/2bc280f758d88fc0ac6396e921c7e697c9016086/doc/images/map-sizes.png)
+
+
+## Context Footprint
+
+`pi-context-view` does not add any instructions or messages to the model context.
+
+## My Other Stuff
+
+📌 [S-VHS](https://github.com/dimk90/s-vhs) - terminal recorder used to create the demo GIFs.
+
+## License
+
+[MIT](https://github.com/dimk90/pi-context-view/blob/master/LICENSE)
