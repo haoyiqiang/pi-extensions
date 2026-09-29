@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+* The package is now maintained and released from the `pi-extensions` monorepo, with a root `index.ts`, shared npm workspace checks, bilingual documentation, and a package configuration skill.
+
 
 ## `[v0.6.0]` - 20.09.2026
 

@@ -54,8 +54,11 @@ jobs:
           - dir: packages/pi-extensions-tool-display
           - dir: packages/pi-metrics
           - dir: packages/pi-models-discovery
-          - dir: packages/pi-session-tools
           - dir: packages/pi-session-resources
+          - dir: packages/pi-blackhole
+          - dir: packages/pi-context-view
+          - dir: packages/pi-rewind
+          - dir: packages/pi-spark
           - dir: packages/pi-dynamic-workflows
           - dir: packages/pi-interactive-subagents
           - dir: packages/pi-safety-guards

@@ -65,7 +65,7 @@ pi install npm:pi-naming
 ## 独立使用与组合
 
 - `pi-terminal-mux` 是自动安装的库依赖，无需额外启用扩展；负责目标探测与终端执行，不负责生成标题。
-- 不依赖 `pi-interactive-subagents` 或 `pi-session-tools`。没有终端后端时仍可独立命名 session。
+- 不依赖 `pi-interactive-subagents`。没有终端后端时仍可独立命名 session。
 - 启动方可通过 terminal-mux 的 `PI_TERMINAL_RENAME_CONTEXT` 协议传递独占终端目标。子会话仍可命名 session，但不改共享 workspace；只改启动方明确授予的 pane/tab。
 - tmux/WezTerm/Otty/Orca 分屏不代表独占 window/tab，归属无法确认时跳过并说明原因，不扩大操作范围。
 - 使用 `pi-interactive-subagents` 时，需在它的 `subagentExtensions` 中显式加载本包入口；仅在主会话安装本包不会绕过子代理的扩展隔离设置。

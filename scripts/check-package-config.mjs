@@ -13,6 +13,7 @@
  * 6. package.json "files" includes README.md and README.zh-CN.md
  * 7. The root Pi package excludes library-only workspace entrypoints
  * 8. Every extension package publishes and registers one configuration SKILL.md
+ * 9. Pi development dependency pins use one exact version across all workspaces
  */
 
 import { readFileSync, existsSync, readdirSync } from "node:fs";
@@ -151,11 +152,27 @@ if (!rootSkillEntries.includes(ROOT_SKILL_GLOB)) {
 }
 const REQUIRED_FILES = ["package.json", "index.ts", "README.md", "README.zh-CN.md", "tsconfig.json"];
 const REQUIRED_PKG_FIELDS = ["name", "version", "description", "main", "exports", "files", "license"];
+const PI_DEV_DEPENDENCIES = new Set([
+  "@earendil-works/pi-agent-core",
+  "@earendil-works/pi-ai",
+  "@earendil-works/pi-coding-agent",
+  "@earendil-works/pi-tui",
+]);
+const piDevPins = new Map();
 
 for (const dir of packageDirs) {
   const pkgRoot = join(PACKAGES_DIR, dir);
   const pkgJson = JSON.parse(readFileSync(join(pkgRoot, "package.json"), "utf8"));
   const label = pkgJson.name ?? dir;
+  for (const [dependency, version] of Object.entries(pkgJson.devDependencies ?? {})) {
+    if (!PI_DEV_DEPENDENCIES.has(dependency)) continue;
+    if (!/^\d+\.\d+\.\d+$/.test(version)) {
+      error(`${label}: devDependency "${dependency}" must use an exact version, found "${version}"`);
+    }
+    const users = piDevPins.get(version) ?? [];
+    users.push(`${label}:${dependency}`);
+    piDevPins.set(version, users);
+  }
 
   // The root Git package uses a workspace glob. Utility packages still have
   // index.ts library entrypoints, so they must be excluded from Pi's loader.
@@ -244,6 +261,13 @@ for (const dir of packageDirs) {
       }
     }
   }
+}
+
+if (piDevPins.size > 1) {
+  const details = [...piDevPins.entries()]
+    .map(([version, users]) => `${version} (${users.join(", ")})`)
+    .join("; ");
+  error(`Pi development dependencies must use one version across all workspaces: ${details}`);
 }
 
 // ---------------------------------------------------------------------------

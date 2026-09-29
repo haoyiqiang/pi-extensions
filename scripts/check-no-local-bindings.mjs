@@ -21,11 +21,11 @@ let failed = false;
 const PACKAGES_DIR = join(ROOT, "packages");
 if (!existsSync(PACKAGES_DIR)) mkdirSync(PACKAGES_DIR);
 
-function grepCheck(label, pattern, targets) {
+function grepCheck(label, pattern, targets, { caseSensitive = false } = {}) {
   try {
     const out = execFileSync(
       "grep",
-      ["-rnEi", pattern, ...targets],
+      [caseSensitive ? "-rnE" : "-rnEi", pattern, ...targets],
       { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
     );
     if (out.trim()) {
@@ -45,10 +45,13 @@ function grepCheck(label, pattern, targets) {
   }
 }
 
-// 1. 本机绝对路径
+// 1. 本机绝对路径。区分大小写：macOS 家目录始终是 /Users/，而忽略大小写会把
+// URL 路径段（如 https://host/v1/users/me）误判为本机路径。
 grepCheck("no-local-path", "/Users/", [
-  "packages",
-]);
+    "packages",
+  ],
+  { caseSensitive: true },
+);
 
 // 2. 私有域名/业务名
 grepCheck("no-private-domain", "shopcider|plutus|harbor\\.|gitlab\\.", [

@@ -1,0 +1,59 @@
+# AGENTS.md
+
+Pi extension package: algorithmic session compaction for a coding agent, merging two upstream packages (pi-vcc) + (pi-observational-memory) with heavy divergence on both.
+
+## Commands
+Run from the parent repository root:
+```bash
+npm run typecheck --workspace pi-blackhole
+npm test --workspace pi-blackhole
+npm run check --workspace pi-blackhole
+```
+
+- The parent npm workspace and root `package-lock.json` own dependency installation.
+- Release-please owns versions, changelogs, and npm publication. Do not add a package-local release workflow or lockfile.
+- Pi loads `index.ts` directly. Do not require a generated `dist/` directory for consumers.
+
+## Testing quirks
+- **`tests/` is NOT in tsconfig.json** apart from `tests/fixtures/pi-extension-api.typecheck.ts`, which holds the compile-only extension-API contract. Adding other test files would surface ~150 pre-existing type errors tracked as a separate cleanup.
+- `src/pi-base/**/*.test.ts` is excluded from tsconfig by design.
+- Tests are pure unit tests with fake agent loops — no LLM/network. `tests/vcc-support/real-sessions.ts` optionally samples `~/.pi/agent/sessions`, but nothing requires real data.
+- `tests/fixtures/installed-package.ts` resolves an installed package's root by walking up from the test file. Use it instead of a `process.cwd()`-relative `node_modules` path, which only exists in a standalone checkout.
+- Loading the module graph in a test's first `await import()` is disk-bound, so `testTimeout` is raised well above vitest's default. Keep new tests free of compiler or other heavyweight child processes; static contracts belong in `npm run typecheck`.
+
+## Architecture
+
+- `index.ts` is the public factory and the `pi.extensions` entry. It installs the host inline-compaction adapter, captures provider streams, registers consolidation and compaction triggers, `session_before_compact`, `session_compact_failed`, and `context` hooks, commands, and the unified `recall` tool.
+- `src/core/` — unified config (`unified-config.ts` = defaults + resolution; env overrides declared in `config-env.ts` as `PI_BLACKHOLE_*`). configManager is the true source and entry point - users edit in UI.
+- `src/extract/` — vcc compaction section extraction (goals, files, commits, preferences, brief).
+- `src/om/` — observational memory: `agents/` (observer → reflector → dropper agent loops), `ledger/`, `runtime.ts`, `consolidation.ts`, `compaction-trigger.ts`, `cooldown.ts` (persisted fallback cooldowns), `pending.ts` (manual-mode disk buffers), `inline-compaction.ts`.
+- `src/project-recall/` — project-scoped memory: `corpus.ts` (project session scan + pending orphan attribution), `dedup.ts`, `format-export.ts`, `session-dir.ts`.
+- `src/hooks/` — `before-compact.ts` (`session_before_compact`), `compact-failed.ts` (`session_compact_failed` pi >=0.84.3), `compaction-context.ts` (`context` append-mode projection).
+- `src/commands/` — `pi-vcc.ts` (`/blackhole`), `memory.ts` (`/blackhole-memory`), `vcc-recall.ts` (`/blackhole-recall`), `blackhole-export.ts` (`/blackhole-export`), `cleanup.ts`.
+- `src/tools/recall.ts` — session-history search/expand/drill-down.
+- `src/pi-base/` — **vendored copy** (config manager + settings modal). Treat as upstream code: surgical rewiring and minimal fixes only if it causes runtime failures.
+- `docs/` — committed product docs: `architecture.md`, `observational-memory.md`, `recall.md`, `vcc-compaction.md`, `APPEND_COMPACTION.md`.
+- `work_docs/` — separate planning docs.
+
+## Workflow conventions
+
+- Follow the parent repository branch and release process.
+- Use Conventional Commits (`feat:`, `fix:`, `refactor:`, `docs:`, `chore:`), with focused scopes such as `(pi-base)`, `(recall)`, or `(export)` when useful.
+- Keep `CHANGELOG.md` current for substantial user-visible changes; release-please creates release version updates.
+- Docs consistency: every number in README.md / docs/CONFIG.md / llms.txt must match `src/core/unified-config.ts` defaults — cross-check when changing defaults. `docs/` mirrors the same source of truth.
+
+## Debugging / runtime
+
+- `debug: true` → pre-compaction snapshot at `/tmp/pi-blackhole-debug.json`; `debugLog: true` → JSONL at `~/.pi/agent/pi-blackhole/debug.ndjson`.
+- Config lives at `~/.pi/agent/pi-blackhole/pi-blackhole-config.json`; cooldowns at `pi-blackhole-cooldown.json`.
+
+## Testing
+
+- **T1. Prove new tests can fail while writing them.** Write tests first: run the new test red against the code before its fix exists, then implement and run it green. Applies when you author both in this session. For verifying existing fixes (issues/PRs/uncommitted work), tests already accompany the code: run them green and confirm the assertions target the changed path — don't re-run them against pre-fix code. If a test can't fail, it isn't testing anything.
+- **T2. Arm every precondition the branch needs.** If the code path depends on prior state (a flag, a prior call, session data), set that state explicitly in the test. Don't assume execution reaches the new guard by default, check what runs before it.
+- **T3. Cover every branch, not just the happy path.** Each conditional (if/else, fallback, empty vs populated input) needs its own test case. A theme-present case and a theme-absent case are two tests, not one.
+- **T4. Assert the specific thing that would break, not a generic proxy.** A broad negative check, like asserting a substring is absent from the whole output, passes even when an unrelated change happens to introduce that same substring elsewhere. Assert against a stable, unique token or the actual structure.
+- **T5. One behavior per test case.** If one assertion in a block throws, every assertion after it silently stops running and its coverage disappears from the failure report. Split sequential checks into separate test cases.
+- **T6. Clean up in a finally block or an after-hook, never inline after assertions.** If an assertion throws before cleanup runs, tmp files, mocks, or state leak into the next test run.
+- **T7. Don't bypass type or null safety checks to make a test compile.** Non-null assertions, unsafe casts, and untyped escapes (`any` or equivalent) silence the same runtime uncertainty the code under test is supposed to handle. Type the value the way production does and narrow it explicitly.
+- **T8. Match mocks to real output shape.** If the real dependency wraps, escapes, or transforms its return value, the mock has to do the same. A stripped-down mock can make a test pass by exercising a code path that never runs in production.

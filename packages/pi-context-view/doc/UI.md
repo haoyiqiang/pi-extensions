@@ -160,7 +160,7 @@ hints, counters, and blank rows. Cache keys must include all layout-affecting
 dimensions and theme state; state changed from within a view, such as the Usage
 map scale, must invalidate cached output instead.
 
-UI cases `pnpm check` must cover, beyond the general matrix in
+UI cases `npm run check --workspace pi-context-view` must cover, beyond the general matrix in
 [AGENTS.md](../AGENTS.md):
 
 - 60, 80, and 120 columns, the narrow fallback, and height-only resizing;

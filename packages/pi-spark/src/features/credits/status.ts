@@ -1,0 +1,49 @@
+import prettyMilliseconds from "pretty-ms";
+
+import { formatLink } from "../../utils/format";
+
+import type { Theme } from "@earendil-works/pi-coding-agent";
+import type { Credits, CreditsLane } from "./types";
+
+const WINDOWS_WARNING = 70;
+const WINDOWS_ERROR = 90;
+const BALANCE_WARNING = 10;
+const BALANCE_ERROR = 5;
+
+export function renderCredits(theme: Theme, label: string, credits: Credits, link?: string): string {
+  const styledLabel = theme.fg("dim", label ? `${label} ` : "");
+  const value = credits.type === "windows" ? renderWindows(theme, credits) : renderBalance(theme, credits);
+  const suffix = credits.suffix ? ` ${theme.fg("dim", credits.suffix)}` : "";
+
+  const text = `${styledLabel}${value}${suffix}`;
+  return link ? formatLink(text, link) : text;
+}
+
+export function renderError(theme: Theme, label: string, message: string): string {
+  return theme.fg("error", `${label} ${message}`);
+}
+
+function renderWindows(theme: Theme, credits: Extract<Credits, { type: "windows" }>): string {
+  const unlimited = credits.unlimited || credits.lanes.every((lane) => lane.percent === undefined);
+  if (unlimited) return theme.fg("success", "unlimited");
+
+  return credits.lanes.map((lane) => renderLane(theme, lane)).join(" ");
+}
+
+function renderLane(theme: Theme, lane: CreditsLane): string {
+  const percent = `${lane.label} ${lane.percent === undefined ? "?" : lane.percent.toFixed(0)}%`;
+  const color = lane.percent && lane.percent > WINDOWS_ERROR ? "error" : lane.percent && lane.percent > WINDOWS_WARNING ? "warning" : "success";
+  const resetAt = !!lane.resetAt ? ` ${theme.fg("dim", `[⟳ ${prettyMilliseconds(Math.max(0, lane.resetAt - Date.now()), { compact: true })}]`)}` : "";
+
+  return `${theme.fg(color, percent)}${resetAt}`;
+}
+
+function renderBalance(theme: Theme, credits: Extract<Credits, { type: "balance" }>): string {
+  if (credits.remaining === undefined) return theme.fg("dim", "$?");
+
+  const text = `$${credits.remaining.toFixed(2)}`;
+
+  if (credits.remaining < BALANCE_ERROR) return theme.fg("error", text);
+  if (credits.remaining < BALANCE_WARNING) return theme.fg("warning", text);
+  return theme.fg("success", text);
+}

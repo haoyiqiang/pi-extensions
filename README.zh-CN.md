@@ -19,17 +19,22 @@
 | [`pi-naming`](./packages/pi-naming) | 统一自动和手动命名会话及允许修改的终端目标。 | [English](./packages/pi-naming/README.md) · [中文](./packages/pi-naming/README.zh-CN.md) |
 | [`pi-auto-goal`](./packages/pi-auto-goal) | 每次完全停止后用第二个模型判定是否属于擅自早停，是则以用户语气要求 agent 继续。 | [English](./packages/pi-auto-goal/README.md) · [中文](./packages/pi-auto-goal/README.zh-CN.md) |
 | [`pi-clean-mode`](./packages/pi-clean-mode) | 把一轮 agent 运行折叠成一行耗时头，展开前只显示最终答案。 | [English](./packages/pi-clean-mode/README.md) · [中文](./packages/pi-clean-mode/README.zh-CN.md) |
+| [`pi-blackhole`](./packages/pi-blackhole) | 提供确定性压缩、会话观察记忆和原始历史 Recall。 | [English](./packages/pi-blackhole/README.md) · [中文](./packages/pi-blackhole/README.zh-CN.md) |
+| [`pi-context-view`](./packages/pi-context-view) | 可视化上下文用量，并检查系统提示、工具、技能和扩展注入。 | [English](./packages/pi-context-view/README.md) · [中文](./packages/pi-context-view/README.zh-CN.md) |
+| [`pi-rewind`](./packages/pi-rewind) | 创建 Git 检查点，并恢复文件、会话状态或两者。 | [English](./packages/pi-rewind/README.md) · [中文](./packages/pi-rewind/README.zh-CN.md) |
+| [`pi-spark`](./packages/pi-spark) | 提供 provider 余额、模型预设、空闲回顾、自动会话标题，以及紧凑的 editor/footer TUI。 | [English](./packages/pi-spark/README.md) · [中文](./packages/pi-spark/README.zh-CN.md) |
 | [`pi-distill`](./packages/pi-distill) | 在所有已启用 object-schema 工具的超长输出占满上下文前进行提炼。 | [English](./packages/pi-distill/README.md) · [中文](./packages/pi-distill/README.zh-CN.md) |
 | [`pi-tool-supervisor`](./packages/pi-tool-supervisor) | 根据匹配规则在工具执行前后进行审查，并对 `edit`、`write` 使用真实 diff。 | [English](./packages/pi-tool-supervisor/README.md) · [中文](./packages/pi-tool-supervisor/README.zh-CN.md) |
 | [`pi-metrics`](./packages/pi-metrics) | 在 working spinner 实时显示会话全程耗时，并在 agent 停下后给一行汇总（`on-stop`，默认），或按 `live` 模式每轮一行。 | [English](./packages/pi-metrics/README.md) · [中文](./packages/pi-metrics/README.zh-CN.md) |
 | [`pi-models-discovery`](./packages/pi-models-discovery) | 自动发现 models.json 中标记 `discoverModels` 的 provider 的模型列表，启动走持久化缓存，并提供手动刷新命令。 | [English](./packages/pi-models-discovery/README.md) · [中文](./packages/pi-models-discovery/README.zh-CN.md) |
-| [`pi-session-tools`](./packages/pi-session-tools) | 缓存 bash `grep`/`tail`/`head` 管道过滤前的完整输出，并提供 `session_log` / `session_squash` 对话压缩（主 agent 生成交接摘要）。 | [English](./packages/pi-session-tools/README.md) · [中文](./packages/pi-session-tools/README.zh-CN.md) |
 | [`pi-session-resources`](./packages/pi-session-resources) | 从成功工具活动中收集文件、浏览器 URL 和 PR/MR 链接，并通过编辑器上方可点击、可切换类型的 `#` 资源选择器进行引用。 | [English](./packages/pi-session-resources/README.md) · [中文](./packages/pi-session-resources/README.zh-CN.md) |
 | [`pi-extensions-i18n`](./packages/pi-extensions-i18n) | 提供共享的语言选择、catalog 加载、插值和 `/config:language` 命令。 | [English](./packages/pi-extensions-i18n/README.md) · [中文](./packages/pi-extensions-i18n/README.zh-CN.md) |
 | [`pi-extensions-tool-display`](./packages/pi-extensions-tool-display) | 提供实际的 Pi 工具展示宿主，以及共享的结果渲染协议和组件工具。 | [English](./packages/pi-extensions-tool-display/README.md) · [中文](./packages/pi-extensions-tool-display/README.zh-CN.md) |
 | [`pi-model-request`](./packages/pi-model-request) | 让扩展按 Pi 核心的方式单独发一次模型请求：解析鉴权、补齐 provider 会话头、调用 completion。 | [English](./packages/pi-model-request/README.md) · [中文](./packages/pi-model-request/README.zh-CN.md) |
 | [`@maplezzk/pi-dynamic-workflows`](./packages/pi-dynamic-workflows) | Claude-Code 风格的动态 workflow 编排，支持 `meta`/`phase()`/`agent()`/`parallel()`/`pipeline()` 原语，通过 `/config:workflow` 配置。Fork 自 michaelliv/pi-dynamic-workflows。 | [English](./packages/pi-dynamic-workflows/README.md) · [中文](./packages/pi-dynamic-workflows/README.zh-CN.md) |
 | [`@maplezzk/pi-interactive-subagents`](./packages/pi-interactive-subagents) | 终端复用器分屏中的非阻塞交互式子 agent，带实时状态 widget、`/plan` 与 `/iterate` 工作流。Fork 自 HazAT/pi-interactive-subagents。 | [English](./packages/pi-interactive-subagents/README.md) · [中文](./packages/pi-interactive-subagents/README.zh-CN.md) |
+
+> `pi-session-tools` 已退役并从本仓库移除。对于历史会话中的 `session-squash` 条目，明确提供兼容逻辑的包仍可读取。
 
 插件管理类斜杠命令统一采用 `/config:<功能>[-动作]` 命名。改名前的命令会继续作为兼容别名保留；`/plan`、`/iterate`、`/subagent` 是刻意保留的高频工作流快捷命令。
 

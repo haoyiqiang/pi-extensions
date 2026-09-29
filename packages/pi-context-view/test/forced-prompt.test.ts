@@ -4,7 +4,7 @@ import { test } from "node:test";
 import type { BuildSystemPromptOptions, ToolInfo } from "@earendil-works/pi-coding-agent";
 
 // Deep import bypasses the package barrel, which does not re-export buildSystemPrompt.
-import { buildSystemPrompt } from "../node_modules/@earendil-works/pi-coding-agent/dist/core/system-prompt.js";
+import { buildSystemPrompt } from "./fixtures/pi-system-prompt.ts";
 import { buildUsageSnapshot, InitialCaptureState } from "../src/capture.ts";
 import type { InitialSnapshot, InjectionItem } from "../src/model.ts";
 import type { SystemMessage } from "../src/transcript.ts";

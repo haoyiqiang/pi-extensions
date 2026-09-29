@@ -15,8 +15,11 @@ pi-extensions/
 │   ├── pi-terminal-mux/         # Terminal multiplexer abstraction (muxy/cmux/tmux/zellij/wezterm/herdr/otty/orca + headless fallback)
 │   ├── pi-metrics/               # Session metrics (live elapsed spinner, per-turn and total run summaries)
 │   ├── pi-models-discovery/     # Dynamic model discovery for providers marked with discoverModels
-│   ├── pi-session-tools/        # Bash pipe output cache and session_log/session_squash conversation squashing
 │   ├── pi-session-resources/    # Clickable tabbed # picker for session files, browser URLs, and PR/MR links
+│   ├── pi-blackhole/            # Deterministic compaction, observational memory, and recall
+│   ├── pi-context-view/         # Context usage and injection inspection
+│   ├── pi-rewind/               # Git-backed checkpoints and rewind
+│   ├── pi-spark/                # Provider credits, presets, recap, titles, compact TUI
 ├── scripts/                     # Repository checks and workspace helpers
 ├── .github/workflows/           # CI and release automation
 ├── README.md                    # English project documentation
@@ -32,7 +35,7 @@ Each package owns its entrypoint, tests, configuration example, localization res
 - `pi-safety-guards` is independently installable; see `packages/pi-safety-guards/README.md` for its configuration, behavior, and tests.
 - `pi-nested-skills` is independently installable; see `packages/pi-nested-skills/README.md` for its configuration, behavior, and tests.
 - `pi-notifications` is independently installable; see `packages/pi-notifications/README.md` for its configuration, behavior, and tests.
-- `pi-naming` owns automatic Pi session titles and manual terminal naming; it uses pi-ai and terminal-mux, not session-tools. Automatic and manual naming share configurable session/workspace/tab targets.
+- `pi-naming` owns automatic Pi session titles and manual terminal naming; it uses pi-ai and terminal-mux. Automatic and manual naming share configurable session/workspace/tab targets.
 
 - `pi-distill` discovers active tools with object parameter schemas and observes their results through Pi's native `tool_call` and `tool_result` events. It does not register duplicate tools.
 - `pi-tool-supervisor` reviews the actual before/after diff of `edit` and `write` against configured rule files. It reports findings but is not an operating-system sandbox or an edit rollback mechanism.
@@ -42,8 +45,10 @@ Each package owns its entrypoint, tests, configuration example, localization res
 - `pi-terminal-mux` owns terminal multiplexer detection and pane/surface operations. Extensions that need terminal interaction depend on it instead of re-implementing backend detection.
 - `pi-metrics` owns session metrics: the live elapsed spinner and per-turn/total summaries listen to Pi's native `input`, `agent_start`, `turn_start`, `turn_end`, `agent_end`, and `agent_settled` events without registering tools.
 - `pi-models-discovery` owns dynamic model discovery: it reads `discoverModels` providers from models.json, fetches `{baseUrl}/models`, persists a startup cache, and exposes `/model-discovery` plus `/model-discovery-refresh` commands.
-- `pi-session-tools` owns the bash pipe output cache (`tool_call` rewrites `grep`/`tail`/`head` pipelines with `tee`) and `session_log`/`session_squash` for non-destructive conversation squashing; the main agent writes the handoff summary directly into the `session_squash` call.
 - `pi-session-resources` observes successful tool results, rebuilds resources from the active session branch, and exposes file, browser, and PR/MR targets through a clickable, tabbed `#` picker above the editor without adding model-context messages.
+- `pi-blackhole` owns deterministic compaction, observational-memory workers, and raw-session recall. Do not combine its automatic compaction ownership with another automatic context owner.
+- `pi-context-view` passively inspects context composition and hidden injections; it must not add persistent model-context instructions or messages.
+- `pi-rewind` owns Git-backed worktree checkpoints and coordinated file/session restore. It is not a substitute for context compaction.
 
 Keep packages composable and independently installable. Avoid coupling one extension to another extension's private implementation details or display state.
 
@@ -52,6 +57,7 @@ Keep packages composable and independently installable. Avoid coupling one exten
 - Do not commit user-specific paths, credentials, private domains, internal service names, or machine-specific defaults.
 - Resolve user directories with `os.homedir()` or Pi's standard configuration directory. Support `PI_CODING_AGENT_DIR` where the package already exposes that configuration point.
 - Optional external tools must be detected at runtime and have a graceful fallback or noop path.
+- `pi-spark` owns provider credit reporting, model presets, idle recap and title generation, and the compact editor/footer TUI. It replaces Pi's editor and footer, so do not combine it with another extension that owns the same surfaces.
 - Do not make network calls, model assumptions, or local daemon availability implicit in deterministic tests.
 - Use configuration or injected adapters for environment-specific behavior.
 
@@ -85,6 +91,7 @@ npm run check
 ```
 
 `npm run check` is the repository gate. It runs type checks, package tests, packaging checks, and the local-binding policy check. Tests should be deterministic and must not require API keys, a live reviewer model, or a particular filesystem layout.
+Workspace development dependencies on `@earendil-works/pi-agent-core`, `pi-ai`, `pi-coding-agent`, and `pi-tui` use one exact version (`0.87.1` at this revision). Keep them in lockstep; package peer ranges continue to describe the package's tested runtime compatibility.
 
 When changing a package, also inspect its package-level README and `config.example.json`. If the public behavior changes, add or update focused tests and document the configuration or compatibility impact.
 

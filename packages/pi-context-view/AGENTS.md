@@ -1,6 +1,6 @@
 # pi-context-view
 
-TypeScript pi extension (`src/index.ts`) with two TUI-only overlays and one utility command:
+TypeScript Pi extension (`index.ts` → `src/index.ts`) with two TUI-only overlays and one utility command:
 
 - `/context` or `/context usage` — estimate current context composition.
 - `/context injections` — inspect the frozen Initial snapshot with opt-in raw previews.
@@ -16,7 +16,7 @@ The command accepts only `usage`, `injections`, and `config`; keep both views un
 | `doc/UI.md`           | Changing the shared frame, colors, casing, descriptions, interaction, responsive behavior, or release media. Per-view rules live in `doc/ui/usage.md`, `doc/ui/injections.md`, and `doc/ui/previews.md`. |
 | `doc/THINKING.md`     | Changing reasoning-token accounting, signature handling, or thinking-preview notation.                                                                                                                   |
 | `doc/PLAN.md`         | Adding commands, configuration, runtime inspection, or other roadmap work.                                                                                                                               |
-| `doc/RELEASE.md`      | Changing versions, tagging, publishing, or preparing a release.                                                                                                                                          |
+| Root release files          | Changing versions or publishing. Releases are managed by the monorepo release-please workflow. |
 
 ## Repository rules
 
@@ -26,12 +26,12 @@ The command accepts only `usage`, `injections`, and `config`; keep both views un
 - **Command contract.** Keep parsing, completions, registration text, README usage, and command tests synchronized whenever the `/context` grammar or mode guard changes.
 - **Config contract.** Keep user-configurable state override-only: defaults in code, no auto-created or default-backfilled config file, invalid entries degrading to defaults. `doc/ARCHITECTURE.md` holds the full load and write contract.
 - **UI contract.** Treat `doc/UI.md` and `doc/ui/` as canonical; update the owning page and focused tests whenever the specified TUI behavior changes.
-- **Dependency contract.** Keep both pi packages as `"*"` peer dependencies and exact development pins matching `pi --version`; run `pnpm install` after changing either pin.
+- **Dependency contract.** Keep Pi packages as compatible peer dependencies and exact development pins aligned with the monorepo; refresh the root `package-lock.json` with npm after changing pins.
 
 ## Verification
 
 ```bash
-pnpm check
+npm run check --workspace pi-context-view
 ```
 
 - **Lifecycle changes.** Load `test/fixtures/marker.ts`, `test/fixtures/forced-prompt.ts`, and `test/fixtures/input-transform.ts` in both extension orders and use an `after_provider_response` sentinel to prove a probe makes no provider request.

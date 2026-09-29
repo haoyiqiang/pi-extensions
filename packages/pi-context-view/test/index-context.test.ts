@@ -11,9 +11,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 
 // Deep import bypasses the package barrel, which does not re-export the option normalizer.
-import {
-	normalizeBuildSystemPromptOptions,
-} from "../node_modules/@earendil-works/pi-coding-agent/dist/core/system-prompt.js";
+import { normalizeBuildSystemPromptOptions } from "./fixtures/pi-system-prompt.ts";
 import { PROBE_IDENTITIES_CUSTOM_TYPE } from "../src/capture.ts";
 import registerExtension from "../src/index.ts";
 

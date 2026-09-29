@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 // Deep import bypasses the package barrel, which does not re-export buildSystemPrompt.
-import { buildSystemPrompt } from "../node_modules/@earendil-works/pi-coding-agent/dist/core/system-prompt.js";
+import { buildSystemPrompt } from "./fixtures/pi-system-prompt.ts";
 import { analyzeSystemPrompt, type PromptOptionsSlice, textTokens, type ToolSlice } from "../src/measure.ts";
 import { buildSnapshot, type InjectionItem } from "../src/model.ts";
 import { collectPreviewEntries, computeUsage } from "../src/usage.ts";

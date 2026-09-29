@@ -1,0 +1,193 @@
+import { CustomEditor } from "@earendil-works/pi-coding-agent";
+
+import { Spinner } from "./spinner";
+import { SplitLine } from "../../components/split-line";
+import { loadConfig } from "../../config";
+import { PRESET_CHANGE, parsePresetChange } from "../../events";
+import { formatModel } from "../../utils/format";
+
+import type { ExtensionAPI, ExtensionContext, KeybindingsManager } from "@earendil-works/pi-coding-agent";
+import type { TUI, EditorTheme } from "@earendil-works/pi-tui";
+import type { EventCollector } from "../../events";
+import type { ThinkingLevelIndicator } from "./config";
+
+class Editor extends CustomEditor {
+  private pi: ExtensionAPI;
+  private ctx: ExtensionContext;
+
+  private spinner: Spinner;
+  private thinkingLevelIndicator: ThinkingLevelIndicator;
+  private workingMessage: string | undefined;
+  private slots: { modelBefore: string | undefined };
+
+  constructor(pi: ExtensionAPI, ctx: ExtensionContext, tui: TUI, theme: EditorTheme, keybindings: KeybindingsManager, spinner: Spinner = new Spinner(), thinkingLevelIndicator: ThinkingLevelIndicator = "border") {
+    super(tui, theme, keybindings);
+
+    this.pi = pi;
+    this.ctx = ctx;
+
+    this.spinner = spinner;
+    this.spinner.setTUI(tui);
+    this.thinkingLevelIndicator = thinkingLevelIndicator;
+    this.workingMessage = undefined;
+    this.slots = { modelBefore: undefined };
+  }
+
+  setWorkingMessage(message?: string | undefined): void {
+    this.workingMessage = message;
+    this.tui.requestRender();
+  }
+
+  setSlot(slot: keyof typeof this.slots, value?: string | undefined): void {
+    this.slots[slot] = value;
+    this.tui.requestRender();
+  }
+
+  override render(width: number): string[] {
+    // Pi reapplies the thinking-level border color when the level changes. Use the dim color here
+    // while preserving Bash mode's dedicated border color. Set it before rendering, since the
+    // border helpers below run inside `super.render()`.
+    if (this.thinkingLevelIndicator === "model" && !this.getText().trimStart().startsWith("!")) {
+      this.borderColor = (text) => this.ctx.ui.theme.fg("dim", text);
+    }
+
+    return super.render(width);
+  }
+
+  protected override renderTopBorder(width: number, hiddenLineCount: number): string {
+    return this.renderBorder(width, this.getTopLeft(hiddenLineCount), this.getTopRight());
+  }
+
+  protected override renderBottomBorder(width: number, hiddenLineCount: number): string {
+    return this.renderBorder(width, this.getScrollHint("↓", hiddenLineCount), "");
+  }
+
+  private renderBorder(width: number, left: string, right: string): string {
+    const theme = this.ctx.ui.theme;
+
+    return new SplitLine(left, right, {
+      padding: 1,
+      innerPadding: 1,
+      spacingChar: this.borderColor("─"),
+      ellipsis: theme.fg("dim", "…"),
+    }).render(width)[0];
+  }
+
+  private getTopLeft(hiddenLineCount: number): string {
+    const theme = this.ctx.ui.theme;
+
+    const spinner = this.spinner.getFrame();
+    const workingMessage = this.workingMessage;
+    const workingText = [spinner ? theme.fg("accent", spinner) : undefined, workingMessage ? theme.fg("dim", workingMessage) : undefined].filter(Boolean).join(" ");
+
+    return [this.getScrollHint("↑", hiddenLineCount), workingText].filter(Boolean).join(theme.fg("dim", " · "));
+  }
+
+  private getTopRight(): string {
+    const theme = this.ctx.ui.theme;
+
+    const modelBeforeText = this.slots.modelBefore;
+    const modelText = formatModel(this.ctx.model?.provider, this.ctx.model?.id, this.pi.getThinkingLevel());
+    const coloredModelText = this.thinkingLevelIndicator === "model" ? this.withThinkingLevelColor(modelText) : theme.fg("dim", modelText);
+
+    return [modelBeforeText ? theme.fg("dim", modelBeforeText) : undefined, coloredModelText].filter(Boolean).join(theme.fg("dim", " · "));
+  }
+
+  /** Renders Pi's hidden-line hint, which this editor keeps on the left side of the border. */
+  private getScrollHint(direction: "↑" | "↓", hiddenLineCount: number): string {
+    if (hiddenLineCount <= 0) return "";
+
+    return this.ctx.ui.theme.fg("dim", `${direction} ${hiddenLineCount} more`);
+  }
+
+  private withThinkingLevelColor(text: string): string {
+    const theme = this.ctx.ui.theme;
+    const thinkingLevel = this.pi.getThinkingLevel();
+
+    return theme.getThinkingBorderColor(thinkingLevel)(text);
+  }
+}
+
+export function registerEditor(pi: ExtensionAPI, events: EventCollector): void {
+  let editor: Editor | undefined = undefined;
+  let spinner: Spinner | undefined = undefined;
+  let runningToolCallIds = new Set<string>();
+
+  pi.on("session_start", (_event, ctx) => {
+    const config = loadConfig(ctx).editor;
+    if (ctx.mode !== "tui" || !config) return;
+
+    spinner = new Spinner(config.spinner);
+
+    ctx.ui.setWorkingVisible(false);
+    ctx.ui.setEditorComponent((tui, theme, keybindings) => {
+      editor = new Editor(pi, ctx, tui, theme, keybindings, spinner, config.thinkingLevelIndicator);
+
+      events.on(PRESET_CHANGE, (data) => {
+        const payload = parsePresetChange(data);
+        editor?.setSlot("modelBefore", payload ? ctx.ui.theme.bold(payload) : undefined);
+      });
+
+      return editor;
+    });
+  });
+
+  pi.on("agent_start", () => {
+    runningToolCallIds.clear();
+    editor?.setWorkingMessage();
+    spinner?.start();
+  });
+
+  pi.on("message_update", (event) => {
+    if (runningToolCallIds.size > 0) return;
+
+    switch (event.assistantMessageEvent.type) {
+      case "thinking_start":
+      case "thinking_delta":
+      case "thinking_end":
+        editor?.setWorkingMessage("Thinking");
+        break;
+      case "text_start":
+      case "text_delta":
+      case "text_end":
+        editor?.setWorkingMessage("Streaming");
+        break;
+      case "toolcall_start":
+      case "toolcall_delta":
+      case "toolcall_end":
+        editor?.setWorkingMessage("Running tools");
+        break;
+      default:
+        editor?.setWorkingMessage();
+        break;
+    }
+  });
+
+  pi.on("tool_execution_start", (event) => {
+    runningToolCallIds.add(event.toolCallId);
+    editor?.setWorkingMessage("Running tools");
+  });
+
+  pi.on("tool_execution_end", (event) => {
+    runningToolCallIds.delete(event.toolCallId);
+    editor?.setWorkingMessage(runningToolCallIds.size > 0 ? "Running tools" : undefined);
+  });
+
+  pi.on("agent_end", () => {
+    runningToolCallIds.clear();
+    editor?.setWorkingMessage();
+  });
+
+  pi.on("agent_settled", () => {
+    runningToolCallIds.clear();
+    editor?.setWorkingMessage();
+    spinner?.stop();
+  });
+
+  pi.on("session_shutdown", () => {
+    runningToolCallIds.clear();
+    editor = undefined;
+    spinner?.dispose();
+    spinner = undefined;
+  });
+}

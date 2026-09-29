@@ -105,7 +105,7 @@ The former `detector` matcher was removed because its logic lived in code instea
 
 ### Directory rules
 
-Relative roots resolve against Pi's current working directory; absolute paths and `~/` are supported. Only listed roots are allowed, and `["."]` means the working directory. When `pi-add-dir` is installed, its active directory authorization is also honored; after `session_squash`, the guard restores the authorization from the squashed source branch. Add extra directories and device paths such as `/dev/null` when needed.
+Relative roots resolve against Pi's current working directory; absolute paths and `~/` are supported. Only listed roots are allowed, and `["."]` means the working directory. When `pi-add-dir` is installed, its active directory authorization is also honored. For legacy `session-squash` snapshots, the guard restores the authorization from the source branch. Add extra directories and device paths such as `/dev/null` when needed.
 
 Custom matchers can use the exported `findOutOfScopeBashPaths(command, cwd, roots)` helper to supply their own roots.
 

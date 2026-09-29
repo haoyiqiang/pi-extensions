@@ -1,0 +1,848 @@
+/**
+ * Before-compact hook — handles pi-vcc compaction + OM content injection.
+ *
+ * Upstream: https://github.com/sting8k/pi-vcc (src/hooks/before-compact.ts)
+ * Modified by pi-vcc-om:
+ * - After pi-vcc compiles its summary, calls buildCompactionProjection
+ *   and renderSummary to append observations/reflections to the output.
+ * - This is the single joining point between pi-vcc and OM.
+ */
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { convertToLlm } from "@earendil-works/pi-coding-agent";
+import { writeFileSync } from "fs";
+import {
+  compile,
+  compileSegment,
+  extractRecallNote,
+  stripOMContent,
+  stripRecallNotes,
+} from "../core/summarize";
+import { buildAppendOnlyDetails, coverageForMessages } from "../core/compaction-chain.js";
+import { getModelProvider, matchesSkippedProvider } from "../core/provider-skip.js";
+import type { PiVccCompactionDetails } from "../details";
+import { buildCompactionProjection, renderSummary } from "../om/ledger/index.js";
+import type { Runtime } from "../om/runtime.js";
+import { debugLog } from "../om/debug-log.js";
+import { effectiveContextWindow } from "../om/model-budget.js";
+import { DEFAULTS, configFileNeedsMigration } from "../core/unified-config.js";
+import { buildRetainedToolOutputProjection } from "../core/tool-output-budget.js";
+import { buildGlobalIndexById, loadGlobalIndexById } from "../core/global-indices.js";
+import { loadGitFileTags } from "../extract/git-status.js";
+import { collectFilesTouched } from "../extract/file-touch.js";
+
+export const PI_VCC_COMPACT_INSTRUCTION = "__pi_vcc__";
+
+// ── Migration reminder ────────────────────────────────────────────────────────
+
+/** Per-session notification count for migration reminder (max 2). */
+const migrationNotifyCount = new Map<string, number>();
+
+/**
+ * Show migration reminder notification if user's on-disk config still has legacy keys.
+ * At most 2 notifications per session. Call after compaction completes.
+ */
+export function notifyMigrationReminder(
+  sessionId: string,
+  notify: (msg: string, level: string) => void,
+): void {
+  const count = migrationNotifyCount.get(sessionId) ?? 0;
+  if (count >= 2) return;
+  if (!configFileNeedsMigration()) return;
+  migrationNotifyCount.set(sessionId, count + 1);
+  notify("blackhole: Use `/blackhole configure` to save your updated configuration.", "info");
+}
+
+const formatTokens = (n: number): string => {
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
+};
+
+export interface CompactionStats {
+  summarized: number;
+  kept: number;
+  keptTokensEst: number;
+  compactAll: boolean;
+  totalUserTurns: number;
+  keptUserTurns: number;
+  requestedKeepUserTurns: number;
+  keepUserTurnsExplicit: boolean;
+  keepFallbackToCompactAll: boolean;
+  smartKeepAdjusted: boolean;
+  smartFromKeep: number;
+}
+
+/**
+ * Format compaction stats for user-visible notification.
+ * Example output:
+ *   blackhole: 6 source entries processed; tail kept 1/4 user turns (~0.5k tok).
+ */
+export const formatCompactionStats = (stats: CompactionStats): string => {
+  const parts: string[] = [`${stats.summarized} source entries processed`];
+  parts.push(`tail kept ${stats.keptUserTurns}/${stats.totalUserTurns} user turns`);
+  if (stats.smartKeepAdjusted) {
+    parts.push(`smart keep:${stats.smartFromKeep}→${stats.keptUserTurns}`);
+  }
+  if (stats.keepFallbackToCompactAll) {
+    parts.push(`compact-all`);
+  }
+  return `blackhole: ${parts.join("; ")} (~${formatTokens(stats.keptTokensEst)} tok).`;
+};
+
+const dbg = (debug: boolean, data: Record<string, unknown>) => {
+  if (!debug) return;
+  try {
+    writeFileSync("/tmp/pi-blackhole-debug.json", JSON.stringify(data, null, 2));
+  } catch {}
+};
+
+const previewContent = (content: unknown): string => {
+  if (typeof content === "string") return content.slice(0, 300);
+  if (Array.isArray(content)) {
+    return content
+      .map((c: any) => {
+        if (c?.type === "text") return c.text ?? "";
+        if (c?.type === "toolCall") return `[toolCall:${c.name}]`;
+        if (c?.type === "thinking") return `[thinking]`;
+        if (c?.type === "image") return `[image:${c.mimeType}]`;
+        return `[${c?.type ?? "unknown"}]`;
+      })
+      .join("\n")
+      .slice(0, 300);
+  }
+  return "";
+};
+
+interface EntryWithMessage {
+  entry: { id: string; type: string };
+  message: { role: string; content: unknown };
+}
+
+export type OwnCutCancelReason = "no_live_messages" | "too_few_live_messages";
+
+export type OwnCutResult =
+  | {
+      ok: true;
+      messages: any[];
+      /** Session entry ids backing `messages`, in the same order. */
+      selectedIds: string[];
+      firstKeptEntryId: string;
+      compactAll: boolean;
+    }
+  | { ok: false; reason: OwnCutCancelReason };
+
+export function buildOwnCut(
+  branchEntries: any[],
+  /** Pi's firstKeptEntryId from preparation (undefined = don't use Pi's cut). */
+  piFirstKeptEntryId?: string,
+  /** "pi-default" = use Pi's cut, "minimal" = keep only last user message (current). */
+  tailBehavior?: "pi-default" | "minimal",
+): OwnCutResult {
+  // Find the last compaction entry and its firstKeptEntryId
+  let lastCompactionIdx = -1;
+  let lastKeptId: string | undefined;
+  for (let i = branchEntries.length - 1; i >= 0; i--) {
+    if (branchEntries[i].type === "compaction") {
+      lastCompactionIdx = i;
+      lastKeptId = branchEntries[i].firstKeptEntryId;
+      break;
+    }
+  }
+
+  // Orphan recovery: triggers when lastKeptId is set to "" (sentinel from prior
+  // compact-all) OR set to an id that no longer exists in the branch. In both cases,
+  // start collecting from right after the last compaction entry.
+  const hasPriorCompaction = lastCompactionIdx >= 0;
+  const hasValidKeptId = !!lastKeptId && branchEntries.some((e: any) => e.id === lastKeptId);
+  const orphanRecovery = hasPriorCompaction && !hasValidKeptId;
+
+  // Collect live messages
+  const liveMessages: EntryWithMessage[] = [];
+  if (orphanRecovery) {
+    for (let i = lastCompactionIdx + 1; i < branchEntries.length; i++) {
+      const e = branchEntries[i];
+      if (e.type === "compaction") continue;
+      if (e.type === "message" && e.message) {
+        liveMessages.push({ entry: e, message: e.message });
+      }
+    }
+  } else {
+    let foundKept = !lastKeptId; // if no prior compaction, start collecting immediately
+    for (const e of branchEntries) {
+      if (!foundKept && e.id === lastKeptId) foundKept = true;
+      if (!foundKept) continue;
+      if (e.type === "compaction") continue;
+      if (e.type === "message" && e.message) {
+        liveMessages.push({ entry: e, message: e.message });
+      }
+    }
+  }
+
+  // Minimal normally cuts at the last user message. If Pi found a later safe
+  // split-turn boundary, use it too so one oversized current turn is not kept whole.
+  let minimalCutIdx = liveMessages.length - 1;
+  while (minimalCutIdx > 0 && liveMessages[minimalCutIdx]?.message.role !== "user") {
+    minimalCutIdx--;
+  }
+  if (minimalCutIdx <= 0) minimalCutIdx = liveMessages.length; // compact-all
+
+  // ── Pi's cut path: always use in pi-default; in minimal only when later ──
+  if (piFirstKeptEntryId) {
+    const cutInBranch = branchEntries.findIndex((e: any) => e.id === piFirstKeptEntryId);
+    if (cutInBranch >= 0) {
+      const liveCutIdx = liveMessages.findIndex((lm) => lm.entry.id === piFirstKeptEntryId);
+      if (liveCutIdx > 0 && (tailBehavior === "pi-default" || liveCutIdx > minimalCutIdx)) {
+        return {
+          ok: true,
+          messages: liveMessages.slice(0, liveCutIdx).map((e) => e.message),
+          selectedIds: liveMessages.slice(0, liveCutIdx).map((e) => e.entry.id),
+          firstKeptEntryId: piFirstKeptEntryId,
+          compactAll: false,
+        };
+      }
+      if (liveCutIdx === 0 && tailBehavior === "pi-default") {
+        // Pi's cut is at first live message.
+        // Pi wants to keep everything, so only compact-all is acceptable (summarizes
+        // everything for a fresh page).  If minimal path would aggressively cut
+        // (multiple user messages), cancel to respect Pi's guidance.
+        let lastUserIdx = liveMessages.length - 1;
+        while (lastUserIdx > 0 && liveMessages[lastUserIdx].message.role !== "user") {
+          lastUserIdx--;
+        }
+        if (lastUserIdx > 0) {
+          // Multiple user messages — minimal would aggressively cut, violating Pi
+          return { ok: false, reason: "too_few_live_messages" };
+        }
+        // Single user message — fall through to minimal path (will compact-all)
+      }
+      // liveCutIdx === -1: piFirstKeptEntryId not found in liveMessages
+      // (e.g., refers to a non-message entry like type:"custom" OM metadata or
+      // type:"compaction"). Resolve to the next message entry after pi's cut point.
+      if (liveCutIdx < 0) {
+        const nextMsgEntry = branchEntries.find(
+          (e: any, i: number) => i > cutInBranch && e.type === "message" && e.message,
+        );
+        if (nextMsgEntry) {
+          const resolvedId: string = nextMsgEntry.id;
+          const resolvedLiveIdx = liveMessages.findIndex((lm) => lm.entry.id === resolvedId);
+          if (
+            resolvedLiveIdx > 0 &&
+            (tailBehavior === "pi-default" || resolvedLiveIdx > minimalCutIdx)
+          ) {
+            return {
+              ok: true,
+              messages: liveMessages.slice(0, resolvedLiveIdx).map((e) => e.message),
+              selectedIds: liveMessages.slice(0, resolvedLiveIdx).map((e) => e.entry.id),
+              firstKeptEntryId: resolvedId,
+              compactAll: false,
+            };
+          }
+          if (resolvedLiveIdx === 0 && tailBehavior === "pi-default") {
+            let lastUserIdx = liveMessages.length - 1;
+            while (lastUserIdx > 0 && liveMessages[lastUserIdx].message.role !== "user") {
+              lastUserIdx--;
+            }
+            if (lastUserIdx > 0) {
+              return { ok: false, reason: "too_few_live_messages" };
+            }
+            // Single user message — fall through to minimal (will compact-all)
+          }
+          // resolvedLiveIdx === -1: resolved message not in liveMessages
+          // (shouldn't happen since liveMessages starts from prior firstKeptEntryId
+          // which should be before or at pi's cut), but fall through if it does.
+        }
+        // No message found after pi's cut point in branch — fall through
+      }
+    }
+    // piFirstKeptEntryId not found in branch → fall through to minimal / orphan recovery
+  }
+
+  if (liveMessages.length === 0) return { ok: false, reason: "no_live_messages" };
+  if (liveMessages.length <= 2) return { ok: false, reason: "too_few_live_messages" };
+
+  // Summarize all messages, keep only the last user message as context
+  let cutIdx = liveMessages.length - 1;
+  while (cutIdx > 0 && liveMessages[cutIdx].message.role !== "user") {
+    cutIdx--;
+  }
+
+  if (cutIdx <= 0) {
+    // Single user prompt scenario (or no user at all).
+    // Compact EVERYTHING and keep no tail. This handles both:
+    //  - Single user prompt at index 0: compact all, fresh start after summary
+    //  - No user message at all (e.g., long assistant/tool chain): still compact
+    //    to recover from context overflow rather than cancelling and leaving
+    //    the session unrecoverable.
+    // firstKeptEntryId="" is a sentinel: pi-core's buildSessionContext won't match it
+    // (so 0 kept from pre-compaction), and next buildOwnCut triggers orphan recovery.
+    return {
+      ok: true,
+      messages: liveMessages.map((e) => e.message),
+      selectedIds: liveMessages.map((e) => e.entry.id),
+      firstKeptEntryId: "",
+      compactAll: true,
+    };
+  }
+
+  return {
+    ok: true,
+    messages: liveMessages.slice(0, cutIdx).map((e) => e.message),
+    selectedIds: liveMessages.slice(0, cutIdx).map((e) => e.entry.id),
+    firstKeptEntryId: liveMessages[cutIdx].entry.id,
+    compactAll: false,
+  };
+}
+
+const REASON_MESSAGES: Record<OwnCutCancelReason, string> = {
+  no_live_messages: "blackhole: Nothing to compact (no live messages)",
+  too_few_live_messages:
+    'blackhole: Too few live messages — Pi\'s default logic preserves visible context. Set tailBehavior to "minimal" in config to force compaction with fewer messages.',
+};
+
+export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) => {
+  pi.on("session_before_compact", (event, ctx) => {
+    const { preparation, branchEntries, customInstructions } = event;
+    const isPiVcc = customInstructions === PI_VCC_COMPACT_INSTRUCTION;
+
+    // Establish attribution for this attempt before config/context access can
+    // throw. Every attempt overwrites stale state; success/failure hooks consume it.
+    omRuntime.compactWasPiVcc = isPiVcc;
+    omRuntime.lastCompactCancelled = false;
+    omRuntime.ensureConfig(ctx.cwd ?? process.cwd(), (msg) => ctx.ui?.notify?.(msg, "warning"));
+    const trace = (ev: string, d?: Record<string, unknown>) =>
+      debugLog(ev, d, omRuntime.config.debugLog === true);
+
+    // Provider-aware skip: another engine owns compaction for this provider
+    // (e.g. pi-codex-compaction for OpenAI Codex). Step aside entirely so
+    // exactly one compaction engine acts per turn, regardless of extension
+    // registration order. Applies to auto and explicit (/blackhole) paths.
+    // EXPERIMENTAL compat shim — do not extend; see src/core/provider-skip.ts.
+    if (matchesSkippedProvider(omRuntime.config, ctx.model)) {
+      trace("before_compact.provider_skipped", {
+        provider: getModelProvider(ctx.model),
+        skipForProviders: omRuntime.config.skipForProviders,
+      });
+      return;
+    }
+
+    trace("before_compact.enter", {
+      customInstructions,
+      isPiVcc,
+      overrideDefaultCompaction: omRuntime.config.overrideDefaultCompaction,
+      manualMode:
+        omRuntime.config.compaction === "manual" || omRuntime.config.noAutoCompact === true,
+      branchLength: branchEntries.length,
+      hasPreviousSummary: !!preparation.previousSummary,
+    });
+
+    // Always handle explicit /blackhole marker.
+    // Otherwise, only handle when user opted in via settings.
+
+    // NEW: Unified compaction guards
+    // compaction "off": blackhole skips auto-triggered, but /blackhole still uses blackhole pipeline
+    if (omRuntime.config.compaction === "off" && !isPiVcc) {
+      trace("before_compact.return_early", { reason: "compaction_off" });
+      return;
+    }
+
+    // compactionEngine "pi-default" means let Pi handle auto-triggered compactions
+    if (omRuntime.config.compactionEngine === "pi-default" && !isPiVcc) {
+      trace("before_compact.return_early", {
+        reason: "compactionEngine_pi_default",
+      });
+      return;
+    }
+
+    // compaction "manual": /compact falls through to Pi, /blackhole still works
+    if (omRuntime.config.compaction === "manual" && !isPiVcc) {
+      trace("before_compact.return_early", { reason: "compaction_manual" });
+      return;
+    }
+
+    // LEGACY: old config key guards — only apply when new keys are absent (unmigrated config)
+    if (
+      omRuntime.config.compaction === undefined &&
+      omRuntime.config.compactionEngine === undefined
+    ) {
+      if (!isPiVcc && !omRuntime.config.overrideDefaultCompaction) {
+        trace("before_compact.return_early", {
+          reason: "overrideDefaultCompaction=false and not /blackhole",
+        });
+        return;
+      }
+
+      if (
+        (omRuntime.config.compaction === "manual" || omRuntime.config.noAutoCompact) &&
+        !isPiVcc
+      ) {
+        trace("before_compact.cancel", {
+          reason: "manual mode and not /blackhole",
+        });
+        omRuntime.lastCompactCancelled = true;
+        return { cancel: true };
+      }
+    }
+
+    // Determine effective tail behavior for buildOwnCut
+    // Both /blackhole and auto-triggered default to "minimal" (aggressive cut);
+    // users can opt into "pi-default" (gentler) by setting tailBehavior in config.
+    const effectiveTailBehavior = omRuntime.config.tailBehavior ?? "minimal";
+
+    trace("before_compact.tail_behavior", {
+      effectiveTailBehavior,
+      configTailBehavior: omRuntime.config.tailBehavior,
+      isPiVcc,
+      piFirstKeptEntryId: preparation.firstKeptEntryId,
+    });
+
+    const ownCut = buildOwnCut(
+      branchEntries as any[],
+      preparation.firstKeptEntryId,
+      effectiveTailBehavior,
+    );
+    if (!ownCut.ok) {
+      const lastComp = [...branchEntries].reverse().find((e: any) => e.type === "compaction");
+      const lastCompIdx = lastComp ? (branchEntries as any[]).indexOf(lastComp) : -1;
+
+      // Recompute liveMessages view (same logic as buildOwnCut) for diagnostic
+      const lastKeptId: string | undefined = (lastComp as any)?.firstKeptEntryId;
+      const hasPriorCompaction = lastCompIdx >= 0;
+      const hasValidKeptId =
+        !!lastKeptId && (branchEntries as any[]).some((e: any) => e.id === lastKeptId);
+      const diagOrphan = hasPriorCompaction && !hasValidKeptId;
+      const liveRoles: string[] = [];
+      if (diagOrphan) {
+        for (let i = lastCompIdx + 1; i < branchEntries.length; i++) {
+          const e = (branchEntries as any[])[i];
+          if (e.type === "compaction") continue;
+          if (e.type === "message" && e.message) liveRoles.push(e.message.role);
+        }
+      } else {
+        let foundKept = !lastKeptId;
+        for (const e of branchEntries as any[]) {
+          if (!foundKept && e.id === lastKeptId) foundKept = true;
+          if (!foundKept) continue;
+          if (e.type === "compaction") continue;
+          if (e.type === "message" && e.message) liveRoles.push(e.message.role);
+        }
+      }
+      const userIndices = liveRoles.reduce<number[]>(
+        (acc, r, i) => (r === "user" ? (acc.push(i), acc) : acc),
+        [],
+      );
+
+      dbg(omRuntime.config.debug, {
+        cancelled: true,
+        reason: ownCut.reason,
+        isPiVcc,
+        counts: {
+          total: branchEntries.length,
+          messages: (branchEntries as any[]).filter((e: any) => e.type === "message").length,
+          compactions: (branchEntries as any[]).filter((e: any) => e.type === "compaction").length,
+          entriesAfterLastCompaction:
+            lastCompIdx >= 0 ? branchEntries.length - lastCompIdx - 1 : null,
+        },
+        liveMessages: {
+          count: liveRoles.length,
+          userCount: userIndices.length,
+          firstUserIdx: userIndices[0] ?? null,
+          lastUserIdx: userIndices[userIndices.length - 1] ?? null,
+          roleSequence:
+            liveRoles.length <= 30
+              ? liveRoles
+              : [...liveRoles.slice(0, 10), "...", ...liveRoles.slice(-10)],
+        },
+        lastCompaction: lastComp
+          ? {
+              hasFirstKeptEntryId: !!(lastComp as any).firstKeptEntryId,
+              foundInBranch: (lastComp as any).firstKeptEntryId
+                ? (branchEntries as any[]).some(
+                    (e: any) => e.id === (lastComp as any).firstKeptEntryId,
+                  )
+                : null,
+            }
+          : null,
+        tail: (branchEntries as any[]).slice(-5).map((e: any) => ({
+          type: e.type,
+          role: e.type === "message" ? e.message?.role : undefined,
+          hasContent: e.type === "message" ? e.message?.content != null : undefined,
+        })),
+      });
+
+      trace("before_compact.cancel", { reason: ownCut.reason, isPiVcc });
+      try {
+        ctx?.ui?.notify?.(REASON_MESSAGES[ownCut.reason], "warning");
+      } catch {}
+      omRuntime.lastCompactCancelled = true;
+      return { cancel: true };
+    }
+
+    trace("before_compact.proceeding", {
+      messageCount: ownCut.messages.length,
+      firstKeptEntryId: ownCut.firstKeptEntryId,
+      compactAll: ownCut.compactAll,
+      isPiVcc,
+    });
+
+    const agentMessages = ownCut.messages;
+    const agentSelectedIds = ownCut.selectedIds;
+    const firstKeptEntryId = ownCut.firstKeptEntryId;
+
+    // ── Session-global indices for summary refs ──────────────────────
+    // Recall numbers messages across the whole session file (all windows,
+    // all branches); the selected window is zero-based. Map each selected
+    // entry id to its global index so emitted (#N) refs resolve via recall.
+    // Primary source is the in-memory tree (file order, synchronously
+    // persisted); the session file is the fallback. convertToLlm is
+    // elementwise (drops/replaces per message, order preserved), so align by
+    // converting singletons — never by position.
+    let globalIndexById: Map<string, number> | undefined;
+    try {
+      const all = (ctx as any)?.sessionManager?.getEntries?.();
+      if (Array.isArray(all)) globalIndexById = buildGlobalIndexById(all);
+    } catch {
+      globalIndexById = undefined;
+    }
+    if (!globalIndexById) {
+      try {
+        const sf = (ctx as any)?.sessionManager?.getSessionFile?.();
+        if (typeof sf === "string" && sf) globalIndexById = loadGlobalIndexById(sf);
+      } catch {
+        globalIndexById = undefined;
+      }
+    }
+    const convertedWithIndices: Array<{ message: any; sourceIndex: number | undefined }> = [];
+    for (let i = 0; i < agentMessages.length; i++) {
+      let converted: any[];
+      try {
+        converted = convertToLlm([agentMessages[i]]);
+      } catch {
+        continue;
+      }
+      if (converted.length === 0) continue;
+      const id = agentSelectedIds[i];
+      convertedWithIndices.push({
+        message: converted[0],
+        sourceIndex: typeof id === "string" ? globalIndexById?.get(id) : undefined,
+      });
+    }
+    const messages = convertedWithIndices.map((x) => x.message);
+    // No map at all (facades without entries/file) keeps the legacy
+    // positional behavior. A present map with a missing id yields undefined
+    // for that position, which renderers display as no ref (fail-closed).
+    // Parallel to `messages` by construction.
+    const sourceIndices =
+      globalIndexById === undefined ? undefined : convertedWithIndices.map((x) => x.sourceIndex);
+
+    // Count kept messages and estimate tokens
+    const keptIdx = (branchEntries as any[]).findIndex((e: any) => e.id === firstKeptEntryId);
+    const keptEntries =
+      keptIdx >= 0
+        ? (branchEntries as any[]).slice(keptIdx).filter((e: any) => e.type === "message")
+        : [];
+    const keptChars = keptEntries.reduce((sum: number, e: any) => {
+      const c = e.message?.content;
+      if (typeof c === "string") return sum + c.length;
+      if (Array.isArray(c))
+        return (
+          sum +
+          c.reduce((s: number, p: any) => {
+            if (p.text) return s + p.text.length;
+            if (p.type === "toolCall")
+              return (
+                s +
+                (p.name?.length ?? 0) +
+                (typeof p.input === "string"
+                  ? p.input.length
+                  : JSON.stringify(p.input ?? "").length)
+              );
+            if (p.type === "toolResult")
+              return (
+                s +
+                (typeof p.content === "string"
+                  ? p.content.length
+                  : JSON.stringify(p.content ?? "").length)
+              );
+            return s;
+          }, 0)
+        );
+      return sum;
+    }, 0);
+    const totalUserTurns = (branchEntries as any[]).filter(
+      (e: any) => e.type === "message" && e.message?.role === "user",
+    ).length;
+    const keptUserTurns = ownCut.compactAll
+      ? 0
+      : (branchEntries as any[])
+          .slice(keptIdx)
+          .filter((e: any) => e.type === "message" && e.message?.role === "user").length;
+    omRuntime.compactionStats = {
+      summarized: agentMessages.length,
+      kept: keptEntries.length,
+      keptTokensEst: Math.round(keptChars / 4),
+      compactAll: ownCut.compactAll,
+      totalUserTurns,
+      keptUserTurns,
+      requestedKeepUserTurns: 1,
+      keepUserTurnsExplicit: false,
+      keepFallbackToCompactAll: ownCut.compactAll,
+      smartKeepAdjusted: false,
+      smartFromKeep: 1,
+    };
+
+    const fileOps = {
+      readFiles: [...preparation.fileOps.read],
+      modifiedFiles: [...preparation.fileOps.written, ...preparation.fileOps.edited],
+    };
+    // Git working-tree tags for fresh-window annotations; empty (no
+    // annotations) outside a repo or if git fails.
+    const gitTags = loadGitFileTags(ctx.cwd ?? process.cwd());
+    const summary = compile({
+      messages,
+      previousSummary: preparation.previousSummary,
+      fileOps,
+      sourceIndices,
+      touchMessages: agentMessages,
+      cwd: ctx.cwd ?? process.cwd(),
+      gitTags,
+    });
+    const freshSegmentSummary =
+      omRuntime.config.compactionSummaryMode === "append"
+        ? compileSegment({
+            messages,
+            fileOps,
+            sourceIndices,
+            touchMessages: agentMessages,
+            cwd: ctx.cwd ?? process.cwd(),
+            gitTags,
+          })
+        : "";
+
+    const branchIds = branchEntries.map((e: any) => e.id);
+    const cutIdx = branchIds.indexOf(firstKeptEntryId);
+    const cutWindow =
+      cutIdx >= 0
+        ? branchEntries
+            .slice(Math.max(0, cutIdx - 3), Math.min(branchEntries.length, cutIdx + 3))
+            .map((e: any) => ({
+              id: e.id,
+              type: e.type,
+              role: e.type === "message" ? e.message?.role : undefined,
+              preview: e.type === "message" ? previewContent(e.message?.content) : undefined,
+            }))
+        : [];
+
+    dbg(omRuntime.config.debug, {
+      usedOwnCut: true,
+      messagesToSummarize: agentMessages.length,
+      messagesPreviewHead: agentMessages.slice(0, 3).map((m: any) => ({
+        role: m.role,
+        preview: previewContent(m.content),
+      })),
+      messagesPreviewTail: agentMessages.slice(-3).map((m: any) => ({
+        role: m.role,
+        preview: previewContent(m.content),
+      })),
+      convertedMessages: messages.length,
+      firstKeptEntryId,
+      cutWindow,
+      tokensBefore: preparation.tokensBefore,
+      summaryLength: summary.length,
+      summaryPreview: summary.slice(0, 500),
+      sections: [...summary.matchAll(/^\[(.+?)\]/gm)].map((m) => m[1]),
+    });
+
+    // The trace call below applies the debugLog flag internally, but its
+    // argument object is evaluated eagerly — gate the diagnostic collection
+    // here so it costs nothing when debugging is off.
+    const debugLogEnabled = omRuntime.config.debugLog === true;
+    trace("before_compact.summary_generated", {
+      summaryLength: summary.length,
+      messageCount: agentMessages.length,
+      // Live attribution signal (#105): how many files the touch collector
+      // saw in the raw pre-conversion messages. A 0 here alongside a rich
+      // window means the in-memory toolCall block shape differs from the
+      // serialized JSONL shape the collector was built against. Computed only
+      // when debugLog is enabled (zero cost by default, and no duplicate of
+      // the collection pass inside compile → buildSections).
+      filesTouchedCount: !debugLogEnabled
+        ? undefined
+        : (() => {
+            try {
+              return collectFilesTouched(agentMessages, ctx.cwd ?? process.cwd()).length;
+            } catch {
+              return undefined;
+            }
+          })(),
+    });
+
+    let allEntries: any[] = [];
+    try {
+      const entries = ctx.sessionManager?.getEntries?.();
+      if (Array.isArray(entries)) allEntries = entries;
+    } catch {
+      // Omitted outputs remain generically recallable when an index is unproven.
+    }
+    const retainedToolOutputProjection = buildRetainedToolOutputProjection(
+      keptEntries,
+      allEntries,
+      omRuntime.config.retainedToolOutputMaxTokens,
+    );
+    trace("before_compact.tool_output_budget", {
+      retainedTokens: retainedToolOutputProjection.retainedTokens,
+      omittedTokens: retainedToolOutputProjection.omittedTokens,
+      omittedCount: retainedToolOutputProjection.omissions.length,
+      pendingCount: retainedToolOutputProjection.pendingCount,
+    });
+
+    const legacyDetails: PiVccCompactionDetails = {
+      compactor: "blackhole",
+      version: 1,
+      sections: [...summary.matchAll(/^\[(.+?)\]/gm)].map((m) => m[1]),
+      sourceMessageCount: agentMessages.length,
+      previousSummaryUsed: Boolean(preparation.previousSummary),
+      retainedToolOutputProjection,
+    };
+
+    // ── Inject observational-memory content ───────────────────────────
+    let omContent: string;
+    let omDetails: Record<string, unknown> | undefined;
+    let omHasContent = false;
+    trace("before_compact.om_injection", {
+      memoryEnabled: omRuntime.config.memory !== false,
+    });
+    if (omRuntime.config.memory !== false) {
+      const projection = buildCompactionProjection(branchEntries as any[], firstKeptEntryId, {
+        observationsPoolMaxTokens: omRuntime.config.observationsPoolMaxTokens,
+        reflectionsPoolMaxTokens:
+          omRuntime.config.reflectionsPoolMaxTokens ?? DEFAULTS.reflectionsPoolMaxTokens,
+        fullFoldAlways: omRuntime.config.fullFoldAlways,
+      });
+      omContent = renderSummary(projection.reflections, projection.observations);
+      omDetails = projection.details;
+      omHasContent = projection.reflections.length > 0 || projection.observations.length > 0;
+    } else {
+      omContent = renderSummary([], []);
+    }
+
+    // An empty replacement summary would discard the context Pi's native
+    // compactor is designed to preserve. Decline ownership only when neither
+    // Blackhole's VCC summary nor the OM projection produced any content;
+    // non-empty Blackhole summaries retain the existing deterministic path.
+    // (renderSummary([], []) always emits the OM recall footer, so the check
+    // must not key off footer-inclusive omContent.)
+    const fallbackSummary = summary + "\n\n" + omContent;
+    if (summary.trim().length === 0 && !omHasContent) {
+      // Returning undefined delegates to Pi's native summarizer:
+      // ExtensionHandler permits void, and pi only acts on result?.compaction.
+      trace("before_compact.native_fallback", {
+        reason: "empty_blackhole_summary",
+      });
+      return;
+    }
+
+    const warnAppendFallback = (reason: string) => {
+      trace("before_compact.append_fallback", { reason });
+      if (omRuntime.appendFallbackNotified) return;
+      omRuntime.appendFallbackNotified = true;
+      ctx?.ui?.notify?.(
+        `pi-blackhole: append summary mode fell back to a complete replacement summary (${reason}); run /blackhole to rebase back into append segments`,
+        "warning",
+      );
+    };
+    let details: PiVccCompactionDetails = legacyDetails;
+    if (omRuntime.config.compactionSummaryMode === "append") {
+      const currentCoverage = coverageForMessages(
+        branchEntries as any[],
+        agentSelectedIds,
+        firstKeptEntryId,
+      );
+      const aggregateSummary = stripRecallNotes(stripOMContent(summary)).trim();
+      const hasPriorCompaction = branchEntries.some((entry) => entry.type === "compaction");
+      const hasCompletePreviousSummary =
+        !hasPriorCompaction || Boolean(preparation.previousSummary);
+      if (
+        currentCoverage &&
+        freshSegmentSummary.trim().length > 0 &&
+        aggregateSummary.length > 0 &&
+        hasCompletePreviousSummary
+      ) {
+        const trailingSummary = [extractRecallNote(summary), omContent]
+          .map((part) => part.trim())
+          .filter((part) => part.length > 0)
+          .join("\n\n");
+        try {
+          const result = buildAppendOnlyDetails({
+            branchEntries: branchEntries as any[],
+            manualRebase: isPiVcc,
+            freshSummary: freshSegmentSummary,
+            aggregateSummary,
+            trailingSummary,
+            currentCoverage,
+            tokensBefore: preparation.tokensBefore,
+            sections: legacyDetails.sections,
+            previousSummaryUsed: legacyDetails.previousSummaryUsed,
+            retainedToolOutputProjection,
+            model: ctx.model ? { provider: ctx.model.provider, id: ctx.model.id } : undefined,
+            contextWindowTokens:
+              ctx.model && Number.isFinite(ctx.model.contextWindow) && ctx.model.contextWindow > 0
+                ? effectiveContextWindow(ctx.model)
+                : undefined,
+            reserveTokens: preparation.settings?.reserveTokens,
+            overflow: event.reason === "overflow",
+          });
+          details = result.details;
+          trace("before_compact.append_decision", {
+            ...result.decision,
+            observationBudget: omRuntime.config.observationsPoolMaxTokens,
+            reflectionBudget:
+              omRuntime.config.reflectionsPoolMaxTokens ?? DEFAULTS.reflectionsPoolMaxTokens,
+          });
+          if (result.decision.insufficientRecovery) {
+            ctx.ui?.notify?.(
+              "blackhole: estimated context still exceeds available capacity after compaction; Pi overflow retry/error handling remains in control",
+              "warning",
+            );
+          }
+        } catch (error) {
+          warnAppendFallback(
+            `invalid-chain: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      } else {
+        warnAppendFallback(
+          !currentCoverage
+            ? "coverage"
+            : !hasCompletePreviousSummary
+              ? "missing-previous-summary"
+              : "empty-summary",
+        );
+      }
+    }
+    return {
+      compaction: {
+        summary: fallbackSummary,
+        details: { ...details, "om.folded": omDetails },
+        tokensBefore: preparation.tokensBefore,
+        firstKeptEntryId,
+      },
+    };
+  });
+
+  // Fire success toast for /compact path only (delayed to let UI settle).
+  // /blackhole path uses its own onComplete callback in the command handler.
+  pi.on("session_compact", (event, ctx) => {
+    const compactWasPiVcc = omRuntime.compactWasPiVcc;
+    omRuntime.compactWasPiVcc = false;
+    if (!event.fromExtension) return;
+    if (compactWasPiVcc) return; // /blackhole handles its own toast via onComplete
+    const stats = omRuntime.compactionStats;
+    if (!stats) return;
+    const sessionId = ctx.sessionManager.getSessionId();
+    setTimeout(() => {
+      try {
+        ctx?.ui?.notify?.(formatCompactionStats(stats), "info");
+        notifyMigrationReminder(sessionId, (msg, level) => ctx?.ui?.notify?.(msg, level as any));
+      } catch {}
+    }, 500);
+  });
+};

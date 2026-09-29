@@ -1,0 +1,485 @@
+/**
+ * Tests for the /blackhole-memory command (status, view, full).
+ */
+import { describe, it, expect, vi } from "vitest";
+
+// Never touch the real system clipboard in tests — the real
+// copyTextToClipboard spawns wl-copy/xclip/xsel and would overwrite
+// the user's actual clipboard with test fixture data.
+vi.mock("../src/om/clipboard.js", () => ({
+  copyTextToClipboard: vi.fn(async () => true),
+}));
+
+import { registerMemoryCommand } from "../src/commands/memory.js";
+import { copyTextToClipboard } from "../src/om/clipboard.js";
+import {
+  compactionEntry,
+  memoryDetails,
+  observation,
+  observationsRecordedEntry,
+  reflection,
+  reflectionsRecordedEntry,
+  observationsDroppedEntry,
+  textCustomMessage,
+  type TestEntry,
+} from "./fixtures/session.js";
+
+/** Build a minimal mock pi + runtime for testing commands */
+function createMockEnvironment() {
+  const notifyCalls: Array<{ msg: string; level: string }> = [];
+  const handlerMap = new Map<string, (event: unknown, ctx: unknown) => unknown>();
+
+  const pi = {
+    registerCommand: vi.fn(
+      (name: string, def: { handler: (args: unknown, ctx: unknown) => Promise<void> }) => {
+        handlerMap.set(name, def.handler as any);
+      },
+    ),
+  };
+
+  const runtime = {
+    ensureConfig: vi.fn(),
+    resetInfoGate: vi.fn(),
+    tryEmitInfo: vi.fn((hasUI: boolean, ui: any, msg: string) => {
+      if (!hasUI || !ui) return;
+      try {
+        ui.notify(msg, "info");
+      } catch {
+        /* stale ctx */
+      }
+    }),
+    config: {
+      observeAfterTokens: 15_000,
+      reflectAfterTokens: 25_000,
+      compactAfterTokens: 81_000,
+      observationsPoolMaxTokens: 20_000,
+      dropperPoolFullnessThreshold: 0.1,
+      dropperPressureThreshold: 0.7,
+      observerChunkMaxTokens: 40_000,
+      observerPreambleMaxTokens: 0,
+      passive: false,
+      noAutoCompact: false,
+    },
+    consolidationInFlight: false,
+    compactInFlight: false,
+    compactHookInFlight: false,
+    lastObserverError: undefined,
+    lastReflectorError: undefined,
+    lastDropperError: undefined,
+    staleCtxSkippedCompactions: 0,
+    staleCtxWarnedSessions: new Set<string>(),
+  };
+
+  const ui = {
+    notify: vi.fn((msg: string, level: string) => {
+      notifyCalls.push({ msg, level });
+    }),
+  };
+
+  /** Helper: build a basic branch with some observations and reflections */
+  function buildBranch(
+    overrides: Partial<{
+      observations: number;
+      reflections: number;
+      drops: number;
+    }> = {},
+  ) {
+    const { observations = 2, reflections = 1, drops = 0 } = overrides;
+    const entries: TestEntry[] = [textCustomMessage("raw-1", "aaaa")];
+    if (observations > 0) {
+      const obsList = Array.from({ length: observations }, (_, i) =>
+        observation(`${"a".repeat(12 - String(i).length)}${i}`, {
+          relevance: "medium",
+          tokenCount: 10,
+        }),
+      );
+      entries.push(
+        observationsRecordedEntry("om-obs", {
+          observations: obsList,
+          coversUpToId: "raw-1",
+        }),
+      );
+    }
+    if (reflections > 0) {
+      const refList = Array.from({ length: reflections }, (_, i) =>
+        reflection(`${"e".repeat(12 - String(i).length)}${i}`, ["aaaaaaaaaaaa"]),
+      );
+      entries.push(
+        reflectionsRecordedEntry("om-ref", {
+          reflections: refList,
+          coversUpToId: "raw-1",
+        }),
+      );
+    }
+    if (drops > 0) {
+      entries.push(
+        observationsDroppedEntry("om-drop", {
+          observationIds: ["aaaaaaaaaaaa"],
+          coversUpToId: "om-obs",
+        }),
+      );
+    }
+    return entries;
+  }
+
+  return {
+    pi,
+    runtime,
+    ui,
+    notifyCalls,
+    handlerMap,
+    buildBranch,
+  };
+}
+
+describe("/blackhole-memory command", () => {
+  it("status omits the stale-ctx skip line when the counter is zero", async () => {
+    const { pi, runtime, handlerMap, buildBranch } = createMockEnvironment();
+    registerMemoryCommand(pi as any, runtime as any);
+
+    const ui = { notify: vi.fn() };
+    await handlerMap.get("blackhole-memory")!([], {
+      cwd: "/tmp/test",
+      sessionManager: {
+        getBranch: vi.fn(() => buildBranch()),
+        getSessionId: vi.fn(() => "test-session"),
+      },
+      ui,
+    });
+
+    const msg = (ui.notify as any).mock.calls[0][0] as string;
+    expect(msg).not.toContain("Skipped compactions");
+  });
+
+  it("status shows the stale-ctx skip counter only when nonzero (issue #92)", async () => {
+    const { pi, runtime, handlerMap, buildBranch } = createMockEnvironment();
+    registerMemoryCommand(pi as any, runtime as any);
+    runtime.staleCtxSkippedCompactions = 3;
+
+    const ui = { notify: vi.fn() };
+    await handlerMap.get("blackhole-memory")!([], {
+      cwd: "/tmp/test",
+      sessionManager: {
+        getBranch: vi.fn(() => buildBranch()),
+        getSessionId: vi.fn(() => "test-session"),
+      },
+      ui,
+    });
+
+    const msg = (ui.notify as any).mock.calls[0][0] as string;
+    expect(msg).toContain("Skipped compactions (disposed ctx): 3");
+  });
+
+  it("registers the command on pi", () => {
+    const { pi, runtime } = createMockEnvironment();
+    registerMemoryCommand(pi as any, runtime as any);
+    expect(pi.registerCommand).toHaveBeenCalledWith(
+      "blackhole-memory",
+      expect.objectContaining({
+        description: expect.stringContaining("memory"),
+      }),
+    );
+  });
+
+  it("shows status with pipeline counters for default config", async () => {
+    const { pi, runtime, handlerMap, buildBranch } = createMockEnvironment();
+    registerMemoryCommand(pi as any, runtime as any);
+
+    const ui = { notify: vi.fn() };
+    const entries = buildBranch({ observations: 3, reflections: 2 });
+
+    await handlerMap.get("blackhole-memory")!([], {
+      cwd: "/tmp/test",
+      sessionManager: {
+        getBranch: vi.fn(() => entries),
+        getSessionId: vi.fn(() => "test-session"),
+      },
+      ui,
+    });
+
+    expect(ui.notify).toHaveBeenCalledTimes(1);
+    const msg = (ui.notify as any).mock.calls[0][0] as string;
+    expect(msg).toContain("Memory");
+    expect(msg).toContain("Observations:");
+    expect(msg).toContain("Reflections:");
+    expect(msg).toContain("Observer:");
+    expect(msg).toContain("Reflector:");
+    expect(msg).toContain("Dropper:");
+    expect(msg).toContain("eligible at ≥10% with new data; pressure at ≥70% pool");
+    expect(msg).toContain("Compaction:");
+    expect(msg).toContain("Obs pool:");
+    expect(msg).toContain("Reflect pool:");
+  });
+
+  it("status shows recorded / dropped / visible counts", async () => {
+    const { pi, runtime, handlerMap, buildBranch } = createMockEnvironment();
+    registerMemoryCommand(pi as any, runtime as any);
+
+    const ui = { notify: vi.fn() };
+    // 2 observations, 1 reflection, 1 dropped
+    const entries = buildBranch({ observations: 2, reflections: 1, drops: 1 });
+
+    await handlerMap.get("blackhole-memory")!([], {
+      cwd: "/tmp/test",
+      sessionManager: {
+        getBranch: vi.fn(() => entries),
+        getSessionId: vi.fn(() => "test-session"),
+      },
+      ui,
+    });
+
+    const msg = (ui.notify as any).mock.calls[0][0] as string;
+    expect(msg).toContain("2 recorded");
+    expect(msg).toContain("1 dropped");
+    expect(msg).toContain("1 visible");
+  });
+
+  it("status Obs pool uses the live active observation pool, not the compaction snapshot", async () => {
+    const { pi, runtime, handlerMap } = createMockEnvironment();
+    registerMemoryCommand(pi as any, runtime as any);
+
+    const ui = { notify: vi.fn() };
+    const entries = [
+      textCustomMessage("raw-1", "aaaa"),
+      observationsRecordedEntry("om-obs-1", {
+        observations: [
+          observation("aaaaaaaaaaaa", { relevance: "medium", tokenCount: 10 }),
+          observation("aaaaaaaaaaab", { relevance: "medium", tokenCount: 20 }),
+        ],
+        coversUpToId: "raw-1",
+      }),
+      compactionEntry("c1", {
+        details: memoryDetails({
+          observations: [observation("aaaaaaaaaaaa", { relevance: "medium", tokenCount: 10 })],
+        }),
+      }),
+      observationsRecordedEntry("om-obs-2", {
+        observations: [observation("aaaaaaaaaaac", { relevance: "medium", tokenCount: 30 })],
+        coversUpToId: "raw-1",
+      }),
+    ];
+
+    await handlerMap.get("blackhole-memory")!([], {
+      cwd: "/tmp/test",
+      sessionManager: {
+        getBranch: vi.fn(() => entries),
+        getSessionId: vi.fn(() => "test-session"),
+      },
+      ui,
+    });
+
+    const msg = (ui.notify as any).mock.calls[0][0] as string;
+    // Live fold has 3 active observations (10 + 20 + 30 = 60 tokens).
+    // The compaction snapshot only preserves 1 observation (10 tokens).
+    expect(msg).toContain("~60 / 20,000 tokens");
+    expect(msg).toContain("pool 0%"); // 60 / 20000 = 0.3%, rounds to 0%
+  });
+
+  it("shows passive mode indicator when config.passive is true", async () => {
+    const { pi, runtime, handlerMap } = createMockEnvironment();
+    runtime.config.passive = true;
+    registerMemoryCommand(pi as any, runtime as any);
+
+    const ui = { notify: vi.fn() };
+
+    await handlerMap.get("blackhole-memory")!([], {
+      cwd: "/tmp/test",
+      sessionManager: {
+        getBranch: vi.fn(() => []),
+        getSessionId: vi.fn(() => "test-session"),
+      },
+      ui,
+    });
+
+    const msg = (ui.notify as any).mock.calls[0][0] as string;
+    expect(msg).toContain("Passive:");
+    expect(msg).toContain("automatic memory workers and auto-compaction disabled");
+  });
+
+  it("shows in-flight indicators when consolidation is running", async () => {
+    const { pi, runtime, handlerMap } = createMockEnvironment();
+    runtime.consolidationInFlight = true;
+    runtime.compactInFlight = true;
+    registerMemoryCommand(pi as any, runtime as any);
+
+    const ui = { notify: vi.fn() };
+
+    await handlerMap.get("blackhole-memory")!([], {
+      cwd: "/tmp/test",
+      sessionManager: {
+        getBranch: vi.fn(() => []),
+        getSessionId: vi.fn(() => "test-session"),
+      },
+      ui,
+    });
+
+    const msg = (ui.notify as any).mock.calls[0][0] as string;
+    expect(msg).toContain("In flight");
+    expect(msg).toContain("Consolidation: running");
+    expect(msg).toContain("Auto-compaction: running");
+  });
+
+  it("shows last errors when present", async () => {
+    const { pi, runtime, handlerMap } = createMockEnvironment();
+    runtime.lastObserverError = "Model unavailable";
+    runtime.lastDropperError = "Budget exceeded";
+    registerMemoryCommand(pi as any, runtime as any);
+
+    const ui = { notify: vi.fn() };
+
+    await handlerMap.get("blackhole-memory")!([], {
+      cwd: "/tmp/test",
+      sessionManager: {
+        getBranch: vi.fn(() => []),
+        getSessionId: vi.fn(() => "test-session"),
+      },
+      ui,
+    });
+
+    const msg = (ui.notify as any).mock.calls[0][0] as string;
+    expect(msg).toContain("Last error");
+    expect(msg).toContain("Observer: Model unavailable");
+    expect(msg).toContain("Dropper: Budget exceeded");
+  });
+
+  it("view mode renders visible observations and reflections", async () => {
+    const { pi, runtime, handlerMap, buildBranch } = createMockEnvironment();
+    registerMemoryCommand(pi as any, runtime as any);
+
+    const ui = { notify: vi.fn() };
+    const entries = buildBranch({ observations: 2, reflections: 1 });
+
+    await handlerMap.get("blackhole-memory")!(["view"], {
+      cwd: "/tmp/test",
+      sessionManager: {
+        getBranch: vi.fn(() => entries),
+        getSessionId: vi.fn(() => "test-session"),
+      },
+      ui,
+    });
+
+    expect(ui.notify).toHaveBeenCalledTimes(1);
+    const msg = (ui.notify as any).mock.calls[0][0] as string;
+    expect(msg).toContain("Reflections");
+    expect(msg).toContain("Observations");
+    expect(msg).toContain("Copied to clipboard.");
+    // The clipboard helper must be the mock — the real one spawns
+    // wl-copy/xclip/xsel and would overwrite the user's clipboard.
+    expect(copyTextToClipboard).toHaveBeenCalledTimes(1);
+  });
+
+  it("full mode renders all recorded observations and reflections", async () => {
+    const { pi, runtime, handlerMap, buildBranch } = createMockEnvironment();
+    registerMemoryCommand(pi as any, runtime as any);
+
+    const ui = { notify: vi.fn() };
+    const entries = buildBranch({ observations: 2, reflections: 1 });
+
+    await handlerMap.get("blackhole-memory")!(["full"], {
+      cwd: "/tmp/test",
+      sessionManager: {
+        getBranch: vi.fn(() => entries),
+        getSessionId: vi.fn(() => "test-session"),
+      },
+      ui,
+    });
+
+    expect(ui.notify).toHaveBeenCalledTimes(1);
+    const msg = (ui.notify as any).mock.calls[0][0] as string;
+    expect(msg).toContain("Reflections");
+    expect(msg).toContain("Observations");
+  });
+
+  it("shows usage message for invalid mode", async () => {
+    const { pi, runtime, handlerMap } = createMockEnvironment();
+    registerMemoryCommand(pi as any, runtime as any);
+
+    const ui = { notify: vi.fn() };
+
+    await handlerMap.get("blackhole-memory")!(["invalid-mode"], {
+      cwd: "/tmp/test",
+      sessionManager: {
+        getBranch: vi.fn(() => []),
+        getSessionId: vi.fn(() => "test-session"),
+      },
+      ui,
+    });
+
+    const msg = (ui.notify as any).mock.calls[0][0] as string;
+    expect(msg).toContain("Usage:");
+  });
+
+  it("manual mode shows manual marker and preamble cap info", async () => {
+    const { pi, runtime, handlerMap } = createMockEnvironment();
+    runtime.config.compaction = "manual";
+    registerMemoryCommand(pi as any, runtime as any);
+
+    const ui = { notify: vi.fn() };
+
+    await handlerMap.get("blackhole-memory")!([], {
+      cwd: "/tmp/test",
+      sessionManager: {
+        getBranch: vi.fn(() => []),
+        getSessionId: vi.fn(() => "test-session"),
+      },
+      ui,
+    });
+
+    const msg = (ui.notify as any).mock.calls[0][0] as string;
+    expect(msg).toContain("[manual]");
+    // Pending section and Preamble cap only show when pending data exists on disk
+  });
+
+  it("status shows the context-window-derived threshold with its basis (issue #60)", async () => {
+    const { pi, runtime, handlerMap, buildBranch } = createMockEnvironment();
+    runtime.config.compactAfterTokens = undefined; // derived mode
+    runtime.config.compactAfterRatio = 0.65;
+    runtime.config.compactReserveTokens = undefined;
+    registerMemoryCommand(pi as any, runtime as any);
+
+    const ui = { notify: vi.fn() };
+    const entries = buildBranch({ observations: 1, reflections: 1 });
+
+    await handlerMap.get("blackhole-memory")!([], {
+      cwd: "/tmp/test",
+      sessionManager: {
+        getBranch: vi.fn(() => entries),
+        getSessionId: vi.fn(() => "test-session"),
+      },
+      ui,
+      model: { provider: "test", id: "test", contextWindow: 200_000 },
+    });
+
+    const msg = (ui.notify as any).mock.calls[0][0] as string;
+    expect(msg).toContain("triggers at 130,000");
+    expect(msg).toContain("65% of 200,000-token window");
+  });
+
+  it("status shows the preset-curve threshold with its basis (window curve)", async () => {
+    const { pi, runtime, handlerMap, buildBranch } = createMockEnvironment();
+    // No numeric knob: the built-in default preset curve governs out of the box.
+    runtime.config.compactAfterTokens = undefined;
+    runtime.config.compactAfterRatio = undefined;
+    runtime.config.compactReserveTokens = undefined;
+    registerMemoryCommand(pi as any, runtime as any);
+
+    const ui = { notify: vi.fn() };
+    const entries = buildBranch({ observations: 1, reflections: 1 });
+
+    await handlerMap.get("blackhole-memory")!([], {
+      cwd: "/tmp/test",
+      sessionManager: {
+        getBranch: vi.fn(() => entries),
+        getSessionId: vi.fn(() => "test-session"),
+      },
+      ui,
+      // 200,000 sits between the 131,072 (0.8) and 262,144 (0.7) anchors:
+      // ratio ≈ 0.747 → fires at 149,482, displayed as 75%.
+      model: { provider: "test", id: "test", contextWindow: 200_000 },
+    });
+
+    const msg = (ui.notify as any).mock.calls[0][0] as string;
+    expect(msg).toContain("triggers at 149,482");
+    expect(msg).toContain("75% of 200,000-token window (preset: default)");
+  });
+});

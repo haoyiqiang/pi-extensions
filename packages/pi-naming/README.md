@@ -65,7 +65,7 @@ For longer English titles use `maxLength: 60`, `preferredLength: 40`, `language:
 ## Standalone and composed use
 
 - `pi-terminal-mux` is an automatically installed library dependency, not a separate extension to enable. It resolves terminal targets and executes renames, without generating titles.
-- No dependency on `pi-interactive-subagents` or `pi-session-tools`. Session naming works without a terminal backend.
+- No dependency on `pi-interactive-subagents`. Session naming works without a terminal backend.
 - Launchers can provide owned terminal targets through terminal-mux's `PI_TERMINAL_RENAME_CONTEXT` protocol. Child sessions can name themselves but cannot rename a shared workspace; only explicitly granted panes/tabs are changed.
 - tmux/WezTerm/Otty/Orca splits do not prove exclusive window/tab ownership. Unverified targets are skipped with an explanation rather than expanding the operation's scope.
 - With `pi-interactive-subagents`, explicitly include this package's entrypoint in `subagentExtensions`. Installing it in the parent does not bypass child extension isolation.

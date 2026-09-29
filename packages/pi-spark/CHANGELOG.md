@@ -1,0 +1,593 @@
+# Changelog
+
+## [0.28.0](https://github.com/zlliang/pi-spark/compare/v0.27.0...v0.28.0) (2026-09-22)
+
+
+### ⚠ BREAKING CHANGES
+
+* use Pi 0.87 context projections for recaps and titles
+
+### Bug Fixes
+
+* use Pi 0.87 context projections for recaps and titles ([a822fa3](https://github.com/zlliang/pi-spark/commit/a822fa350f1146123d46a7dbf53d812947ff7b49))
+
+## [0.27.0](https://github.com/zlliang/pi-spark/compare/v0.26.0...v0.27.0) (2026-09-20)
+
+
+### Features
+
+* **credits:** honor Chinese holidays in DeepSeek off-peak pricing ([fc99f7d](https://github.com/zlliang/pi-spark/commit/fc99f7d152091e7c751745b46f35840676270538))
+
+## [0.26.0](https://github.com/zlliang/pi-spark/compare/v0.25.0...v0.26.0) (2026-09-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* Require Pi 0.86.0 or later.
+
+### Features
+
+* adopt Pi 0.86 model and usage APIs ([5d5868d](https://github.com/zlliang/pi-spark/commit/5d5868defdad303a0b8a9761b013886a198c268d))
+
+## [0.25.0](https://github.com/zlliang/pi-spark/compare/v0.24.0...v0.25.0) (2026-09-14)
+
+
+### Bug Fixes
+
+* refine recap lifecycle and feature event handling ([4bb7474](https://github.com/zlliang/pi-spark/commit/4bb7474b3d04a6d92179b1873afdd6155e5e0368))
+
+## [0.24.0](https://github.com/zlliang/pi-spark/compare/v0.23.1...v0.24.0) (2026-09-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* adopt Pi 0.85 extension APIs
+
+### Features
+
+* adopt Pi 0.85 extension APIs ([2cd3208](https://github.com/zlliang/pi-spark/commit/2cd3208fe5bf8aade7828720ae0397da6836fe99))
+
+
+### Bug Fixes
+
+* capitalize DeepSeek pricing labels ([fffcc40](https://github.com/zlliang/pi-spark/commit/fffcc40c8664056fb54d3c5fea5853f3805a2e4f))
+
+## [0.23.1](https://github.com/zlliang/pi-spark/compare/v0.23.0...v0.23.1) (2026-09-12)
+
+
+### Bug Fixes
+
+* **credits:** refresh pricing on user input ([8183402](https://github.com/zlliang/pi-spark/commit/8183402da978b41696685e244a698214fd519ce4))
+
+## [0.23.0](https://github.com/zlliang/pi-spark/compare/v0.22.3...v0.23.0) (2026-09-11)
+
+
+### Features
+
+* **credits:** support provider peak/off-peak pricing ([f0dbf19](https://github.com/zlliang/pi-spark/commit/f0dbf19dca6f7a3eb290490052489eb0649680d1))
+
+## [0.22.3](https://github.com/zlliang/pi-spark/compare/v0.22.2...v0.22.3) (2026-09-10)
+
+
+### Features
+
+* **credits:** add provider dashboard hyperlinks ([f7a7ec2](https://github.com/zlliang/pi-spark/commit/f7a7ec2b2394dd65e5c6ce20bc4b3d8fb5cc600e))
+* **credits:** show reset times and convert Kimi balances to USD ([7c4a478](https://github.com/zlliang/pi-spark/commit/7c4a4782cecba8ecc557bfcf496b898347b5e2b5))
+
+
+### Bug Fixes
+
+* correct cache probe config typing ([1695212](https://github.com/zlliang/pi-spark/commit/1695212c607163ebc2fbb721d6088377f36b9887))
+* **credits:** update Codex usage settings link ([4f8d72c](https://github.com/zlliang/pi-spark/commit/4f8d72c6acbd519ab7850b8a086a09de5d83ca98))
+
+## [0.22.2](https://github.com/zlliang/pi-spark/compare/v0.22.1...v0.22.2) (2026-09-04)
+
+
+### Miscellaneous Chores
+
+* trigger release 0.22.2 ([b8463a8](https://github.com/zlliang/pi-spark/commit/b8463a887b9be6c81d8d55df7b6a31df6acdb21f))
+
+## [0.22.1](https://github.com/zlliang/pi-spark/compare/v0.22.0...v0.22.1) (2026-09-04)
+
+
+### Bug Fixes
+
+* **auth:** pass environment to background requests ([a89c943](https://github.com/zlliang/pi-spark/commit/a89c943c4190b659ac4cf3ffec49eff315008f94))
+* **credits:** enable credits status in RPC mode ([#72](https://github.com/zlliang/pi-spark/issues/72)) ([58e9cc1](https://github.com/zlliang/pi-spark/commit/58e9cc16bbae4a06cc9ea89e694f7723f6abcd7d))
+* **credits:** simplify mode check ([a58acd1](https://github.com/zlliang/pi-spark/commit/a58acd1ca7830f4a03941ad90778a1b4f2ae715c))
+* **model:** avoid authenticating fallback models ([3a6f6a1](https://github.com/zlliang/pi-spark/commit/3a6f6a12bbf180079cf09333842cf4159583cf7e))
+
+## [0.22.0](https://github.com/zlliang/pi-spark/compare/v0.21.1...v0.22.0) (2026-08-07)
+
+
+### ⚠ BREAKING CHANGES
+
+* **fullscreen:** use Pi's native fullscreen mode
+
+### Code Refactoring
+
+* **fullscreen:** use Pi's native fullscreen mode ([3fbc092](https://github.com/zlliang/pi-spark/commit/3fbc09234f4baff627624b99714fd8057e179e80))
+
+## [0.21.1](https://github.com/zlliang/pi-spark/compare/v0.21.0...v0.21.1) (2026-07-24)
+
+
+### Bug Fixes
+
+* **credits:** extract token from Authorization header for OAuth providers ([06f7309](https://github.com/zlliang/pi-spark/commit/06f7309bd520e76947dc7a9523b6fc4e2855a779))
+* **credits:** resolve OAuth tokens consistently ([e7fd9d8](https://github.com/zlliang/pi-spark/commit/e7fd9d8098cfaf96c79a7122b95d388016b6cefa))
+* **presets:** skip unavailable presets when cycling ([72348da](https://github.com/zlliang/pi-spark/commit/72348da41a6037165a1d89381a98fa54e8209993))
+
+## [0.21.0](https://github.com/zlliang/pi-spark/compare/v0.20.0...v0.21.0) (2026-07-23)
+
+
+### Features
+
+* **credits:** retry HTTP requests with Ky ([ee0a304](https://github.com/zlliang/pi-spark/commit/ee0a304de314a7950e9289ea2cb1618caf4d67bb))
+* **editor:** add model thinking level indicator ([d27059d](https://github.com/zlliang/pi-spark/commit/d27059df79f77d4087fe5c20218e3f76385781ae))
+* **themes:** add GitHub default themes ([40838ed](https://github.com/zlliang/pi-spark/commit/40838ed1b00be8b66da335eb8d29fa059b0bf51b))
+* **write:** add scrolling tail previews ([7542dde](https://github.com/zlliang/pi-spark/commit/7542dde92ac0c3973f9b284001d530b4115ff21c))
+
+
+### Bug Fixes
+
+* **footer:** include all session usage costs ([ed69b31](https://github.com/zlliang/pi-spark/commit/ed69b314bd1d56072b55804f64b7ed0f738675d8))
+* **modes:** handle non-TUI sessions correctly ([58e0246](https://github.com/zlliang/pi-spark/commit/58e02460109ca2cb494bc870ef1b8be0d2140e4f))
+* **themes:** improve muted colors and code fence contrast ([b8a85d9](https://github.com/zlliang/pi-spark/commit/b8a85d96cec879c59cfc2d3eb9aeee0f6b4efb72))
+* **title:** generate after first turn ([5fbf21e](https://github.com/zlliang/pi-spark/commit/5fbf21e0c2a2489d0582171a3b763dba045f1189))
+* **write:** clarify omitted line summary ([702af59](https://github.com/zlliang/pi-spark/commit/702af59c5877147a05c4279b80e7258807a837c6))
+
+
+### Performance Improvements
+
+* **fullscreen:** render transcript only once ([7eb60b9](https://github.com/zlliang/pi-spark/commit/7eb60b960d7acc544a8f5aa18b935f12c4bd9457))
+
+## [0.20.0](https://github.com/zlliang/pi-spark/compare/v0.19.3...v0.20.0) (2026-07-19)
+
+
+### Features
+
+* **credits:** add per-provider enable/disable config ([ec800ef](https://github.com/zlliang/pi-spark/commit/ec800ef0cc44abcfebb0f54577c648c2ab8f3a86))
+* **credits:** improve Kimi usage reporting ([675d5f0](https://github.com/zlliang/pi-spark/commit/675d5f077e9cb16e491d25e243f5641fc11861b1))
+* **footer:** add statusPosition config for inline/below extension statuses ([4bfec49](https://github.com/zlliang/pi-spark/commit/4bfec49c7bbe656404dd75f2e335939f3ec88d8c))
+
+
+### Bug Fixes
+
+* **credits:** clarify Kimi extra usage balance ([685052c](https://github.com/zlliang/pi-spark/commit/685052c1e04e1ffbfdecd876305eb00f08dacb97))
+* **fullscreen:** suppress idle status gap ([02cc41d](https://github.com/zlliang/pi-spark/commit/02cc41d522512b3c5fdf2111032f1d1d8b07ce56))
+
+## [0.19.3](https://github.com/zlliang/pi-spark/compare/v0.19.2...v0.19.3) (2026-07-17)
+
+
+### Bug Fixes
+
+* **credits:** handle missing used value in Kimi Code lane ([5eb86f8](https://github.com/zlliang/pi-spark/commit/5eb86f8f0606ef88e0adda73b65e2ec29b9ae57d))
+* **footer:** hide cost below half a cent ([04c0f17](https://github.com/zlliang/pi-spark/commit/04c0f17f07ba6400b7a37d797b1d02dd7faf7c06))
+
+## [0.19.2](https://github.com/zlliang/pi-spark/compare/v0.19.1...v0.19.2) (2026-07-17)
+
+
+### Bug Fixes
+
+* support Pi 0.80.8 ([3f786a1](https://github.com/zlliang/pi-spark/commit/3f786a1db1c60ceb9a4563cab34e35ca55dba232))
+
+## [0.19.1](https://github.com/zlliang/pi-spark/compare/v0.19.0...v0.19.1) (2026-07-13)
+
+
+### Bug Fixes
+
+* **credits:** derive Codex window labels from limits ([65e7900](https://github.com/zlliang/pi-spark/commit/65e7900a22803c9e0db18837100bb11c6557a617))
+
+## [0.19.0](https://github.com/zlliang/pi-spark/compare/v0.18.1...v0.19.0) (2026-07-11)
+
+
+### Features
+
+* **credits:** add Codex reset redemption ([1c56eea](https://github.com/zlliang/pi-spark/commit/1c56eeae9fb3ed46f859fbe8c88e8ce78a388950))
+
+
+### Bug Fixes
+
+* **lifecycle:** wait for agent settlement ([7653b51](https://github.com/zlliang/pi-spark/commit/7653b513f8b6a91354fa1ba70f688639b142a206))
+* **package:** include docs in published files ([14d96f9](https://github.com/zlliang/pi-spark/commit/14d96f9b5cb1aefda7d5d06ee9fb0cd3ccdf8d62))
+* **title:** use sentence case for English titles ([747e41d](https://github.com/zlliang/pi-spark/commit/747e41db088ba80d617363e8f237f2ad505292a5))
+
+## [0.18.1](https://github.com/zlliang/pi-spark/compare/v0.18.0...v0.18.1) (2026-07-10)
+
+
+### Bug Fixes
+
+* **lockfile:** normalize pi-ai binary path ([9d9a641](https://github.com/zlliang/pi-spark/commit/9d9a64155105b114f1d6f3576622144ab18505fc))
+* **model:** isolate background Codex sessions ([b240e53](https://github.com/zlliang/pi-spark/commit/b240e53672ef452ea17b962fb683a552c5ca3904))
+
+## [0.18.0](https://github.com/zlliang/pi-spark/compare/v0.17.1...v0.18.0) (2026-07-10)
+
+
+### Features
+
+* **config:** support max thinking level ([3d58e28](https://github.com/zlliang/pi-spark/commit/3d58e28a5da00c95a33bc5735b8f8e0bb1b66fad))
+
+## [0.17.1](https://github.com/zlliang/pi-spark/compare/v0.17.0...v0.17.1) (2026-07-10)
+
+
+### Bug Fixes
+
+* preserve routing for background model calls ([27b2c12](https://github.com/zlliang/pi-spark/commit/27b2c12f3d3c179dca4ce44978a34725d6f4db60))
+
+## [0.17.0](https://github.com/zlliang/pi-spark/compare/v0.16.0...v0.17.0) (2026-07-09)
+
+
+### Features
+
+* add kimi code provider ([#56](https://github.com/zlliang/pi-spark/issues/56)) ([8950df3](https://github.com/zlliang/pi-spark/commit/8950df3c8ac58158a817d7e4cc8a26d315c5a534))
+
+
+### Bug Fixes
+
+* **credits:** always show Kimi Code weekly usage lane ([985ba89](https://github.com/zlliang/pi-spark/commit/985ba8974fa07490941c7eb77a076ace20566d1f)), closes [#56](https://github.com/zlliang/pi-spark/issues/56)
+* **credits:** fix Kimi Code weekly lane always rendering ([76e9227](https://github.com/zlliang/pi-spark/commit/76e922751d09e81f3619f4493c895306c255c34d)), closes [#56](https://github.com/zlliang/pi-spark/issues/56)
+
+## [0.16.0](https://github.com/zlliang/pi-spark/compare/v0.15.0...v0.16.0) (2026-07-09)
+
+
+### Features
+
+* **title:** name sessions automatically after the first exchange ([dcef9f5](https://github.com/zlliang/pi-spark/commit/dcef9f5a9d71d6f793383526dfb3d924d0937d93))
+
+
+### Bug Fixes
+
+* **presets:** use border color for preset selector border ([500a868](https://github.com/zlliang/pi-spark/commit/500a8681758533433e8d6da6d0eafa5c9774d141))
+* update pi-ai provider imports ([ccf7f6d](https://github.com/zlliang/pi-spark/commit/ccf7f6dc292c0c11f114f19a48f3b72f58016345))
+
+## [0.15.0](https://github.com/zlliang/pi-spark/compare/v0.14.7...v0.15.0) (2026-06-20)
+
+
+### Features
+
+* **footer:** hide cost display for free models when cost is zero ([78e0a23](https://github.com/zlliang/pi-spark/commit/78e0a230d6a148b927d5cd598c0edee505c260c2))
+* remove pi and web agent tools ([1acb837](https://github.com/zlliang/pi-spark/commit/1acb8377bbad437a31d8feb91112529f332964ab))
+
+
+### Bug Fixes
+
+* **config:** use shared config directory name ([bc5dae0](https://github.com/zlliang/pi-spark/commit/bc5dae08d8528a41e379c041cf0eaba2b176ae68))
+* **tool:** handle missing composed tool action ([e93bf39](https://github.com/zlliang/pi-spark/commit/e93bf391c26afad3e8bf84123d26f1f2a9626a60))
+
+## [0.14.7](https://github.com/zlliang/pi-spark/compare/v0.14.6...v0.14.7) (2026-06-17)
+
+
+### Bug Fixes
+
+* **config:** isolate invalid feature config instead of disabling all ([c57addb](https://github.com/zlliang/pi-spark/commit/c57addb510ce88031c7def2ddde97a594ac1f39f))
+* **credits:** cancel inflight request on session shutdown ([2695273](https://github.com/zlliang/pi-spark/commit/2695273e155da4aa1edd87098c3574363833aad0))
+
+## [0.14.6](https://github.com/zlliang/pi-spark/compare/v0.14.5...v0.14.6) (2026-06-15)
+
+
+### Bug Fixes
+
+* **pi:** trim name parameters and align state output ([2dd5efc](https://github.com/zlliang/pi-spark/commit/2dd5efc9888763399a8af4e6d96d5d7744959daa))
+* **presets:** apply preset flag only on startup ([b0a2585](https://github.com/zlliang/pi-spark/commit/b0a2585a6fa63b3a72b14daf2802ad90eace1a3c))
+* **presets:** improve selector layout and key hints ([9bf0c9f](https://github.com/zlliang/pi-spark/commit/9bf0c9f7b5f00dda84464fe8327054af00a9d26b))
+* **utils:** prevent duplicate elapsed timing line in composed tools ([0a00fd5](https://github.com/zlliang/pi-spark/commit/0a00fd554c7eeadeb099f185507e63a850dd89c6))
+
+## [0.14.5](https://github.com/zlliang/pi-spark/compare/v0.14.4...v0.14.5) (2026-06-14)
+
+
+### Bug Fixes
+
+* **startup:** defer heavy gRPC and MCP imports to first use ([2080906](https://github.com/zlliang/pi-spark/commit/2080906515452d3ad4464b6cf2892dc765025458))
+
+## [0.14.4](https://github.com/zlliang/pi-spark/compare/v0.14.3...v0.14.4) (2026-06-14)
+
+
+### Features
+
+* **tools:** add per-action execution timing to composed tools ([b857f1d](https://github.com/zlliang/pi-spark/commit/b857f1d8ccd1b5b5713c3486291889b7d037e298))
+
+## [0.14.3](https://github.com/zlliang/pi-spark/compare/v0.14.2...v0.14.3) (2026-06-14)
+
+
+### Code Refactoring
+
+* **tools:** share composed-tool architecture across pi and web ([12e563b](https://github.com/zlliang/pi-spark/commit/12e563b357f9e5cf83fef04943c66feffd16c26f))
+
+## [0.14.2](https://github.com/zlliang/pi-spark/compare/v0.14.1...v0.14.2) (2026-06-14)
+
+
+### Bug Fixes
+
+* **pi:** simplify missing model display ([ab6389e](https://github.com/zlliang/pi-spark/commit/ab6389ea0e8e13360c221d6b9fc450e80514416d))
+
+## [0.14.1](https://github.com/zlliang/pi-spark/compare/v0.14.0...v0.14.1) (2026-06-14)
+
+
+### Miscellaneous Chores
+
+* trigger release 0.14.1 ([b966f0e](https://github.com/zlliang/pi-spark/commit/b966f0ecb4739cbf250051de652fc0f51fa9d5f9))
+
+## [0.14.0](https://github.com/zlliang/pi-spark/compare/v0.13.1...v0.14.0) (2026-06-14)
+
+
+### Features
+
+* add unified pi and web agent tools ([1229d93](https://github.com/zlliang/pi-spark/commit/1229d93e1beffd444767781c3c1332e26706dc8a))
+
+## [0.13.1](https://github.com/zlliang/pi-spark/compare/v0.13.0...v0.13.1) (2026-06-14)
+
+
+### Documentation
+
+* refresh README screenshots ([85948f7](https://github.com/zlliang/pi-spark/commit/85948f763b7fdcdf6020f17ebc425398a3133bc9))
+
+## [0.13.0](https://github.com/zlliang/pi-spark/compare/v0.12.0...v0.13.0) (2026-06-14)
+
+
+### Code Refactoring
+
+* consolidate features into a single extension ([5fd0f5c](https://github.com/zlliang/pi-spark/commit/5fd0f5c5a577fe0808a91b4d313a1cd569e9288f))
+
+## [0.12.0](https://github.com/zlliang/pi-spark/compare/v0.11.2...v0.12.0) (2026-06-13)
+
+
+### ⚠ BREAKING CHANGES
+
+* fold pi-credits into pi-spark and revert to single package
+
+### Miscellaneous Chores
+
+* release 0.12.0 ([e80081a](https://github.com/zlliang/pi-spark/commit/e80081a2d352da108feea446d44fb63f9ecc68ff))
+
+
+### Code Refactoring
+
+* fold pi-credits into pi-spark and revert to single package ([3a1cbe3](https://github.com/zlliang/pi-spark/commit/3a1cbe360feeab02a1d8b8313eaf6b06b4f8d400))
+
+## [0.11.2](https://github.com/zlliang/pi-spark/compare/v0.11.1...v0.11.2) (2026-06-13)
+
+
+### Documentation
+
+* **pi-spark:** simplify description ([ede2299](https://github.com/zlliang/pi-spark/commit/ede2299cee377401c066bd76d8e795c9f96d4f1d))
+
+## [0.11.1](https://github.com/zlliang/pi-spark/compare/v0.11.0...v0.11.1) (2026-06-13)
+
+
+### Documentation
+
+* **pi-spark:** polish README and metadata ([382de1a](https://github.com/zlliang/pi-spark/commit/382de1aeaa48de7d874d088cba60b6ff1e60d42d))
+
+## [0.11.0](https://github.com/zlliang/pi-spark/compare/v0.10.5...v0.11.0) (2026-06-13)
+
+
+### Miscellaneous Chores
+
+* **pi-spark:** release 0.11.0 ([c5124d4](https://github.com/zlliang/pi-spark/commit/c5124d4070c7caa96e0e1fc37e0a23b45232e38c))
+
+## [0.10.5](https://github.com/zlliang/pi-spark/compare/v0.10.4...v0.10.5) (2026-06-13)
+
+
+### Bug Fixes
+
+* **pi-spark:** reassert clearOnShrink each render in fullscreen ([55604b5](https://github.com/zlliang/pi-spark/commit/55604b59742b5300ef80102f9fbc3fc1c7a798cd))
+
+## [0.10.4](https://github.com/zlliang/pi-spark/compare/v0.10.3...v0.10.4) (2026-06-13)
+
+
+### Bug Fixes
+
+* add npm package homepage metadata ([9ff2e39](https://github.com/zlliang/pi-spark/commit/9ff2e39d609c3c0a39c45a6c6b456bde964fbaa8))
+
+## [0.10.3](https://github.com/zlliang/pi-spark/compare/v0.10.2...v0.10.3) (2026-06-13)
+
+
+### Miscellaneous Chores
+
+* **pi-spark:** release 0.10.3 ([c253364](https://github.com/zlliang/pi-spark/commit/c2533641a4c9fe3b91ad6d0a52077d65036a95f0))
+
+## [0.10.2](https://github.com/zlliang/pi-spark/compare/v0.10.1...v0.10.2) (2026-06-13)
+
+
+### Bug Fixes
+
+* simplify cost display ([4990a57](https://github.com/zlliang/pi-spark/commit/4990a57fd9688929e115d64121a009630988d93e))
+
+## [0.10.1](https://github.com/zlliang/pi-spark/compare/v0.10.0...v0.10.1) (2026-06-13)
+
+
+### Miscellaneous Chores
+
+* bump to 0.10.1 ([14a7b3d](https://github.com/zlliang/pi-spark/commit/14a7b3dc56d329095e478d0e0e1979a177bb1cfe))
+
+## [0.10.0](https://github.com/zlliang/pi-spark/compare/v0.9.5...v0.10.0) (2026-06-13)
+
+
+### ⚠ BREAKING CHANGES
+
+* **models:** the model tool's "current" action is renamed to "active", and the scope/provider/model params are replaced by "query".
+
+### Features
+
+* **models:** filter model lists with Liqe queries ([877479b](https://github.com/zlliang/pi-spark/commit/877479b51a715b7a5a05381b207ecd03837e433d))
+
+
+### Styles
+
+* **name:** use complete sentences in tool prose ([3430899](https://github.com/zlliang/pi-spark/commit/343089946f685b70c1bcda0291cf511f536a0711))
+
+## [0.9.5](https://github.com/zlliang/pi-spark/compare/v0.9.4...v0.9.5) (2026-06-12)
+
+
+### Bug Fixes
+
+* **models:** keep unavailable model labels visible ([feab815](https://github.com/zlliang/pi-spark/commit/feab8159210033ad362a4951e835247e28325063))
+
+## [0.9.4](https://github.com/zlliang/pi-spark/compare/v0.9.3...v0.9.4) (2026-06-12)
+
+
+### Bug Fixes
+
+* **models:** expose unavailable models by scope ([8df5053](https://github.com/zlliang/pi-spark/commit/8df5053b1b92aaa78a366088b9414e7f197c4072))
+
+## [0.9.3](https://github.com/zlliang/pi-spark/compare/v0.9.2...v0.9.3) (2026-06-12)
+
+
+### Bug Fixes
+
+* **models:** align action description order ([3de17c1](https://github.com/zlliang/pi-spark/commit/3de17c1d5f341eeb8673c70060a8dcb8febe8f5c))
+* update model and name extension exports ([68b5191](https://github.com/zlliang/pi-spark/commit/68b51916c89717ac26ccafb863d420d16dd0423c))
+
+## [0.9.2](https://github.com/zlliang/pi-spark/compare/v0.9.1...v0.9.2) (2026-06-12)
+
+
+### Bug Fixes
+
+* **models:** show expand hint in model tool call ([a7ac029](https://github.com/zlliang/pi-spark/commit/a7ac02943e0621e04093c5cc0a81a192fe440801))
+
+## [0.9.1](https://github.com/zlliang/pi-spark/compare/v0.9.0...v0.9.1) (2026-06-12)
+
+
+### Bug Fixes
+
+* **models:** polish model tool prompt guideline ([eb01e6b](https://github.com/zlliang/pi-spark/commit/eb01e6b5a3b5dd180d32b9a9c8e06e4b90f42036))
+
+## [0.9.0](https://github.com/zlliang/pi-spark/compare/v0.8.0...v0.9.0) (2026-06-12)
+
+
+### Features
+
+* **models:** add model inspection tool ([4d2625e](https://github.com/zlliang/pi-spark/commit/4d2625e2e2bd2e5637c50e563efff7b271a5a21d))
+
+## [0.8.0](https://github.com/zlliang/pi-spark/compare/v0.7.0...v0.8.0) (2026-06-10)
+
+
+### Features
+
+* **credits:** generalize codex-usage into multi-provider credits ([84ffc8e](https://github.com/zlliang/pi-spark/commit/84ffc8e25256619a6b82759095be554433de15d0))
+* move credits extension to the dedicated pi-credits package ([2d1e868](https://github.com/zlliang/pi-spark/commit/2d1e868f2c541c3707c9564ccdedaf80f40a7be5))
+
+## [0.7.0](https://github.com/zlliang/pi-spark/compare/v0.6.3...v0.7.0) (2026-06-10)
+
+
+### Code Refactoring
+
+* remove trust-all extension ([2a783f9](https://github.com/zlliang/pi-spark/commit/2a783f9d3aa3031f0c204b047546c8f5d1aa6728))
+
+## [0.6.3](https://github.com/zlliang/pi-spark/compare/v0.6.2...v0.6.3) (2026-06-09)
+
+
+### Code Refactoring
+
+* rename session naming tool ([49f8502](https://github.com/zlliang/pi-spark/commit/49f850226a175e280b0337f96fbaa649276d1153))
+
+## [0.6.2](https://github.com/zlliang/pi-spark/compare/v0.6.1...v0.6.2) (2026-06-09)
+
+
+### Code Refactoring
+
+* adjust set-session-name reason handling ([6d1b0b8](https://github.com/zlliang/pi-spark/commit/6d1b0b8ba3859b0a8b991758f01582caf65d6c8c))
+
+## [0.6.1](https://github.com/zlliang/pi-spark/compare/v0.6.0...v0.6.1) (2026-06-09)
+
+
+### Code Refactoring
+
+* **editor:** show preset name in bold without prefix ([79a5fe2](https://github.com/zlliang/pi-spark/commit/79a5fe2910647094503bca9ccbc69326c6ade12a))
+
+## [0.6.0](https://github.com/zlliang/pi-spark/compare/v0.5.2...v0.6.0) (2026-06-09)
+
+
+### Features
+
+* add trust-all extension ([2784e47](https://github.com/zlliang/pi-spark/commit/2784e4719689280029864c45455bdac1d515669a))
+* **codex-usage:** refresh after usage events ([bc53364](https://github.com/zlliang/pi-spark/commit/bc533646d085966376278ec6672b7d51d11c3e2d))
+* **editor:** add pulse spinner preset ([9033de9](https://github.com/zlliang/pi-spark/commit/9033de9552630b16481dcb37aa9556bd37ab1bc7))
+
+## [0.5.2](https://github.com/zlliang/pi-spark/compare/v0.5.1...v0.5.2) (2026-06-08)
+
+
+### Bug Fixes
+
+* **codex-usage:** round status percentages ([a641329](https://github.com/zlliang/pi-spark/commit/a64132919bd99d67d2dd039206ab80a41cfab720))
+
+## [0.5.1](https://github.com/zlliang/pi-spark/compare/v0.5.0...v0.5.1) (2026-06-08)
+
+
+### Bug Fixes
+
+* **codex-usage:** polish usage error message ([99edccf](https://github.com/zlliang/pi-spark/commit/99edccf6d19b3fdb334414b46f59a25d542bc03d))
+
+## [0.5.0](https://github.com/zlliang/pi-spark/compare/v0.4.0...v0.5.0) (2026-06-08)
+
+
+### Features
+
+* **codex-usage:** add Codex rate-limit usage status ([6778581](https://github.com/zlliang/pi-spark/commit/67785818e3cb2304b16b1feaf1dfb58520cb1542))
+
+## [0.4.0](https://github.com/zlliang/pi-spark/compare/v0.3.1...v0.4.0) (2026-06-08)
+
+
+### Features
+
+* **set-session-name:** add session naming tool ([bc60e90](https://github.com/zlliang/pi-spark/commit/bc60e9049e17e1b82fc0d936731235f2bd4e94dd))
+
+## [0.3.1](https://github.com/zlliang/pi-spark/compare/v0.3.0...v0.3.1) (2026-06-08)
+
+
+### Bug Fixes
+
+* **fullscreen:** keep clearOnShrink enabled across reload ([e1adde0](https://github.com/zlliang/pi-spark/commit/e1adde0eca052319dd9231f6e22456ae33109289))
+
+## [0.3.0](https://github.com/zlliang/pi-spark/compare/v0.2.1...v0.3.0) (2026-06-06)
+
+
+### Features
+
+* **footer:** shorten cwd display ([8ae3525](https://github.com/zlliang/pi-spark/commit/8ae3525af6311de94c4b85f07e3f9c6df5369011))
+* **fullscreen:** clear session on exit ([b48b997](https://github.com/zlliang/pi-spark/commit/b48b9972365da5c24d2f90f36d1ba0e945d87e94))
+
+
+### Bug Fixes
+
+* **fullscreen:** style exit session label ([b7fcd80](https://github.com/zlliang/pi-spark/commit/b7fcd80113e52efd6c46bcd617c3c0520fcb2fb0))
+
+## [0.2.1](https://github.com/zlliang/pi-spark/compare/v0.2.0...v0.2.1) (2026-06-04)
+
+
+### Miscellaneous Chores
+
+* release 0.2.1 ([d296d5d](https://github.com/zlliang/pi-spark/commit/d296d5de0eb890b1f9c10dd5edd7343224a58819))
+
+## [0.2.0](https://github.com/zlliang/pi-spark/compare/v0.1.2...v0.2.0) (2026-06-04)
+
+
+### Features
+
+* **editor:** show working status in border ([b72b127](https://github.com/zlliang/pi-spark/commit/b72b12738b209bb3016009c88e2efd1544d770f6))
+* **footer:** include statuses in main line ([93a18de](https://github.com/zlliang/pi-spark/commit/93a18de6fbd53e7751dbecb01f9efa7b954d8bdf))
+* **presets:** support preset CLI flag ([435c164](https://github.com/zlliang/pi-spark/commit/435c164b61ce231074fdbdee636d45af1845bebf))
+
+
+### Bug Fixes
+
+* **editor:** clear tool status after executions ([780395f](https://github.com/zlliang/pi-spark/commit/780395f79e078dd7c4af596f5dd66b344ce3ef34))
+* **editor:** track running tools by call id ([72fbe37](https://github.com/zlliang/pi-spark/commit/72fbe370995296988bcd3100d2c25721b08af62b))
+
+## [0.1.2](https://github.com/zlliang/pi-spark/compare/v0.1.1...v0.1.2) (2026-06-03)
+
+
+### Bug Fixes
+
+* **editor:** add tildes spinner preset ([523f6fc](https://github.com/zlliang/pi-spark/commit/523f6fcd982455fbfe202982c5dfb7a62590b6dd))
+
+## [0.1.1](https://github.com/zlliang/pi-spark/compare/v0.1.0...v0.1.1) (2026-06-02)
+
+
+### Miscellaneous Chores
+
+* release 0.1.1 ([09bfd96](https://github.com/zlliang/pi-spark/commit/09bfd96eec21dc9467bbbf10946bc5bb9cf858f7))
+
+## [0.1.0](https://github.com/zlliang/pi-spark/releases/tag/v0.1.0) (2026-06-02)
+
+Initial release of pi-spark, including the Editor, Footer, Fullscreen, Presets, and Recap extensions, plus shared TUI components and spark configuration support.

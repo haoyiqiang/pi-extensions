@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { buildSystemPrompt } from "../node_modules/@earendil-works/pi-coding-agent/dist/core/system-prompt.js";
+import { buildSystemPrompt } from "./fixtures/pi-system-prompt.ts";
 import { analyzeSystemPrompt, type ToolSlice } from "../src/measure.ts";
 import { findPromptSections } from "../src/prompt-blocks.ts";
 

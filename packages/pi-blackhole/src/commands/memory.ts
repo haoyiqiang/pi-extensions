@@ -1,0 +1,298 @@
+/**
+ * /blackhole-memory command — shows memory pipeline status and content.
+ *
+ * Created by pi-vcc-om. Replaces OM's standalone /om-status and /om-view.
+ * Usage: /blackhole-memory [status|view|full]
+ */
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { copyTextToClipboard } from "../om/clipboard.js";
+import {
+  BUILTIN_PRESETS,
+  autoCompactThreshold,
+  effectivePresets,
+  presetRatioForWindow,
+  sessionContextWindow,
+  type CompactThresholdConfig,
+} from "../om/model-budget.js";
+import type { Runtime } from "../om/runtime.js";
+import {
+  diffProjection,
+  entryIndexForId,
+  foldLedger,
+  fullProjection,
+  observationPoolTokens,
+  observationToSummaryLine,
+  rawTokensAfterIndex,
+  rawTokensSinceDropCoverage,
+  rawTokensSinceLastCompaction,
+  rawTokensSinceObservationCoverage,
+  rawTokensSinceReflectionCoverage,
+  reflectionToSummaryLine,
+  visibleProjection,
+  type Entry,
+  type Projection,
+} from "../om/ledger/index.js";
+import { readPendingState } from "../om/pending.js";
+import {
+  isFixedTokenThreshold,
+  isManualMode,
+  isReserveTokens,
+  isWindowRatio,
+} from "../core/unified-config.js";
+
+function firstArg(args: unknown): string | undefined {
+  if (Array.isArray(args)) return typeof args[0] === "string" ? args[0] : undefined;
+  if (typeof args === "string") return args.trim().split(/\s+/)[0];
+  if (args && typeof args === "object" && "mode" in args) {
+    const mode = (args as { mode?: unknown }).mode;
+    return typeof mode === "string" ? mode : undefined;
+  }
+  return undefined;
+}
+
+function pct(current: number, total: number): number {
+  return total > 0 ? Math.round((current / total) * 100) : 0;
+}
+
+function pressureHint(config: {
+  dropperPressureThreshold: number;
+  dropperPoolFullnessThreshold: number;
+}): string {
+  if (config.dropperPressureThreshold >= 1) return "pressure off";
+  const threshold = Math.max(config.dropperPressureThreshold, config.dropperPoolFullnessThreshold);
+  return `pressure at ≥${Math.round(threshold * 100)}% pool`;
+}
+
+/**
+ * Basis suffix for the auto-compaction threshold line. Empty for an explicit
+ * fixed token threshold; describes the window-derived basis otherwise
+ * (issue #60 + preset curves). The preset branch resolves the same ratio the
+ * trigger uses, so display and trigger cannot disagree.
+ */
+function compactThresholdSuffix(cfg: CompactThresholdConfig, window: number): string {
+  // Validity (not mere presence) decides the tier — mirrors compactThresholdTokens
+  // so display and trigger cannot disagree, even for unnormalized configs.
+  if (isFixedTokenThreshold(cfg.compactAfterTokens)) return ""; // explicit fixed token threshold
+  if (isWindowRatio(cfg.compactAfterRatio)) {
+    return ` · ${Math.round(cfg.compactAfterRatio * 100)}% of ${window.toLocaleString()}-token window`;
+  }
+  if (isReserveTokens(cfg.compactReserveTokens)) {
+    return ` · keeps ${cfg.compactReserveTokens.toLocaleString()} headroom in ${window.toLocaleString()}-token window`;
+  }
+  // Preset curve (incl. the out-of-box default preset): describe the effective
+  // ratio at this window, resolved by the same pure functions as the trigger.
+  const name = cfg.compactAfterPreset ?? "default";
+  const anchors = effectivePresets(cfg)[name] ?? BUILTIN_PRESETS.default;
+  const ratio = presetRatioForWindow(anchors, window);
+  return ` · ${Math.round(ratio * 100)}% of ${window.toLocaleString()}-token window (preset: ${name})`;
+}
+
+function tokenSum(items: { tokenCount: number }[]): number {
+  return items.reduce((sum, item) => sum + item.tokenCount, 0);
+}
+
+function addedSuffix(count: number): string | undefined {
+  return count > 0 ? `+${count.toLocaleString()}` : undefined;
+}
+
+function removedSuffix(count: number): string | undefined {
+  return count > 0 ? `-${count.toLocaleString()}` : undefined;
+}
+
+function appendSuffixes(line: string, suffixes: (string | undefined)[]): string {
+  const rendered = suffixes.filter((s): s is string => s !== undefined);
+  return rendered.length > 0 ? `${line} ${rendered.join(" ")}` : line;
+}
+
+function renderList<T>(items: T[], render: (item: T) => string, empty: string): string {
+  return items.length > 0 ? items.map(render).join("\n") : empty;
+}
+
+function renderContentOnlyProjection(
+  projection: Projection,
+  emptyScope: "visible" | "recorded",
+): string {
+  return [
+    "── Reflections ──",
+    renderList(projection.reflections, reflectionToSummaryLine, `No ${emptyScope} reflections.`),
+    "",
+    "── Observations ──",
+    renderList(projection.observations, observationToSummaryLine, `No ${emptyScope} observations.`),
+  ].join("\n");
+}
+
+export function registerMemoryCommand(pi: ExtensionAPI, runtime: Runtime): void {
+  pi.registerCommand("blackhole-memory", {
+    description:
+      "Show memory pipeline status & token counters. /blackhole-memory [view] visible observations & reflections, [full] complete recorded memory (copies to clipboard).",
+    handler: async (args, ctx) => {
+      runtime.ensureConfig(ctx.cwd, (msg) => ctx.ui?.notify?.(msg, "warning"));
+      const entries = ctx.sessionManager.getBranch() as Entry[];
+      const sessionId = ctx.sessionManager.getSessionId();
+      const mode = firstArg(args);
+
+      // /blackhole-memory full — show full recorded memory + copy to clipboard
+      if (mode === "full") {
+        const projection = fullProjection(entries);
+        const output = renderContentOnlyProjection(projection, "recorded");
+        const copied = await copyTextToClipboard(output).catch(() => false);
+        ctx.ui.notify(
+          copied
+            ? `${output}\n\nCopied to clipboard.`
+            : `${output}\n\nFailed to copy to clipboard.`,
+          "info",
+        );
+        return;
+      }
+
+      // /blackhole-memory view — show visible memory + copy to clipboard
+      if (mode === "view") {
+        const projection = visibleProjection(entries);
+        const output = renderContentOnlyProjection(projection, "visible");
+        const copied = await copyTextToClipboard(output).catch(() => false);
+        ctx.ui.notify(
+          copied
+            ? `${output}\n\nCopied to clipboard.`
+            : `${output}\n\nFailed to copy to clipboard.`,
+          "info",
+        );
+        return;
+      }
+
+      // /blackhole-memory (no args) — show status
+      if (mode && mode !== "status") {
+        ctx.ui.notify("Usage: /blackhole-memory [status|view|full]", "info");
+        return;
+      }
+
+      const folded = foldLedger(entries);
+      const visible = visibleProjection(entries);
+      const full = fullProjection(entries);
+      const drift = diffProjection(visible, full);
+
+      // Manual mode keeps observations in pending.json rather than the branch;
+      // include those batches so this line matches the dropper trigger's pool.
+      const pending = isManualMode(runtime.config) ? readPendingState(sessionId) : undefined;
+      const { tokens: poolTokens } = observationPoolTokens(entries, pending);
+      // Manual mode keeps records out of the branch; surface the pending share
+      // explicitly so a manual-only user can see where the pool number comes from.
+      const branchPoolTokens = pending ? observationPoolTokens(entries).tokens : poolTokens;
+      const pendingPoolTokens = poolTokens - branchPoolTokens;
+      const poolScopeSuffix =
+        pendingPoolTokens > 0
+          ? ` · branch ${branchPoolTokens.toLocaleString()} + pending ${pendingPoolTokens.toLocaleString()}`
+          : "";
+      const visibleReflectionTokens = tokenSum(visible.reflections);
+      const observationLine = appendSuffixes(
+        `Observations: ${folded.observations.length} recorded / ${folded.droppedObservationIds.size} dropped / ${visible.observations.length} visible`,
+        [
+          addedSuffix(drift.observationsOnlyInFull.length),
+          removedSuffix(drift.droppedOnlyInFull.length),
+        ],
+      );
+      const reflectionLine = appendSuffixes(
+        `Reflections:  ${folded.reflections.length} recorded / ${visible.reflections.length} visible`,
+        [addedSuffix(drift.reflectionsOnlyInFull.length)],
+      );
+      let obsProgress = rawTokensSinceObservationCoverage(entries);
+      let reflectionProgress = rawTokensSinceReflectionCoverage(entries);
+      let dropProgress = rawTokensSinceDropCoverage(entries);
+      const compactionProgress = rawTokensSinceLastCompaction(entries);
+
+      // In manual mode, pending coversUpToId entries act as virtual coverage markers
+      // that aren't reflected in the branch. Adjust accumulated counts accordingly.
+      if (pending) {
+        if (pending.observation?.coversUpToId) {
+          const idx = entryIndexForId(entries, pending.observation.coversUpToId);
+          if (idx >= 0) obsProgress = rawTokensAfterIndex(entries, idx);
+        }
+        if (pending.reflection?.coversUpToId) {
+          const idx = entryIndexForId(entries, pending.reflection.coversUpToId);
+          if (idx >= 0) reflectionProgress = rawTokensAfterIndex(entries, idx);
+        }
+        if (pending.dropped?.coversUpToId) {
+          const idx = entryIndexForId(entries, pending.dropped.coversUpToId);
+          if (idx >= 0) dropProgress = rawTokensAfterIndex(entries, idx);
+        }
+      }
+
+      const passiveLines =
+        runtime.config.passive === true
+          ? ["── Mode ──", "Passive: automatic memory workers and auto-compaction disabled", ""]
+          : [];
+
+      const lines = [
+        ...passiveLines,
+        "── Memory ──",
+        observationLine,
+        reflectionLine,
+        "",
+        "── Pipeline ──",
+        "Transcript accumulated since last run. Triggers when exceeding threshold.",
+        `Observer:       ~${obsProgress.toLocaleString()} tokens (triggers at ${runtime.config.observeAfterTokens.toLocaleString()})`,
+        `Reflector:      ~${reflectionProgress.toLocaleString()} tokens (triggers at ${runtime.config.reflectAfterTokens.toLocaleString()})`,
+        `Dropper:        pool ${pct(poolTokens, runtime.config.observationsPoolMaxTokens)}% — eligible at ≥${Math.round(runtime.config.dropperPoolFullnessThreshold * 100)}% with new data; ${pressureHint(runtime.config)} (${dropProgress.toLocaleString()}/${runtime.config.reflectAfterTokens.toLocaleString()} new tokens)`,
+        `Compaction:     ~${compactionProgress.toLocaleString()} tokens` +
+          (isManualMode(runtime.config)
+            ? " [manual]"
+            : ` (triggers at ${autoCompactThreshold(runtime.config, ctx.model).toLocaleString()}${compactThresholdSuffix(runtime.config, sessionContextWindow(ctx.model, runtime.config))})`),
+        `Obs pool:       ~${poolTokens.toLocaleString()} / ${runtime.config.observationsPoolMaxTokens.toLocaleString()} tokens (${pct(poolTokens, runtime.config.observationsPoolMaxTokens)}%)${poolScopeSuffix}`,
+        `Reflect pool:   ~${visibleReflectionTokens.toLocaleString()} tokens`,
+      ];
+
+      // Show pending data when manual mode is active
+      if (pending) {
+        const hasObs = !!pending.observation;
+        const hasRef = !!pending.reflection;
+        const hasDrop = !!pending.dropped;
+        if (hasObs || hasRef || hasDrop) {
+          lines.push("", "── Pending (manual mode) ──");
+          if (hasObs) lines.push("Observation:  waiting in pending.json");
+          if (hasRef) lines.push("Reflection:   waiting in pending.json");
+          if (hasDrop) lines.push("Dropper:      waiting in pending.json");
+          const preambleCap =
+            runtime.config.observerPreambleMaxTokens > 0
+              ? runtime.config.observerPreambleMaxTokens
+              : Math.round(runtime.config.observerChunkMaxTokens * 0.3);
+          const pctNote =
+            runtime.config.observerPreambleMaxTokens > 0
+              ? ""
+              : ` (30% of ${runtime.config.observerChunkMaxTokens.toLocaleString()} chunk)`;
+          lines.push(
+            `Preamble cap: ${preambleCap.toLocaleString()} tokens per section (observations, reflections)${pctNote}`,
+          );
+          lines.push("Run /blackhole to flush and compact.");
+        }
+      }
+
+      if (runtime.consolidationInFlight || runtime.compactInFlight || runtime.compactHookInFlight) {
+        lines.push("", "── In flight ──");
+        if (runtime.consolidationInFlight) {
+          const phase = runtime.consolidationPhase ? ` (${runtime.consolidationPhase})` : "";
+          lines.push(`Consolidation: running${phase}`);
+        }
+        if (runtime.compactInFlight) lines.push("Auto-compaction: running");
+        if (runtime.compactHookInFlight) lines.push("Compaction hook: running");
+      }
+
+      // Issue #92: scheduled auto-compactions skipped because the extension ctx
+      // went stale before the deferred compaction ran (in-memory subagent/flow
+      // sessions disposed right after agent_end). Process-wide counter.
+      if ((runtime.staleCtxSkippedCompactions ?? 0) > 0) {
+        lines.push(
+          "",
+          `Skipped compactions (disposed ctx): ${runtime.staleCtxSkippedCompactions.toLocaleString()}`,
+        );
+      }
+
+      if (runtime.lastObserverError || runtime.lastReflectorError || runtime.lastDropperError) {
+        lines.push("", "── Last error ──");
+        if (runtime.lastObserverError) lines.push(`Observer: ${runtime.lastObserverError}`);
+        if (runtime.lastReflectorError) lines.push(`Reflector: ${runtime.lastReflectorError}`);
+        if (runtime.lastDropperError) lines.push(`Dropper: ${runtime.lastDropperError}`);
+      }
+
+      ctx.ui.notify(lines.join("\n"), "info");
+    },
+  });
+}

@@ -1,0 +1,33 @@
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { CreditsProviderId } from "./config";
+import type { Cost, PricingRule } from "./pricing";
+
+/**
+ * Normalized credits/usage for a provider.
+ *
+ * - `balance` providers (e.g., OpenRouter, Vercel AI Gateway) report a remaining dollar balance.
+ * - `windows` providers (e.g., OpenAI Codex) report rate-limit windows as used percentages.
+ */
+export type Credits = (
+  | { type: "balance"; remaining?: number | undefined }
+  | { type: "windows"; lanes: CreditsLane[]; unlimited?: boolean | undefined }
+) & { suffix?: string | undefined };
+
+export interface CreditsLane {
+  label: string;
+  percent: number | undefined;
+  /** Timestamp in milliseconds. */
+  resetAt?: number;
+}
+
+export type RefreshCredits = (ctx: ExtensionContext) => Promise<void>;
+
+/** A credits source for a Pi provider, shown in the status line while that provider is active. */
+export interface CreditsProvider {
+  readonly id: CreditsProviderId;
+  readonly label: string;
+  readonly link?: string;
+  readonly pricingRules?: (timestamp: number) => PricingRule[];
+  fetch(apiKey: string, signal: AbortSignal, cost?: Cost): Promise<Credits>;
+  register?(pi: ExtensionAPI, ctx: ExtensionContext, refresh: RefreshCredits): void;
+}

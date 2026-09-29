@@ -9,8 +9,8 @@ export const REGISTRY = "https://registry.npmjs.org";
 /** registry 查询超时（毫秒） */
 const FETCH_TIMEOUT_MS = 10_000;
 
-/** 本仓库已知的 npm 维护者用户名 */
-export const KNOWN_MAINTAINERS = ["maplezzk"];
+/** 本仓库及纳入 monorepo 的上游包已知 npm 维护者用户名 */
+export const KNOWN_MAINTAINERS = ["maplezzk", "k0valik", "dimk90", "arpagon", "zlliang"];
 
 /**
  * 查询某个包名的 npm registry 元数据。

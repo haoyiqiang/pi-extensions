@@ -1,0 +1,267 @@
+![Cover](./assets/cover.png)
+
+# pi-spark
+
+[Pi](https://pi.dev/) package that polishes your daily experience.
+
+![Overview](./assets/screenshot-overview.png)
+
+## Install
+```bash
+# Install this package from npm (recommended)
+pi install npm:pi-spark
+# Or install all extensions from this monorepo
+pi install git:github.com/maplezzk/pi-extensions
+```
+
+Reload or restart Pi after installation.
+
+## Features
+
+### Compact TUI: editor and footer
+
+pi-spark ships with a custom editor and footer, replacing the default ones. The compact TUI gives you a calm experience without distraction.
+
+- The editor shows a working indicator inspired by [Amp](https://ampcode.com/) and the current model on the top border. If you use [presets](#presets), the active preset appears there too.
+- The footer shows session information, extension statuses, cost, and context usage on one line.
+
+![Compact TUI](./assets/screenshot-tui.png)
+
+> Earlier pi-spark releases included a custom fullscreen renderer. Pi [0.84.0](https://github.com/earendil-works/pi/releases/tag/v0.84.0) now provides fullscreen mode natively, with a sticky editor and footer and an independently scrollable transcript, so pi-spark has retired its workaround. Enable Pi's fullscreen mode in `/settings`, with `pi --tui-mode fullscreen`, or in Pi's `settings.json`:
+>
+> ```json
+> {
+>   "tuiMode": "fullscreen"
+> }
+> ```
+>
+> When upgrading, remove the retired `fullscreen` field from `spark.json`.
+
+### Credits
+
+pi-spark shows the active provider's credit balance or rate-limit usage in the status line, so you can keep an eye on what's left without leaving the terminal.
+
+- Supported providers: DeepSeek, Fireworks, Kimi Code, Moonshot, OpenAI Codex, OpenRouter, and Vercel AI Gateway.
+- Most provider fetching follows [CodexBar](https://github.com/steipete/codexbar). Fireworks is the exception: its balance sits behind an internal gRPC API, reverse-engineered from the `firectl` binary (see [Reverse-Engineering Fireworks Credits](./docs/reverse-engineering-fireworks-credits.md)).
+
+![Credits](./assets/screenshot-credits.png)
+
+#### OpenAI Codex banked resets
+
+Banked rate-limit resets are saved benefits that can reset eligible Codex usage windows when redeemed. When available, their count appears after the usage windows. Run `/codex-resets` to inspect each reset and its expiration date, then select one to redeem. See [OpenAI Codex Banked Rate-Limit Resets](./docs/openai-codex-banked-rate-limit-resets.md) for the underlying behavior and internal APIs.
+
+![Codex resets](./assets/screenshot-codex-resets.png)
+
+#### Peak/off-peak pricing
+
+Pi does not currently support time-based pricing, so its cost estimates can be inaccurate for providers with peak/off-peak rates, such as [DeepSeek](https://api-docs.deepseek.com/quick_start/pricing). pi-spark updates model cost metadata so subsequent usage calculations reflect the current rate.
+
+![Peak/off-peak pricing](./assets/screenshot-peak-off-peak-pricing.png)
+
+### Presets
+
+pi-spark lets you define named model presets in `spark.json` (see [Configuration](#configuration)), so you can switch between models and thinking levels without retyping provider details. The active preset is shown on the editor's top border.
+
+- Switch interactively with `/preset`, or jump straight to one with `/preset <name>`.
+- Start pi on a given preset with `pi --preset <name>`.
+- Cycle presets with `ctrl+super+p` (forward) and `ctrl+shift+super+p` (backward); `super` is `command` on macOS and needs a terminal that forwards it.
+
+![Presets](./assets/screenshot-presets.png)
+
+### Recap
+
+pi-spark generates a short recap of the current session after it goes idle, or on demand, inspired by [Claude Code's session recap](https://code.claude.com/docs/en/interactive-mode#session-recap).
+
+- A recap is generated automatically once the session stays idle past `recap.idle` in `spark.json`.
+- Run `/recap` to generate one manually at any time.
+- The recap generation can use its own model, configured separately from your working model.
+
+![Recap](./assets/screenshot-recap.png)
+
+### Title
+
+pi-spark names the session automatically after the first completed turn, so it's easy to find later in the session selector.
+
+- Once the agent completes its first response and any tool calls from that turn, pi-spark generates a short title from the conversation and sets it as the session name.
+- Generation is silent: nothing is shown in the UI, and the usage is recorded in a session entry like the recap.
+- Sessions that already have a name are left untouched.
+- The title generation can use its own model, configured separately from your working model.
+
+### Scrolling write previews
+
+Long, streaming `write` tool calls keep their latest lines visible instead of pinning the preview to the beginning. The omitted-line count appears above the preview, while `ctrl+o` still expands the full content.
+
+https://github.com/user-attachments/assets/b7bb77c1-c188-46a2-aba9-6487bdf58fa0
+
+## Configuration
+
+pi-spark reads config from `~/.pi/agent/spark.json` and from the current project's `.pi/spark.json`. Project config overrides matching global fields.
+
+For example:
+
+```json
+{
+  "editor": {
+    "spinner": "dots"
+  },
+  "footer": false,
+  "presets": {
+    "claude-opus": {
+      "provider": "anthropic",
+      "model": "claude-opus-4-8",
+      "thinkingLevel": "high"
+    },
+    "gpt": {
+      "provider": "openai-codex",
+      "model": "gpt-5.5",
+      "thinkingLevel": "medium"
+    }
+  },
+  "recap": {
+    "idle": "5m",
+    "provider": "openai-codex",
+    "model": "gpt-5.4-mini",
+    "thinkingLevel": "off"
+  },
+  "title": {
+    "provider": "openai-codex",
+    "model": "gpt-5.4-mini",
+    "thinkingLevel": "off"
+  }
+}
+```
+
+### References
+
+All fields are optional. Each top-level feature runs with the defaults below unless you [turn it off](#turn-off-the-features-you-dont-like).
+
+| Field | Value (or `false`) | Description |
+| --- | --- | --- |
+| `credits` | `CreditsConfig` | Shows the active provider's credit balance or rate-limit usage in the status line. |
+| `editor` | `EditorConfig` | Shows a working indicator and the current model on the editor's top border. |
+| `footer` | `FooterConfig` | Shows session info, extension statuses, cost, and context usage. |
+| `presets` | `{ [name]: Preset }` | Defines named model presets, keyed by name. |
+| `recap` | `RecapConfig` | Generates a session recap when idle or on demand. |
+| `title` | `TitleConfig` | Names the session automatically after the first completed turn. |
+| `write` | `{}` | Keeps the latest lines of streaming `write` tool calls visible. |
+
+#### `CreditsConfig`
+
+All supported providers are enabled by default. Set a provider to `false` to disable its credits status and pricing updates, or to `true` to override a global `false` in project config.
+
+```json
+{
+  "credits": {
+    "providers": {
+      "fireworks": false,
+      "openai-codex": true
+    }
+  }
+}
+```
+
+| Field | Value | Description |
+| --- | --- | --- |
+| `providers` | partial map of provider IDs to booleans | Enables or disables credits for individual providers. Valid IDs: `deepseek`, `fireworks`, `kimi-coding`, `moonshotai`, `moonshotai-cn`, `openai-codex`, `openrouter`, and `vercel-ai-gateway`. |
+
+#### `EditorConfig`
+
+The `spinner` field is optional and defaults to `tildes`. `thinkingLevelIndicator` is also optional and defaults to `border`.
+
+| Field | Value | Description |
+| --- | --- | --- |
+| `spinner` | `dots` | `⠋, ⠙, ⠹, ⠸, ⠼, ⠴, ⠦, ⠧, ⠇, ⠏` |
+|  | `lights` | `○, ●` |
+|  | `tildes` (default) | `∼, ≈, ≋, ≈, ∼` |
+|  | `pulse` | `·, •, ●, •, ·` |
+| `thinkingLevelIndicator` | `border` (default) | Uses the thinking-level color for the editor border. |
+|  | `model` | Uses the thinking-level color for the model name and the dim color for the editor border. |
+
+#### `FooterConfig`
+
+The `statusPosition` field is optional and defaults to `inline`.
+
+| Field | Value | Description |
+| --- | --- | --- |
+| `statusPosition` | `inline` (default) | Shows extension statuses on the same line as session info, cost, and context usage. |
+|  | `below` | Moves extension statuses to a new line below. |
+
+#### `Preset`
+
+Each preset must set all three fields.
+
+| Field | Value | Description |
+| --- | --- | --- |
+| `provider` | string | Provider ID, e.g., `anthropic`. |
+| `model` | string | Model ID, e.g., `claude-opus-4-8`. |
+| `thinkingLevel` | `ModelThinkingLevel` | Thinking level for the preset. |
+
+#### `RecapConfig`
+
+All fields are optional. If the recap model configuration is incomplete, pi-spark falls back to the session's main model. `thinkingLevel` defaults to `off` (clamped to the model), so recap stays cheap regardless of your working thinking level.
+
+| Field | Value | Description |
+| --- | --- | --- |
+| `idle` | number (ms) or duration string | How long the session must stay idle before a recap is generated. Accepts a millisecond number or a [parse-duration](https://github.com/jkroso/parse-duration) string (e.g., `"5m"`); minimum 5000 ms, defaults to 5 minutes. |
+| `provider` | string | Provider ID for the recap model. |
+| `model` | string | Model ID for the recap model. |
+| `thinkingLevel` | `ModelThinkingLevel` | Thinking level for the recap model. Defaults to `off`. |
+
+#### `TitleConfig`
+
+All fields are optional. If the title model configuration is incomplete, pi-spark falls back to the session's main model. `thinkingLevel` defaults to `off` (clamped to the model), so title generation stays cheap regardless of your working thinking level.
+
+| Field | Value | Description |
+| --- | --- | --- |
+| `provider` | string | Provider ID for the title model. |
+| `model` | string | Model ID for the title model. |
+| `thinkingLevel` | `ModelThinkingLevel` | Thinking level for the title model. Defaults to `off`. |
+
+#### `ModelThinkingLevel`
+
+Valid values: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`.
+
+### Turn off the features you don't like
+
+All features are enabled by default. Set a specific feature to `false` in `spark.json` to disable it.
+
+For example, to disable the customized footer:
+
+```json
+{
+  "footer": false
+}
+```
+
+## Themes
+
+pi-spark ships with two custom themes inspired by [GitHub's VS Code themes](https://github.com/primer/github-vscode-theme):
+
+- [`github-light-default`](themes/github-light-default.json)
+- [`github-dark-default`](themes/github-dark-default.json)
+
+![Themes](./assets/screenshot-themes.png)
+
+Select either theme in `/settings`, or configure automatic switching between them:
+
+```json
+{
+  "theme": "github-light-default/github-dark-default"
+}
+```
+
+## Development
+
+Run the package checks from the monorepo root:
+
+```bash
+npm install
+npm run typecheck --workspace pi-spark
+npm run check --workspace pi-spark
+```
+
+`pi-spark` is based on [zlliang/pi-spark](https://github.com/zlliang/pi-spark) and is maintained and released from this monorepo.
+
+## License
+
+[MIT](./LICENSE.md)

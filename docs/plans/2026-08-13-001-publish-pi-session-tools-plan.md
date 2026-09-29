@@ -1,11 +1,13 @@
 ---
 title: 公开并发布 pi-session-tools 包（公开仓 + npm + 私有仓切换）
 type: feat
-status: active
+status: retired
 date: 2026-08-13
 ---
 
 # 公开并发布 pi-session-tools 包
+
+> 本文是保留的历史计划。`pi-session-tools` 已从本仓库移除，不再属于当前发布或安装范围。
 
 ## Overview
 

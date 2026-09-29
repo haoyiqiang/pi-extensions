@@ -60,7 +60,10 @@ Zoom in for a more detailed breakdown of large context windows, such as
 ## Install
 
 ```bash
+# Install this package from npm
 pi install npm:pi-context-view
+# Or install all extensions from this monorepo
+pi install git:github.com/maplezzk/pi-extensions
 ```
 
 ## Customization
@@ -74,20 +77,18 @@ To get started, create a configuration file populated with the current defaults:
 ```
 > This creates `~/.pi/agent/extensions/pi-context-view.json`.
 
-See the [configuration reference](https://github.com/dimk90/pi-context-view/blob/master/doc/CONFIG.md)
-for each parameter's meaning and default value.
+See the [configuration reference](./doc/CONFIG.md) for each parameter's meaning and default value.
 
 ### Category Colors
 
 You can use theme color names to match your current theme or hex values for
 colors that stay the same across themes. Here are examples of custom
-[terrain](https://github.com/dimk90/pi-context-view/blob/master/doc/palettes/terrain.json) and
-[rainbow](https://github.com/dimk90/pi-context-view/blob/master/doc/palettes/rainbow.json) palettes:
+[terrain](./doc/palettes/terrain.json) and
+[rainbow](./doc/palettes/rainbow.json) palettes:
 
 ![Terrain and rainbow palettes](https://media.githubusercontent.com/media/dimk90/pi-context-view/e9f75e538ada31af0c1ba3517bad0a13f06050e6/doc/images/palettes.png)
 
-See the [theme color reference](https://github.com/dimk90/pi-context-view/blob/develop/doc/PI-THEME-COLORS.md)
-for color names that follow the current theme.
+See the [theme color reference](./doc/PI-THEME-COLORS.md) for color names that follow the current theme.
 
 ### Map Size
 
@@ -100,10 +101,19 @@ You can configure the number of rows and columns in the `Context Usage` map:
 
 `pi-context-view` does not add any instructions or messages to the model context.
 
-## My Other Stuff
+## Development
 
-📌 [S-VHS](https://github.com/dimk90/s-vhs) - terminal recorder used to create the demo GIFs.
+Run the package checks from the monorepo root:
+
+```bash
+npm install
+npm run typecheck --workspace pi-context-view
+npm test --workspace pi-context-view
+npm run check --workspace pi-context-view
+```
+
+This package is based on Dmitry Makarov's [pi-context-view](https://github.com/dimk90/pi-context-view) and is maintained and released from this monorepo.
 
 ## License
 
-[MIT](https://github.com/dimk90/pi-context-view/blob/master/LICENSE)
+[MIT](./LICENSE)
