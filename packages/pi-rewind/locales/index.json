@@ -1,0 +1,166 @@
+{
+  "commandDescription": {
+    "zh-CN": "把文件改动和（或）会话回退到指定检查点",
+    "en-US": "Rewind file changes and/or conversation to a checkpoint"
+  },
+  "shortcutDescription": {
+    "zh-CN": "回退（等同于 /rewind）",
+    "en-US": "Rewind (same as /rewind)"
+  },
+  "notAvailable": {
+    "zh-CN": "无法回退：当前不在 Git 仓库中，或没有活动会话。",
+    "en-US": "Rewind not available (no git repo or session)"
+  },
+  "notAvailableShort": {
+    "zh-CN": "无法回退。",
+    "en-US": "Rewind not available"
+  },
+  "noCheckpoints": {
+    "zh-CN": "没有可用检查点。",
+    "en-US": "No checkpoints available"
+  },
+  "noCheckpointAvailable": {
+    "zh-CN": "没有可用检查点。",
+    "en-US": "No checkpoint available"
+  },
+  "cancelled": {
+    "zh-CN": "已取消回退。",
+    "en-US": "Rewind cancelled"
+  },
+  "undoSuccess": {
+    "zh-CN": "撤销成功：文件已恢复到上次回退前的状态。",
+    "en-US": "Undo successful — files restored to before last rewind"
+  },
+  "undoLastRewind": {
+    "zh-CN": "↩ 撤销上次回退",
+    "en-US": "↩ Undo last rewind"
+  },
+  "conversationPartialFailure": {
+    "zh-CN": "会话回退未完全成功。",
+    "en-US": "Conversation rewind partially failed"
+  },
+  "restoredFromBeforeUndo": {
+    "zh-CN": "文件已恢复到上次回退前的状态。",
+    "en-US": "Files restored to before last rewind"
+  },
+  "filesRestoredFromCheckpoint": {
+    "zh-CN": "已从检查点恢复文件。",
+    "en-US": "Files restored from checkpoint"
+  },
+  "filesRestoredToCheckpoint": {
+    "zh-CN": "文件已恢复到该检查点。",
+    "en-US": "Files restored to checkpoint"
+  },
+  "filesRewoundToCheckpoint": {
+    "zh-CN": "文件已回退到检查点 #{index}。",
+    "en-US": "Files rewound to checkpoint #{index}"
+  },
+  "rewound": {
+    "zh-CN": "已将{what}回退到检查点 #{index}。",
+    "en-US": "Rewound {what} to checkpoint #{index}"
+  },
+  "restoreFailed": {
+    "zh-CN": "恢复失败：{error}",
+    "en-US": "Restore failed: {error}"
+  },
+  "whatAll": {
+    "zh-CN": "文件和会话",
+    "en-US": "files + conversation"
+  },
+  "whatFiles": {
+    "zh-CN": "文件",
+    "en-US": "files"
+  },
+  "whatConversation": {
+    "zh-CN": "会话",
+    "en-US": "conversation"
+  },
+  "selectCheckpointTitle": {
+    "zh-CN": "回退到检查点：",
+    "en-US": "Rewind to checkpoint:"
+  },
+  "restoreModeTitle": {
+    "zh-CN": "恢复模式：",
+    "en-US": "Restore mode:"
+  },
+  "restoreOptionsTitle": {
+    "zh-CN": "恢复选项",
+    "en-US": "Restore Options"
+  },
+  "quickRewindTitle": {
+    "zh-CN": "快速回退（仅文件）：",
+    "en-US": "Quick rewind (files only):"
+  },
+  "restoreAll": {
+    "zh-CN": "全部恢复（文件 + 会话）",
+    "en-US": "Restore all (files + conversation)"
+  },
+  "restoreFilesOnly": {
+    "zh-CN": "仅文件（保留会话）",
+    "en-US": "Files only (keep conversation)"
+  },
+  "restoreConversationOnly": {
+    "zh-CN": "仅会话（保留文件）",
+    "en-US": "Conversation only (keep files)"
+  },
+  "codeOnly": {
+    "zh-CN": "仅代码（恢复文件，保留会话）",
+    "en-US": "Code only (restore files, keep conversation)"
+  },
+  "cancel": {
+    "zh-CN": "取消",
+    "en-US": "Cancel"
+  },
+  "keepCurrentFiles": {
+    "zh-CN": "保留当前文件",
+    "en-US": "Keep current files"
+  },
+  "restoreFilesToThatPoint": {
+    "zh-CN": "把文件恢复到该时间点",
+    "en-US": "Restore files to that point"
+  },
+  "cancelNavigation": {
+    "zh-CN": "取消导航",
+    "en-US": "Cancel navigation"
+  },
+  "confirmDiffTitle": {
+    "zh-CN": "自检查点 #{index} 以来的文件改动：\n\n{diff}",
+    "en-US": "Files changed since checkpoint #{index}:\n\n{diff}"
+  },
+  "confirmProceed": {
+    "zh-CN": "是否继续恢复？",
+    "en-US": "Proceed with restore?"
+  },
+  "checkpointLabel": {
+    "zh-CN": "#{index} [{time}]{branchTag} {description}",
+    "en-US": "#{index} [{time}]{branchTag} {description}"
+  },
+  "branchTagSame": {
+    "zh-CN": " [{branch}]",
+    "en-US": " [{branch}]"
+  },
+  "branchTagCross": {
+    "zh-CN": " ⚠️ {branch}",
+    "en-US": " ⚠️ {branch}"
+  },
+  "toolLabel": {
+    "zh-CN": "#{index} [{time}]{branchTag} → {tool}",
+    "en-US": "#{index} [{time}]{branchTag} → {tool}"
+  },
+  "sessionStart": {
+    "zh-CN": "会话开始",
+    "en-US": "Session start"
+  },
+  "turnFallback": {
+    "zh-CN": "第 {index} 轮",
+    "en-US": "Turn {index}"
+  },
+  "checkpointCount": {
+    "zh-CN": "{count} 个检查点",
+    "en-US": "{count} checkpoint"
+  },
+  "checkpointCountPlural": {
+    "zh-CN": "{count} 个检查点",
+    "en-US": "{count} checkpoints"
+  }
+}

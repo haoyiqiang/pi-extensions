@@ -15,22 +15,27 @@ import type { ConfigCreationResult } from "./config.ts";
 import type { InitialSnapshot } from "./model.ts";
 import { runWithProbeToken } from "./probe-token.ts";
 import { normalizePreviewText } from "./text.ts";
+import { i18n, NOTICE_SOURCE } from "./i18n.ts";
+import { notifyWithSource, type NoticeLevel } from "pi-extensions-i18n";
 
-const COMMAND_USAGE = "Usage: /context [usage|injections|config]";
-/**
- * Slash-command palette text, kept beside the grammar it describes.
- * RegisteredCommand has no argumentHint; mimic pi's `<hint> — <description>` style.
- */
-export const CONTEXT_COMMAND_DESCRIPTION =
-	"[usage|injections|config] - Inspect context usage, injections";
 /** Cap for reported messages, which may quote configuration files and OS error text. */
 const MAX_REPORTED_MESSAGE_LENGTH = 500;
 const DEFAULT_VIEW: ContextView = "usage";
+/** Command argument completions. Descriptions are localized when the palette opens. */
 const ARGUMENT_OPTIONS = [
-	{ value: "usage", label: "usage", description: "Show estimated context usage" },
-	{ value: "injections", label: "injections", description: "Explore initial context injections" },
-	{ value: "config", label: "config", description: "Create config file populated with defaults" },
-] satisfies AutocompleteItem[];
+	{ value: "usage", label: "usage", messageKey: "argumentUsage" },
+	{ value: "injections", label: "injections", messageKey: "argumentInjections" },
+	{ value: "config", label: "config", messageKey: "argumentConfig" },
+] as const satisfies readonly { value: string; label: string; messageKey: string }[];
+
+/**
+ * Slash-command palette text, kept beside the grammar it describes.
+ * RegisteredCommand has no argumentHint; mimic pi's `<hint> — <description>` style.
+ * Built per call so the entry follows the locale in effect at registration.
+ */
+export function contextCommandDescription(): string {
+	return i18n.t("commandDescription");
+}
 
 /** The focused view a `/context` invocation requests. */
 export type ContextView = "usage" | "injections";
@@ -62,14 +67,16 @@ export function parseContextCommand(argumentsText: string): ContextCommand {
 	if (words.length === 1 && words[0] === "config") {
 		return { type: "config" };
 	}
-	return { type: "invalid", message: COMMAND_USAGE };
+	return { type: "invalid", message: i18n.t("usage") };
 }
 
 /** Complete full argument values for the supported `/context` grammar. */
 export function getContextArgumentCompletions(argumentPrefix: string): AutocompleteItem[] | null {
 	const normalizedPrefix = argumentPrefix.trimStart().toLowerCase();
 	const matches = ARGUMENT_OPTIONS.filter((option) => option.value.startsWith(normalizedPrefix));
-	return matches.length > 0 ? matches.map((option) => ({ ...option })) : null;
+	return matches.length > 0
+		? matches.map((option) => ({ value: option.value, label: option.label, description: i18n.t(option.messageKey) }))
+		: null;
 }
 
 /** Obtain Initial through passive capture, one silent probe, or a pi-native fallback. */
@@ -108,7 +115,7 @@ export async function resolveInitialCapture(
 		if (outcome.status === "captured" && capture.snapshot !== undefined) {
 			return { snapshot: capture.snapshot };
 		}
-		const reason = outcome.status === "failed" ? outcome.reason : "Silent probe did not capture Initial.";
+		const reason = outcome.status === "failed" ? outcome.reason : i18n.t("probeNoCapture");
 		return createFallback(pi, context, reason);
 	} finally {
 		if (attempt.started) context.ui.setWorkingVisible(true);
@@ -123,11 +130,11 @@ export async function resolveInitialCapture(
 export function reportCommandMessage(
 	context: ExtensionCommandContext,
 	message: string,
-	type: "info" | "warning" | "error",
+	type: NoticeLevel,
 ): void {
 	const safeMessage = truncate(normalizePreviewText(message), MAX_REPORTED_MESSAGE_LENGTH);
 	if (context.hasUI) {
-		context.ui.notify(safeMessage, type);
+		notifyWithSource({ ctx: context, source: NOTICE_SOURCE, level: type, message: safeMessage });
 		return;
 	}
 	process.stderr.write(`${safeMessage}\n`);
@@ -135,20 +142,24 @@ export function reportCommandMessage(
 
 /** Refuse a view outside TUI mode, naming the form the user typed. */
 export function reportTuiOnly(context: ExtensionCommandContext, view: ContextView): void {
-	reportCommandMessage(context, `/context ${view} is available in TUI mode only.`, "warning");
+	reportCommandMessage(context, i18n.t("tuiOnly", { view }), "warning");
 }
 
 /** Report the outcome of the explicit create-only configuration command. */
 export function reportConfigCreation(context: ExtensionCommandContext, result: ConfigCreationResult): void {
 	switch (result.type) {
 		case "created":
-			reportCommandMessage(context, `Created default configuration: ${result.filePath}`, "info");
+			reportCommandMessage(context, i18n.t("configCreated", { path: result.filePath }), "info");
 			break;
 		case "exists":
-			reportCommandMessage(context, `Configuration already exists; left unchanged: ${result.filePath}`, "warning");
+			reportCommandMessage(context, i18n.t("configExists", { path: result.filePath }), "warning");
 			break;
 		case "failed":
-			reportCommandMessage(context, `Cannot create configuration at ${result.filePath}: ${result.reason}`, "error");
+			reportCommandMessage(
+				context,
+				i18n.t("configFailed", { path: result.filePath, reason: result.reason }),
+				"error",
+			);
 			break;
 		default: {
 			// Compile-time proof that every result variant is reported.
@@ -168,10 +179,10 @@ function getProbeUnavailableReason(
 	context: ExtensionCommandContext,
 	compactionInProgress: boolean,
 ): string | undefined {
-	if (compactionInProgress) return "Silent probe unavailable: context compaction is in progress.";
-	if (context.model === undefined) return "Silent probe unavailable: no model is selected.";
+	if (compactionInProgress) return i18n.t("probeCompactionInProgress");
+	if (context.model === undefined) return i18n.t("probeNoModel");
 	if (!context.modelRegistry.hasConfiguredAuth(context.model)) {
-		return `Silent probe unavailable: ${context.model.provider} has no configured authentication.`;
+		return i18n.t("probeNoAuth", { provider: context.model.provider });
 	}
 	return undefined;
 }
@@ -189,6 +200,6 @@ function createFallback(
 			allTools: pi.getAllTools(),
 			activeToolNames: pi.getActiveTools(),
 		}),
-		degradedReason: `${reason} Extension additions were not observed.`,
+		degradedReason: i18n.t("fallbackDegraded", { reason }),
 	};
 }

@@ -2405,7 +2405,7 @@ describe("showWorkerNotifications", () => {
     await fixture.run();
 
     expect(notify).toHaveBeenCalledWith(
-      "Observational memory: no observations — 2 observation(s) rejected for invalid sourceEntryIds",
+      "[blackhole] Observational memory: no observations — 2 observation(s) rejected for invalid sourceEntryIds",
       "warning",
     );
   });

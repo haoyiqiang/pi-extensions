@@ -7,6 +7,7 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { wrapTextWithAnsi } from "@earendil-works/pi-tui";
 
+import { i18n } from "../i18n.ts";
 import type { InjectedReference, InjectionSection, JsonSpan } from "../model.ts";
 import { normalizeInlineText, normalizePreviewText } from "../text.ts";
 import { shiftJsonSpan } from "./json-preview.ts";
@@ -203,7 +204,10 @@ function headingKey(text: string): string {
  */
 function sectionHeaderLines(theme: Theme, section: InjectionSection, wrapWidth: number): string[] {
 	const label = theme.fg("syntaxKeyword", theme.bold(normalizeInlineText(section.label)));
-	const tokens = theme.fg("muted", ` · ${section.tokens.toLocaleString("en-US")} tokens`);
+	const tokens = theme.fg(
+		"muted",
+		` · ${i18n.t("tokensCount", { count: section.tokens.toLocaleString("en-US") })}`,
+	);
 	const marker = section.dropped === true ? droppedMarker(theme) : section.moved === true ? movedMarker(theme) : "";
 	return wrapTextWithAnsi(`${label}${tokens}${marker}`, wrapWidth).map((line) => `${BODY_INDENT}${line}`);
 }

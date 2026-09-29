@@ -1,6 +1,7 @@
 import { convertToLlm, serializeConversation } from "@earendil-works/pi-coding-agent";
 
 import { clearRecapWidget, setRecapLoadingWidget, setRecapTextWidget } from "./widget";
+import { i18n } from "../../i18n";
 import { sanitizeText } from "../../utils/format";
 import { completeBackground, resolveModelSettings } from "../../utils/model";
 
@@ -68,7 +69,7 @@ export class RecapManager {
       if (controller.signal.aborted || this.inflight !== controller) return;
 
       const message = error instanceof Error ? error.message : String(error);
-      setRecapTextWidget(ctx, "Unable to generate recap.", message);
+      setRecapTextWidget(ctx, i18n.t("recapUnable"), message);
       this.active = false;
     } finally {
       if (this.inflight === controller) this.inflight = undefined;
@@ -96,7 +97,7 @@ export class RecapManager {
     });
 
     if (response.stopReason === "error") {
-      throw new Error(response.errorMessage ?? "Recap generation failed");
+      throw new Error(response.errorMessage ?? i18n.t("recapGenerationFailed"));
     }
 
     const content = response.content

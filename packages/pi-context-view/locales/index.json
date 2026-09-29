@@ -1,0 +1,226 @@
+{
+  "commandDescription": {
+    "zh-CN": "[usage|injections|config] - 查看上下文用量与注入内容",
+    "en-US": "[usage|injections|config] - Inspect context usage, injections"
+  },
+  "usage": {
+    "zh-CN": "用法：/context [usage|injections|config]",
+    "en-US": "Usage: /context [usage|injections|config]"
+  },
+  "argumentUsage": {
+    "zh-CN": "查看上下文用量估计",
+    "en-US": "Show estimated context usage"
+  },
+  "argumentInjections": {
+    "zh-CN": "查看初始上下文注入内容",
+    "en-US": "Explore initial context injections"
+  },
+  "argumentConfig": {
+    "zh-CN": "创建带默认值的配置文件",
+    "en-US": "Create config file populated with defaults"
+  },
+  "tuiOnly": {
+    "zh-CN": "/context {view} 只在 TUI 模式下可用。",
+    "en-US": "/context {view} is available in TUI mode only."
+  },
+  "configCreated": {
+    "zh-CN": "已创建默认配置：{path}",
+    "en-US": "Created default configuration: {path}"
+  },
+  "configExists": {
+    "zh-CN": "配置已存在，未做修改：{path}",
+    "en-US": "Configuration already exists; left unchanged: {path}"
+  },
+  "configFailed": {
+    "zh-CN": "无法在 {path} 创建配置：{reason}",
+    "en-US": "Cannot create configuration at {path}: {reason}"
+  },
+  "probeCompactionInProgress": {
+    "zh-CN": "无法执行静默探测：正在压缩上下文。",
+    "en-US": "Silent probe unavailable: context compaction is in progress."
+  },
+  "probeNoModel": {
+    "zh-CN": "无法执行静默探测：未选择模型。",
+    "en-US": "Silent probe unavailable: no model is selected."
+  },
+  "probeNoAuth": {
+    "zh-CN": "无法执行静默探测：{provider} 没有配置鉴权。",
+    "en-US": "Silent probe unavailable: {provider} has no configured authentication."
+  },
+  "probeNoCapture": {
+    "zh-CN": "静默探测未捕获 Initial。",
+    "en-US": "Silent probe did not capture Initial."
+  },
+  "fallbackDegraded": {
+    "zh-CN": "{reason} 未观察到扩展新增内容。",
+    "en-US": "{reason} Extension additions were not observed."
+  },
+  "usageTitle": {
+    "zh-CN": "上下文用量",
+    "en-US": "Context Usage"
+  },
+  "usageDescription": {
+    "zh-CN": "下一次模型请求的上下文估计。Token 计数为近似值，可能与提供方估计不同。",
+    "en-US": "Estimated context for the next model request. Token counts are approximate and may differ from the provider's estimate."
+  },
+  "invisibleReasoningDescription": {
+    "zh-CN": "条目标题格式：[DD-MM-YYYY] [assistant] 可见 + 推理 ≈不可见 (≈合计)。≈ 为提供方报告计数；~ 为无明细时的粗略估计，且不计入分类合计。当提供方随消息回放加密推理时，Encoded 会替换 Reasoning。",
+    "en-US": "Entry headers read: [DD-MM-YYYY] [assistant] visible + Reasoning ≈invisible (≈total). ≈ is a provider-reported count; ~ is a rough approximation when no breakdown is reported and excluded from category totals. Encoded replaces Reasoning when the provider replays encrypted reasoning with its message."
+  },
+  "hintNavigate": {
+    "zh-CN": "导航",
+    "en-US": "Navigate"
+  },
+  "hintPreview": {
+    "zh-CN": "预览",
+    "en-US": "Preview"
+  },
+  "hintZoom": {
+    "zh-CN": "缩放",
+    "en-US": "Zoom"
+  },
+  "hintClose": {
+    "zh-CN": "关闭",
+    "en-US": "Close"
+  },
+  "hintScroll": {
+    "zh-CN": "滚动",
+    "en-US": "Scroll"
+  },
+  "hintPage": {
+    "zh-CN": "翻页",
+    "en-US": "Page"
+  },
+  "hintBack": {
+    "zh-CN": "返回",
+    "en-US": "Back"
+  },
+  "categoryHeading": {
+    "zh-CN": "分类：",
+    "en-US": "Category:"
+  },
+  "mapHeading": {
+    "zh-CN": "图例：",
+    "en-US": "Map:"
+  },
+  "mapKeyFull": {
+    "zh-CN": "单一分类块",
+    "en-US": "Single category block"
+  },
+  "mapKeyPart": {
+    "zh-CN": "共享块，显示最大分类",
+    "en-US": "Shared block, largest category shown"
+  },
+  "mapKeySize": {
+    "zh-CN": "块大小",
+    "en-US": "Block Size"
+  },
+  "mapKeyOneCategory": {
+    "zh-CN": " 单一分类",
+    "en-US": " One category"
+  },
+  "mapKeyMixed": {
+    "zh-CN": " 混合",
+    "en-US": " Mixed"
+  },
+  "mapKeyOne": {
+    "zh-CN": " 单一",
+    "en-US": " One"
+  },
+  "zoomLabel": {
+    "zh-CN": "缩放 {from} → {to}",
+    "en-US": "Zoom {from} → {to}"
+  },
+  "usageUnavailable": {
+    "zh-CN": "无法获取上下文用量。",
+    "en-US": "Context usage unavailable."
+  },
+  "autoCompactBuffer": {
+    "zh-CN": "自动压缩缓冲",
+    "en-US": "Auto-Compact Buffer"
+  },
+  "freeSpace": {
+    "zh-CN": "剩余空间",
+    "en-US": "Free Space"
+  },
+  "moreNotices": {
+    "zh-CN": "… +{count} 条更多",
+    "en-US": "… +{count} more"
+  },
+  "noContentCaptured": {
+    "zh-CN": "此分类未捕获内容。",
+    "en-US": "No content captured for this category."
+  },
+  "moreLines": {
+    "zh-CN": "… +{count} 行",
+    "en-US": "… +{count} lines"
+  },
+  "viewContent": {
+    "zh-CN": "Enter - 查看内容",
+    "en-US": "Enter - View Content"
+  },
+  "skillBadge": {
+    "zh-CN": "[skill]",
+    "en-US": "[skill]"
+  },
+  "encodedLabel": {
+    "zh-CN": "Encoded",
+    "en-US": "Encoded"
+  },
+  "reasoningLabel": {
+    "zh-CN": "Reasoning",
+    "en-US": "Reasoning"
+  },
+  "injectionsTitle": {
+    "zh-CN": "上下文注入",
+    "en-US": "Context Injections"
+  },
+  "injectionsDescription": {
+    "zh-CN": "首次请求注入模型上下文的内容，附带 token 估计。",
+    "en-US": "Injections into the model context for the first turn, with token estimates."
+  },
+  "tabInitial": {
+    "zh-CN": "[INITIAL]",
+    "en-US": "[INITIAL]"
+  },
+  "tokensCount": {
+    "zh-CN": "{count} tokens",
+    "en-US": "{count} tokens"
+  },
+  "degradedFallback": {
+    "zh-CN": "[已降级：使用 pi 原生回退]",
+    "en-US": "[Degraded: pi-native fallback used]"
+  },
+  "markerHighlighted": {
+    "zh-CN": "Highlighted",
+    "en-US": "Highlighted"
+  },
+  "markerHighlightedExplanation": {
+    "zh-CN": " 部分由扩展注入 pi 的系统提示。它们不计入 System Prompt token，而计入注入该内容的扩展。",
+    "en-US": " parts are injected by extensions into pi’s system prompt. They are excluded from the System Prompt token count and included in the injecting extension’s count."
+  },
+  "markerGuess": {
+    "zh-CN": "(guess)",
+    "en-US": "(guess)"
+  },
+  "markerGuessExplanation": {
+    "zh-CN": " 来源是从注入文本本身推断的。",
+    "en-US": " sources are inferred from the injected text itself."
+  },
+  "markerDropped": {
+    "zh-CN": "Dropped",
+    "en-US": "Dropped"
+  },
+  "markerDroppedExplanation": {
+    "zh-CN": " 部分已被自定义系统提示替换，不计入任何位置。",
+    "en-US": " parts were replaced by a custom system prompt and are counted nowhere."
+  },
+  "markerMoved": {
+    "zh-CN": "Moved",
+    "en-US": "Moved"
+  },
+  "markerMovedExplanation": {
+    "zh-CN": " 块在系统提示中的位置与通常不同。其 token 计数不变。",
+    "en-US": " blocks appear in a different position in the system prompt than usual. Their token counts are unchanged."
+  }
+}

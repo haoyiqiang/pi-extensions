@@ -12,7 +12,7 @@
  *
  * Usage:
  *   pi -e ./src/index.ts
- *   pi install github.com/arpagon/pi-rewind
+ *   pi install npm:pi-rewind
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -30,6 +30,7 @@ import {
 import { createInitialState, resetState } from "./state.js";
 import { updateStatus, clearStatus } from "./ui.js";
 import { registerCommands, handleForkRestore, handleTreeRestore } from "./commands.js";
+import { i18n } from "./i18n.js";
 
 /** Truncate a string to maxLen, adding ellipsis if needed */
 function truncate(s: string, maxLen: number): string {
@@ -93,7 +94,7 @@ export default function (pi: ExtensionAPI) {
         sessionId: state.sessionId,
         trigger: "resume",
         turnIndex: 0,
-        description: "Session start",
+        description: i18n.t("sessionStart"),
       });
       state.resumeCheckpoint = cp;
       state.checkpoints.set(cp.id, cp);

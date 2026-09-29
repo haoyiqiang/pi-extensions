@@ -6,6 +6,7 @@ import { confirmCodexReset, formatAvailableResets, showCodexResetsLoader, showCo
 import { getAuthToken } from "../../../utils/auth";
 import { toNumber } from "../../../utils/format";
 import { http, withAuth } from "../../../utils/http";
+import { i18n } from "../../../i18n";
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { KyInstance } from "ky";
@@ -148,7 +149,7 @@ export const openaiCodexProvider: CreditsProvider = {
     if (readStoredCredential(PROVIDER)?.type !== "oauth") return;
 
     pi.registerCommand("codex-resets", {
-      description: "Browse and redeem banked OpenAI Codex rate-limit resets",
+      description: i18n.t("codexResetsCommandDescription"),
       handler: async (_args, ctx) => await runCodexResets(ctx, refresh),
     });
   },

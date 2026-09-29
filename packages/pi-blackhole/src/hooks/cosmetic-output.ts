@@ -19,6 +19,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { debugLog } from "../om/debug-log.js";
 import type { Runtime } from "../om/runtime.js";
+import { i18n } from "../i18n.js";
 
 /** Plain custom-entry type. Never a `custom_message` — those enter context. */
 export const PRE_COMPACTION_OUTPUT_TYPE = "blackhole-pre-compaction-output";
@@ -184,12 +185,12 @@ export function registerPreCompactionOutput(pi: ExtensionAPI, runtime: Runtime):
       if (!isPreCompactionOutputData(entry?.data)) return undefined;
       const data = entry.data;
       const container = new Container();
-      container.addChild(new Text(theme.fg("dim", "[Previous output — display only]"), 0, 0));
+      container.addChild(new Text(theme.fg("dim", i18n.t("previousOutputDisplayOnly")), 0, 0));
       // Copied text is data, never terminal control: strip escape sequences
       // before the Markdown component can pass them to the terminal.
       container.addChild(new Markdown(stripTerminalSequences(data.text), 0, 0, getMarkdownTheme()));
       if (data.truncated) {
-        container.addChild(new Text(theme.fg("dim", "[Copy truncated]"), 0, 0));
+        container.addChild(new Text(theme.fg("dim", i18n.t("copyTruncated")), 0, 0));
       }
       return container;
     },

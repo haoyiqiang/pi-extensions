@@ -1,0 +1,198 @@
+{
+  "presetCommandDescription": {
+    "zh-CN": "切换模型预设",
+    "en-US": "Switch model preset"
+  },
+  "recapCommandDescription": {
+    "zh-CN": "为当前会话生成一段简短回顾",
+    "en-US": "Generate a short recap of the current session"
+  },
+  "codexResetsCommandDescription": {
+    "zh-CN": "查看并兑换已积累的 OpenAI Codex 速率限制重置",
+    "en-US": "Browse and redeem banked OpenAI Codex rate-limit resets"
+  },
+  "invalidConfig": {
+    "zh-CN": "pi-spark 配置无效：{errors}",
+    "en-US": "Invalid pi-spark config: {errors}"
+  },
+  "noPresets": {
+    "zh-CN": "spark.json 中没有定义预设",
+    "en-US": "No presets defined in spark.json"
+  },
+  "unknownPreset": {
+    "zh-CN": "未知预设 {key}（{available}）",
+    "en-US": "Unknown preset {key} ({available})"
+  },
+  "availablePresets": {
+    "zh-CN": "可用：{keys}",
+    "en-US": "available: {keys}"
+  },
+  "noPresetsDefined": {
+    "zh-CN": "未定义任何预设",
+    "en-US": "none defined"
+  },
+  "presetModelNotFound": {
+    "zh-CN": "预设 {key}：找不到模型 {model}",
+    "en-US": "Preset {key}: model {model} not found"
+  },
+  "presetNoApiKey": {
+    "zh-CN": "预设 {key}：{model} 没有 API key",
+    "en-US": "Preset {key}: no API key for {model}"
+  },
+  "presetApplied": {
+    "zh-CN": "预设：{key}（{description}）",
+    "en-US": "Preset: {key} ({description})"
+  },
+  "presetThinkingClamped": {
+    "zh-CN": "预设 {key}：思考级别 {requested} 被限制为 {applied}",
+    "en-US": "Preset {key}: thinking level {requested} was clamped to {applied}"
+  },
+  "noModelSelected": {
+    "zh-CN": "没有为 {feature} 选择模型",
+    "en-US": "No model selected for {feature}"
+  },
+  "noCodexResets": {
+    "zh-CN": "没有可用的 Codex 重置",
+    "en-US": "No Codex resets available"
+  },
+  "codexResetsNoDetails": {
+    "zh-CN": "{resets}，但没有返回重置详情",
+    "en-US": "{resets}, but no reset details were returned"
+  },
+  "recapGenerating": {
+    "zh-CN": "正在生成回顾…",
+    "en-US": "Generating recap..."
+  },
+  "recapLabel": {
+    "zh-CN": "回顾：",
+    "en-US": "Recap:"
+  },
+  "recapWarning": {
+    "zh-CN": "（警告：{warning}）",
+    "en-US": "(Warning: {warning})"
+  },
+  "recapUnable": {
+    "zh-CN": "无法生成回顾。",
+    "en-US": "Unable to generate recap."
+  },
+  "recapGenerationFailed": {
+    "zh-CN": "回顾生成失败",
+    "en-US": "Recap generation failed"
+  },
+  "selectPreset": {
+    "zh-CN": "选择预设",
+    "en-US": "Select preset"
+  },
+  "keyNavigate": {
+    "zh-CN": "浏览",
+    "en-US": "navigate"
+  },
+  "keySelect": {
+    "zh-CN": "选择",
+    "en-US": "select"
+  },
+  "keyCancel": {
+    "zh-CN": "取消",
+    "en-US": "cancel"
+  },
+  "keyRedeem": {
+    "zh-CN": "兑换",
+    "en-US": "redeem"
+  },
+  "keyConfirm": {
+    "zh-CN": "确认",
+    "en-US": "confirm"
+  },
+  "editorThinking": {
+    "zh-CN": "思考中",
+    "en-US": "Thinking"
+  },
+  "editorStreaming": {
+    "zh-CN": "输出中",
+    "en-US": "Streaming"
+  },
+  "editorRunningTools": {
+    "zh-CN": "运行工具",
+    "en-US": "Running tools"
+  },
+  "editorMore": {
+    "zh-CN": "{count} 行更多",
+    "en-US": "{count} more"
+  },
+  "creditsUnlimited": {
+    "zh-CN": "不限量",
+    "en-US": "unlimited"
+  },
+  "presetFlagDescription": {
+    "zh-CN": "要使用的模型预设",
+    "en-US": "Model preset to use"
+  },
+  "presetCycleForward": {
+    "zh-CN": "向后循环模型预设",
+    "en-US": "Cycle model preset forward"
+  },
+  "presetCycleBackward": {
+    "zh-CN": "向前循环模型预设",
+    "en-US": "Cycle model preset backward"
+  },
+  "codexPanelTitle": {
+    "zh-CN": "OpenAI Codex 已积累的速率限制重置",
+    "en-US": "OpenAI Codex banked rate-limit resets"
+  },
+  "codexLoading": {
+    "zh-CN": "加载中…",
+    "en-US": "Loading..."
+  },
+  "codexRedeeming": {
+    "zh-CN": "兑换中…",
+    "en-US": "Redeeming..."
+  },
+  "codexRedeemConfirm": {
+    "zh-CN": "兑换重置？",
+    "en-US": "Redeem reset?"
+  },
+  "codexRedeemWarning": {
+    "zh-CN": "此操作会永久消耗一次已积累重置，并重置所有符合条件的窗口。",
+    "en-US": "This permanently consumes one banked reset and resets all eligible windows."
+  },
+  "yes": {
+    "zh-CN": "是",
+    "en-US": "Yes"
+  },
+  "no": {
+    "zh-CN": "否",
+    "en-US": "No"
+  },
+  "codexResetsAvailableOne": {
+    "zh-CN": "1 次重置可用",
+    "en-US": "1 reset available"
+  },
+  "codexResetsAvailableMany": {
+    "zh-CN": "{count} 次重置可用",
+    "en-US": "{count} resets available"
+  },
+  "codexBankedResetDefault": {
+    "zh-CN": "已积累的速率限制重置",
+    "en-US": "Banked rate-limit reset"
+  },
+  "codexGranted": {
+    "zh-CN": "授予 {date}",
+    "en-US": "Granted {date}"
+  },
+  "codexExpires": {
+    "zh-CN": "到期 {date}",
+    "en-US": "Expires {date}"
+  },
+  "codexNoExpiration": {
+    "zh-CN": "无到期时间",
+    "en-US": "No expiration"
+  },
+  "creditsExtraUsage": {
+    "zh-CN": "（额外用量 ${amount}）",
+    "en-US": "(Extra Usage ${amount})"
+  },
+  "creditsLimit": {
+    "zh-CN": "限额",
+    "en-US": "Limit"
+  }
+}

@@ -1,3 +1,4 @@
+import { i18n } from "../../../i18n";
 import { convertToUSD, toNumber } from "../../../utils/format";
 import { http, withAuth } from "../../../utils/http";
 
@@ -50,7 +51,7 @@ function toPercent(detail: KimiCodeUsage): number | undefined {
 }
 
 function formatWindowLabel(window?: { duration?: number; timeUnit?: string } | null): string {
-  if (!window?.duration) return "Limit";
+  if (!window?.duration) return i18n.t("creditsLimit");
 
   const duration = window.duration;
   const unit = window.timeUnit;
@@ -59,7 +60,7 @@ function formatWindowLabel(window?: { duration?: number; timeUnit?: string } | n
   if (unit === "TIME_UNIT_HOUR") return `${duration}h`;
   if (unit === "TIME_UNIT_DAY") return `${duration}d`;
   if (unit === "TIME_UNIT_WEEK") return `${duration * 7}d`;
-  return "Limit";
+  return i18n.t("creditsLimit");
 }
 
 function buildLane(label: string, detail: KimiCodeUsage): CreditsLane | undefined {
@@ -80,7 +81,7 @@ async function formatSuffix(wallet: KimiCodeBoosterWallet | null | undefined, si
   const remaining = Math.round(amountLeft / BOOSTER_FIXED_POINT_CENTS) / 100;
   const currency = wallet.monthlyChargeLimit?.currency || wallet.monthlyUsed?.currency || "USD";
   const remainingUSD = await convertToUSD(remaining, currency, signal);
-  return !!remainingUSD ? `(Extra Usage $${remainingUSD.toFixed(2)})` : undefined;
+  return !!remainingUSD ? i18n.t("creditsExtraUsage", { amount: remainingUSD.toFixed(2) }) : undefined;
 }
 
 export const kimiCodeProvider: CreditsProvider = {

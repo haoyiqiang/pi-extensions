@@ -8,7 +8,7 @@ import { buildSessionContext, type ExtensionAPI } from "@earendil-works/pi-codin
 
 import { ConfigStore, createDefaultConfigFile } from "./config.ts";
 import {
-	CONTEXT_COMMAND_DESCRIPTION,
+	contextCommandDescription,
 	getContextArgumentCompletions,
 	parseContextCommand,
 	reportCommandMessage,
@@ -133,7 +133,7 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("context", {
-		description: CONTEXT_COMMAND_DESCRIPTION,
+		description: contextCommandDescription(),
 		getArgumentCompletions: getContextArgumentCompletions,
 		handler: async (args, ctx) => {
 			const command = parseContextCommand(args);

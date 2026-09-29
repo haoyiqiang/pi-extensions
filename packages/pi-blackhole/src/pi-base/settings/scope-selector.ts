@@ -2,6 +2,7 @@ import type { Component, TUI } from "@earendil-works/pi-tui";
 import { matchesKey } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { divider, formatHintLine, frame, frameContentWidth, type KeyHint } from "./frame.ts";
+import { i18n } from "../../i18n.js";
 
 export interface ScopeSelectorEntry {
   id: string;
@@ -64,16 +65,16 @@ export function createScopeSelector(args: ScopeSelectorArgs): Component {
 
       const hints: KeyHint[] = [];
       if (availableEntries.length > 0) {
-        hints.push({ key: "↑↓", label: "select" });
+        hints.push({ key: "↑↓", label: i18n.t("hintSelect") });
         if (availableEntries.length > 1 && availableEntries.length <= 9) {
-          hints.push({ key: `1-${availableEntries.length}`, label: "choose" });
+          hints.push({ key: `1-${availableEntries.length}`, label: i18n.t("hintChoose") });
         }
         if (availableEntries.length > 2) {
-          hints.push({ key: "home/end", label: "top/bottom" });
+          hints.push({ key: "home/end", label: i18n.t("hintTopBottom") });
         }
-        hints.push({ key: "enter/space", label: "confirm" });
+        hints.push({ key: "enter/space", label: i18n.t("hintConfirm") });
       }
-      hints.push({ key: "esc", label: "cancel" });
+      hints.push({ key: "esc", label: i18n.t("hintCancel") });
       bodyLines.push(args.theme.fg("muted", `  ${formatHintLine(hints, args.theme)}`));
 
       return frame(bodyLines, width, args.theme, {
@@ -120,16 +121,16 @@ export function createScopeSelector(args: ScopeSelectorArgs): Component {
     lines.push("");
     const hints: KeyHint[] = [];
     if (availableEntries.length > 0) {
-      hints.push({ key: "↑↓", label: "select" });
+      hints.push({ key: "↑↓", label: i18n.t("hintSelect") });
       if (availableEntries.length > 1 && availableEntries.length <= 9) {
-        hints.push({ key: `1-${availableEntries.length}`, label: "choose" });
+        hints.push({ key: `1-${availableEntries.length}`, label: i18n.t("hintChoose") });
       }
       if (availableEntries.length > 2) {
-        hints.push({ key: "home/end", label: "top/bottom" });
+        hints.push({ key: "home/end", label: i18n.t("hintTopBottom") });
       }
-      hints.push({ key: "enter/space", label: "confirm" });
+      hints.push({ key: "enter/space", label: i18n.t("hintConfirm") });
     }
-    hints.push({ key: "esc", label: "cancel" });
+    hints.push({ key: "esc", label: i18n.t("hintCancel") });
     lines.push(args.theme.fg("muted", `  ${formatHintLine(hints, args.theme)}`));
     return lines;
   };

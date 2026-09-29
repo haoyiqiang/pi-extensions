@@ -27,6 +27,7 @@ import {
 } from "../core/unified-config.js";
 import { effectivePresets } from "../om/model-budget.js";
 import { openChangelogView } from "../changelog/changelog.js";
+import { i18n } from "../i18n.js";
 
 const CONFIG_FILENAME = "pi-blackhole-config.json";
 
@@ -48,87 +49,81 @@ export const config = new ConfigManager<UnifiedConfig>({
     {
       key: "compaction",
       type: "enum",
-      label: "Compaction mode",
-      description:
-        "auto=trigger on threshold, manual=only /blackhole, off=auto:Pi handles, /blackhole:blackhole pipeline",
+      label: i18n.t("fieldCompactionLabel"),
+      description: i18n.t("fieldCompactionDescription"),
       value: cfg.compaction,
       options: ["auto", "manual", "off"],
       optionLabels: {
-        auto: "auto — trigger on threshold",
-        manual: "manual — only /blackhole",
-        off: "off — auto:Pi handles, /blackhole:blackhole pipeline",
+        auto: i18n.t("fieldCompactionOptionAuto"),
+        manual: i18n.t("fieldCompactionOptionManual"),
+        off: i18n.t("fieldCompactionOptionOff"),
       },
     },
     {
       key: "compactionEngine",
       type: "enum",
-      label: "Compaction engine",
-      description: "blackhole=structured summary+OM, pi-default=built-in Pi summarization",
+      label: i18n.t("fieldCompactionEngineLabel"),
+      description: i18n.t("fieldCompactionEngineDescription"),
       value: cfg.compactionEngine,
       options: ["blackhole", "pi-default"],
       optionLabels: {
-        blackhole: "blackhole — structured summary + OM",
-        "pi-default": "pi-default — built-in Pi summarization",
+        blackhole: i18n.t("fieldCompactionEngineOptionBlackhole"),
+        "pi-default": i18n.t("fieldCompactionEngineOptionPiDefault"),
       },
     },
     {
       key: "compactionSummaryMode",
       type: "enum",
-      label: "Summary history",
-      description:
-        "default=replace one complete summary, append=freeze automatic segments and rebase on /blackhole",
+      label: i18n.t("fieldCompactionSummaryModeLabel"),
+      description: i18n.t("fieldCompactionSummaryModeDescription"),
       value: cfg.compactionSummaryMode,
       options: ["default", "append"],
       optionLabels: {
-        default: "default — one complete replacement summary",
-        append: "append — immutable auto segments; /blackhole rebases",
+        default: i18n.t("fieldCompactionSummaryModeOptionDefault"),
+        append: i18n.t("fieldCompactionSummaryModeOptionAppend"),
       },
     },
     {
       key: "tailBehavior",
       type: "enum",
-      label: "Visible tail",
-      description:
-        "minimal=keep last user message only (default), pi-default=keep Pi's preserved visible context",
+      label: i18n.t("fieldTailBehaviorLabel"),
+      description: i18n.t("fieldTailBehaviorDescription"),
       value: cfg.tailBehavior,
       options: ["minimal", "pi-default"],
       optionLabels: {
-        minimal: "minimal — keep last user message only (default)",
-        "pi-default": "pi-default — keep Pi's preserved visible context",
+        minimal: i18n.t("fieldTailBehaviorOptionMinimal"),
+        "pi-default": i18n.t("fieldTailBehaviorOptionPiDefault"),
       },
     },
     {
       key: "midRunCompaction",
       type: "enum",
-      label: "Mid-run compaction",
-      description:
-        "resume=compact transparently and continue the same run, pause=interrupt and stop, off=only check when run ends (default)",
+      label: i18n.t("fieldMidRunCompactionLabel"),
+      description: i18n.t("fieldMidRunCompactionDescription"),
       value: cfg.midRunCompaction,
       options: ["resume", "pause", "off"],
       optionLabels: {
-        resume: "resume — transparent compact, same run (experimental)",
-        pause: "pause — interrupt, compact, and stop",
-        off: "off — only check when run ends (default)",
+        resume: i18n.t("fieldMidRunCompactionOptionResume"),
+        pause: i18n.t("fieldMidRunCompactionOptionPause"),
+        off: i18n.t("fieldMidRunCompactionOptionOff"),
       },
     },
     {
       key: "showPreCompactionMessage",
       type: "boolean",
-      label: "Show pre-compaction output",
-      description:
-        "Display-only copy (max 16 KiB) of the newest assistant output the compaction dropped. Never enters model context or memory.",
+      label: i18n.t("fieldShowPreCompactionMessageLabel"),
+      description: i18n.t("fieldShowPreCompactionMessageDescription"),
       value: cfg.showPreCompactionMessage,
       valueDescriptions: {
-        on: "Shown — recent output re-rendered below the compaction card",
-        off: "Hidden — compaction card only",
+        on: i18n.t("fieldShowPreCompactionMessageOn"),
+        off: i18n.t("fieldShowPreCompactionMessageOff"),
       },
     },
     {
       key: "compactAfterTokens",
       type: "number",
-      label: "Auto-compact threshold (tokens)",
-      description:
-        "Explicit fixed token threshold; wins over the window-derived knobs and the preset curve. 0 = not set (a preset curve, ratio, or reserve governs).",
+      label: i18n.t("fieldCompactAfterTokensLabel"),
+      description: i18n.t("fieldCompactAfterTokensDescription"),
       value: cfg.compactAfterTokens ?? 0,
       min: 0,
       max: 500_000,
@@ -137,9 +132,8 @@ export const config = new ConfigManager<UnifiedConfig>({
     {
       key: "retainedToolOutputMaxTokens",
       type: "number",
-      label: "Retained tool outputs",
-      description:
-        "Token budget for historical tool-output text; newest is retained first and older text remains available via recall",
+      label: i18n.t("fieldRetainedToolOutputMaxTokensLabel"),
+      description: i18n.t("fieldRetainedToolOutputMaxTokensDescription"),
       value: cfg.retainedToolOutputMaxTokens,
       min: 1_000,
       max: 200_000,
@@ -154,9 +148,8 @@ export const config = new ConfigManager<UnifiedConfig>({
     {
       key: "compactAfterRatio",
       type: "number",
-      label: "Auto-compact ratio (of context window)",
-      description:
-        "Compact when the session reaches this fraction of the active model's context window (e.g. 0.65 on a 200k model fires at ~130k). 0 = not set. An explicit token threshold wins; beats the reserve knob and the preset curve.",
+      label: i18n.t("fieldCompactAfterRatioLabel"),
+      description: i18n.t("fieldCompactAfterRatioDescription"),
       value: cfg.compactAfterRatio ?? 0,
       min: 0,
       max: 1,
@@ -164,9 +157,8 @@ export const config = new ConfigManager<UnifiedConfig>({
     {
       key: "compactReserveTokens",
       type: "number",
-      label: "Auto-compact headroom reserve",
-      description:
-        "Alternative window-derived knob: compact when only this many tokens of headroom remain (threshold = window − reserve). 0 = not set. An explicit token threshold wins; ratio wins when both are set.",
+      label: i18n.t("fieldCompactReserveTokensLabel"),
+      description: i18n.t("fieldCompactReserveTokensDescription"),
       value: cfg.compactReserveTokens ?? 0,
       integer: true,
       min: 0,
@@ -175,9 +167,8 @@ export const config = new ConfigManager<UnifiedConfig>({
     {
       key: "compactAfterPreset",
       type: "enum",
-      label: "Compaction threshold preset",
-      description:
-        "Window-scaled curve that sets the threshold when no numeric knob above is set (default: compact at 90% of a 32k window, falling to 40% at 1M). To edit the curve or add presets, hand-edit compactAfterPresets in the config file.",
+      label: i18n.t("fieldCompactAfterPresetLabel"),
+      description: i18n.t("fieldCompactAfterPresetDescription"),
       value: cfg.compactAfterPreset ?? "default",
       // Options = built-in preset names + any user-added names from the file
       // (same effective-presets merge the resolver uses, so the modal list and
@@ -187,8 +178,8 @@ export const config = new ConfigManager<UnifiedConfig>({
         Object.keys(effectivePresets(cfg)).map((name) => [
           name,
           name === "default"
-            ? "default — falling curve (0.90 @ 32k → 0.40 @ 1M)"
-            : `${name} (custom preset)`,
+            ? i18n.t("fieldCompactAfterPresetOptionDefault")
+            : i18n.t("fieldCompactAfterPresetOptionCustom", { name }),
         ]),
       ),
     },
@@ -197,27 +188,26 @@ export const config = new ConfigManager<UnifiedConfig>({
     {
       key: "memory",
       type: "boolean",
-      label: "Observational memory",
-      description: "Enable OM workers (observer, reflector, dropper) and content injection",
+      label: i18n.t("fieldMemoryLabel"),
+      description: i18n.t("fieldMemoryDescription"),
       value: cfg.memory,
       valueDescriptions: {
-        on: "Active — OM workers + content injection enabled",
-        off: "Suspended — OM disabled",
+        on: i18n.t("fieldMemoryOn"),
+        off: i18n.t("fieldMemoryOff"),
       },
     },
     {
       key: "sessionFallback",
       type: "boolean",
-      label: "Session model fallback",
-      description:
-        "off=skip stage when all OM models fail, instead of falling back to the main coding model",
+      label: i18n.t("fieldSessionFallbackLabel"),
+      description: i18n.t("fieldSessionFallbackDescription"),
       value: cfg.sessionFallback ?? true,
     },
     {
       key: "observeAfterTokens",
       type: "number",
-      label: "Observer threshold",
-      description: "Tokens accumulated since last observer run before triggering next observe",
+      label: i18n.t("fieldObserveAfterTokensLabel"),
+      description: i18n.t("fieldObserveAfterTokensDescription"),
       value: cfg.observeAfterTokens,
       min: 1_000,
       max: 200_000,
@@ -226,8 +216,8 @@ export const config = new ConfigManager<UnifiedConfig>({
     {
       key: "reflectAfterTokens",
       type: "number",
-      label: "Reflect + dropper threshold",
-      description: "Tokens accumulated since last reflect before triggering reflector and dropper",
+      label: i18n.t("fieldReflectAfterTokensLabel"),
+      description: i18n.t("fieldReflectAfterTokensDescription"),
       value: cfg.reflectAfterTokens,
       min: 1_000,
       max: 200_000,
@@ -236,9 +226,8 @@ export const config = new ConfigManager<UnifiedConfig>({
     {
       key: "observationsPoolMaxTokens",
       type: "number",
-      label: "Observation pool max",
-      description:
-        "Full-fold pressure and max estimated rendered observation-line tokens in compaction output",
+      label: i18n.t("fieldObservationsPoolMaxTokensLabel"),
+      description: i18n.t("fieldObservationsPoolMaxTokensDescription"),
       value: cfg.observationsPoolMaxTokens,
       min: 1_000,
       max: 200_000,
@@ -247,9 +236,8 @@ export const config = new ConfigManager<UnifiedConfig>({
     {
       key: "reflectionsPoolMaxTokens",
       type: "number",
-      label: "Reflection output max",
-      description:
-        "Max estimated rendered reflection-line tokens in compaction output. 0 disables the cap. Full source records remain available through recall.",
+      label: i18n.t("fieldReflectionsPoolMaxTokensLabel"),
+      description: i18n.t("fieldReflectionsPoolMaxTokensDescription"),
       value: cfg.reflectionsPoolMaxTokens,
       min: 0,
       max: 200_000,
@@ -258,8 +246,8 @@ export const config = new ConfigManager<UnifiedConfig>({
     {
       key: "observationsPoolTargetTokens",
       type: "number",
-      label: "Observation pool target",
-      description: "Target tokens after dropper prunes (defaults to half of pool max)",
+      label: i18n.t("fieldObservationsPoolTargetTokensLabel"),
+      description: i18n.t("fieldObservationsPoolTargetTokensDescription"),
       value: cfg.observationsPoolTargetTokens,
       min: 500,
       max: 200_000,
@@ -268,8 +256,8 @@ export const config = new ConfigManager<UnifiedConfig>({
     {
       key: "reflectorInputMaxTokens",
       type: "number",
-      label: "Reflector input max",
-      description: "Max prompt tokens for reflector model input (rolling window cap)",
+      label: i18n.t("fieldReflectorInputMaxTokensLabel"),
+      description: i18n.t("fieldReflectorInputMaxTokensDescription"),
       value: cfg.reflectorInputMaxTokens,
       min: 1_000,
       max: 500_000,
@@ -278,8 +266,8 @@ export const config = new ConfigManager<UnifiedConfig>({
     {
       key: "dropperInputMaxTokens",
       type: "number",
-      label: "Dropper input max",
-      description: "Max prompt tokens for dropper model input (rolling window cap)",
+      label: i18n.t("fieldDropperInputMaxTokensLabel"),
+      description: i18n.t("fieldDropperInputMaxTokensDescription"),
       value: cfg.dropperInputMaxTokens,
       min: 1_000,
       max: 500_000,
@@ -288,8 +276,8 @@ export const config = new ConfigManager<UnifiedConfig>({
     {
       key: "observerChunkMaxTokens",
       type: "number",
-      label: "Observer chunk max",
-      description: "Max source entry tokens sent to observer per chunk",
+      label: i18n.t("fieldObserverChunkMaxTokensLabel"),
+      description: i18n.t("fieldObserverChunkMaxTokensDescription"),
       value: cfg.observerChunkMaxTokens,
       min: 1_000,
       max: 200_000,
@@ -298,8 +286,8 @@ export const config = new ConfigManager<UnifiedConfig>({
     {
       key: "observerPreambleMaxTokens",
       type: "number",
-      label: "Observer preamble max",
-      description: "Preamble budget in manual compaction mode (0=auto-compute 30% of chunk)",
+      label: i18n.t("fieldObserverPreambleMaxTokensLabel"),
+      description: i18n.t("fieldObserverPreambleMaxTokensDescription"),
       value: cfg.observerPreambleMaxTokens,
       min: 0,
       max: 100_000,
@@ -308,9 +296,8 @@ export const config = new ConfigManager<UnifiedConfig>({
     {
       key: "dropperPressureThreshold",
       type: "number",
-      label: "Dropper pressure threshold",
-      description:
-        "Fraction of observationsPoolMaxTokens that triggers pressure-driven dropper (1 disables)",
+      label: i18n.t("fieldDropperPressureThresholdLabel"),
+      description: i18n.t("fieldDropperPressureThresholdDescription"),
       value: cfg.dropperPressureThreshold,
       min: 0.01,
       max: 1,
@@ -319,9 +306,8 @@ export const config = new ConfigManager<UnifiedConfig>({
     {
       key: "dropperPoolFullnessThreshold",
       type: "number",
-      label: "Dropper pool fullness threshold",
-      description:
-        "Min observation-pool fullness (fraction of pool max) before the dropper runs (0-1, default 0.10)",
+      label: i18n.t("fieldDropperPoolFullnessThresholdLabel"),
+      description: i18n.t("fieldDropperPoolFullnessThresholdDescription"),
       value: cfg.dropperPoolFullnessThreshold,
       min: 0.01,
       max: 1,
@@ -330,8 +316,8 @@ export const config = new ConfigManager<UnifiedConfig>({
     {
       key: "agentMaxTurns",
       type: "number",
-      label: "Max turns per agent",
-      description: "Shared turn cap for background memory agents",
+      label: i18n.t("fieldAgentMaxTurnsLabel"),
+      description: i18n.t("fieldAgentMaxTurnsDescription"),
       value: cfg.agentMaxTurns,
       min: 1,
       max: 100,
@@ -340,9 +326,8 @@ export const config = new ConfigManager<UnifiedConfig>({
     {
       key: "providerIdleTimeoutMs",
       type: "number",
-      label: "Provider idle timeout (ms)",
-      description:
-        "Body-idle timeout for background provider streams; 0 = disabled, unset = inherit pi's default",
+      label: i18n.t("fieldProviderIdleTimeoutMsLabel"),
+      description: i18n.t("fieldProviderIdleTimeoutMsDescription"),
       value: cfg.providerIdleTimeoutMs ?? 0,
       min: 0,
       max: 3_600_000,
@@ -351,26 +336,24 @@ export const config = new ConfigManager<UnifiedConfig>({
     {
       key: "cacheRetention",
       type: "enum",
-      label: "Worker prompt-cache retention",
-      description:
-        "Provider-neutral prompt-cache retention for the memory workers; unset defers to pi's effective setting. Adapters ignore values they do not support.",
+      label: i18n.t("fieldCacheRetentionLabel"),
+      description: i18n.t("fieldCacheRetentionDescription"),
       // "unset" is a modal-only sentinel: validate() drops it before the config
       // is persisted, so an untouched field never pins a value in the file.
       value: cfg.cacheRetention ?? "unset",
       options: ["unset", ...CACHE_RETENTION_VALUES],
       optionLabels: {
-        unset: "unset — inherit pi's effective setting",
-        none: "none — no prompt caching where supported",
-        short: "short — pi's provider default",
-        long: "long — extended retention where supported",
+        unset: i18n.t("fieldCacheRetentionOptionUnset"),
+        none: i18n.t("fieldCacheRetentionOptionNone"),
+        short: i18n.t("fieldCacheRetentionOptionShort"),
+        long: i18n.t("fieldCacheRetentionOptionLong"),
       },
     },
     {
       key: "workerAttemptTimeoutMs",
       type: "number",
-      label: "Worker attempt timeout (ms)",
-      description:
-        "Hard elapsed deadline per worker/model attempt; timeout aborts the call and tries the next fallback; 0 = disabled",
+      label: i18n.t("fieldWorkerAttemptTimeoutMsLabel"),
+      description: i18n.t("fieldWorkerAttemptTimeoutMsDescription"),
       value: cfg.workerAttemptTimeoutMs ?? 0,
       min: 0,
       max: 3_600_000,
@@ -379,9 +362,8 @@ export const config = new ConfigManager<UnifiedConfig>({
     {
       key: "fullFoldAlways",
       type: "boolean",
-      label: "Preserve OM on first compaction",
-      description:
-        "When true, early reflections/drops survive the first compaction in a fresh session",
+      label: i18n.t("fieldFullFoldAlwaysLabel"),
+      description: i18n.t("fieldFullFoldAlwaysDescription"),
       value: cfg.fullFoldAlways,
     },
 
@@ -389,20 +371,19 @@ export const config = new ConfigManager<UnifiedConfig>({
     {
       key: "statusBar",
       type: "boolean",
-      label: "Footer status bar",
-      description: "Show token gauges (O/P/X) and worker events in the footer",
+      label: i18n.t("fieldStatusBarLabel"),
+      description: i18n.t("fieldStatusBarDescription"),
       value: cfg.statusBar,
     },
     {
       key: "showWorkerNotifications",
       type: "boolean",
-      label: "Worker notifications",
-      description:
-        "Show routine observer/reflector/dropper progress toasts; warnings, errors and compaction notices always show",
+      label: i18n.t("fieldShowWorkerNotificationsLabel"),
+      description: i18n.t("fieldShowWorkerNotificationsDescription"),
       value: cfg.showWorkerNotifications,
       valueDescriptions: {
-        on: "On — routine worker progress toasts shown",
-        off: "Off — quiet; warnings/errors only",
+        on: i18n.t("fieldShowWorkerNotificationsOn"),
+        off: i18n.t("fieldShowWorkerNotificationsOff"),
       },
     },
 
@@ -410,15 +391,15 @@ export const config = new ConfigManager<UnifiedConfig>({
     {
       key: "debug",
       type: "boolean",
-      label: "Debug snapshots",
-      description: "Write detailed debug snapshots to /tmp/pi-blackhole-debug.json",
+      label: i18n.t("fieldDebugLabel"),
+      description: i18n.t("fieldDebugDescription"),
       value: cfg.debug,
     },
     {
       key: "debugLog",
       type: "boolean",
-      label: "Debug JSONL logging",
-      description: "Write structured JSONL debug logs to agent directory",
+      label: i18n.t("fieldDebugLogLabel"),
+      description: i18n.t("fieldDebugLogDescription"),
       value: cfg.debugLog,
     },
   ],
@@ -607,7 +588,7 @@ export async function openBlackholeSettings(ctx: ExtensionContext): Promise<void
     [
       {
         id: "changelog",
-        label: "Display Changelog",
+        label: i18n.t("settingsActionChangelog"),
         available: true,
       },
     ],

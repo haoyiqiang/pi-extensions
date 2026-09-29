@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+// Pin the locale before importing the module under test: translations are resolved
+// per call, but import order is hoisted, so set the env here at the very top.
+process.env.PI_EXTENSIONS_LOCALE = "en-US";
 import { test } from "node:test";
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
@@ -6,7 +9,7 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-c
 import { CompactionState, InitialCaptureState, SilentProbeState } from "../src/capture.ts";
 import { readProbeToken } from "../src/probe-token.ts";
 import {
-	CONTEXT_COMMAND_DESCRIPTION,
+	contextCommandDescription,
 	getContextArgumentCompletions,
 	parseContextCommand,
 	reportCommandMessage,
@@ -44,7 +47,7 @@ test("parseContextCommand defaults to Usage and accepts the explicit grammar", (
 
 test("command registration and completions expose the supported grammar", () => {
 	assert.equal(
-		CONTEXT_COMMAND_DESCRIPTION,
+		contextCommandDescription(),
 		"[usage|injections|config] - Inspect context usage, injections",
 	);
 	assert.deepEqual(
@@ -69,8 +72,10 @@ test("reportCommandMessage sanitizes and caps untrusted message text", () => {
 	reportCommandMessage(context, 'Ignoring unknown key "\u001b[31mred\u0007"', "warning");
 	reportCommandMessage(context, "x".repeat(600), "error");
 
-	assert.deepEqual(notified[0], { message: 'Ignoring unknown key "red"', type: "warning" });
-	assert.equal(notified[1]?.message.length, 500);
+	assert.deepEqual(notified[0], { message: '[context] Ignoring unknown key "red"', type: "warning" });
+	// The source tag prefixes the message before the cap is applied by the shared helper.
+	assert.ok(notified[1]?.message.startsWith("[context] "));
+	assert.equal(notified[1]?.message.length, "[context] ".length + 500);
 	assert.ok(notified[1]?.message.endsWith("\u2026"));
 });
 
@@ -82,8 +87,8 @@ test("reportTuiOnly names the refused view instead of the whole command", () => 
 
 	// Only views are refused; /context config needs no UI and runs in every mode.
 	assert.deepEqual(notified, [
-		{ message: "/context usage is available in TUI mode only.", type: "warning" },
-		{ message: "/context injections is available in TUI mode only.", type: "warning" },
+		{ message: "[context] /context usage is available in TUI mode only.", type: "warning" },
+		{ message: "[context] /context injections is available in TUI mode only.", type: "warning" },
 	]);
 });
 
@@ -97,9 +102,9 @@ test("reportConfigCreation reports every create outcome with its own severity", 
 	reportConfigCreation(context, { type: "failed", filePath, reason: "EACCES: \u001b[31mdenied\u0007" });
 
 	assert.deepEqual(notified, [
-		{ message: `Created default configuration: ${filePath}`, type: "info" },
-		{ message: `Configuration already exists; left unchanged: ${filePath}`, type: "warning" },
-		{ message: `Cannot create configuration at ${filePath}: EACCES: denied`, type: "error" },
+		{ message: `[context] Created default configuration: ${filePath}`, type: "info" },
+		{ message: `[context] Configuration already exists; left unchanged: ${filePath}`, type: "warning" },
+		{ message: `[context] Cannot create configuration at ${filePath}: EACCES: denied`, type: "error" },
 	]);
 });
 

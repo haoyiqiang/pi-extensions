@@ -19,6 +19,7 @@ import {
   responsiveInnerRows,
   wrapLine,
 } from "../pi-base/settings/frame.ts";
+import { i18n } from "../i18n.js";
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -318,13 +319,15 @@ export function createChangelogViewer(args: ChangelogViewerArgs): Component {
   const { tui, theme, done, packageRoot, maxEntries } = args;
 
   const version = getPackageVersion(packageRoot);
-  const title = version ? `pi-blackhole v${version} — Changelog` : "pi-blackhole — Changelog";
+  const title = version
+    ? i18n.t("changelogTitle", { version })
+    : i18n.t("changelogTitleNoVersion");
 
   const raw = readChangelogText(packageRoot);
   let allLines: string[];
 
   if (!raw) {
-    allLines = ["Changelog not found.", "Expected CHANGELOG.md at package root."];
+    allLines = [i18n.t("changelogNotFound"), i18n.t("changelogExpectedPath")];
   } else {
     const entries = parseChangelogEntries(raw, maxEntries);
     if (entries.length === 0) {
@@ -372,13 +375,13 @@ export function createChangelogViewer(args: ChangelogViewerArgs): Component {
     while (slice.length < visible) slice.push("");
 
     const body: string[] = [];
-    if (scroll > 0) body.push(theme.fg("dim", `  ↑ ${scroll} earlier`));
+    if (scroll > 0) body.push(theme.fg("dim", i18n.t("changelogEarlier", { count: scroll })));
     body.push(...slice);
     if (scroll + visible < wrapped.length) {
-      body.push(theme.fg("dim", `  ↓ ${wrapped.length - scroll - visible} more`));
+      body.push(theme.fg("dim", i18n.t("changelogMore", { count: wrapped.length - scroll - visible })));
     }
 
-    const hints = "↑↓ scroll · PgUp/PgDn · Esc close";
+    const hints = i18n.t("changelogHint");
     const footer = theme.fg("dim", hints);
     // Reserve one footer line inside frame: append after body before framing?
     // Simpler: include footer as last body line dim
@@ -455,13 +458,13 @@ function createLazyChangelogViewer(params: {
     while (slice.length < visible) slice.push("");
 
     const body: string[] = [];
-    if (scroll > 0) body.push(theme.fg("dim", `  ↑ ${scroll} earlier`));
+    if (scroll > 0) body.push(theme.fg("dim", i18n.t("changelogEarlier", { count: scroll })));
     body.push(...slice);
     if (scroll + visible < wrapped.length) {
-      body.push(theme.fg("dim", `  ↓ ${wrapped.length - scroll - visible} more`));
+      body.push(theme.fg("dim", i18n.t("changelogMore", { count: wrapped.length - scroll - visible })));
     }
     body.push("");
-    body.push(theme.fg("dim", "  ↑↓ scroll · PgUp/PgDn · Esc close"));
+    body.push(theme.fg("dim", `  ${i18n.t("changelogHint")}`));
     return frame(body, width, theme, { title, fixedInnerRows: inner });
   };
 

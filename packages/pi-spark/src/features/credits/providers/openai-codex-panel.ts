@@ -3,6 +3,8 @@ import { Box, Container, matchesKey, SelectList, Spacer, Text } from "@earendil-
 
 import { Loader } from "../../../components/loader";
 import { renderCredits } from "../status";
+import { i18n, NOTICE_SOURCE } from "../../../i18n";
+import { notifyWithSource } from "pi-extensions-i18n";
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { SelectItem, TuiMouseEvent } from "@earendil-works/pi-tui";
@@ -22,7 +24,7 @@ export async function showCodexResetsSelector(ctx: ExtensionContext, load: (sign
 
     const container = new Container();
     const box = new Box(1, 1);
-    const loader = new Loader(tui, (text) => theme.fg("accent", text), (text) => theme.fg("muted", text), "Loading...");
+    const loader = new Loader(tui, (text) => theme.fg("accent", text), (text) => theme.fg("muted", text), i18n.t("codexLoading"));
 
     let settled = false;
     let selectList: SelectList | undefined;
@@ -39,10 +41,10 @@ export async function showCodexResetsSelector(ctx: ExtensionContext, load: (sign
 
     container.addChild(new DynamicBorder((text: string) => theme.fg("border", text)));
 
-    box.addChild(new Text(theme.bold(theme.fg("accent", "OpenAI Codex banked rate-limit resets")), 0, 0));
+    box.addChild(new Text(theme.bold(theme.fg("accent", i18n.t("codexPanelTitle"))), 0, 0));
     box.addChild(loader);
     box.addChild(new Spacer(1));
-    box.addChild(new Text(keyHint("tui.select.cancel", "cancel"), 0, 0));
+    box.addChild(new Text(keyHint("tui.select.cancel", i18n.t("keyCancel")), 0, 0));
 
     container.addChild(box);
     container.addChild(new DynamicBorder((text: string) => theme.fg("border", text)));
@@ -56,18 +58,18 @@ export async function showCodexResetsSelector(ctx: ExtensionContext, load: (sign
 
       const credits = data.credits.filter((credit) => credit.status === "available").toSorted((a, b) => getExpirationTime(a) - getExpirationTime(b));
       if (data.available_count === 0) {
-        ctx.ui.notify("No Codex resets available", "info");
+        notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: i18n.t("noCodexResets") });
         finish(null);
         return;
       }
       if (credits.length === 0) {
-        ctx.ui.notify(`${formatAvailableResets(data.available_count)}, but no reset details were returned`, "warning");
+        notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("codexResetsNoDetails", { resets: formatAvailableResets(data.available_count) }) });
         finish(null);
         return;
       }
 
       box.clear();
-      box.addChild(new Text(theme.bold(theme.fg("accent", "OpenAI Codex banked rate-limit resets")), 0, 0));
+      box.addChild(new Text(theme.bold(theme.fg("accent", i18n.t("codexPanelTitle"))), 0, 0));
       box.addChild(new Text(renderCredits(theme, "", data.usage), 0, 0));
       box.addChild(new Spacer(1));
 
@@ -91,14 +93,14 @@ export async function showCodexResetsSelector(ctx: ExtensionContext, load: (sign
       box.addChild(selectList);
       box.addChild(new Spacer(1));
 
-      const keyHints = [rawKeyHint("↑↓", "navigate"), keyHint("tui.select.confirm", "redeem"), keyHint("tui.select.cancel", "cancel")];
+      const keyHints = [rawKeyHint("↑↓", i18n.t("keyNavigate")), keyHint("tui.select.confirm", i18n.t("keyRedeem")), keyHint("tui.select.cancel", i18n.t("keyCancel"))];
       box.addChild(new Text(keyHints.join("  "), 0, 0));
 
       tui.requestRender();
     }).catch((error) => {
       if (settled || controller.signal.aborted) return;
 
-      ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+      notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "error", message: error instanceof Error ? error.message : String(error) });
       finish(null);
     });
 
@@ -126,7 +128,7 @@ export async function confirmCodexReset(ctx: ExtensionContext, credit: BankedRat
     container.addChild(new DynamicBorder((text: string) => theme.fg("border", text)));
 
     const box = new Box(1, 1);
-    box.addChild(new Text(theme.bold(theme.fg("accent", "Redeem reset?")), 0, 0));
+    box.addChild(new Text(theme.bold(theme.fg("accent", i18n.t("codexRedeemConfirm"))), 0, 0));
     box.addChild(new Spacer(1));
 
     const details = [
@@ -137,12 +139,12 @@ export async function confirmCodexReset(ctx: ExtensionContext, credit: BankedRat
 
     box.addChild(new Text(theme.fg("muted", details), 0, 0));
     box.addChild(new Spacer(1));
-    box.addChild(new Text(theme.fg("warning", "This permanently consumes one banked reset and resets all eligible windows."), 0, 0));
+    box.addChild(new Text(theme.fg("warning", i18n.t("codexRedeemWarning")), 0, 0));
     box.addChild(new Spacer(1));
 
     const items: SelectItem[] = [
-      { value: "yes", label: "Yes" },
-      { value: "no", label: "No" },
+      { value: "yes", label: i18n.t("yes") },
+      { value: "no", label: i18n.t("no") },
     ];
 
     const selectList = new SelectList(items, 2, {
@@ -158,7 +160,7 @@ export async function confirmCodexReset(ctx: ExtensionContext, credit: BankedRat
     box.addChild(selectList);
     box.addChild(new Spacer(1));
 
-    const keyHints = [rawKeyHint("↑↓", "navigate"), keyHint("tui.select.confirm", "confirm"), keyHint("tui.select.cancel", "cancel")];
+    const keyHints = [rawKeyHint("↑↓", i18n.t("keyNavigate")), keyHint("tui.select.confirm", i18n.t("keyConfirm")), keyHint("tui.select.cancel", i18n.t("keyCancel"))];
     box.addChild(new Text(keyHints.join("  "), 0, 0));
 
     container.addChild(box);
@@ -181,12 +183,12 @@ export async function confirmCodexReset(ctx: ExtensionContext, credit: BankedRat
 export async function showCodexResetsLoader(ctx: ExtensionContext, run: () => Promise<void>): Promise<void> {
   await ctx.ui.custom<void>((tui, theme, _keybindings, done) => {
     const container = new Container();
-    const loader = new Loader(tui, (text) => theme.fg("accent", text), (text) => theme.fg("muted", text), "Redeeming...");
+    const loader = new Loader(tui, (text) => theme.fg("accent", text), (text) => theme.fg("muted", text), i18n.t("codexRedeeming"));
 
     container.addChild(new DynamicBorder((text: string) => theme.fg("border", text)));
 
     const box = new Box(1, 1);
-    box.addChild(new Text(theme.bold(theme.fg("accent", "OpenAI Codex banked rate-limit resets")), 0, 0));
+    box.addChild(new Text(theme.bold(theme.fg("accent", i18n.t("codexPanelTitle"))), 0, 0));
     box.addChild(loader);
 
     container.addChild(box);
@@ -195,7 +197,7 @@ export async function showCodexResetsLoader(ctx: ExtensionContext, run: () => Pr
     loader.start();
 
     run()
-      .catch((error: unknown) => ctx.ui.notify(error instanceof Error ? error.message : String(error), "error"))
+      .catch((error: unknown) => notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "error", message: error instanceof Error ? error.message : String(error) }))
       .finally(() => {
         loader.stop();
         done();
@@ -209,19 +211,19 @@ export async function showCodexResetsLoader(ctx: ExtensionContext, run: () => Pr
 }
 
 export function formatAvailableResets(count: number): string {
-  return `${count} ${count === 1 ? "reset" : "resets"} available`;
+  return count === 1 ? i18n.t("codexResetsAvailableOne") : i18n.t("codexResetsAvailableMany", { count: String(count) });
 }
 
 function formatCreditTitle(credit: BankedRateLimitReset): string {
-  return credit.title?.trim() || "Banked rate-limit reset";
+  return credit.title?.trim() || i18n.t("codexBankedResetDefault");
 }
 
 function formatCreditDescription(credit: BankedRateLimitReset, padEnd: boolean = true): string {
   const formatDate = (value: string) => DATE_FORMATTER.format(new Date(value));
   const pad = (text: string) => (padEnd ? text.padEnd(DATE_COLUMN_WIDTH) : text);
 
-  const granted = pad(`Granted ${formatDate(credit.granted_at)}`);
-  const expires = pad(credit.expires_at ? `Expires ${formatDate(credit.expires_at)}` : "No expiration");
+  const granted = pad(i18n.t("codexGranted", { date: formatDate(credit.granted_at) }));
+  const expires = pad(credit.expires_at ? i18n.t("codexExpires", { date: formatDate(credit.expires_at) }) : i18n.t("codexNoExpiration"));
 
   return `${granted} · ${expires}`;
 }

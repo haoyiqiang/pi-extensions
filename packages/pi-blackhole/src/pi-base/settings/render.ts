@@ -5,6 +5,7 @@ import { divider, formatHintLine, pad, wrapLine } from "./frame.ts";
 import { validateFieldValue } from "./validate-field.ts";
 import { visibleRowIndices, clampSelection, focusedRow } from "./navigation.ts";
 import { isDirty } from "./values.ts";
+import { i18n } from "../../i18n.js";
 
 export function renderTabBar(state: BodyState, width: number): string {
   if (state.tabs.length === 0) return "";
@@ -38,7 +39,7 @@ export function renderTabBar(state: BodyState, width: number): string {
   for (const tab of state.tabs) {
     let label = tab.label;
     if (state.isBuffered && dirtyTabIds.has(tab.id)) {
-      label += " ● Unsaved";
+      label += ` ${i18n.t("unsavedMarker")}`;
     }
     const isFocused =
       state.tabActionFocus >= 0 &&

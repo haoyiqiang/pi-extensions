@@ -10,6 +10,7 @@
   "files": [
     "index.ts",
     "src",
+    "locales",
     "README.md",
     "README.zh-CN.md",
     "SKILL.md",
@@ -23,7 +24,8 @@
   },
   "pi": {
     "extensions": [
-      "./index.ts"
+      "./index.ts",
+      "../pi-extensions-i18n/index.ts"
     ],
     "skills": [
       "./SKILL.md"
@@ -60,6 +62,9 @@
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.85.1",
     "@earendil-works/pi-tui": ">=0.85.1"
+  },
+  "dependencies": {
+    "pi-extensions-i18n": "^0.8.0"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.87.1",

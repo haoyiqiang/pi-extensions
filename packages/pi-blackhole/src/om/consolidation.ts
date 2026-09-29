@@ -29,6 +29,7 @@ import { effectiveContextWindow } from "./model-budget.js";
 import { estimateEntryTokens, estimateStringTokens } from "./tokens.js";
 import { serializeSourceAddressedBranchEntries } from "./serialize.js";
 import { OBSERVER_SYSTEM } from "./agents/observer/prompts.js";
+import { i18n, notifyBlackhole } from "../i18n.js";
 
 /** Fixed overhead for system prompt, tool definitions, and turn scaffold in context window pre-check. */
 const AGENT_LOOP_RESERVE = 8_000;
@@ -427,15 +428,16 @@ export function makeModelResolver(
     debugLog(`${stage}.model_unavailable`, { reason: resolved.reason });
     if (!runtime.resolveFailureNotified && ctx.hasUI && ctx.ui) {
       if (runtime.failedInCycle.size > 0 && resolved.reason.includes("all candidates exhausted")) {
-        const fallbackMsg =
-          stageFallbacks.length === 0 ? "no fallbacks configured" : "no available fallbacks";
+        const fallbackMsg = stageFallbacks.length === 0
+          ? i18n.t("omNoFallbacksConfigured")
+          : i18n.t("omNoFallbacksAvailable");
         runtime.tryEmitInfo(
           true,
           ctx.ui,
-          `Observational memory: ${stage} skipped — model unavailable (cooldown set to 0, ${fallbackMsg}, will retry next run)`,
+          i18n.t("omStageUnavailableRetry", { stage, fallbacks: fallbackMsg }),
         );
       } else {
-        ctx.ui.notify(`Observational memory: ${stage} skipped — ${resolved.reason}`, "warning");
+        notifyBlackhole(ctx, "warning", i18n.t("omStageSkipped", { stage, reason: resolved.reason }));
       }
       runtime.resolveFailureNotified = true;
     }
@@ -501,7 +503,7 @@ function validateCursors(entries: Entry[], runtime: Runtime): void {
 }
 
 function maybeLaunchConsolidation(pi: ExtensionAPI, runtime: Runtime, ctx: ConsolidationCtx): void {
-  runtime.ensureConfig(ctx.cwd, (msg) => ctx.ui?.notify?.(msg, "warning"));
+  runtime.ensureConfig(ctx.cwd, (msg) => notifyBlackhole(ctx, "warning", msg));
   if (runtime.config.memory === false) return;
 
   // Provider-aware skip: another engine owns this provider (e.g. Codex native
@@ -741,18 +743,14 @@ function handleWorkerErrorAfterClose(args: {
     // Issue #80: the error text can be a provider body; it goes to the
     // cooldown/debug log only, never into the toast. The pointer itself
     // must be true too, so it names only a destination that was written.
-    ctx.ui?.notify(
-      `Observational memory: ${stage} kept its ${keptNoun}, but a later turn failed (${
-        deterministic
-          ? cooled
-            ? "deterministic error, model cooled down; details in cooldown log"
-            : "deterministic error; no cooldown recorded"
-          : runtime.config.debugLog === true
-            ? "transient error; details in debug log"
-            : "transient error; enable debugLog for details"
-      })`,
-      "warning",
-    );
+    const detail = deterministic
+      ? cooled
+        ? i18n.t("omFailDeterministicCooled")
+        : i18n.t("omFailDeterministicNoCooldown")
+      : runtime.config.debugLog === true
+        ? i18n.t("omFailTransientDebug")
+        : i18n.t("omFailTransientNoDebug");
+    notifyBlackhole(ctx, "warning", i18n.t("omStageKeptFailed", { stage, kept: keptNoun, detail }));
   }
 }
 
@@ -903,7 +901,7 @@ export async function runObserverStage(
     runtime.tryEmitWorkerInfo(
       ctx.hasUI,
       ctx.ui,
-      `Observational memory: observer running on ~${chunkTokens.toLocaleString()}-token chunk (of ${effectiveTokens.toLocaleString()} accumulated)`,
+      i18n.t("observerRunning", { chunk: chunkTokens.toLocaleString(), total: effectiveTokens.toLocaleString() }),
     );
     debugLog("observer.start", {
       tokens,
@@ -950,7 +948,7 @@ export async function runObserverStage(
       runtime.tryEmitInfo(
         ctx.hasUI,
         ctx.ui,
-        `Observational memory: observer skipping ${(resolved.model as any).provider}/${(resolved.model as any).id} (context window ${effectiveObsCtx.toLocaleString()} too small for ~${observerEstimatedInput.toLocaleString()}-token input)`,
+        i18n.t("observerInputTooLarge", { model: `${(resolved.model as any).provider}/${(resolved.model as any).id}`, window: effectiveObsCtx.toLocaleString(), input: observerEstimatedInput.toLocaleString() }),
       );
       continue;
     }
@@ -1033,7 +1031,7 @@ export async function runObserverStage(
         runtime.tryEmitWorkerInfo(
           ctx.hasUI,
           ctx.ui,
-          `Observational memory: ${result.observations.length} observation${result.observations.length === 1 ? "" : "s"} recorded`,
+          i18n.t("observationsRecorded", { count: result.observations.length, plural: result.observations.length === 1 ? "" : "s" }),
         );
         return "continue";
       }
@@ -1042,15 +1040,15 @@ export async function runObserverStage(
       const reason = result.emptyReason;
       const reasonLabel = reason
         ? reason.kind === "tool_not_called"
-          ? "model did not call the observation tool"
+          ? i18n.t("observerNoToolCall")
           : reason.kind === "all_rejected"
-            ? `${reason.count} observation(s) rejected for invalid sourceEntryIds`
+            ? i18n.t("observerInvalidSources", { count: reason.count })
             : reason.kind === "all_duplicates"
-              ? `${reason.count} observation(s) were duplicates of already-recorded entries`
+              ? i18n.t("observerDuplicates", { count: reason.count })
               : reason.kind === "empty_array"
-                ? "model called the tool but submitted an empty observations array"
-                : "nothing new to record"
-        : "unknown reason";
+                ? i18n.t("observerEmptyArray")
+                : i18n.t("observerNothingNew")
+        : i18n.t("observerUnknownReason");
       const reasonLevel: "info" | "warning" = reason
         ? reason.kind === "no_new_content" || reason.kind === "all_duplicates"
           ? "info"
@@ -1060,12 +1058,12 @@ export async function runObserverStage(
       runtime.advanceCursor("observer", coversUpToId, "empty");
       if (reasonLevel === "warning") {
         if (ctx.hasUI)
-          ctx.ui?.notify(`Observational memory: no observations — ${reasonLabel}`, "warning");
+          notifyBlackhole(ctx, "warning", i18n.t("omNoObservations", { reason: reasonLabel }));
       } else {
         runtime.tryEmitWorkerInfo(
           ctx.hasUI,
           ctx.ui,
-          `Observational memory: no observations — ${reasonLabel}`,
+          i18n.t("omNoObservations", { reason: reasonLabel }),
         );
       }
       return "continue";
@@ -1225,7 +1223,7 @@ async function runReflectorStage(
     runtime.tryEmitWorkerInfo(
       ctx.hasUI,
       ctx.ui,
-      `Observational memory: reflector running (~${effectiveReflectionTokens.toLocaleString()} tokens accumulated, ~${reflectorInputTokens.toLocaleString()}-token input)`,
+      i18n.t("reflectorRunning", { total: effectiveReflectionTokens.toLocaleString(), input: reflectorInputTokens.toLocaleString() }),
     );
 
     // Candidate provenance is captured during resolution so a settings reload
@@ -1253,7 +1251,7 @@ async function runReflectorStage(
       runtime.tryEmitInfo(
         ctx.hasUI,
         ctx.ui,
-        `Observational memory: reflector skipping ${(resolved.model as any).provider}/${(resolved.model as any).id} (context window ${effectiveRefCtx.toLocaleString()} too small for ~${reflectorEstimatedInput.toLocaleString()}-token input)`,
+        i18n.t("reflectorInputTooLarge", { model: `${(resolved.model as any).provider}/${(resolved.model as any).id}`, window: effectiveRefCtx.toLocaleString(), input: reflectorEstimatedInput.toLocaleString() }),
       );
       continue;
     }
@@ -1543,7 +1541,7 @@ async function runDropperStage(
     runtime.tryEmitWorkerInfo(
       ctx.hasUI,
       ctx.ui,
-      `Observational memory: dropper running (~${effectiveDropTokens.toLocaleString()} tokens accumulated, ~${dropperInputTokens.toLocaleString()}-token input)`,
+      i18n.t("dropperRunning", { total: effectiveDropTokens.toLocaleString(), input: dropperInputTokens.toLocaleString() }),
     );
 
     // Candidate provenance is captured during resolution so a settings reload
@@ -1600,7 +1598,7 @@ async function runDropperStage(
         runtime.tryEmitInfo(
           ctx.hasUI,
           ctx.ui,
-          `Observational memory: dropper skipping ${(resolved.model as any).provider}/${(resolved.model as any).id} (context window ${effectiveDropCtx.toLocaleString()} too small for ~${dropperEstimatedInput.toLocaleString()}-token input)`,
+          i18n.t("dropperInputTooLarge", { model: `${(resolved.model as any).provider}/${(resolved.model as any).id}`, window: effectiveDropCtx.toLocaleString(), input: dropperEstimatedInput.toLocaleString() }),
         );
         continue;
       }

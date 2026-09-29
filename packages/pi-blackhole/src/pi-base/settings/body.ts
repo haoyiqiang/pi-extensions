@@ -68,6 +68,7 @@ import {
   estimateDescriptionRows,
 } from "./render.ts";
 import { createConfirm } from "./confirm.ts";
+import { i18n } from "../../i18n.js";
 
 const PREFERRED_INNER_ROWS = 45;
 
@@ -226,9 +227,9 @@ export function createSettingsModalBody<F extends Field>(
   function mountDirtyConfirm(): void {
     state.confirm = createConfirm(
       {
-        message: ["You have unsaved changes."],
-        confirmLabel: "Discard",
-        cancelLabel: "Cancel",
+        message: [i18n.t("unsavedChanges")],
+        confirmLabel: i18n.t("confirmDiscard"),
+        cancelLabel: i18n.t("confirmCancel"),
         danger: true,
       },
       (confirmed) => {
@@ -707,8 +708,8 @@ export function createSettingsModalBody<F extends Field>(
       if (state.confirm) {
         const lines = state.confirm.render(frameContentWidth(width));
         const title = state.options.title
-          ? `${state.options.title} — Discard changes?`
-          : "Discard changes?";
+          ? `${state.options.title} — ${i18n.t("confirmDiscardChanges")}`
+          : i18n.t("confirmDiscardChanges");
         const opts: FrameOptions = {
           title,
           fixedInnerRows: inner,
@@ -741,7 +742,7 @@ export function createSettingsModalBody<F extends Field>(
       );
 
       const dirtyDot =
-        state.isBuffered && isDirty(state) ? ` ${state.args.theme.fg("accent", "● Unsaved")}` : "";
+        state.isBuffered && isDirty(state) ? ` ${state.args.theme.fg("accent", i18n.t("unsavedMarker"))}` : "";
       const title = state.options.title ? `${state.options.title}${dirtyDot}` : state.options.title;
 
       const frameLines = frame(bodyLines, width, state.args.theme, {

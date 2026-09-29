@@ -162,7 +162,7 @@ describe("compact-failed hook", () => {
     handler(failedEvent({ reason: "overflow", aborted: true, willRetry: true }), ctx);
 
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "blackhole: overflow compaction aborted, retrying turn",
+      "[blackhole] overflow compaction aborted, retrying turn",
       "info",
     );
   });
@@ -209,7 +209,7 @@ describe("compact-failed hook", () => {
     );
 
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "blackhole: compaction failed — summary too long",
+      "[blackhole] compaction failed — summary too long",
       "error",
     );
   });
@@ -249,7 +249,7 @@ describe("compact-failed hook", () => {
     // compactWasPiVcc means the current failure is ours: not skipped, error
     // surfaced, and the attempt marker consumed before a later failure arrives.
     expect(traceEvents()).not.toContain("compact_failed.skipped_pi_default");
-    expect(ctx.ui.notify).toHaveBeenCalledWith("blackhole: compaction failed — boom", "error");
+    expect(ctx.ui.notify).toHaveBeenCalledWith("[blackhole] compaction failed — boom", "error");
     expect(traceData("compact_failed.received")).toMatchObject({
       fromExtension: false,
       compactWasPiVcc: true,

@@ -30,6 +30,7 @@ import {
   type Entry,
 } from "./ledger/index.js";
 import { autoCompactThreshold } from "./model-budget.js";
+import { i18n } from "../i18n.js";
 
 const STATUS_KEY = "blackhole";
 const SPINNER_FRAMES = ["◐", "◓", "◑", "◒"] as const;
@@ -127,7 +128,7 @@ export function registerStatusBar(pi: ExtensionAPI, runtime: Runtime): void {
     const o = `${t.fg("muted", "O")}${gaugeBar(t, gauges.obsSince, cfg.observeAfterTokens)}`;
     const p = `${t.fg("muted", "P")}${gaugeBar(t, gauges.pool, cfg.observationsPoolMaxTokens)}`;
     const x = `${t.fg("muted", "X")}${gaugeBar(t, gauges.ctxTokens, threshold)}`;
-    let s = `${t.fg("success", "bh")} ${o}  ${p}  ${x}`;
+    let s = `${t.fg("success", i18n.t("statusBarPrefix"))} ${o}  ${p}  ${x}`;
     const parts: string[] = [];
     for (const w of workers) {
       if (w.state.kind === "running") {

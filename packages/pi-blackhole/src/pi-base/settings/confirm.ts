@@ -2,6 +2,7 @@ import type { Component, TUI } from "@earendil-works/pi-tui";
 import { matchesKey } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { formatHintLine, wrapLine, type KeyHint } from "./frame.ts";
+import { i18n } from "../../i18n.js";
 
 export interface ConfirmOptions {
   /** Lines of message body (component word-wraps via wrapLine). */
@@ -21,8 +22,8 @@ export function createConfirm(
   done: (confirmed: boolean) => void,
   args: ConfirmArgs,
 ): Component {
-  const confirmLabel = options.confirmLabel ?? "Confirm";
-  const cancelLabel = options.cancelLabel ?? "Cancel";
+  const confirmLabel = options.confirmLabel ?? i18n.t("confirmConfirm");
+  const cancelLabel = options.cancelLabel ?? i18n.t("confirmCancel");
   const isDanger = options.danger ?? false;
 
   // Order + pre-selection:

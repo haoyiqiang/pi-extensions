@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+process.env.PI_EXTENSIONS_LOCALE = "en-US";
 import { test } from "node:test";
 
 import { type ContextEvent, Theme, type ThemeColor } from "@earendil-works/pi-coding-agent";

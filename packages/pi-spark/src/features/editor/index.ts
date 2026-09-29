@@ -4,6 +4,7 @@ import { Spinner } from "./spinner";
 import { SplitLine } from "../../components/split-line";
 import { loadConfig } from "../../config";
 import { PRESET_CHANGE, parsePresetChange } from "../../events";
+import { i18n } from "../../i18n";
 import { formatModel } from "../../utils/format";
 
 import type { ExtensionAPI, ExtensionContext, KeybindingsManager } from "@earendil-works/pi-coding-agent";
@@ -97,7 +98,7 @@ class Editor extends CustomEditor {
   private getScrollHint(direction: "↑" | "↓", hiddenLineCount: number): string {
     if (hiddenLineCount <= 0) return "";
 
-    return this.ctx.ui.theme.fg("dim", `${direction} ${hiddenLineCount} more`);
+    return this.ctx.ui.theme.fg("dim", `${direction} ${i18n.t("editorMore", { count: String(hiddenLineCount) })}`);
   }
 
   private withThinkingLevelColor(text: string): string {
@@ -145,17 +146,17 @@ export function registerEditor(pi: ExtensionAPI, events: EventCollector): void {
       case "thinking_start":
       case "thinking_delta":
       case "thinking_end":
-        editor?.setWorkingMessage("Thinking");
+        editor?.setWorkingMessage(i18n.t("editorThinking"));
         break;
       case "text_start":
       case "text_delta":
       case "text_end":
-        editor?.setWorkingMessage("Streaming");
+        editor?.setWorkingMessage(i18n.t("editorStreaming"));
         break;
       case "toolcall_start":
       case "toolcall_delta":
       case "toolcall_end":
-        editor?.setWorkingMessage("Running tools");
+        editor?.setWorkingMessage(i18n.t("editorRunningTools"));
         break;
       default:
         editor?.setWorkingMessage();
@@ -165,12 +166,12 @@ export function registerEditor(pi: ExtensionAPI, events: EventCollector): void {
 
   pi.on("tool_execution_start", (event) => {
     runningToolCallIds.add(event.toolCallId);
-    editor?.setWorkingMessage("Running tools");
+    editor?.setWorkingMessage(i18n.t("editorRunningTools"));
   });
 
   pi.on("tool_execution_end", (event) => {
     runningToolCallIds.delete(event.toolCallId);
-    editor?.setWorkingMessage(runningToolCallIds.size > 0 ? "Running tools" : undefined);
+    editor?.setWorkingMessage(runningToolCallIds.size > 0 ? i18n.t("editorRunningTools") : undefined);
   });
 
   pi.on("agent_end", () => {

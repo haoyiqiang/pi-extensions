@@ -7,6 +7,8 @@ import { writeFileSync } from "node:fs";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { i18n, NOTICE_SOURCE } from "../i18n.js";
+import { notifyWithSource } from "pi-extensions-i18n";
 
 function defaultOutPath(cwd: string, now: Date): string {
   const iso = now.toISOString();
@@ -16,13 +18,9 @@ function defaultOutPath(cwd: string, now: Date): string {
 
 export const registerBlackholeExportCommand = (pi: ExtensionAPI) => {
   pi.registerCommand("blackhole-export", {
-    description:
-      "Export distilled project memory (observations/reflections from past sessions) to markdown. Usage: /blackhole-export [out:<path>]. If no out: is provided, writes to the project local cwd.",
+    description: i18n.t("exportCommandDescription"),
     handler: async (args: string, ctx) => {
-      ctx.ui.notify(
-        "Exporting project memory… this may take a few minutes depending on the number of session files for the project.",
-        "info",
-      );
+      notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: i18n.t("exportStarting") });
       // Yield so the TUI can paint the warning before the heavy scan blocks.
       await new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -35,10 +33,7 @@ export const registerBlackholeExportCommand = (pi: ExtensionAPI) => {
         : defaultOutPath(ctx.cwd, now);
 
       if (outMatch && !outPath.toLowerCase().endsWith(".md")) {
-        ctx.ui.notify(
-          `Export path must be a markdown file: ${outPath}. Use out:<path-to-file>.md`,
-          "error",
-        );
+        notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "error", message: i18n.t("exportPathNotMarkdown", { path: outPath }) });
         return;
       }
 
@@ -47,7 +42,7 @@ export const registerBlackholeExportCommand = (pi: ExtensionAPI) => {
       if (userOut && !isAbsolute(userOut)) {
         const rel = relative(resolve(ctx.cwd), resolvedOut);
         if (rel.startsWith("..") || isAbsolute(rel)) {
-          ctx.ui.notify(`Export path escapes current directory: ${outPath}`, "error");
+          notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "error", message: i18n.t("exportPathEscapes", { path: outPath }) });
           return;
         }
       }
@@ -55,7 +50,7 @@ export const registerBlackholeExportCommand = (pi: ExtensionAPI) => {
       const { findGitRoot } = await import("../project-recall/session-dir.js");
       const { root: gitRoot, warning: gitWarning } = await findGitRoot(ctx.cwd);
       if (gitWarning) {
-        ctx.ui.notify(gitWarning, "warning");
+        notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: gitWarning });
       }
       const activeSessionFile = ctx.sessionManager.getSessionFile() ?? undefined;
 
@@ -74,12 +69,9 @@ export const registerBlackholeExportCommand = (pi: ExtensionAPI) => {
         if (t - lastProgressAt < 800 && scanned !== 0 && scanned !== total) return;
         lastProgressAt = t;
         if (scanned === 0 && total > 0) {
-          ctx.ui.notify(
-            `Scanning ${total} session files for observational memory markers…`,
-            "info",
-          );
+          notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: i18n.t("exportScanningMarkers", { total }) });
         } else if (total > 0) {
-          ctx.ui.notify(`Scanning ${scanned}/${total} session files…`, "info");
+          notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: i18n.t("exportScanningProgress", { scanned, total }) });
         }
       };
 
@@ -99,18 +91,12 @@ export const registerBlackholeExportCommand = (pi: ExtensionAPI) => {
         corpus.reflections.length === 0 &&
         corpus.droppedIds.size === 0
       ) {
-        ctx.ui.notify(
-          `No observational memory found for ${basename(corpus.projectRoot)} (${corpus.sessionsConsidered} sessions scanned).`,
-          "warning",
-        );
+        notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("exportNoneFound", { project: basename(corpus.projectRoot), sessions: corpus.sessionsConsidered }) });
         return;
       }
 
       if (corpus.observations.length > 0 || corpus.reflections.length > 0) {
-        ctx.ui.notify(
-          `Ranking ${corpus.observations.length} observations and ${corpus.reflections.length} reflections…`,
-          "info",
-        );
+        notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: i18n.t("exportRanking", { observations: corpus.observations.length, reflections: corpus.reflections.length }) });
         await new Promise<void>((resolve) => setImmediate(resolve));
       }
 
@@ -123,29 +109,26 @@ export const registerBlackholeExportCommand = (pi: ExtensionAPI) => {
       try {
         writeFileSync(outPath, markdown, "utf-8");
       } catch (error) {
-        ctx.ui.notify(`Export failed to write ${outPath}: ${String(error)}`, "error");
+        notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "error", message: i18n.t("exportWriteFailed", { path: outPath, error: String(error) }) });
         return;
       }
 
+      const covered = stats.suppressedByReflections > 0 ? i18n.t("exportCoveredSuffix", { count: stats.suppressedByReflections }) : "";
       const lines = [
-        `Project memory exported to ${outPath}`,
+        i18n.t("exportDone", { path: outPath }),
         "",
-        `- sessions scanned: ${stats.sessionsConsidered} (${stats.filesWithMarkers} with memory entries)`,
-        `- observations: ${stats.observationsTotal} → ${stats.observationsRendered} rendered (${stats.duplicatesCollapsed} duplicates collapsed, ${stats.observationsFiltered} below viability gate${stats.suppressedByReflections > 0 ? `, ${stats.suppressedByReflections} covered by reflections` : ""})`,
-        stats.topicGroups > 0
-          ? `- ${stats.topicGroups} topic groups identified; each observation shows its **topic badge**`
-          : null,
-        `- reflections: ${stats.reflectionsTotal}`,
+        i18n.t("exportSessionsLine", { considered: stats.sessionsConsidered, withMarkers: stats.filesWithMarkers }),
+        i18n.t("exportObservationsLine", { total: stats.observationsTotal, rendered: stats.observationsRendered, duplicates: stats.duplicatesCollapsed, filtered: stats.observationsFiltered, covered }),
+        stats.topicGroups > 0 ? i18n.t("exportTopicGroups", { count: stats.topicGroups }) : null,
+        i18n.t("exportReflectionsLine", { count: stats.reflectionsTotal }),
       ];
       if (stats.orphanedObservations > 0 || stats.orphanedReflections > 0) {
-        lines.push(
-          `- unattributed pending memory: ${stats.orphanedObservations} obs / ${stats.orphanedReflections} reflections from ${stats.orphanedSessions} lost session(s)`,
-        );
+        lines.push(i18n.t("exportUnattributed", { observations: stats.orphanedObservations, reflections: stats.orphanedReflections, sessions: stats.orphanedSessions }));
       }
       if (stats.droppedExcluded > 0) {
-        lines.push(`- dropper-pruned ids excluded: ${stats.droppedExcluded}`);
+        lines.push(i18n.t("exportDroppedExcluded", { count: stats.droppedExcluded }));
       }
-      lines.push("", "The file is plain markdown — curate it, then import into any memory system.");
+      lines.push("", i18n.t("exportFooter"));
 
       pi.sendMessage({
         customType: "blackhole-export",

@@ -25,6 +25,7 @@ import type { PendingOMState } from "./pending.js";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import type { AuthResult } from "@earendil-works/pi-ai";
 import { debugLog } from "./debug-log.js";
+import { i18n, notifyBlackhole } from "../i18n.js";
 
 interface ResolvedModelBase {
   ok: true;
@@ -322,7 +323,7 @@ export class Runtime {
     if (this.hasEmittedInfoThisTurn) return false;
     this.hasEmittedInfoThisTurn = true;
     try {
-      ui.notify(message, "info");
+      notifyBlackhole({ hasUI, ui }, "info", message);
     } catch {
       // Stale extension context — harmless.
     }
@@ -416,7 +417,7 @@ export class Runtime {
         this.tryEmitInfo(
           ctx.hasUI,
           ctx.ui,
-          `Observational memory: ${stageName} skipping ${key} (failed this cycle, cooldown disabled)`,
+          i18n.t("omSkippingFailedCycle", { stage: stageName, model: key }),
         );
         debugLog("model.failed_this_cycle", { stage: stageName, model: key });
         continue;
@@ -428,7 +429,7 @@ export class Runtime {
         this.tryEmitInfo(
           ctx.hasUI,
           ctx.ui,
-          `Observational memory: ${stageName} skipping ${key} (cooldown — details in cooldown log)`,
+          i18n.t("omSkippingCooldown", { stage: stageName, model: key }),
         );
         // Issue #110 follow-up: a cycle skipped by cooldown is otherwise
         // invisible in the debug log (only the toast shows it). Emit the
@@ -447,10 +448,7 @@ export class Runtime {
       const configured = ctx.modelRegistry.find(candidate.provider, candidate.id);
       if (!configured) {
         if (ctx.hasUI && ctx.ui) {
-          ctx.ui.notify(
-            `Observational memory: ${stageName} model ${candidate.provider}/${candidate.id} not found`,
-            "warning",
-          );
+          notifyBlackhole(ctx, "warning", i18n.t("omModelNotFound", { stage: stageName, model: `${candidate.provider}/${candidate.id}` }));
         }
         continue;
       }
@@ -465,10 +463,7 @@ export class Runtime {
       }
       if (!auth.ok || !hasAuth) {
         if (ctx.hasUI && ctx.ui) {
-          ctx.ui.notify(
-            `Observational memory: ${stageName} no auth for ${candidate.provider}`,
-            "warning",
-          );
+          notifyBlackhole(ctx, "warning", i18n.t("omNoAuth", { stage: stageName, provider: candidate.provider }));
         }
         continue;
       }
@@ -580,7 +575,7 @@ export class Runtime {
     this.tryEmitInfo(
       ctx.hasUI,
       ctx.ui,
-      `Observational memory: ${stageName} skipped — all candidates failed (sessionFallback disabled, won't use main model)`,
+      i18n.t("omAllCandidatesFailed", { stage: stageName }),
     );
     this.resolveFailureNotified = true;
 
@@ -811,7 +806,7 @@ export class Runtime {
     if (phase === "dropper") this.lastDropperError = message;
     if (ctx.hasUI && ctx.ui) {
       try {
-        ctx.ui.notify(`Observational memory: ${phase} failed: ${message}`, "warning");
+        notifyBlackhole(ctx, "warning", i18n.t("omPhaseFailed", { phase, message }));
       } catch {
         // Stale extension context — harmless.
       }
@@ -836,7 +831,7 @@ export class Runtime {
         errorMessage = error instanceof Error ? error.message : String(error);
         if (!this.disposed && hasUI && ui) {
           try {
-            ui.notify(`Observational memory: ${label} failed: ${errorMessage}`, "warning");
+            notifyBlackhole({ hasUI, ui }, "warning", i18n.t("omPhaseFailed", { phase: label, message: errorMessage }));
           } catch {
             // Stale extension context — harmless.
           }

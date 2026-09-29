@@ -8,6 +8,7 @@ export default defineConfig({
     // disks, so allow headroom above the 10s default for tests that load the graph.
     testTimeout: 120_000,
     include: ["tests/**/*.test.ts", "src/**/*.test.ts"],
+    setupFiles: ["tests/setup.ts"],
   },
   resolve: {
     alias: [

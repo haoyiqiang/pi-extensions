@@ -29,6 +29,8 @@ import { buildRetainedToolOutputProjection } from "../core/tool-output-budget.js
 import { buildGlobalIndexById, loadGlobalIndexById } from "../core/global-indices.js";
 import { loadGitFileTags } from "../extract/git-status.js";
 import { collectFilesTouched } from "../extract/file-touch.js";
+import { i18n, NOTICE_SOURCE } from "../i18n.js";
+import { notifyWithSource, type NoticeLevel } from "pi-extensions-i18n";
 
 export const PI_VCC_COMPACT_INSTRUCTION = "__pi_vcc__";
 
@@ -43,13 +45,13 @@ const migrationNotifyCount = new Map<string, number>();
  */
 export function notifyMigrationReminder(
   sessionId: string,
-  notify: (msg: string, level: string) => void,
+  notify: (msg: string, level: NoticeLevel) => void,
 ): void {
   const count = migrationNotifyCount.get(sessionId) ?? 0;
   if (count >= 2) return;
   if (!configFileNeedsMigration()) return;
   migrationNotifyCount.set(sessionId, count + 1);
-  notify("blackhole: Use `/blackhole configure` to save your updated configuration.", "info");
+  notify(i18n.t("migrationReminder"), "info");
 }
 
 const formatTokens = (n: number): string => {
@@ -77,15 +79,21 @@ export interface CompactionStats {
  *   blackhole: 6 source entries processed; tail kept 1/4 user turns (~0.5k tok).
  */
 export const formatCompactionStats = (stats: CompactionStats): string => {
-  const parts: string[] = [`${stats.summarized} source entries processed`];
-  parts.push(`tail kept ${stats.keptUserTurns}/${stats.totalUserTurns} user turns`);
-  if (stats.smartKeepAdjusted) {
-    parts.push(`smart keep:${stats.smartFromKeep}→${stats.keptUserTurns}`);
-  }
-  if (stats.keepFallbackToCompactAll) {
-    parts.push(`compact-all`);
-  }
-  return `blackhole: ${parts.join("; ")} (~${formatTokens(stats.keptTokensEst)} tok).`;
+  // Compatibility with older persisted/testing stats that only carry `kept`.
+  const kept = stats.keptUserTurns ?? stats.kept;
+  const total = stats.totalUserTurns ?? kept;
+  const smart = stats.smartKeepAdjusted
+    ? i18n.t("compactionStatsSmart", { from: stats.smartFromKeep, to: kept })
+    : "";
+  const all = stats.keepFallbackToCompactAll ? i18n.t("compactionStatsAll") : "";
+  return i18n.t("compactionStats", {
+    summarized: stats.summarized,
+    kept,
+    total,
+    smart,
+    all,
+    tokens: formatTokens(stats.keptTokensEst),
+  });
 };
 
 const dbg = (debug: boolean, data: Record<string, unknown>) => {
@@ -292,11 +300,10 @@ export function buildOwnCut(
   };
 }
 
-const REASON_MESSAGES: Record<OwnCutCancelReason, string> = {
-  no_live_messages: "blackhole: Nothing to compact (no live messages)",
-  too_few_live_messages:
-    'blackhole: Too few live messages — Pi\'s default logic preserves visible context. Set tailBehavior to "minimal" in config to force compaction with fewer messages.',
-};
+const ownCutReasonMessage = (reason: OwnCutCancelReason): string =>
+  reason === "no_live_messages"
+    ? i18n.t("ownCutNoLiveMessages")
+    : i18n.t("ownCutTooFewLiveMessages");
 
 export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) => {
   pi.on("session_before_compact", (event, ctx) => {
@@ -307,7 +314,7 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
     // throw. Every attempt overwrites stale state; success/failure hooks consume it.
     omRuntime.compactWasPiVcc = isPiVcc;
     omRuntime.lastCompactCancelled = false;
-    omRuntime.ensureConfig(ctx.cwd ?? process.cwd(), (msg) => ctx.ui?.notify?.(msg, "warning"));
+    omRuntime.ensureConfig(ctx.cwd ?? process.cwd(), (msg) => notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: msg }));
     const trace = (ev: string, d?: Record<string, unknown>) =>
       debugLog(ev, d, omRuntime.config.debugLog === true);
 
@@ -470,7 +477,7 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
 
       trace("before_compact.cancel", { reason: ownCut.reason, isPiVcc });
       try {
-        ctx?.ui?.notify?.(REASON_MESSAGES[ownCut.reason], "warning");
+        notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: ownCutReasonMessage(ownCut.reason) });
       } catch {}
       omRuntime.lastCompactCancelled = true;
       return { cancel: true };
@@ -744,10 +751,7 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
       trace("before_compact.append_fallback", { reason });
       if (omRuntime.appendFallbackNotified) return;
       omRuntime.appendFallbackNotified = true;
-      ctx?.ui?.notify?.(
-        `pi-blackhole: append summary mode fell back to a complete replacement summary (${reason}); run /blackhole to rebase back into append segments`,
-        "warning",
-      );
+      notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("appendSummaryFallback", { reason }) });
     };
     let details: PiVccCompactionDetails = legacyDetails;
     if (omRuntime.config.compactionSummaryMode === "append") {
@@ -798,10 +802,7 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
               omRuntime.config.reflectionsPoolMaxTokens ?? DEFAULTS.reflectionsPoolMaxTokens,
           });
           if (result.decision.insufficientRecovery) {
-            ctx.ui?.notify?.(
-              "blackhole: estimated context still exceeds available capacity after compaction; Pi overflow retry/error handling remains in control",
-              "warning",
-            );
+            notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("contextStillTooLarge") });
           }
         } catch (error) {
           warnAppendFallback(
@@ -840,8 +841,8 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
     const sessionId = ctx.sessionManager.getSessionId();
     setTimeout(() => {
       try {
-        ctx?.ui?.notify?.(formatCompactionStats(stats), "info");
-        notifyMigrationReminder(sessionId, (msg, level) => ctx?.ui?.notify?.(msg, level as any));
+        notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: formatCompactionStats(stats) });
+        notifyMigrationReminder(sessionId, (msg, level) => notifyWithSource({ ctx, source: NOTICE_SOURCE, level, message: msg }));
       } catch {}
     }, 500);
   });

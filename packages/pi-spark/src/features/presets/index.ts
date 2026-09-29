@@ -3,6 +3,8 @@ import { Key } from "@earendil-works/pi-tui";
 import { PresetManager } from "./manager";
 import { showPresetSelector } from "./selector";
 import { loadConfig } from "../../config";
+import { i18n, NOTICE_SOURCE } from "../../i18n";
+import { notifyWithSource } from "pi-extensions-i18n";
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
@@ -10,7 +12,7 @@ export function registerPresets(pi: ExtensionAPI): void {
   let presetManager: PresetManager | undefined = undefined;
 
   pi.registerFlag("preset", {
-    description: "Model preset to use",
+    description: i18n.t("presetFlagDescription"),
     type: "string",
   });
 
@@ -19,7 +21,7 @@ export function registerPresets(pi: ExtensionAPI): void {
     const presetFlag = event.reason === "startup" ? pi.getFlag("preset") : undefined;
 
     if (!config || Object.keys(config).length === 0) {
-      if (presetFlag) ctx.ui.notify("No presets defined in spark.json", "warning");
+      if (presetFlag) notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("noPresets") });
       return;
     }
 
@@ -27,7 +29,7 @@ export function registerPresets(pi: ExtensionAPI): void {
     presetManager.sync(ctx);
 
     pi.registerCommand("preset", {
-      description: "Switch model preset",
+      description: i18n.t("presetCommandDescription"),
       getArgumentCompletions: (prefix: string) => {
         if (!presetManager) return null;
 
@@ -67,14 +69,14 @@ export function registerPresets(pi: ExtensionAPI): void {
   });
 
   pi.registerShortcut(Key.ctrlSuper("p"), {
-    description: "Cycle model preset forward",
+    description: i18n.t("presetCycleForward"),
     handler: async (ctx) => {
       await presetManager?.cycle(ctx, "forward");
     },
   });
 
   pi.registerShortcut(Key.ctrlShiftSuper("p"), {
-    description: "Cycle model preset backward",
+    description: i18n.t("presetCycleBackward"),
     handler: async (ctx) => {
       await presetManager?.cycle(ctx, "backward");
     },

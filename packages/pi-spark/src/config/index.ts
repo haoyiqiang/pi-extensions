@@ -4,6 +4,8 @@ import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { defu } from "defu";
 
 import { featureSchemas } from "./schema";
+import { i18n, NOTICE_SOURCE } from "../i18n";
+import { notifyWithSource } from "pi-extensions-i18n";
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { SparkConfig } from "./schema";
@@ -51,7 +53,7 @@ export function loadConfig(ctx: ExtensionContext): SparkConfig {
   }
 
   if (errors.length > 0) {
-    ctx.ui.notify(`Invalid pi-spark config: ${errors.join("; ")}`, "error");
+    notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "error", message: i18n.t("invalidConfig", { errors: errors.join("; ") }) });
   }
 
   cache.set(ctx.cwd, config as SparkConfig);

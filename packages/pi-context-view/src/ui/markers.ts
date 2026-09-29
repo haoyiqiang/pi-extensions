@@ -7,6 +7,7 @@
 import type { Theme, ThemeColor } from "@earendil-works/pi-coding-agent";
 import { wrapTextWithAnsi } from "@earendil-works/pi-tui";
 
+import { i18n } from "../i18n.ts";
 import { BODY_INDENT, fitLine } from "./layout.ts";
 
 /** Dim separator introducing a state marker after the estimate it explains. */
@@ -29,46 +30,49 @@ interface MarkerLegend {
 	readonly explanation: string;
 }
 
-/** One fixed sentence per marker: each states its own accounting, independent of the others. */
-const MARKER_LEGENDS: Record<ContextMarker, MarkerLegend> = {
-	highlighted: {
-		keyword: "Highlighted",
-		// Restored extension lines carry this color, so the bullet opens in it too.
-		color: "syntaxNumber",
-		explanation: " parts are injected by extensions into pi’s system prompt. They are excluded from the" +
-			" System Prompt token count and included in the injecting extension’s count.",
-	},
-	guess: {
-		keyword: "(guess)",
-		color: "dim",
-		explanation: " sources are inferred from the injected text itself.",
-	},
-	dropped: {
-		keyword: "Dropped",
-		color: "toolDiffRemoved",
-		explanation: " parts were replaced by a custom system prompt and are counted nowhere.",
-	},
-	moved: {
-		keyword: "Moved",
-		color: "warning",
-		explanation: " blocks appear in a different position in the system prompt than usual." +
-			" Their token counts are unchanged.",
-	},
-};
+/** One sentence per marker: each states its own accounting, independent of the others. */
+function markerLegend(marker: ContextMarker): MarkerLegend {
+	switch (marker) {
+		case "highlighted":
+			return {
+				keyword: i18n.t("markerHighlighted"),
+				color: "syntaxNumber",
+				explanation: i18n.t("markerHighlightedExplanation"),
+			};
+		case "guess":
+			return {
+				keyword: i18n.t("markerGuess"),
+				color: "dim",
+				explanation: i18n.t("markerGuessExplanation"),
+			};
+		case "dropped":
+			return {
+				keyword: i18n.t("markerDropped"),
+				color: "toolDiffRemoved",
+				explanation: i18n.t("markerDroppedExplanation"),
+			};
+		case "moved":
+			return {
+				keyword: i18n.t("markerMoved"),
+				color: "warning",
+				explanation: i18n.t("markerMovedExplanation"),
+			};
+	}
+}
 
 /** Themed marker naming content pi never sent, for a preview subheader or a hierarchy row. */
 export function droppedMarker(theme: Theme): string {
-	return stateMarker(theme, MARKER_LEGENDS.dropped);
+	return stateMarker(theme, markerLegend("dropped"));
 }
 
 /** Themed marker naming content pi sends from elsewhere in the prompt than it wrote it. */
 export function movedMarker(theme: Theme): string {
-	return stateMarker(theme, MARKER_LEGENDS.moved);
+	return stateMarker(theme, markerLegend("moved"));
 }
 
 /** Themed suffix naming an owner this extension inferred rather than one pi reported. */
 export function guessMarker(theme: Theme): string {
-	const { color, keyword } = MARKER_LEGENDS.guess;
+	const { color, keyword } = markerLegend("guess");
 	return theme.fg(color, ` ${keyword}`);
 }
 
@@ -84,7 +88,7 @@ export function markerLegendLines(
 ): string[] {
 	const shown = new Set(markers);
 	return MARKER_ORDER.filter((marker) => shown.has(marker))
-		.flatMap((marker) => bulletLines(theme, MARKER_LEGENDS[marker], width));
+		.flatMap((marker) => bulletLines(theme, markerLegend(marker), width));
 }
 
 /** Dim separator plus the keyword in the one fixed color its legend bullet also opens with. */

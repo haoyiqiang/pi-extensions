@@ -15,6 +15,7 @@ import {
 	type MapSize,
 	resolveCategoryColor,
 } from "../config.ts";
+import { i18n } from "../i18n.ts";
 import type { ContextUsageSnapshot, UsageCategory, UsagePreviewEntry } from "../model.ts";
 import { normalizeInlineText, normalizePreviewText } from "../text.ts";
 import { collectPreviewEntries } from "../usage.ts";
@@ -44,13 +45,7 @@ import { buildUsageMap, calculateFitMapScale, type UsageMap, type UsageMapCell }
 import { BlockNavigator, layoutPreviewBlocks, type PreviewLayout } from "./usage-preview.ts";
 import { DEFAULT_WHEEL_SCROLL_LINES, parseWheelDirection, readWheelScrollLines } from "./wheel.ts";
 
-const USAGE_DESCRIPTION = "Estimated context for the next model request. " +
-	"Token counts are approximate and may differ from the provider's estimate.";
-const INVISIBLE_REASONING_DESCRIPTION =
-	"Entry headers read: [DD-MM-YYYY] [assistant] visible + Reasoning ≈invisible (≈total). " +
-	"≈ is a provider-reported count; ~ is a rough approximation when no breakdown " +
-	"is reported and excluded from category totals. " +
-	"Encoded replaces Reasoning when the provider replays encrypted reasoning with its message.";
+
 /** Dashboard rows below the content, excluding the collapsible description: blank, hints, blank, border. */
 const USAGE_TAIL_FIXED_LINE_COUNT = 4;
 const DETAIL_CATEGORY_HEADER_LINE_COUNT = 1;
@@ -84,9 +79,7 @@ const COMPACTED_CELL = "▦";
 const BUFFER_CELL = "⛝";
 const FREE_CELL = "⛶";
 const BREAKDOWN_MARKER = "•";
-const MAP_KEY_FULL_DESCRIPTION = "Single category block";
-const MAP_KEY_PART_DESCRIPTION = "Shared block, largest category shown";
-const MAP_KEY_SIZE_LABEL = "Block Size";
+
 /** Rows the detailed key costs beside the complete legend: one separator plus four key rows. */
 const MAP_KEY_DETAILED_SPARE_ROWS = 5;
 /** Rows the single-line key costs beside the complete legend: one separator plus one key row. */
@@ -332,7 +325,7 @@ export class UsageView {
 	/** Accent title with responsive model, zoom label, and true-window usage metadata. */
 	private headerLines(width: number): string[] {
 		const theme = this.theme;
-		const title = theme.fg("accent", theme.bold("Context Usage"));
+		const title = theme.fg("accent", theme.bold(i18n.t("usageTitle")));
 		const summary = this.reportedSummary();
 		if (width < MAP_SIDE_BY_SIDE_MIN_WIDTH) {
 			return [this.fit(title, width), "", this.fit(summary, width)];
@@ -401,18 +394,21 @@ export class UsageView {
 		) return undefined;
 		return this.theme.fg(
 			"mdHeading",
-			`Zoom ${formatTokens(contextWindow)} → ${formatTokens(this.fitMapScale)}`,
+			i18n.t("zoomLabel", {
+				from: formatTokens(contextWindow),
+				to: formatTokens(this.fitMapScale),
+			}),
 		);
 	}
 
 	/** Dashboard hints with Zoom immediately before Close when the binding is active. */
 	private dashboardHints(width: number): Array<readonly [string, string]> {
 		const hints: Array<readonly [string, string]> = [
-			[STEP_KEY_HINT, "Navigate"],
-			["Enter", "Preview"],
+			[STEP_KEY_HINT, i18n.t("hintNavigate")],
+			["Enter", i18n.t("hintPreview")],
 		];
-		if (this.canToggleMapScale(width)) hints.push(["Z", "Zoom"]);
-		hints.push(["Esc", "Close"]);
+		if (this.canToggleMapScale(width)) hints.push(["Z", i18n.t("hintZoom")]);
+		hints.push(["Esc", i18n.t("hintClose")]);
 		return hints;
 	}
 
@@ -422,7 +418,7 @@ export class UsageView {
 	 * important block on the frame, so it goes before any of them degrades.
 	 */
 	private dashboardDescriptionLines(width: number, availableRows: number, map: UsageMap | undefined): string[] {
-		const lines = wrapDescriptionLines(this.theme, USAGE_DESCRIPTION, "dim", width);
+		const lines = wrapDescriptionLines(this.theme, i18n.t("usageDescription"), "dim", width);
 		const required = this.fullDashboardRows(width, map) + descriptionBlockRows(lines);
 		return required <= availableRows ? lines : [];
 	}
@@ -488,7 +484,7 @@ export class UsageView {
 		const viewport = calculateViewport(this.legendRows.length, rows, reservedLineCount);
 		this.navigator.setVisibleCount(viewport.visibleCount);
 
-		const heading = theme.fg("mdHeading", theme.bold("Category:"));
+		const heading = theme.fg("mdHeading", theme.bold(i18n.t("categoryHeading")));
 		const rowWidth = Math.max(1, width - CURSOR_COLUMN_WIDTH);
 		const columns = this.legendColumns(rowWidth);
 		const visibleRows: string[] = [];
@@ -526,11 +522,11 @@ export class UsageView {
 		if (spare < MAP_KEY_COMPACT_SPARE_ROWS) return [];
 		if (spare < MAP_KEY_DETAILED_SPARE_ROWS) return [this.compactMapKeyLine(map, width)];
 		const theme = this.theme;
-		const sizeLabel = theme.fg("muted", `${MAP_KEY_SIZE_LABEL}: `);
+		const sizeLabel = theme.fg("muted", `${i18n.t("mapKeySize")}: `);
 		return [
-			this.fit(theme.fg("mdHeading", theme.bold("Map:")), width),
-			this.fit(this.mapKeyEntry("text", FULL_CELL, theme.fg("muted", MAP_KEY_FULL_DESCRIPTION)), width),
-			this.fit(this.mapKeyEntry("text", PARTIAL_CELL, theme.fg("muted", MAP_KEY_PART_DESCRIPTION)), width),
+			this.fit(theme.fg("mdHeading", theme.bold(i18n.t("mapHeading"))), width),
+			this.fit(this.mapKeyEntry("text", FULL_CELL, theme.fg("muted", i18n.t("mapKeyFull"))), width),
+			this.fit(this.mapKeyEntry("text", PARTIAL_CELL, theme.fg("muted", i18n.t("mapKeyPart"))), width),
 			this.fit(
 				this.mapKeyEntry(
 					this.categoryColor(FREE_SPACE_CATEGORY_ID),
@@ -550,10 +546,10 @@ export class UsageView {
 	/** Single-line key that drops detail in stages before it would truncate. */
 	private compactMapKeyLine(map: UsageMap, width: number): string {
 		const theme = this.theme;
-		const heading = theme.fg("mdHeading", theme.bold("Map:"));
+		const heading = theme.fg("mdHeading", theme.bold(i18n.t("mapHeading")));
 		const separator = theme.fg("dim", " · ");
-		const full = `${theme.fg("text", FULL_CELL)}${theme.fg("muted", " One category")}`;
-		const partial = `${theme.fg("text", PARTIAL_CELL)}${theme.fg("muted", " Mixed")}`;
+		const full = `${theme.fg("text", FULL_CELL)}${theme.fg("muted", i18n.t("mapKeyOneCategory"))}`;
+		const partial = `${theme.fg("text", PARTIAL_CELL)}${theme.fg("muted", i18n.t("mapKeyMixed"))}`;
 		const size = (withPercent: boolean) =>
 			`${this.paint(this.categoryColor(FREE_SPACE_CATEGORY_ID), FREE_CELL)} ${this.blockSizeText(map, withPercent)}`;
 		const prefix = `${heading} ${full}${separator}${partial}${separator}`;
@@ -561,7 +557,7 @@ export class UsageView {
 		if (visibleWidth(detailed) <= width) return detailed;
 		const withoutPercent = `${prefix}${size(false)}`;
 		if (visibleWidth(withoutPercent) <= width) return withoutPercent;
-		const shortenedFull = `${theme.fg("text", FULL_CELL)}${theme.fg("muted", " One")}`;
+		const shortenedFull = `${theme.fg("text", FULL_CELL)}${theme.fg("muted", i18n.t("mapKeyOne"))}`;
 		return this.fit(`${heading} ${shortenedFull}${separator}${partial}${separator}${size(false)}`, width);
 	}
 
@@ -583,7 +579,7 @@ export class UsageView {
 	/** Pi-reported usage/window metadata, with a marked estimate when current usage is unknown. */
 	private reportedSummary(): string {
 		const reported = this.usage.reported;
-		if (reported === undefined) return this.theme.fg("muted", "Context usage unavailable.");
+		if (reported === undefined) return this.theme.fg("muted", i18n.t("usageUnavailable"));
 		const contextWindow = formatTokens(reported.contextWindow);
 		if (reported.tokens === undefined) {
 			const percent = formatPercent(this.usage.estimatedTokens / reported.contextWindow);
@@ -664,8 +660,8 @@ export class UsageView {
 
 	/** Unstyled hierarchy label used to choose the shared value column. */
 	private plainLegendLabel(row: LegendRow): string {
-		if (row.type === "buffer") return `${BUFFER_CELL} Auto-Compact Buffer`;
-		if (row.type === "free") return `${FREE_CELL} Free Space`;
+		if (row.type === "buffer") return `${BUFFER_CELL} ${i18n.t("autoCompactBuffer")}`;
+		if (row.type === "free") return `${FREE_CELL} ${i18n.t("freeSpace")}`;
 		const indent = "  ".repeat(row.depth);
 		return `${indent}${categoryMarker(row.category.id, row.depth)} ${normalizeInlineText(row.category.label)}`;
 	}
@@ -674,11 +670,11 @@ export class UsageView {
 	private styledLegendLabel(row: LegendRow, selected: boolean): string {
 		if (row.type === "buffer") {
 			const color = this.categoryColor(AUTO_COMPACT_BUFFER_CATEGORY_ID);
-			return `${this.paint(color, BUFFER_CELL)} ${this.theme.fg("text", "Auto-Compact Buffer")}`;
+			return `${this.paint(color, BUFFER_CELL)} ${this.theme.fg("text", i18n.t("autoCompactBuffer"))}`;
 		}
 		if (row.type === "free") {
 			const color = this.categoryColor(FREE_SPACE_CATEGORY_ID);
-			return `${this.paint(color, FREE_CELL)} ${this.theme.fg(selected ? "accent" : "text", "Free Space")}`;
+			return `${this.paint(color, FREE_CELL)} ${this.theme.fg(selected ? "accent" : "text", i18n.t("freeSpace"))}`;
 		}
 		const indent = "  ".repeat(row.depth);
 		const color = this.categoryColor(row.rootId);
@@ -729,7 +725,7 @@ export class UsageView {
 		if (lines.length <= MAX_NOTICE_LINES) return lines;
 		const kept = lines.slice(0, MAX_NOTICE_LINES - 1);
 		const hidden = blocks.length - countWholeBlocks(blocks, kept.length);
-		return [...kept, ...this.wrapNotice(`… +${hidden} more`, width)];
+		return [...kept, ...this.wrapNotice(i18n.t("moreNotices", { count: String(hidden) }), width)];
 	}
 
 	/** One sanitized notice wrapped to the available width, indented on every line. */
@@ -920,9 +916,9 @@ export class UsageView {
 		lines.push(
 			this.fit(
 				hintRow(theme, [
-					[STEP_KEY_HINT, "Scroll"],
-					["PgUp/PgDn", "Page"],
-					["Esc", "Back"],
+					[STEP_KEY_HINT, i18n.t("hintScroll")],
+					["PgUp/PgDn", i18n.t("hintPage")],
+					["Esc", i18n.t("hintBack")],
 				]),
 				width,
 			),
@@ -946,7 +942,7 @@ export class UsageView {
 	/** Visible window of the block stream, or the message an empty category shows instead. */
 	private previewStreamLines(stream: PreviewStream, visibleCount: number, width: number): string[] {
 		if (stream.blocks.length === 0) {
-			const message = this.theme.fg("muted", `${BODY_INDENT}No content captured for this category.`);
+			const message = this.theme.fg("muted", `${BODY_INDENT}${i18n.t("noContentCaptured")}`);
 			return Array.from({ length: visibleCount }, (_, index) => index === 0 ? this.fit(message, width) : "");
 		}
 		const start = this.blockNavigator.offset;
@@ -978,10 +974,10 @@ export class UsageView {
 
 	/** Left-aligned truncation marker with a brighter action label on the selected block only. */
 	private truncationMarker(hiddenLineCount: number, selected: boolean): string {
-		const marker = `${BODY_INDENT}${this.theme.fg("dim", `… +${hiddenLineCount} lines`)}`;
+		const marker = `${BODY_INDENT}${this.theme.fg("dim", i18n.t("moreLines", { count: String(hiddenLineCount) }))}`;
 		if (!selected) return marker;
 		const separator = this.theme.fg("dim", " · ");
-		const action = this.theme.fg("accent", "Enter - View Content");
+		const action = this.theme.fg("accent", i18n.t("viewContent"));
 		return `${marker}${separator}${action}`;
 	}
 
@@ -1073,7 +1069,7 @@ export class UsageView {
 		if (entry.invisibleReasoning !== undefined) {
 			const { tokens, basis, encoded } = entry.invisibleReasoning;
 			const marker = basis === "provider-reported" ? "≈" : "~";
-			const label = encoded ? "Encoded" : "Reasoning";
+			const label = encoded ? i18n.t("encodedLabel") : i18n.t("reasoningLabel");
 			const total = (entry.visibleTokens ?? entry.tokens) + tokens;
 			cells.push(
 				theme.fg("dim", `+ ${label} ${marker}${formatTokens(tokens)} (${marker}${formatTokens(total)})`),
@@ -1101,7 +1097,7 @@ export class UsageView {
 		const hasInvisibleReasoning = this.previewEntries(row)
 			.some((entry) => entry.invisibleReasoning !== undefined);
 		return hasInvisibleReasoning
-			? wrapDescriptionLines(this.theme, INVISIBLE_REASONING_DESCRIPTION, "dim", width)
+			? wrapDescriptionLines(this.theme, i18n.t("invisibleReasoningDescription"), "dim", width)
 			: [];
 	}
 
@@ -1138,7 +1134,7 @@ export class UsageView {
 
 	/** Render the same collapsed skill label/name colors used by pi's transcript component. */
 	private skillBadge(name: string): string {
-		const label = this.theme.fg("customMessageLabel", this.theme.bold("[skill]"));
+		const label = this.theme.fg("customMessageLabel", this.theme.bold(i18n.t("skillBadge")));
 		const safeName = normalizeInlineText(name);
 		if (safeName === "") return label;
 		return `${label} ${this.theme.fg("customMessageText", safeName)}`;
@@ -1207,8 +1203,8 @@ function previewBlockMaxLines(terminalRows: number, descriptionLineCount: number
 
 /** Block stream hints; the selected block carries the open affordance, and an empty stream moves nowhere. */
 function previewHints(blockCount: number): Array<readonly [string, string]> {
-	if (blockCount === 0) return [["Esc", "Back"]];
-	return [[STEP_KEY_HINT, "Navigate"], ["PgUp/PgDn", "Page"], ["Esc", "Back"]];
+	if (blockCount === 0) return [["Esc", i18n.t("hintBack")]];
+	return [[STEP_KEY_HINT, i18n.t("hintNavigate")], ["PgUp/PgDn", i18n.t("hintPage")], ["Esc", i18n.t("hintBack")]];
 }
 
 /** Notices whose wrapped lines fit entirely into the first `keptLines` rows. */

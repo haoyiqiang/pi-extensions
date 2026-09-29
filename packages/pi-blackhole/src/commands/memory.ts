@@ -39,6 +39,8 @@ import {
   isReserveTokens,
   isWindowRatio,
 } from "../core/unified-config.js";
+import { i18n, NOTICE_SOURCE } from "../i18n.js";
+import { notifyWithSource } from "pi-extensions-i18n";
 
 function firstArg(args: unknown): string | undefined {
   if (Array.isArray(args)) return typeof args[0] === "string" ? args[0] : undefined;
@@ -58,9 +60,9 @@ function pressureHint(config: {
   dropperPressureThreshold: number;
   dropperPoolFullnessThreshold: number;
 }): string {
-  if (config.dropperPressureThreshold >= 1) return "pressure off";
+  if (config.dropperPressureThreshold >= 1) return i18n.t("memoryPressureOff");
   const threshold = Math.max(config.dropperPressureThreshold, config.dropperPoolFullnessThreshold);
-  return `pressure at ≥${Math.round(threshold * 100)}% pool`;
+  return i18n.t("memoryPressureAt", { percent: Math.round(threshold * 100) });
 }
 
 /**
@@ -72,19 +74,19 @@ function pressureHint(config: {
 function compactThresholdSuffix(cfg: CompactThresholdConfig, window: number): string {
   // Validity (not mere presence) decides the tier — mirrors compactThresholdTokens
   // so display and trigger cannot disagree, even for unnormalized configs.
-  if (isFixedTokenThreshold(cfg.compactAfterTokens)) return ""; // explicit fixed token threshold
+  if (isFixedTokenThreshold(cfg.compactAfterTokens)) return "";
   if (isWindowRatio(cfg.compactAfterRatio)) {
-    return ` · ${Math.round(cfg.compactAfterRatio * 100)}% of ${window.toLocaleString()}-token window`;
+    return i18n.t("memoryThresholdRatio", { percent: Math.round(cfg.compactAfterRatio * 100), window: window.toLocaleString() });
   }
   if (isReserveTokens(cfg.compactReserveTokens)) {
-    return ` · keeps ${cfg.compactReserveTokens.toLocaleString()} headroom in ${window.toLocaleString()}-token window`;
+    return i18n.t("memoryThresholdReserve", { reserve: cfg.compactReserveTokens.toLocaleString(), window: window.toLocaleString() });
   }
   // Preset curve (incl. the out-of-box default preset): describe the effective
   // ratio at this window, resolved by the same pure functions as the trigger.
   const name = cfg.compactAfterPreset ?? "default";
   const anchors = effectivePresets(cfg)[name] ?? BUILTIN_PRESETS.default;
   const ratio = presetRatioForWindow(anchors, window);
-  return ` · ${Math.round(ratio * 100)}% of ${window.toLocaleString()}-token window (preset: ${name})`;
+  return i18n.t("memoryThresholdPreset", { percent: Math.round(ratio * 100), window: window.toLocaleString(), preset: name });
 }
 
 function tokenSum(items: { tokenCount: number }[]): number {
@@ -112,21 +114,21 @@ function renderContentOnlyProjection(
   projection: Projection,
   emptyScope: "visible" | "recorded",
 ): string {
+  const scope = i18n.t(emptyScope === "visible" ? "memoryScopeVisible" : "memoryScopeRecorded");
   return [
-    "── Reflections ──",
-    renderList(projection.reflections, reflectionToSummaryLine, `No ${emptyScope} reflections.`),
+    i18n.t("memoryReflectionsTitle"),
+    renderList(projection.reflections, reflectionToSummaryLine, i18n.t("memoryNoReflections", { scope })),
     "",
-    "── Observations ──",
-    renderList(projection.observations, observationToSummaryLine, `No ${emptyScope} observations.`),
+    i18n.t("memoryObservationsTitle"),
+    renderList(projection.observations, observationToSummaryLine, i18n.t("memoryNoObservations", { scope })),
   ].join("\n");
 }
 
 export function registerMemoryCommand(pi: ExtensionAPI, runtime: Runtime): void {
   pi.registerCommand("blackhole-memory", {
-    description:
-      "Show memory pipeline status & token counters. /blackhole-memory [view] visible observations & reflections, [full] complete recorded memory (copies to clipboard).",
+    description: i18n.t("memoryCommandDescription"),
     handler: async (args, ctx) => {
-      runtime.ensureConfig(ctx.cwd, (msg) => ctx.ui?.notify?.(msg, "warning"));
+      runtime.ensureConfig(ctx.cwd, (msg) => notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: msg }));
       const entries = ctx.sessionManager.getBranch() as Entry[];
       const sessionId = ctx.sessionManager.getSessionId();
       const mode = firstArg(args);
@@ -136,12 +138,7 @@ export function registerMemoryCommand(pi: ExtensionAPI, runtime: Runtime): void 
         const projection = fullProjection(entries);
         const output = renderContentOnlyProjection(projection, "recorded");
         const copied = await copyTextToClipboard(output).catch(() => false);
-        ctx.ui.notify(
-          copied
-            ? `${output}\n\nCopied to clipboard.`
-            : `${output}\n\nFailed to copy to clipboard.`,
-          "info",
-        );
+        notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: copied ? i18n.t("memoryCopied", { output }) : i18n.t("memoryCopyFailed", { output }) });
         return;
       }
 
@@ -150,18 +147,13 @@ export function registerMemoryCommand(pi: ExtensionAPI, runtime: Runtime): void 
         const projection = visibleProjection(entries);
         const output = renderContentOnlyProjection(projection, "visible");
         const copied = await copyTextToClipboard(output).catch(() => false);
-        ctx.ui.notify(
-          copied
-            ? `${output}\n\nCopied to clipboard.`
-            : `${output}\n\nFailed to copy to clipboard.`,
-          "info",
-        );
+        notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: copied ? i18n.t("memoryCopied", { output }) : i18n.t("memoryCopyFailed", { output }) });
         return;
       }
 
       // /blackhole-memory (no args) — show status
       if (mode && mode !== "status") {
-        ctx.ui.notify("Usage: /blackhole-memory [status|view|full]", "info");
+        notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: i18n.t("memoryUsage") });
         return;
       }
 
@@ -178,20 +170,29 @@ export function registerMemoryCommand(pi: ExtensionAPI, runtime: Runtime): void 
       // explicitly so a manual-only user can see where the pool number comes from.
       const branchPoolTokens = pending ? observationPoolTokens(entries).tokens : poolTokens;
       const pendingPoolTokens = poolTokens - branchPoolTokens;
-      const poolScopeSuffix =
-        pendingPoolTokens > 0
-          ? ` · branch ${branchPoolTokens.toLocaleString()} + pending ${pendingPoolTokens.toLocaleString()}`
-          : "";
+      const poolScopeSuffix = pendingPoolTokens > 0
+        ? i18n.t("memoryPoolScope", {
+          branch: branchPoolTokens.toLocaleString(),
+          pending: pendingPoolTokens.toLocaleString(),
+        })
+        : "";
       const visibleReflectionTokens = tokenSum(visible.reflections);
       const observationLine = appendSuffixes(
-        `Observations: ${folded.observations.length} recorded / ${folded.droppedObservationIds.size} dropped / ${visible.observations.length} visible`,
+        i18n.t("memoryObservationsStatus", {
+          recorded: folded.observations.length,
+          dropped: folded.droppedObservationIds.size,
+          visible: visible.observations.length,
+        }),
         [
           addedSuffix(drift.observationsOnlyInFull.length),
           removedSuffix(drift.droppedOnlyInFull.length),
         ],
       );
       const reflectionLine = appendSuffixes(
-        `Reflections:  ${folded.reflections.length} recorded / ${visible.reflections.length} visible`,
+        i18n.t("memoryReflectionsStatus", {
+          recorded: folded.reflections.length,
+          visible: visible.reflections.length,
+        }),
         [addedSuffix(drift.reflectionsOnlyInFull.length)],
       );
       let obsProgress = rawTokensSinceObservationCoverage(entries);
@@ -216,28 +217,40 @@ export function registerMemoryCommand(pi: ExtensionAPI, runtime: Runtime): void 
         }
       }
 
-      const passiveLines =
-        runtime.config.passive === true
-          ? ["── Mode ──", "Passive: automatic memory workers and auto-compaction disabled", ""]
-          : [];
-
+      const passiveLines = runtime.config.passive === true
+        ? [i18n.t("memoryModeTitle"), i18n.t("memoryPassive"), ""]
+        : [];
+      const compactionSuffix = isManualMode(runtime.config)
+        ? i18n.t("memoryManualSuffix")
+        : i18n.t("memoryAutoSuffix", {
+          threshold: autoCompactThreshold(runtime.config, ctx.model).toLocaleString(),
+          basis: compactThresholdSuffix(runtime.config, sessionContextWindow(ctx.model, runtime.config)),
+        });
       const lines = [
         ...passiveLines,
-        "── Memory ──",
+        i18n.t("memoryTitle"),
         observationLine,
         reflectionLine,
         "",
-        "── Pipeline ──",
-        "Transcript accumulated since last run. Triggers when exceeding threshold.",
-        `Observer:       ~${obsProgress.toLocaleString()} tokens (triggers at ${runtime.config.observeAfterTokens.toLocaleString()})`,
-        `Reflector:      ~${reflectionProgress.toLocaleString()} tokens (triggers at ${runtime.config.reflectAfterTokens.toLocaleString()})`,
-        `Dropper:        pool ${pct(poolTokens, runtime.config.observationsPoolMaxTokens)}% — eligible at ≥${Math.round(runtime.config.dropperPoolFullnessThreshold * 100)}% with new data; ${pressureHint(runtime.config)} (${dropProgress.toLocaleString()}/${runtime.config.reflectAfterTokens.toLocaleString()} new tokens)`,
-        `Compaction:     ~${compactionProgress.toLocaleString()} tokens` +
-          (isManualMode(runtime.config)
-            ? " [manual]"
-            : ` (triggers at ${autoCompactThreshold(runtime.config, ctx.model).toLocaleString()}${compactThresholdSuffix(runtime.config, sessionContextWindow(ctx.model, runtime.config))})`),
-        `Obs pool:       ~${poolTokens.toLocaleString()} / ${runtime.config.observationsPoolMaxTokens.toLocaleString()} tokens (${pct(poolTokens, runtime.config.observationsPoolMaxTokens)}%)${poolScopeSuffix}`,
-        `Reflect pool:   ~${visibleReflectionTokens.toLocaleString()} tokens`,
+        i18n.t("memoryPipelineTitle"),
+        i18n.t("memoryPipelineDescription"),
+        i18n.t("memoryObserverProgress", { tokens: obsProgress.toLocaleString(), threshold: runtime.config.observeAfterTokens.toLocaleString() }),
+        i18n.t("memoryReflectorProgress", { tokens: reflectionProgress.toLocaleString(), threshold: runtime.config.reflectAfterTokens.toLocaleString() }),
+        i18n.t("memoryDropperProgress", {
+          pool: pct(poolTokens, runtime.config.observationsPoolMaxTokens),
+          eligible: Math.round(runtime.config.dropperPoolFullnessThreshold * 100),
+          pressure: pressureHint(runtime.config),
+          progress: dropProgress.toLocaleString(),
+          threshold: runtime.config.reflectAfterTokens.toLocaleString(),
+        }),
+        i18n.t("memoryCompactionProgress", { tokens: compactionProgress.toLocaleString(), suffix: compactionSuffix }),
+        i18n.t("memoryObservationPool", {
+          current: poolTokens.toLocaleString(),
+          max: runtime.config.observationsPoolMaxTokens.toLocaleString(),
+          percent: pct(poolTokens, runtime.config.observationsPoolMaxTokens),
+          scope: poolScopeSuffix,
+        }),
+        i18n.t("memoryReflectionPool", { tokens: visibleReflectionTokens.toLocaleString() }),
       ];
 
       // Show pending data when manual mode is active
@@ -246,53 +259,49 @@ export function registerMemoryCommand(pi: ExtensionAPI, runtime: Runtime): void 
         const hasRef = !!pending.reflection;
         const hasDrop = !!pending.dropped;
         if (hasObs || hasRef || hasDrop) {
-          lines.push("", "── Pending (manual mode) ──");
-          if (hasObs) lines.push("Observation:  waiting in pending.json");
-          if (hasRef) lines.push("Reflection:   waiting in pending.json");
-          if (hasDrop) lines.push("Dropper:      waiting in pending.json");
-          const preambleCap =
-            runtime.config.observerPreambleMaxTokens > 0
-              ? runtime.config.observerPreambleMaxTokens
-              : Math.round(runtime.config.observerChunkMaxTokens * 0.3);
-          const pctNote =
-            runtime.config.observerPreambleMaxTokens > 0
-              ? ""
-              : ` (30% of ${runtime.config.observerChunkMaxTokens.toLocaleString()} chunk)`;
-          lines.push(
-            `Preamble cap: ${preambleCap.toLocaleString()} tokens per section (observations, reflections)${pctNote}`,
-          );
-          lines.push("Run /blackhole to flush and compact.");
+          lines.push("", i18n.t("memoryPendingTitle"));
+          if (hasObs) lines.push(i18n.t("memoryPendingObservation"));
+          if (hasRef) lines.push(i18n.t("memoryPendingReflection"));
+          if (hasDrop) lines.push(i18n.t("memoryPendingDropper"));
+          const preambleCap = runtime.config.observerPreambleMaxTokens > 0
+            ? runtime.config.observerPreambleMaxTokens
+            : Math.round(runtime.config.observerChunkMaxTokens * 0.3);
+          const pctNote = runtime.config.observerPreambleMaxTokens > 0
+            ? ""
+            : i18n.t("memoryPreambleDefaultNote", {
+              percent: 30,
+              chunk: runtime.config.observerChunkMaxTokens.toLocaleString(),
+            });
+          lines.push(i18n.t("memoryPreambleCap", { tokens: preambleCap.toLocaleString(), note: pctNote }));
+          lines.push(i18n.t("memoryRunBlackhole"));
         }
       }
 
       if (runtime.consolidationInFlight || runtime.compactInFlight || runtime.compactHookInFlight) {
-        lines.push("", "── In flight ──");
+        lines.push("", i18n.t("memoryInFlightTitle"));
         if (runtime.consolidationInFlight) {
-          const phase = runtime.consolidationPhase ? ` (${runtime.consolidationPhase})` : "";
-          lines.push(`Consolidation: running${phase}`);
+          const phase = runtime.consolidationPhase
+            ? i18n.t("memoryPhaseSuffix", { phase: runtime.consolidationPhase })
+            : "";
+          lines.push(i18n.t("memoryConsolidationRunning", { phase }));
         }
-        if (runtime.compactInFlight) lines.push("Auto-compaction: running");
-        if (runtime.compactHookInFlight) lines.push("Compaction hook: running");
+        if (runtime.compactInFlight) lines.push(i18n.t("memoryAutoCompactionRunning"));
+        if (runtime.compactHookInFlight) lines.push(i18n.t("memoryCompactionHookRunning"));
       }
-
       // Issue #92: scheduled auto-compactions skipped because the extension ctx
       // went stale before the deferred compaction ran (in-memory subagent/flow
       // sessions disposed right after agent_end). Process-wide counter.
       if ((runtime.staleCtxSkippedCompactions ?? 0) > 0) {
-        lines.push(
-          "",
-          `Skipped compactions (disposed ctx): ${runtime.staleCtxSkippedCompactions.toLocaleString()}`,
-        );
+        lines.push("", i18n.t("memorySkippedCompactions", { count: runtime.staleCtxSkippedCompactions.toLocaleString() }));
       }
-
       if (runtime.lastObserverError || runtime.lastReflectorError || runtime.lastDropperError) {
-        lines.push("", "── Last error ──");
-        if (runtime.lastObserverError) lines.push(`Observer: ${runtime.lastObserverError}`);
-        if (runtime.lastReflectorError) lines.push(`Reflector: ${runtime.lastReflectorError}`);
-        if (runtime.lastDropperError) lines.push(`Dropper: ${runtime.lastDropperError}`);
+        lines.push("", i18n.t("memoryLastErrorTitle"));
+        if (runtime.lastObserverError) lines.push(i18n.t("memoryObserverLabel", { message: runtime.lastObserverError }));
+        if (runtime.lastReflectorError) lines.push(i18n.t("memoryReflectorLabel", { message: runtime.lastReflectorError }));
+        if (runtime.lastDropperError) lines.push(i18n.t("memoryDropperLabel", { message: runtime.lastDropperError }));
       }
 
-      ctx.ui.notify(lines.join("\n"), "info");
+      notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: lines.join("\n") });
     },
   });
 }

@@ -23,6 +23,8 @@ import {
   OM_OBSERVATIONS_RECORDED,
   OM_REFLECTIONS_RECORDED,
 } from "../om/ledger/index.js";
+import { i18n, NOTICE_SOURCE } from "../i18n.js";
+import { notifyWithSource } from "pi-extensions-i18n";
 
 /**
  * One message per host refusal, shared by the pre-check and the onError
@@ -32,8 +34,8 @@ import {
  */
 const manualRefusalMessage = (reason: CompactionIneligibility): string =>
   reason === "already_compacted"
-    ? "blackhole: already compacted — nothing new to compact since the last summary"
-    : "blackhole: nothing to compact yet — Pi's keep-recent budget still covers this branch";
+    ? i18n.t("manualAlreadyCompacted")
+    : i18n.t("manualNothingToCompact");
 
 export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
   const prefixMatch = (value: string, prefix: string): boolean => {
@@ -41,25 +43,23 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
   };
 
   pi.registerCommand("blackhole", {
-    description:
-      "Manual compact with structural summary. Subcommands: [settings] config overlay, " +
-      "[changelog] display changelog, [cleanup] remove orphaned files, [om-off]/[om-on] disable/enable observational memory.",
+    description: i18n.t("blackholeCommandDescription"),
     getArgumentCompletions: (prefix: string) => {
       const subcommands = [
         {
           value: "settings",
-          label: "Open configuration overlay [settings]",
+          label: i18n.t("blackholeSubSettings"),
         },
         {
           value: "changelog",
-          label: "Display changelog [changelog]",
+          label: i18n.t("blackholeSubChangelog"),
         },
         {
           value: "cleanup",
-          label: "Remove orphaned pending files [cleanup]",
+          label: i18n.t("blackholeSubCleanup"),
         },
-        { value: "om-off", label: "Disable observational memory [om-off]" },
-        { value: "om-on", label: "Enable observational memory [om-on]" },
+        { value: "om-off", label: i18n.t("blackholeSubOmOff") },
+        { value: "om-on", label: i18n.t("blackholeSubOmOn") },
       ];
       if (!prefix) return subcommands;
       // "configure" is an accepted alias for "settings" (routed by the
@@ -75,7 +75,7 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
       // but a command can be the first thing that runs in a session — load the
       // config before the first read so a configured `compaction: "manual"`
       // session does not fall back to DEFAULTS.
-      runtime.ensureConfig(ctx.cwd ?? process.cwd(), (msg) => ctx.ui.notify(msg, "warning"));
+      runtime.ensureConfig(ctx.cwd ?? process.cwd(), (msg) => notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: msg }));
       const sessionId = ctx.sessionManager.getSessionId();
 
       // Handle subcommands
@@ -109,16 +109,9 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
             GLOBAL_CONFIG_DIR,
           );
           runtime.config = config.loadWithWarnings(ctx.cwd, GLOBAL_CONFIG_DIR).config;
-          ctx.ui.notify(
-            "Observational memory disabled. Use /blackhole om-on to re-enable.",
-            "info",
-          );
+          notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: i18n.t("omDisabled") });
         } catch {
-          ctx.ui.notify(
-            "Failed to save config — the config file may be read-only (e.g., managed by Nix). " +
-              "Runtime state updated for this session only.",
-            "warning",
-          );
+          notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("configSaveFailed") });
         }
         return;
       }
@@ -132,13 +125,9 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
             GLOBAL_CONFIG_DIR,
           );
           runtime.config = config.loadWithWarnings(ctx.cwd, GLOBAL_CONFIG_DIR).config;
-          ctx.ui.notify("Observational memory enabled.", "info");
+          notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: i18n.t("omEnabled") });
         } catch {
-          ctx.ui.notify(
-            "Failed to save config — the config file may be read-only (e.g., managed by Nix). " +
-              "Runtime state updated for this session only.",
-            "warning",
-          );
+          notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("configSaveFailed") });
         }
         return;
       } // Warn if input starts with a known subcommand but isn't an exact match.
@@ -149,10 +138,7 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
           trimmed.toLowerCase().startsWith(name.toLowerCase()) && trimmed.length > name.length,
       );
       if (nearMiss) {
-        ctx.ui.notify(
-          `/blackhole ${nearMiss} accepts no arguments. Did you mean "/blackhole ${nearMiss}"?`,
-          "warning",
-        );
+        notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("subcommandNoArgs", { name: nearMiss }) });
         return;
       }
 
@@ -175,7 +161,7 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
         ctx.model,
       );
       if (ineligibility) {
-        ctx.ui.notify(manualRefusalMessage(ineligibility), "info");
+        notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: manualRefusalMessage(ineligibility) });
         return;
       }
 
@@ -214,7 +200,7 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
           pi.appendEntry(OM_OBSERVATIONS_DROPPED, batch.data);
         }
         clearPendingState(sessionId);
-        ctx.ui.notify("Observational memory: pending entries flushed", "info");
+        notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: i18n.t("pendingFlushed") });
       }
 
       ctx.compact({
@@ -222,11 +208,11 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
         onComplete: () => {
           const stats = runtime.compactionStats;
           if (stats) {
-            ctx.ui.notify(formatCompactionStats(stats), "info");
+            notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: formatCompactionStats(stats) });
           } else {
-            ctx.ui.notify("Compacted with blackhole", "info");
+            notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: i18n.t("compacted") });
           }
-          notifyMigrationReminder(sessionId, (msg, level) => ctx.ui.notify(msg, level as any));
+          notifyMigrationReminder(sessionId, (msg, level) => notifyWithSource({ ctx, source: NOTICE_SOURCE, level, message: msg }));
 
           // Fire follow-up prompt after compaction completes
           if (followUpPrompt) {
@@ -241,15 +227,15 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
           // can disagree — Pi resolves per-model keepRecentTokens overrides) is
           // still a refusal, not a failure.
           if (message.startsWith("Nothing to compact")) {
-            ctx.ui.notify(manualRefusalMessage("too_small"), "info");
+            notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: manualRefusalMessage("too_small") });
           } else if (message === "Already compacted") {
-            ctx.ui.notify(manualRefusalMessage("already_compacted"), "info");
+            notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: manualRefusalMessage("already_compacted") });
           } else if (message === "Compaction cancelled") {
             // Our own-cut guard already named the specific reason before
             // returning { cancel: true }, and Pi renders "Compaction cancelled"
             // itself for manual aborts. A second toast adds nothing.
           } else {
-            ctx.ui.notify(`Compaction failed: ${message}`, "error");
+            notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "error", message: i18n.t("compactionFailed", { message }) });
           }
         },
       });
