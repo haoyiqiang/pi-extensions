@@ -47,7 +47,7 @@
  */
 
 import type { Api } from "@earendil-works/pi-ai";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, readStoredCredential } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ProviderModelConfig } from "@earendil-works/pi-coding-agent";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -75,6 +75,22 @@ interface Notice {
 /** 用户可见消息的统一出口：带来源标签与颜色（有 UI 传入 ctx 时），否则交给外部回调转发 */
 type NoticeSink = (notice: Notice, ctx?: CommandCtx) => void;
 
+/** 自动发现后的模型默认值；只覆盖 /models 无法提供的公共能力元数据。 */
+interface DiscoveryModelDefaults {
+	reasoning?: boolean;
+	thinkingLevelMap?: ProviderModelConfig["thinkingLevelMap"];
+	input?: ProviderModelConfig["input"];
+	contextWindow?: number;
+	maxTokens?: number;
+	compat?: ProviderModelConfig["compat"];
+}
+
+/** provider 的自动发现过滤和默认元数据配置。 */
+interface ModelDiscoveryOptions {
+	include?: string[];
+	exclude?: string[];
+	defaults?: DiscoveryModelDefaults;
+}
 /** models.json 中 provider 条目的读取形态（含发现标记） */
 interface DiscoveryProviderEntry {
 	id: string;
@@ -84,6 +100,7 @@ interface DiscoveryProviderEntry {
 	api?: string;
 	headers?: Record<string, string>;
 	compat?: Record<string, unknown>;
+	modelDiscovery?: ModelDiscoveryOptions;
 }
 
 interface ModelsResponse {
@@ -132,6 +149,7 @@ function providerFingerprint(entry: DiscoveryProviderEntry): string {
 		entry.apiKey ?? "",
 		entry.headers ?? {},
 		entry.compat ?? {},
+		entry.modelDiscovery ?? {},
 	]);
 }
 
@@ -236,6 +254,62 @@ async function writeModelsFile(data: Record<string, unknown>): Promise<{ backup:
 	await writeFile(path, `${JSON.stringify(data, null, 4)}\n`, "utf-8");
 	return { backup };
 }
+/** 只接受非空字符串数组；无效值按未配置处理。 */
+function readStringArray(value: unknown): string[] | undefined {
+	if (!Array.isArray(value)) return undefined;
+	const result = value.filter((item): item is string => typeof item === "string" && item.length > 0);
+	return result.length > 0 ? result : undefined;
+}
+
+/** 读取发现模型的默认能力元数据。 */
+function readDiscoveryDefaults(value: unknown): DiscoveryModelDefaults | undefined {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+	const record = value as Record<string, unknown>;
+	const input = Array.isArray(record.input)
+		? record.input.filter((item): item is "text" | "image" => item === "text" || item === "image")
+		: undefined;
+	const thinkingLevelMap = record.thinkingLevelMap && typeof record.thinkingLevelMap === "object"
+		? record.thinkingLevelMap as ProviderModelConfig["thinkingLevelMap"]
+		: undefined;
+	const compat = record.compat && typeof record.compat === "object"
+		? record.compat as ProviderModelConfig["compat"]
+		: undefined;
+	return {
+		...(typeof record.reasoning === "boolean" ? { reasoning: record.reasoning } : {}),
+		...(thinkingLevelMap ? { thinkingLevelMap } : {}),
+		...(input && input.length > 0 ? { input } : {}),
+		...(typeof record.contextWindow === "number" && record.contextWindow > 0
+			? { contextWindow: record.contextWindow }
+			: {}),
+		...(typeof record.maxTokens === "number" && record.maxTokens > 0
+			? { maxTokens: record.maxTokens }
+			: {}),
+		...(compat ? { compat } : {}),
+	};
+}
+
+/** 读取 provider.modelDiscovery；这是 discoverModels 的可选过滤/默认值扩展。 */
+function readModelDiscoveryOptions(value: unknown): ModelDiscoveryOptions | undefined {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+	const record = value as Record<string, unknown>;
+	const include = readStringArray(record.include);
+	const exclude = readStringArray(record.exclude);
+	const defaults = readDiscoveryDefaults(record.defaults);
+	return include || exclude || defaults ? { include, exclude, defaults } : undefined;
+}
+
+/** 把简单 glob（* / ?）转为整串匹配正则。 */
+function modelPatternRegex(pattern: string): RegExp {
+	const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+	return new RegExp(`^${escaped.replaceAll("*", ".*").replaceAll("?", ".")}$`);
+}
+
+/** 判断模型 ID 是否通过 provider.modelDiscovery 的 include/exclude。 */
+export function modelMatchesDiscovery(id: string, options: ModelDiscoveryOptions | undefined): boolean {
+	const included = !options?.include || options.include.some((pattern) => modelPatternRegex(pattern).test(id));
+	if (!included) return false;
+	return !options?.exclude?.some((pattern) => modelPatternRegex(pattern).test(id));
+}
 
 /** 从完整 models.json 数据中筛出带发现标记的 provider */
 function pickDiscoveryProviders(data: Record<string, unknown>): DiscoveryProviderEntry[] {
@@ -257,6 +331,7 @@ function pickDiscoveryProviders(data: Record<string, unknown>): DiscoveryProvide
 				value.compat && typeof value.compat === "object"
 					? (value.compat as Record<string, unknown>)
 					: undefined,
+			modelDiscovery: readModelDiscoveryOptions(value.modelDiscovery),
 		});
 	}
 	return providers;
@@ -290,6 +365,20 @@ function resolveEnvValue(raw: string): { value: string | null; error: string | n
 	}
 	return { value, error: null };
 }
+/** 发现请求优先使用 models.json 的 apiKey；未配置时复用该 provider 的已存 API key。 */
+async function resolveDiscoveryApiKey(entry: DiscoveryProviderEntry): Promise<string | undefined> {
+	if (entry.apiKey !== undefined) {
+		const resolved = resolveEnvValue(entry.apiKey);
+		if (resolved.error) throw new Error(`apiKey ${resolved.error}`);
+		return resolved.value || undefined;
+	}
+	try {
+		const credential = await readStoredCredential(entry.id);
+		return credential?.type === "api_key" ? credential.key : undefined;
+	} catch {
+		return undefined;
+	}
+}
 
 export function buildModel(
 	id: string,
@@ -297,20 +386,26 @@ export function buildModel(
 	contextWindow: number | undefined,
 	maxTokens: number | undefined,
 	providerCompat: Record<string, unknown> | undefined,
+	defaults?: DiscoveryModelDefaults,
 ): ProviderModelConfig {
 	return {
 		id,
 		name: name ?? id,
-		reasoning: true,
+		reasoning: defaults?.reasoning ?? true,
 		// xhigh/max 必须给非 null 值才会出现在 /thinking（缺省键等同不支持）；
-		// 标准档位保持缺省，仍走 pi 的 provider 默认映射，语义不变。
-		thinkingLevelMap: { xhigh: "xhigh", max: "max" },
-		input: ["text", "image"],
+		// modelDiscovery.defaults 可为同一网关声明更准确的统一映射。
+		thinkingLevelMap: {
+			xhigh: "xhigh",
+			max: "max",
+			...defaults?.thinkingLevelMap,
+		},
+		input: defaults?.input ?? ["text", "image"],
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-		contextWindow: contextWindow ?? 1_000_000,
-		maxTokens: maxTokens ?? 65_536,
+		contextWindow: contextWindow ?? defaults?.contextWindow ?? 1_000_000,
+		maxTokens: maxTokens ?? defaults?.maxTokens ?? 65_536,
 		compat: {
 			supportsDeveloperRole: false,
+			...defaults?.compat,
 			...providerCompat,
 		},
 	};
@@ -336,15 +431,8 @@ async function fetchModels(
 		}
 		if (resolved.value !== null) headers[key] = resolved.value;
 	}
-	if (entry.apiKey !== undefined) {
-		const resolved = resolveEnvValue(entry.apiKey);
-		if (resolved.error) {
-			throw new Error(`apiKey ${resolved.error}`);
-		}
-		if (resolved.value) {
-			headers.Authorization = `Bearer ${resolved.value}`;
-		}
-	}
+	const discoveryApiKey = await resolveDiscoveryApiKey(entry);
+	if (discoveryApiKey) headers.Authorization = `Bearer ${discoveryApiKey}`;
 	const url = `${entry.baseUrl.replace(/\/+$/, "")}/models`;
 	let response: Response;
 	try {
@@ -359,6 +447,7 @@ async function fetchModels(
 	const entries = Array.isArray(payload) ? payload : (payload.data ?? []);
 	const models = entries
 		.filter((m): m is typeof m & { id: string } => typeof m?.id === "string" && m.id.length > 0)
+		.filter((m) => modelMatchesDiscovery(m.id, entry.modelDiscovery))
 		.map((m) =>
 			buildModel(
 				m.id,
@@ -366,6 +455,7 @@ async function fetchModels(
 				m.context_window ?? m.contextWindow,
 				m.max_tokens ?? m.maxTokens,
 				entry.compat,
+				entry.modelDiscovery?.defaults,
 			),
 		);
 	if (models.length === 0) {
@@ -378,7 +468,7 @@ async function fetchModels(
 type FetchCache = Map<string, Promise<ProviderModelConfig[]>>;
 
 function fetchWithCache(cache: FetchCache, entry: DiscoveryProviderEntry, notices: Notice[]): Promise<ProviderModelConfig[]> {
-	const cacheKey = `${entry.baseUrl}\n${entry.apiKey ?? ""}\n${JSON.stringify(entry.headers ?? {})}`;
+	const cacheKey = `${entry.baseUrl}\n${entry.apiKey ?? `<stored:${entry.id}>`}\n${JSON.stringify(entry.headers ?? {})}\n${JSON.stringify(entry.modelDiscovery ?? {})}\n${JSON.stringify(entry.compat ?? {})}`;
 	let pending = cache.get(cacheKey);
 	if (!pending) {
 		pending = fetchModels(entry, notices);

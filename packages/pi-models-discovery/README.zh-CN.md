@@ -44,6 +44,49 @@ pi install npm:pi-models-discovery
 
 手编方式修改配置后需 `/reload` 生效；`/config:model-discovery` 命令的修改立即生效。
 
+### 发现过滤与统一默认值
+
+当 `/models` 同时返回图片模型、不同协议模型或网关私有条目时，可用 `modelDiscovery.include` / `exclude` 按模型 ID glob 过滤，并用 `defaults` 补充 `/models` 不提供的统一能力元数据：
+
+```json
+{
+  "providers": {
+    "llm-proxy": {
+      "name": "LLM Proxy Responses",
+      "baseUrl": "https://proxy.example.com/v1",
+      "api": "openai-responses",
+      "authHeader": true,
+      "discoverModels": true,
+      "modelDiscovery": {
+        "include": ["gpt-5.6-*", "gpt-6-*"],
+        "exclude": ["gpt-image-*"],
+        "defaults": {
+          "reasoning": true,
+          "thinkingLevelMap": {
+            "off": null,
+            "minimal": "low",
+            "low": "low",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          },
+          "input": ["text", "image"],
+          "contextWindow": 1050000,
+          "maxTokens": 128000,
+          "compat": {
+            "supportsDeveloperRole": false,
+            "supportsStrictMode": false
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+`include` / `exclude` 是整串 glob，支持 `*` 和 `?`；先应用 include，再应用 exclude。`defaults` 支持 `reasoning`、`thinkingLevelMap`、`input`、`contextWindow`、`maxTokens` 和 `compat`。`/models` 对单个模型返回的 `context_window` / `max_tokens` 优先于 defaults；models.json 的标准 `modelOverrides` 仍可覆盖具体模型。
+
 ## 刷新缓存
 
 ```
@@ -54,11 +97,11 @@ pi install npm:pi-models-discovery
 
 ## 行为
 
-- **启动（缓存优先）**：缓存命中时直接用持久化的模型列表注册，零网络请求；缓存文件位于 `~/.pi/agent/extensions/pi-models-discovery/cache.json`。provider 配置指纹（baseUrl+api+apiKey+headers+compat）变化时缓存自动失效，重新走网络发现。
+- **启动（缓存优先）**：缓存命中时直接用持久化的模型列表注册，零网络请求；缓存文件位于 `~/.pi/agent/extensions/pi-models-discovery/cache.json`。provider 配置指纹（baseUrl+api+apiKey+headers+compat+modelDiscovery）变化时缓存自动失效，重新走网络发现。
 - **在线刷新**：`/config:model-discovery-refresh` 或 `/model` 打开时触发的 `refreshModels` 在线重新发现，并同步更新缓存。
 - **离线 / 拉取失败**：保留 models.json 里手写的 `models`（如有，作为回退），并通过会话内 notify 显式警告，不静默降级；单个 provider 失败不影响其他 provider。
-- **apiKey 解析**（仅发现请求）：支持字面量与 `$ENV_VAR` / `${ENV_VAR}` 插值；`!command` 形式跳过发现并显式警告（聊天请求仍由 pi 自身解析执行，不受影响）。
-- 发现的模型默认参数：`reasoning: true`、`input: ["text", "image"]`、cost 全 0、`contextWindow` 1M、`maxTokens` 64K、`compat.supportsDeveloperRole: false`；provider 级 `compat` 会合并进每个发现的模型。
+- **apiKey 解析（仅发现请求）**：显式 `apiKey` 支持字面量与 `$ENV_VAR` / `${ENV_VAR}` 插值；`!command` 形式跳过发现并显式警告。未配置 `apiKey` 时，会复用 `auth.json` 中同名 provider 的 `api_key` 凭据；聊天请求仍由 Pi 自身解析鉴权。
+- 发现的模型默认参数：`reasoning: true`、`input: ["text", "image"]`、cost 全 0、`contextWindow` 1M、`maxTokens` 64K、`compat.supportsDeveloperRole: false`；provider 级 `compat` 与 `modelDiscovery.defaults` 会合并进每个发现的模型。
 - 发现的模型声明 `thinkingLevelMap: { xhigh: "xhigh", max: "max" }`，让 `xhigh` / `max` 出现在 `/thinking`；标准档位保持缺省，仍由 pi 的 provider 默认映射决定。`/models` 无法逐个模型返回思考能力，所以这是对所有发现模型一刀切的默认值：某个 provider 拒绝这些档位时，在 models.json 的 `modelOverrides` 里按 model.id 覆盖（把 `xhigh` / `max` 置 `null` 可隐藏），或改用手写 `models` 条目自行声明。
 
 ```json

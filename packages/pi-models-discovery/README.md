@@ -44,6 +44,49 @@ Add `"discoverModels": true` to a provider in `~/.pi/agent/models.json`:
 
 Hand edits require `/reload` to take effect; changes made through `/config:model-discovery` apply immediately.
 
+### Discovery filters and shared defaults
+
+When `/models` mixes image models, different wire protocols, or gateway-private entries, use `modelDiscovery.include` / `exclude` to filter model IDs with globs and `defaults` to supply shared capability metadata that `/models` does not return:
+
+```json
+{
+  "providers": {
+    "llm-proxy": {
+      "name": "LLM Proxy Responses",
+      "baseUrl": "https://proxy.example.com/v1",
+      "api": "openai-responses",
+      "authHeader": true,
+      "discoverModels": true,
+      "modelDiscovery": {
+        "include": ["gpt-5.6-*", "gpt-6-*"],
+        "exclude": ["gpt-image-*"],
+        "defaults": {
+          "reasoning": true,
+          "thinkingLevelMap": {
+            "off": null,
+            "minimal": "low",
+            "low": "low",
+            "medium": "medium",
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          },
+          "input": ["text", "image"],
+          "contextWindow": 1050000,
+          "maxTokens": 128000,
+          "compat": {
+            "supportsDeveloperRole": false,
+            "supportsStrictMode": false
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+`include` / `exclude` are whole-ID globs supporting `*` and `?`; include runs first, then exclude. `defaults` accepts `reasoning`, `thinkingLevelMap`, `input`, `contextWindow`, `maxTokens`, and `compat`. Per-model `context_window` / `max_tokens` values returned by `/models` take precedence over defaults; standard models.json `modelOverrides` can still refine individual models.
+
 ## Refreshing the cache
 
 ```
@@ -54,11 +97,11 @@ Forces a rediscovery of every discovery provider and updates the local cache, no
 
 ## Behavior
 
-- **Startup (cache-first)**: when the cache hits, models are registered directly from the persisted list with zero network requests. The cache lives at `~/.pi/agent/extensions/pi-models-discovery/cache.json`. The cache is invalidated automatically when the provider configuration fingerprint (baseUrl+api+apiKey+headers+compat) changes, triggering a fresh network discovery.
+- **Startup (cache-first)**: when the cache hits, models are registered directly from the persisted list with zero network requests. The cache lives at `~/.pi/agent/extensions/pi-models-discovery/cache.json`. The cache is invalidated automatically when the provider configuration fingerprint (baseUrl+api+apiKey+headers+compat+modelDiscovery) changes, triggering a fresh network discovery.
 - **Online refresh**: `/config:model-discovery-refresh`, or the `refreshModels` hook triggered when opening `/model`, rediscovers online and updates the cache.
 - **Offline / fetch failure**: handwritten `models` in models.json (if any) are kept as a fallback, and an explicit warning is surfaced via in-session notify — never a silent degradation. One provider failing does not affect the others.
-- **apiKey resolution** (discovery request only): supports literals and `$ENV_VAR` / `${ENV_VAR}` interpolation; `!command` values skip discovery with an explicit warning (chat requests are still resolved by pi itself and are unaffected).
-- Default parameters for discovered models: `reasoning: true`, `input: ["text", "image"]`, zero cost, `contextWindow` 1M, `maxTokens` 64K, `compat.supportsDeveloperRole: false`. Provider-level `compat` is merged into every discovered model.
+- **apiKey resolution** (discovery request only): an explicit `apiKey` supports literals and `$ENV_VAR` / `${ENV_VAR}` interpolation; `!command` values skip discovery with an explicit warning. When `apiKey` is omitted, discovery reuses an `api_key` credential stored for the same provider ID in auth.json. Chat requests continue to use Pi's own authentication resolution.
+- Default parameters for discovered models: `reasoning: true`, `input: ["text", "image"]`, zero cost, `contextWindow` 1M, `maxTokens` 64K, `compat.supportsDeveloperRole: false`. Provider-level `compat` and `modelDiscovery.defaults` are merged into every discovered model.
 - Discovered models declare `thinkingLevelMap: { xhigh: "xhigh", max: "max" }`, so `xhigh` and `max` appear in `/thinking`; the standard levels stay omitted and keep pi's provider default mapping. `/models` cannot report per-model thinking capability, so this is a blanket default for every discovered model: when a provider rejects those levels, override it per model through `modelOverrides` in models.json (set `xhigh` / `max` to `null` to hide them), or declare the model yourself in a handwritten `models` entry.
 
 ```json

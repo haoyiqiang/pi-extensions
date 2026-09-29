@@ -13,17 +13,17 @@ description: "配置与排查 models.json 的动态模型发现、缓存刷新�
 - `extensions/pi-models-discovery/cache.json`：启动缓存；
 - `models.json.discovery-bak`：交互配置写回前的备份。
 
-只处理带 `discoverModels: true` 的 provider。确认 `baseUrl`、`api`、可选 `apiKey`、headers/compat 以及服务的 `GET {baseUrl}/models` 响应。
+只处理带 `discoverModels: true` 的 provider。确认 `baseUrl`、`api`、可选 `apiKey`、headers/compat、可选 `modelDiscovery` 过滤/默认值，以及服务的 `GET {baseUrl}/models` 响应。
 
 ## 修改
 
-优先使用 `/config:model-discovery` 添加、删除或重新发现 provider；命令会备份并格式化重写 `models.json`，注释与原排版不会保留。手工修改时，provider 至少提供 `baseUrl`、`api`、`discoverModels: true`；修改后需要 `/reload`。
+优先使用 `/config:model-discovery` 添加、删除或重新发现 provider；命令会备份并格式化重写 `models.json`，注释与原排版不会保留。手工修改时，provider 至少提供 `baseUrl`、`api`、`discoverModels: true`；混合目录可用 `modelDiscovery.include` / `exclude` 的 `*`、`?` glob 过滤，并用 `modelDiscovery.defaults` 统一设置 reasoning、thinkingLevelMap、input、contextWindow、maxTokens、compat。修改后需要 `/reload`。
 
-`apiKey` 可用字面量、`$ENV_VAR` 或 `${ENV_VAR}`；`!command` 不用于发现请求，会被跳过并警告。不要把密钥写入 Skill、仓库或回复。
+显式 `apiKey` 可用字面量、`$ENV_VAR` 或 `${ENV_VAR}`；`!command` 不用于发现请求，会被跳过并警告。省略 `apiKey` 时复用 auth.json 中同名 provider 的 api_key。不要把密钥写入 Skill、仓库或回复。
 
 ## 思考等级
 
-发现的模型默认声明 `thinkingLevelMap: { xhigh: "xhigh", max: "max" }`（对所有模型一刀切）。若某个模型不认 `xhigh` / `max`，用 models.json 的 `modelOverrides` 按 model.id 把它们置 `null`。
+发现的模型默认声明 `thinkingLevelMap: { xhigh: "xhigh", max: "max" }`（对所有模型一刀切）。网关最低只接受 `low` 等特殊情况，优先在 `modelDiscovery.defaults.thinkingLevelMap` 统一映射；单个模型例外再用 models.json 的 `modelOverrides`。
 
 ## 验证
 

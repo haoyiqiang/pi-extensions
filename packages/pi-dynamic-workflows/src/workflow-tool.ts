@@ -15,7 +15,12 @@ import {
   renderWorkflowWidgetLines,
   type WorkflowSnapshot,
 } from "./display.ts";
-import { parseWorkflowScript, runWorkflow, type WorkflowRunResult } from "./workflow.ts";
+import {
+  parseWorkflowScript,
+  runWorkflow,
+  type WorkflowRunOptions,
+  type WorkflowRunResult,
+} from "./workflow.ts";
 
 const i18n = createTranslator(loadCatalog(new URL("../locales/index.json", import.meta.url)));
 
@@ -416,21 +421,29 @@ function setupWidget(
   return { updateWidget, clearWidget };
 }
 
-/** 创建 runWorkflow 的基础选项（不含回调） */
+/**
+ * 创建 runWorkflow 的基础选项（不含回调）。
+ *
+ * 返回类型显式标注，让 `session` 里的字段接受 createAgentSession 的完整性检查：
+ * Pi 0.85 起 agent 会话只接受 `modelRuntime`，`modelRegistry` 已不存在。
+ */
 function createWorkflowRunOptions(opts: {
   cwd: string;
   args?: unknown;
   signal?: AbortSignal;
   concurrency?: number;
   ctx: any;
-}) {
+}): WorkflowRunOptions {
   return {
     cwd: opts.cwd,
     args: opts.args,
     signal: opts.signal,
     concurrency: opts.concurrency,
     session: {
-      modelRegistry: opts.ctx.modelRegistry,
+      // 只传 `model`：上游 PR Michaelliv/pi-dynamic-workflows#15 加的 `modelRegistry`
+      // 在 Pi 0.81 起已被 `modelRuntime` 取代，且默认 runtime 本来就从 agentDir 读
+      // auth.json / models.json，所以那个字段现在是死的。返回类型标注会在重新加回它时
+      // 报 TS2353。
       model: opts.ctx.model,
     },
     subagent: {

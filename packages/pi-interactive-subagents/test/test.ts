@@ -2347,6 +2347,51 @@ describe("subagent startup delay", () => {
     }
   });
 });
+
+describe("subagent model inheritance", () => {
+  const parentModel = { provider: "deepseek", id: "deepseek-flash" };
+
+  it("inherits the parent session model as provider/id", () => {
+    const testApi = (subagentsModule as any).__test__;
+    assert.ok(testApi, "expected subagents test helpers to be exported");
+    assert.equal(typeof testApi.resolveInheritedSubagentModel, "function");
+    assert.equal(
+      testApi.resolveInheritedSubagentModel(parentModel, true),
+      "deepseek/deepseek-flash",
+    );
+  });
+
+  it("trims surrounding whitespace in the model identifier", () => {
+    const testApi = (subagentsModule as any).__test__;
+    assert.equal(
+      testApi.resolveInheritedSubagentModel({ provider: " deepseek ", id: " deepseek-flash " }, true),
+      "deepseek/deepseek-flash",
+    );
+  });
+
+  it("skips inheritance when the child uses its own agent directory", () => {
+    const testApi = (subagentsModule as any).__test__;
+    assert.equal(testApi.resolveInheritedSubagentModel(parentModel, false), undefined);
+  });
+
+  it("returns undefined without a usable parent model", () => {
+    const testApi = (subagentsModule as any).__test__;
+    const unusable = [
+      undefined,
+      null,
+      "deepseek/deepseek-flash",
+      {},
+      { provider: "deepseek" },
+      { id: "deepseek-flash" },
+      { provider: "  ", id: "  " },
+      { provider: 42, id: "deepseek-flash" },
+    ];
+    for (const value of unusable) {
+      assert.equal(testApi.resolveInheritedSubagentModel(value, true), undefined);
+    }
+  });
+});
+
 /** Widget filter fixtures: one user-spawned agent, one workflow-launched agent. */
 const VISIBLE_AGENT_ID = "visible-agent-id";
 const VISIBLE_AGENT_NAME = "Scout: widget filter";

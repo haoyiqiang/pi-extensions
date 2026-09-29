@@ -118,10 +118,31 @@ function extractFirstText(content: Array<{ type: string; text?: string }>): stri
  *   1. 调用方传入的 `model` 参数（subagent tool 调用时显式指定）
  *   2. agent 配置文件 frontmatter 里的 `model` 字段
  *   3. 环境变量 PI_SUBAGENT_DEFAULT_MODEL
- *   4. undefined — 不传 --model，子 pi 继承父 session 的默认模型
+ *   4. 父会话当前模型 — 见 resolveInheritedSubagentModel()
+ *   5. 都没有时不传 --model，子 pi 进程用自己的 settings 默认模型
  */
 function getDefaultSubagentModel(): string | undefined {
   return process.env.PI_SUBAGENT_DEFAULT_MODEL?.trim() || undefined;
+}
+
+/**
+ * 父会话当前模型的 `--model` 标识（`provider/id`）。
+ *
+ * 子 pi 进程不传 `--model` 时用的是它自己的 settings 默认模型，未必等于父会话运行时
+ * 切换过的模型（例如父会话用 `--model` 启动过，或中途 `/model` 换过）。要真正继承，
+ * 必须把 `--model` 显式传给子进程。
+ *
+ * 只在子进程和父进程共用同一个 agent 目录时继承：目标 cwd 带自己的 `.pi/agent/` 时，
+ * 子进程读的是那份配置，父会话的模型可能不在它的模型目录里。
+ */
+function resolveInheritedSubagentModel(
+  parentModel: unknown,
+  sharedAgentDir: boolean,
+): string | undefined {
+  if (!sharedAgentDir || !isRecord(parentModel)) return undefined;
+  const provider = typeof parentModel.provider === "string" ? parentModel.provider.trim() : "";
+  const id = typeof parentModel.id === "string" ? parentModel.id.trim() : "";
+  return provider && id ? `${provider}/${id}` : undefined;
 }
 
 // Survive /reload: clear timers and abort poll loops from the previous module load.
@@ -1596,6 +1617,7 @@ export const __test__ = {
   buildSubagentToolAllowlist,
   buildChildExtensionArgs,
   buildPiPromptArgs,
+  resolveInheritedSubagentModel,
   formatWidgetRightLabel,
   observeRunningSubagent,
   resolveDenyTools,
@@ -1633,7 +1655,12 @@ function startWidgetRefresh() {
  */
 async function launchSubagent(
   params: typeof SubagentParams.static,
-  ctx: { sessionManager: { getSessionFile(): string | null; getSessionId(): string; getSessionDir(): string }; cwd: string },
+  ctx: {
+    sessionManager: { getSessionFile(): string | null; getSessionId(): string; getSessionDir(): string };
+    cwd: string;
+    /** 父会话当前模型；用于子进程未指定模型时继承。 */
+    model?: unknown;
+  },
   options?: { surface?: string; hiddenFromWidget?: boolean },
 ): Promise<RunningSubagent> {
   const startTime = Date.now();
@@ -1782,12 +1809,18 @@ async function launchSubagent(
 
   // ── Pi CLI path ──
 
+  // 显式 model / frontmatter / 环境变量优先；都没有时继承父会话当前模型。
+  // 继承只在 pi 路径做：claude 路径不接受 Pi 的 `provider/model` 标识。
+  const piModel =
+    effectiveModel ??
+    resolveInheritedSubagentModel(ctx.model, effectiveAgentDir === getAgentConfigDir());
+
   // Build pi command
   const parts: string[] = ["pi", ...buildChildExtensionArgs()];
   parts.push("--session", shellEscape(subagentSessionFile));
 
-  if (effectiveModel) {
-    const model = effectiveThinking ? `${effectiveModel}:${effectiveThinking}` : effectiveModel;
+  if (piModel) {
+    const model = effectiveThinking ? `${piModel}:${effectiveThinking}` : piModel;
     parts.push("--model", shellEscape(model));
   }
 

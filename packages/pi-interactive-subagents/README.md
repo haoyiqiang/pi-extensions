@@ -74,7 +74,7 @@ If your shell startup is slow and subagent commands sometimes get dropped before
 export PI_SUBAGENT_SHELL_READY_DELAY_MS=2500
 ```
 
-To set a default model for all subagents, use `PI_SUBAGENT_DEFAULT_MODEL`. When unset, subagents inherit the parent session's model (i.e. no `--model` flag is passed to the child pi process):
+To set a default model for all subagents, use `PI_SUBAGENT_DEFAULT_MODEL`:
 
 ```bash
 export PI_SUBAGENT_DEFAULT_MODEL="anthropic/claude-sonnet-4-20250514"
@@ -84,7 +84,10 @@ Model resolution order (highest priority wins):
 1. Explicit `model` parameter in the subagent tool call
 2. Agent definition frontmatter (`model:` field in the `.md` file)
 3. `PI_SUBAGENT_DEFAULT_MODEL` environment variable
-4. Inherited from parent session (no `--model` passed)
+4. The parent session's current model, passed to the child pi process as `--model`
+5. No `--model` flag is passed, so the child pi process uses its own settings default
+
+Step 4 applies only when the child shares the parent's agent directory. When the target `cwd` has its own `.pi/agent/`, the child reads that configuration instead, the parent's model may not exist there, and the child's own default applies. Claude Code agents (`cli: claude` in frontmatter) never inherit, because `claude --model` does not accept Pi's `provider/model` identifiers.
 
 Subagent panes are created without stealing keyboard focus (cmux, tmux). Launch commands target child surfaces by explicit ID, so focus and command delivery are independent. Note: the `interactive` option controls parent status notifications, not terminal focus.
 
