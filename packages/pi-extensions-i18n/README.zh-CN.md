@@ -96,7 +96,7 @@ const t = scope("pi-example");
 t("saved", "Saved");
 ```
 
-平铺的 `locales/en-US.json`、`locales/zh-CN.json` 可以使用 `pi-extensions-i18n/loader` 导出的 `registerLocalesFromDir`。现有包可以渐进迁移：当前 key-first 双语 catalog 使用的 `createTranslator`、`getLocale`、`loadCatalog` 继续保留。
+仓库内各包统一使用平铺的 `locales/en-US.json`、`locales/zh-CN.json`，并通过 `pi-extensions-i18n/loader` 导出的 `registerLocalesFromDir` 注册。`createTranslator`、`getLocale`、`loadCatalog` 继续作为外部 key-first 双语 catalog 的兼容 API 保留。
 
 catalog 条目必须同时包含两种语言：
 

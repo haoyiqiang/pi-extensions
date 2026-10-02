@@ -87,7 +87,7 @@ const t = scope("pi-example");
 t("saved", "Saved");
 ```
 
-Flat `locales/en-US.json` and `locales/zh-CN.json` directories can use `registerLocalesFromDir` from `pi-extensions-i18n/loader`. Existing packages can migrate gradually: `createTranslator`, `getLocale`, and `loadCatalog` remain available for the current key-first bilingual catalog format.
+Repository packages use flat `locales/en-US.json` and `locales/zh-CN.json` files through `registerLocalesFromDir` from `pi-extensions-i18n/loader`. `createTranslator`, `getLocale`, and `loadCatalog` remain available as compatibility APIs for external key-first bilingual catalogs.
 
 Catalog entries must contain both locale keys:
 

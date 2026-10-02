@@ -220,42 +220,31 @@ for (const dir of packageDirs) {
     }
   }
 
-  // 6. i18n catalog consistency. Existing packages may use key-first bilingual
-  // catalogs; migrated packages use one flat string map per locale file.
+  // 6. i18n catalog consistency. Repository packages use one flat string map
+  // per locale; the public compatibility loader still supports legacy callers.
   const localesDir = join(pkgRoot, "locales");
   if (existsSync(localesDir)) {
-    const catalogFiles = readdirSync(localesDir).filter((f) => f.endsWith(".json"));
-    const flatCatalogs = new Map();
+    const catalogFiles = readdirSync(localesDir).filter((file) => file.endsWith(".json")).sort();
+    const expectedFiles = ["en-US.json", "zh-CN.json"];
+    if (JSON.stringify(catalogFiles) !== JSON.stringify(expectedFiles)) {
+      error(`${label}: locales must contain exactly en-US.json and zh-CN.json`);
+    }
+    const catalogs = new Map();
     for (const catalogFile of catalogFiles) {
       const catalog = JSON.parse(readFileSync(join(localesDir, catalogFile), "utf8"));
-      const values = Object.values(catalog);
-      const flat = values.every((value) => typeof value === "string");
-      const keyFirst = values.every((value) => typeof value === "object" && value !== null && !Array.isArray(value));
-      if (flat) {
-        flatCatalogs.set(catalogFile.replace(/\.json$/, ""), catalog);
+      if (Object.values(catalog).some((value) => typeof value !== "string")) {
+        error(`${label}: locales/${catalogFile} must be a flat string map`);
         continue;
       }
-      if (!keyFirst) {
-        error(`${label}: locales/${catalogFile} must be either a flat locale map or a key-first bilingual catalog`);
-        continue;
-      }
-      for (const [key, translations] of Object.entries(catalog)) {
-        const langs = Object.keys(translations);
-        if (!langs.includes("zh-CN")) error(`${label}: locales/${catalogFile} key "${key}" missing zh-CN`);
-        if (!langs.includes("en-US")) error(`${label}: locales/${catalogFile} key "${key}" missing en-US`);
-      }
+      catalogs.set(catalogFile.replace(/\.json$/, ""), catalog);
     }
-    if (flatCatalogs.size > 0) {
-      const english = flatCatalogs.get("en-US");
-      const chinese = flatCatalogs.get("zh-CN");
-      if (!english) error(`${label}: flat locale catalogs require locales/en-US.json`);
-      if (!chinese) error(`${label}: flat locale catalogs require locales/zh-CN.json`);
-      if (english && chinese) {
-        const englishKeys = Object.keys(english).sort();
-        const chineseKeys = Object.keys(chinese).sort();
-        if (JSON.stringify(englishKeys) !== JSON.stringify(chineseKeys)) {
-          error(`${label}: locales/en-US.json and locales/zh-CN.json must contain the same keys`);
-        }
+    const english = catalogs.get("en-US");
+    const chinese = catalogs.get("zh-CN");
+    if (english && chinese) {
+      const englishKeys = Object.keys(english).sort();
+      const chineseKeys = Object.keys(chinese).sort();
+      if (JSON.stringify(englishKeys) !== JSON.stringify(chineseKeys)) {
+        error(`${label}: locales/en-US.json and locales/zh-CN.json must contain the same keys`);
       }
     }
   }

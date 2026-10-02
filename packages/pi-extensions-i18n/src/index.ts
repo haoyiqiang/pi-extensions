@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { createTranslator, loadCatalog } from "./catalog.ts";
+import { registerLocalesFromDir } from "./loader.ts";
 import {
   applyLocale,
   clearLocaleOverride,
@@ -7,7 +7,9 @@ import {
   LOCALE_ENV,
   parseLocalePreference,
   saveLocalePreference,
+  scope,
   type LocalePreference,
+  type MessageParams,
 } from "./runtime.ts";
 import {
   NOTICE_TAG_COLOR,
@@ -20,17 +22,36 @@ import {
 export * from "./catalog.ts";
 export * from "./runtime.ts";
 
-const commandMessages = loadCatalog(new URL("../locales/command.json", import.meta.url));
+const COMMAND_NAMESPACE = "pi-extensions-i18n";
 const NOTICE_TAG = "language";
 const NOTICE_COLOR: NoticeColor = NOTICE_TAG_COLOR;
 const NOTICE_SOURCE: NoticeSource = { tag: NOTICE_TAG, color: NOTICE_COLOR };
 const FLAG_NAME = "locale";
 
+interface CommandI18n {
+  t(key: string, params?: MessageParams): string;
+}
+
+function loadCommandI18n(): CommandI18n {
+  const loaded = registerLocalesFromDir(COMMAND_NAMESPACE, new URL("../locales/", import.meta.url));
+  if (loaded.diagnostics.length > 0) {
+    throw new Error(
+      `Failed to load pi-extensions-i18n locales: ${loaded.diagnostics.map((item) => `${item.locale}: ${item.error}`).join("; ")}`,
+    );
+  }
+  const translate = scope(COMMAND_NAMESPACE);
+  return {
+    t(key: string, params?: MessageParams): string {
+      return translate(key, key, params);
+    },
+  };
+}
+
 function registerLocaleCommand(
   pi: ExtensionAPI,
   getFlagPreference: () => LocalePreference | undefined,
+  i18n: CommandI18n,
 ): void {
-  const i18n = createTranslator(commandMessages);
   const command = {
     description: i18n.t("description"),
     handler: async (args: string, ctx: ExtensionCommandContext) => {
@@ -100,7 +121,7 @@ function registerLocaleCommand(
 
 export default function piI18n(pi: ExtensionAPI): void {
   installNoticeRenderer(pi);
-  const commandI18n = createTranslator(commandMessages);
+  const commandI18n = loadCommandI18n();
   let flagPreference: LocalePreference | undefined;
 
   pi.registerFlag(FLAG_NAME, {
@@ -125,7 +146,7 @@ export default function piI18n(pi: ExtensionAPI): void {
     else clearLocaleOverride();
   });
 
-  registerLocaleCommand(pi, () => flagPreference);
+  registerLocaleCommand(pi, () => flagPreference, commandI18n);
 }
 
 export {
