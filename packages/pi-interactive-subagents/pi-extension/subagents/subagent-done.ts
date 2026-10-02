@@ -1,6 +1,6 @@
 /**
  * Extension loaded into sub-agents.
- * - Shows agent identity + available tools as a styled widget above the editor (toggle with Ctrl+J)
+ * - Shows agent identity + available tools as a styled widget above the editor (toggle with Ctrl+Shift+J)
  * - Provides a `subagent_done` tool for autonomous agents to self-terminate
  * - Nudges any agent that forgets to call subagent_done after generating
  * - Respects PI_DENY_TOOLS for its own tools: a denied tool is not registered,
@@ -24,6 +24,8 @@ import { createTranslator, loadCatalog } from "pi-extensions-i18n";
 import { createSubagentActivityRecorder } from "./activity.ts";
 
 const i18n = createTranslator(loadCatalog(new URL("../../locales/index.json", import.meta.url)));
+// ctrl+j is Pi's built-in newline (tui.input.newLine). Overriding it warns on every child session.
+const WIDGET_TOGGLE_SHORTCUT = "ctrl+shift+j";
 const ASSISTANT_ROLE = "assistant";
 const NORMAL_STOP_REASON = "stop";
 const ABORTED_STOP_REASON = "aborted";
@@ -151,7 +153,7 @@ export default function (pi: ExtensionAPI) {
         if (expanded) {
           // Expanded: full tool list + denied
           const countInfo = theme.fg("dim", ` — ${toolNames.length} available`);
-          const hint = theme.fg("muted", "  (Ctrl+J to collapse)");
+          const hint = theme.fg("muted", `  (${i18n.t("widgetCollapseHint")})`);
 
           const toolList = toolNames
             .map((name: string) => theme.fg("dim", name))
@@ -178,7 +180,7 @@ export default function (pi: ExtensionAPI) {
             denied.length > 0
               ? theme.fg("dim", " · ") + theme.fg("error", `${denied.length} denied`)
               : "";
-          const hint = theme.fg("muted", "  (Ctrl+J to expand)");
+          const hint = theme.fg("muted", `  (${i18n.t("widgetExpandHint")})`);
 
           const content = new Text(`${agentTag}${countInfo}${deniedInfo}${hint}`, 0, 0);
           box.addChild(content);
@@ -294,9 +296,8 @@ export default function (pi: ExtensionAPI) {
     recorder.sessionShutdown((event as any).reason);
   });
 
-  // Toggle expand/collapse with Ctrl+J
-  pi.registerShortcut("ctrl+j", {
-    description: "Toggle subagent tools widget",
+  pi.registerShortcut(WIDGET_TOGGLE_SHORTCUT, {
+    description: i18n.t("widgetToggleShortcut"),
     handler: (ctx) => {
       expanded = !expanded;
       renderWidget(ctx);
