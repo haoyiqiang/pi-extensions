@@ -1,10 +1,14 @@
-import type {
-  ExtensionAPI,
-  ExtensionCommandContext,
-} from "@earendil-works/pi-coding-agent";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { extensionConfigPath, readJsonObjectResult, resolveAgentDir, writeJsonAtomic } from "pi-extensions-config";
+import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { createTranslator, loadCatalog } from "./catalog.ts";
+import {
+  applyLocale,
+  clearLocaleOverride,
+  getLocalePreference,
+  LOCALE_ENV,
+  parseLocalePreference,
+  saveLocalePreference,
+  type LocalePreference,
+} from "./runtime.ts";
 import {
   NOTICE_TAG_COLOR,
   installNoticeRenderer,
@@ -13,181 +17,19 @@ import {
   type NoticeSource,
 } from "./notice.ts";
 
-export const SUPPORTED_LOCALES = ["zh-CN", "en-US"] as const;
-export type Locale = (typeof SUPPORTED_LOCALES)[number];
-export type LocalePreference = Locale | "auto";
+export * from "./catalog.ts";
+export * from "./runtime.ts";
 
-export const DEFAULT_LOCALE_PREFERENCE: LocalePreference = "zh-CN";
-export const LOCALE_ENV = "PI_EXTENSIONS_LOCALE";
-export const LOCALE_CONFIG_FILE = "config.json";
-export const LOCALE_CONFIG_DIR = "extensions/pi-extensions-i18n";
-
-export interface LocaleConfig {
-  locale: LocalePreference;
-}
-
-export type MessageCatalog = Record<string, Record<Locale, string>>;
-export type MessageKey<Catalog extends MessageCatalog> = keyof Catalog & string;
-export type MessageParams = Record<string, string | number>;
-
-interface Translator<Catalog extends MessageCatalog> {
-  locale(): Locale;
-  t(key: MessageKey<Catalog>, params?: MessageParams): string;
-}
-
-let runtimePreference: LocalePreference | undefined;
-
-function normalizeLocale(value: unknown): LocalePreference | undefined {
-  if (typeof value !== "string") return undefined;
-  const normalized = value.trim().toLowerCase();
-  if (normalized === "auto") return "auto";
-  if (normalized === "zh" || normalized === "zh-cn") return "zh-CN";
-  if (normalized === "en" || normalized === "en-us") return "en-US";
-  return undefined;
-}
-
-export function parseLocalePreference(value: string): LocalePreference | undefined {
-  return normalizeLocale(value);
-}
-
-export function getLocaleConfigPath(agentDir = resolveAgentDir()): string {
-  return extensionConfigPath("pi-extensions-i18n", LOCALE_CONFIG_FILE, agentDir);
-}
-
-function readPersistedPreference(agentDir: string): LocalePreference | undefined {
-  const configPath = getLocaleConfigPath(agentDir);
-  const loaded = readJsonObjectResult(configPath);
-  if (loaded.status === "missing") return undefined;
-  if (loaded.status === "invalid") {
-    console.warn(
-      `[pi-extensions-i18n] Failed to read ${configPath}; using ${DEFAULT_LOCALE_PREFERENCE}: ${loaded.error.message}`,
-    );
-    return undefined;
-  }
-  const value = normalizeLocale(loaded.value.locale);
-  if (value) return value;
-  console.warn(
-    `[pi-extensions-i18n] Invalid locale in ${configPath}; using ${DEFAULT_LOCALE_PREFERENCE}.`,
-  );
-  return undefined;
-}
-
-export function getLocalePreference(): LocalePreference {
-  const envValue = process.env[LOCALE_ENV];
-  if (envValue !== undefined) {
-    const parsed = normalizeLocale(envValue);
-    if (parsed) return parsed;
-    console.warn(
-      `[pi-extensions-i18n] Invalid ${LOCALE_ENV}=${JSON.stringify(envValue)}; using ${DEFAULT_LOCALE_PREFERENCE}.`,
-    );
-    return DEFAULT_LOCALE_PREFERENCE;
-  }
-
-  const persisted = readPersistedPreference(resolveAgentDir());
-  if (persisted) {
-    runtimePreference = persisted;
-    return persisted;
-  }
-  return runtimePreference ?? DEFAULT_LOCALE_PREFERENCE;
-}
-
-function detectSystemLocale(): Locale {
-  const systemLocale = process.env.LC_ALL ?? process.env.LC_MESSAGES ?? process.env.LANG ?? "";
-  return systemLocale.toLowerCase().startsWith("zh") ? "zh-CN" : "en-US";
-}
-
-export function getLocale(): Locale {
-  const preference = getLocalePreference();
-  return preference === "auto" ? detectSystemLocale() : preference;
-}
-
-export function resetLocaleState(): void {
-  runtimePreference = undefined;
-}
-
-export function saveLocalePreference(
-  preference: LocalePreference,
-  agentDir = resolveAgentDir(),
-): string {
-  const normalized = normalizeLocale(preference);
-  if (!normalized) {
-    throw new Error(`Unsupported locale preference: ${String(preference)}`);
-  }
-
-  const configPath = getLocaleConfigPath(agentDir);
-  const config: LocaleConfig = { locale: normalized };
-  writeJsonAtomic(configPath, config);
-  runtimePreference = normalized;
-  return configPath;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-export function loadCatalog(catalogFile: URL | string): MessageCatalog {
-  const filePath = catalogFile instanceof URL ? fileURLToPath(catalogFile) : catalogFile;
-  const parsed: unknown = JSON.parse(readFileSync(filePath, "utf8"));
-  if (!isRecord(parsed)) {
-    throw new Error(`Invalid i18n catalog: expected an object in ${filePath}`);
-  }
-
-  const catalog: MessageCatalog = {};
-  for (const [key, entry] of Object.entries(parsed)) {
-    if (!isRecord(entry) || typeof entry["zh-CN"] !== "string" || typeof entry["en-US"] !== "string") {
-      throw new Error(`Invalid i18n catalog entry ${key} in ${filePath}`);
-    }
-    catalog[key] = {
-      "zh-CN": entry["zh-CN"],
-      "en-US": entry["en-US"],
-    };
-  }
-  return catalog;
-}
-
-function interpolate(template: string, params: MessageParams | undefined): string {
-  if (!params) return template;
-  return template.replace(/\{([A-Za-z0-9_]+)\}/g, (placeholder, name) => {
-    const value = params[name];
-    if (value === undefined) {
-      throw new Error(`Missing interpolation value for ${placeholder}`);
-    }
-    return String(value);
-  });
-}
-
-export function createTranslator<Catalog extends MessageCatalog>(
-  catalog: Catalog,
-): Translator<Catalog> {
-  return {
-    locale: getLocale,
-    t(key, params) {
-      const entry = catalog[key];
-      if (!entry) {
-        throw new Error(`Unknown i18n message key: ${String(key)}`);
-      }
-      const locale = getLocale();
-      const message = entry[locale];
-      if (message === undefined) {
-        throw new Error(`Missing ${locale} translation for message key: ${String(key)}`);
-      }
-      return interpolate(message, params);
-    },
-  };
-}
-
-const commandMessages = loadCatalog(
-  new URL("../locales/command.json", import.meta.url),
-);
-
-/** 本扩展的提示标签；短且唯一，便于在会话里定位来源。 */
+const commandMessages = loadCatalog(new URL("../locales/command.json", import.meta.url));
 const NOTICE_TAG = "language";
-/** 提示标签颜色：所有扩展统一用弱化色，来源靠 tag 文本区分，不靠颜色。 */
 const NOTICE_COLOR: NoticeColor = NOTICE_TAG_COLOR;
-/** 本扩展的提示来源。 */
 const NOTICE_SOURCE: NoticeSource = { tag: NOTICE_TAG, color: NOTICE_COLOR };
+const FLAG_NAME = "locale";
 
-function registerLocaleCommand(pi: ExtensionAPI): void {
+function registerLocaleCommand(
+  pi: ExtensionAPI,
+  getFlagPreference: () => LocalePreference | undefined,
+): void {
   const i18n = createTranslator(commandMessages);
   const command = {
     description: i18n.t("description"),
@@ -211,21 +53,14 @@ function registerLocaleCommand(pi: ExtensionAPI): void {
 
       let preference = directPreference;
       if (!preference) {
-        const options = [
-          i18n.t("zh"),
-          i18n.t("en"),
-          i18n.t("auto"),
-        ];
+        const options = [i18n.t("zh"), i18n.t("en"), i18n.t("auto")];
         const current = getLocalePreference();
         const currentOption = current === "zh-CN"
           ? options[0]
           : current === "en-US"
             ? options[1]
             : options[2];
-        const selected = await ctx.ui.select(
-          `${i18n.t("title")} [${currentOption}]`,
-          options,
-        );
+        const selected = await ctx.ui.select(`${i18n.t("title")} [${currentOption}]`, options);
         if (selected === undefined) return;
         preference = selected === options[0]
           ? "zh-CN"
@@ -236,10 +71,11 @@ function registerLocaleCommand(pi: ExtensionAPI): void {
 
       try {
         const configPath = saveLocalePreference(preference);
-        const envOverride = process.env[LOCALE_ENV];
-        const overrideNotice = envOverride
-          ? `\n${i18n.t("envOverride", { env: LOCALE_ENV })}`
-          : "";
+        const overrides = [
+          getFlagPreference() ? i18n.t("flagOverride", { flag: `--${FLAG_NAME}` }) : "",
+          process.env[LOCALE_ENV] ? i18n.t("envOverride", { env: LOCALE_ENV }) : "",
+        ].filter(Boolean);
+        const overrideNotice = overrides.length > 0 ? `\n${overrides.join("\n")}` : "";
         notifyWithSource({
           ctx,
           source: NOTICE_SOURCE,
@@ -256,15 +92,40 @@ function registerLocaleCommand(pi: ExtensionAPI): void {
       }
     },
   };
-  for (const name of ["config:language", "pi-language"] as const) {
+
+  for (const name of ["config:language", "languages", "pi-language"] as const) {
     pi.registerCommand(name, command);
   }
 }
 
 export default function piI18n(pi: ExtensionAPI): void {
-  // 提示改走会话区的自定义条目（带底色消息块），渲染器在这里一次性注册。
   installNoticeRenderer(pi);
-  registerLocaleCommand(pi);
+  const commandI18n = createTranslator(commandMessages);
+  let flagPreference: LocalePreference | undefined;
+
+  pi.registerFlag(FLAG_NAME, {
+    type: "string",
+    description: commandI18n.t("flagDescription"),
+  });
+
+  pi.on("session_start", (_event, ctx) => {
+    const rawFlag = pi.getFlag(FLAG_NAME);
+    flagPreference = typeof rawFlag === "string" ? parseLocalePreference(rawFlag) : undefined;
+    if (typeof rawFlag === "string" && rawFlag.trim() && !flagPreference) {
+      clearLocaleOverride();
+      notifyWithSource({
+        ctx,
+        source: NOTICE_SOURCE,
+        level: "error",
+        message: commandI18n.t("invalid", { value: rawFlag }),
+      });
+      return;
+    }
+    if (flagPreference) applyLocale(flagPreference);
+    else clearLocaleOverride();
+  });
+
+  registerLocaleCommand(pi, () => flagPreference);
 }
 
 export {

@@ -9,10 +9,12 @@ Independent Pi extensions still need the same operational pieces: a portable con
 ## Features
 
 - `zh-CN`, `en-US`, and `auto` locale preferences.
-- Persistent setting at `~/.pi/agent/extensions/pi-extensions-i18n/config.json`.
-- `PI_EXTENSIONS_LOCALE` environment-variable override.
-- `/config:language` interactive command, plus `/config:language en-US` direct selection.
-- Catalog loading and validation requiring both language entries for every message key.
+- A process-global namespace registry backed by `globalThis[Symbol.for(...)]`, so locale changes propagate across separately resolved package instances.
+- Persistent setting at `~/.pi/agent/extensions/pi-extensions-i18n/config.json` through `pi-extensions-config`.
+- `--locale` launch override and `PI_EXTENSIONS_LOCALE` environment-variable override.
+- `/config:language` interactive command, `/languages` alias, and direct selection such as `/config:language en-US`.
+- Namespaced render-time lookup with English fallback, plus a `./loader` subpath for flat per-locale files.
+- Compatibility catalog loading and validation requiring both language entries for every existing message key.
 - Translator interpolation for user-facing UI, command descriptions, and agent prompts.
 - A single notice outlet, `notifyWithSource`, that draws every user-visible notice as a filled background block in the transcript (the same block Pi uses for extension messages) with a short `[tag]` source label. Pi renders `info` notices as dim, unprefixed text, so without the block and tag you cannot tell which extension spoke. Every package uses the same muted label colour (`NOTICE_TAG_COLOR`): the tag text identifies the source, the colour deliberately does not — nine theme colour slots cannot tell sixteen packages apart, and a collision would actively mislead.
 - Notices land below the message and stay out of the LLM context: they are written as Pi custom entries (`appendEntry` + `registerEntryRenderer`) and only affect the transcript.
@@ -35,7 +37,8 @@ Reload Pi after installation:
 ## Locale precedence
 
 ```text
-PI_EXTENSIONS_LOCALE environment variable
+--locale launch flag
+    > PI_EXTENSIONS_LOCALE environment variable
     > persisted config
     > default zh-CN
 ```
@@ -70,21 +73,21 @@ notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t
 
 This renders as a filled background block with `[distill] message` on its first line: the label uses the shared muted `NOTICE_TAG_COLOR`, the body colour follows `level` (`warning` yellow, `error` red, `info` the extension message text colour), and `textColor` overrides the body colour for verdict-style lines that carry their own semantic colour. Level colours are semantic and stay untouched; only the source label gives up colour as an identity channel. In tui mode the notice is written as a Pi custom entry below the message; rpc/print/json keep using `ctx.ui.notify` with plain `[distill] message` text so no ANSI leaks into other frontends. The block is registered once by this package's own extension entry, so a package that uses the helper must load `../pi-extensions-i18n/index.ts` in its `pi.extensions` list. Use `formatNotice({ source, message, mode, theme })` when you only need the rendered string.
 
-Other exports:
+New packages can register a namespace and resolve strings at render time:
 
 ```ts
-import {
-  createTranslator,
-  getLocale,
-  loadCatalog,
-} from "pi-extensions-i18n";
+import { registerStrings, scope } from "pi-extensions-i18n";
 
-const messages = loadCatalog(new URL("../locales/messages.json", import.meta.url));
-const i18n = createTranslator(messages);
+registerStrings("pi-example", {
+  "en-US": { saved: "Saved" },
+  "zh-CN": { saved: "已保存" },
+});
 
-i18n.t("description");
-getLocale();
+const t = scope("pi-example");
+t("saved", "Saved");
 ```
+
+Flat `locales/en-US.json` and `locales/zh-CN.json` directories can use `registerLocalesFromDir` from `pi-extensions-i18n/loader`. Existing packages can migrate gradually: `createTranslator`, `getLocale`, and `loadCatalog` remain available for the current key-first bilingual catalog format.
 
 Catalog entries must contain both locale keys:
 
@@ -102,7 +105,7 @@ Invalid catalogs fail during loading, which makes missing translations visible i
 ## Requirements
 
 - Node.js 22 or newer.
-- Pi's extension runtime when using the `/config:language` command. `/pi-language` remains available as a compatibility alias.
+- Pi's extension runtime when using the locale command. `/languages` and `/pi-language` remain available as aliases.
 
 ## License
 

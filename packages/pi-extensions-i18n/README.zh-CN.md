@@ -9,10 +9,12 @@ Pi 扩展公共国际化运行时。它提供基于 catalog 的小型 API，支�
 ## 能力
 
 - 支持 `zh-CN`、`en-US` 和 `auto` 语言偏好。
-- 将设置持久化到 `~/.pi/agent/extensions/pi-extensions-i18n/config.json`。
-- 支持 `PI_EXTENSIONS_LOCALE` 环境变量覆盖。
-- 提供 `/config:language` 交互式命令，也支持 `/config:language en-US` 直接设置。
-- 加载并校验 catalog，要求每个消息 key 同时提供两种语言。
+- 使用 `globalThis[Symbol.for(...)]` 保存进程级 namespace registry，不同解析路径加载的包实例也能同步语言切换。
+- 通过 `pi-extensions-config` 将设置持久化到 `~/.pi/agent/extensions/pi-extensions-i18n/config.json`。
+- 支持 `--locale` 启动覆盖和 `PI_EXTENSIONS_LOCALE` 环境变量覆盖。
+- 提供 `/config:language`、`/languages` 和直接设置写法。
+- 提供带英文 fallback 的 namespace 运行时查询，以及用于平铺 locale 文件的 `./loader` 子路径。
+- 继续兼容并校验现有双语 catalog，要求每个消息 key 同时提供两种语言。
 - 为 UI、命令描述和 Agent prompt 提供用户文案插值。
 - 提供统一的用户提示出口 `notifyWithSource`：把提示画成会话区里的**带底色消息块**（用户消息同款底色，见下条），并配上 `[tag]` 来源标签，解决 Pi 对 `info` 级提示只显示暗灰无前缀文本、用户既分不清来源也不容易注意到的问题。所有包用同一个弱化色标标签（`NOTICE_TAG_COLOR`）：来源靠 tag 文本，不靠颜色 —— 9 个色槽分给 16 个包必然撞车，撞车后颜色反而误导。
 - 提示落在消息下方、不进 LLM 上下文：通过 Pi 的自定义条目（`appendEntry` + `registerEntryRenderer`）实现，条目只在本地渲染，不消耗上下文窗口。
@@ -60,7 +62,8 @@ notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t
 ## 语言优先级
 
 ```text
-PI_EXTENSIONS_LOCALE 环境变量
+--locale 启动参数
+    > PI_EXTENSIONS_LOCALE 环境变量
     > 持久化配置
     > 默认 zh-CN
 ```
@@ -79,21 +82,21 @@ PI_EXTENSIONS_LOCALE=en-US pi
 
 ## 扩展作者 API
 
-本包导出功能扩展使用的语言和 catalog 原语：
+新包可以注册 namespace，并在渲染时查询当前语言：
 
 ```ts
-import {
-  createTranslator,
-  getLocale,
-  loadCatalog,
-} from "pi-extensions-i18n";
+import { registerStrings, scope } from "pi-extensions-i18n";
 
-const messages = loadCatalog(new URL("../locales/messages.json", import.meta.url));
-const i18n = createTranslator(messages);
+registerStrings("pi-example", {
+  "en-US": { saved: "Saved" },
+  "zh-CN": { saved: "已保存" },
+});
 
-i18n.t("description");
-getLocale();
+const t = scope("pi-example");
+t("saved", "Saved");
 ```
+
+平铺的 `locales/en-US.json`、`locales/zh-CN.json` 可以使用 `pi-extensions-i18n/loader` 导出的 `registerLocalesFromDir`。现有包可以渐进迁移：当前 key-first 双语 catalog 使用的 `createTranslator`、`getLocale`、`loadCatalog` 继续保留。
 
 catalog 条目必须同时包含两种语言：
 
@@ -111,7 +114,7 @@ catalog 条目必须同时包含两种语言：
 ## 要求
 
 - Node.js 22 或更高版本。
-- 使用 `/config:language` 命令时需要 Pi 扩展运行时；`/pi-language` 仍作为兼容别名保留。
+- 使用语言命令时需要 Pi 扩展运行时；`/languages` 与 `/pi-language` 都作为别名保留。
 
 ## 许可证
 

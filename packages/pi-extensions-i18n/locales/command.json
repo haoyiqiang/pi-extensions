@@ -3,6 +3,10 @@
     "zh-CN": "配置 PiExtensions 的界面和 prompt 语言",
     "en-US": "Configure the PiExtensions UI and prompt language"
   },
+  "flagDescription": {
+    "zh-CN": "本次启动使用的 PiExtensions 语言，例如 zh-CN 或 en-US",
+    "en-US": "PiExtensions locale for this launch, such as zh-CN or en-US"
+  },
   "noUi": {
     "zh-CN": "语言配置需要在带 UI 的 Pi 会话中运行。",
     "en-US": "Language settings require a Pi session with a UI."
@@ -38,5 +42,9 @@
   "envOverride": {
     "zh-CN": "当前由 {env} 环境变量覆盖，持久化值将在移除环境变量后生效。",
     "en-US": "The {env} environment variable currently overrides this value; the persisted setting will apply after it is removed."
+  },
+  "flagOverride": {
+    "zh-CN": "当前由 {flag} 启动参数覆盖，持久化值将在下次不传该参数时生效。",
+    "en-US": "The {flag} launch flag currently overrides this value; the persisted setting will apply when the next launch omits it."
   }
 }
