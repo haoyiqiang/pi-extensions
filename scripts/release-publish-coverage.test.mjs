@@ -9,7 +9,7 @@ function workflow(jobs) {
 
 const publishRun = "npm publish --provenance";
 
-test("真实发布工作流覆盖 matrix 与专用自动发布 job，并去重", () => {
+test("真实发布工作流覆盖分波 matrix 与专用自动发布 job，并去重", () => {
   const source = readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
   assert.deepEqual(collectPublishedPackageDirectories(source), [
     "packages/pi-extensions-i18n",
@@ -20,9 +20,9 @@ test("真实发布工作流覆盖 matrix 与专用自动发布 job，并去重",
     "packages/pi-context-view",
     "packages/pi-rewind",
     "packages/pi-spark",
-    "packages/pi-interactive-subagents",
     "packages/pi-terminal-mux",
     "packages/pi-naming",
+    "packages/pi-interactive-subagents",
   ]);
 });
 
@@ -36,11 +36,11 @@ test("registry 验证 step 不是发布覆盖", () => {
   assert.deepEqual(collectPublishedPackageDirectories(source), []);
 });
 
-test("删除专用 naming 或 mux publish step 后不再报告对应覆盖", () => {
+test("删除专用 mux publish step 或 naming matrix 项后不再报告对应覆盖", () => {
   const source = readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
   const withoutMux = source.replace(/\n      - name: Publish to npm\n        working-directory: packages\/pi-terminal-mux\n        run: \|[\s\S]*?\n          fi\n/, "\n");
   assert.ok(!collectPublishedPackageDirectories(withoutMux).includes("packages/pi-terminal-mux"));
-  const withoutNaming = source.replace(/\n      - name: Publish to npm\n        working-directory: packages\/pi-naming\n        run: \|[\s\S]*?\n          fi\n/, "\n");
+  const withoutNaming = source.replace("\n          - dir: packages/pi-naming", "");
   assert.ok(!collectPublishedPackageDirectories(withoutNaming).includes("packages/pi-naming"));
 });
 

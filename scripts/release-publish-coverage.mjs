@@ -3,12 +3,10 @@ import { parseDocument } from "yaml";
 const MATRIX_DIRECTORY = "${{ matrix.dir }}";
 const PACKAGE_DIRECTORY = /^\.?\/?(packages\/[\w-]+)$/;
 
-/** Returns whether a job only runs for the manual retry dispatch. */
 function isManualOnlyJob(job) {
   return typeof job.if === "string" && job.if.includes("github.event_name == 'workflow_dispatch'");
 }
 
-/** Recognizes a shell command line that actually invokes npm publish, not an echo or comment. */
 function publishesNpm(run) {
   return run.split(/\r?\n/).some((line) => {
     const command = line.trim();
@@ -16,7 +14,6 @@ function publishesNpm(run) {
   });
 }
 
-/** Resolves a literal package working directory or throws rather than guessing a publish target. */
 function packageDirectory(value, jobName) {
   if (typeof value !== "string") {
     throw new Error(`release.yml ${jobName}: npm publish has no resolvable working-directory`);
@@ -28,7 +25,6 @@ function packageDirectory(value, jobName) {
   return match[1];
 }
 
-/** Resolves the effective working directory for one publish step. */
 function resolveStepDirectories(step, job, workflow, jobName) {
   const workingDirectory = step["working-directory"]
     ?? job.defaults?.run?.["working-directory"]
@@ -47,8 +43,7 @@ function resolveStepDirectories(step, job, workflow, jobName) {
   return [packageDirectory(workingDirectory, jobName)];
 }
 
-/** Extract package directories from automatic jobs containing an npm publish command. */
-export function collectPublishedPackageDirectories(workflowSource) {
+export function parseReleaseWorkflow(workflowSource) {
   const document = parseDocument(workflowSource);
   if (document.errors.length > 0) {
     throw new Error(`release.yml cannot be parsed: ${document.errors.map((error) => error.message).join("; ")}`);
@@ -57,15 +52,31 @@ export function collectPublishedPackageDirectories(workflowSource) {
   if (!workflow || typeof workflow !== "object" || Array.isArray(workflow) || !workflow.jobs || typeof workflow.jobs !== "object") {
     throw new Error("release.yml must contain a jobs mapping");
   }
+  return workflow;
+}
 
-  const directories = new Set();
+/** Maps every automatically published package directory to its publish job. */
+export function collectPublishedPackageJobs(workflowSource) {
+  const workflow = parseReleaseWorkflow(workflowSource);
+  const packageJobs = new Map();
   for (const [jobName, job] of Object.entries(workflow.jobs)) {
     if (!job || typeof job !== "object" || Array.isArray(job) || isManualOnlyJob(job)) continue;
     if (!Array.isArray(job.steps)) continue;
     for (const step of job.steps) {
       if (!step || typeof step !== "object" || Array.isArray(step) || typeof step.run !== "string" || !publishesNpm(step.run)) continue;
-      for (const directory of resolveStepDirectories(step, job, workflow, jobName)) directories.add(directory);
+      for (const directory of resolveStepDirectories(step, job, workflow, jobName)) {
+        const previous = packageJobs.get(directory);
+        if (previous && previous !== jobName) {
+          throw new Error(`release.yml publishes "${directory}" from both ${previous} and ${jobName}`);
+        }
+        packageJobs.set(directory, jobName);
+      }
     }
   }
-  return [...directories];
+  return packageJobs;
+}
+
+/** Extract package directories from automatic jobs containing an npm publish command. */
+export function collectPublishedPackageDirectories(workflowSource) {
+  return [...collectPublishedPackageJobs(workflowSource).keys()];
 }

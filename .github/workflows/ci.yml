@@ -26,20 +26,8 @@ jobs:
             npm ci
           fi
 
-      - name: Type check
-        run: npm run typecheck
-
-      - name: Run tests
-        run: npm test
-
-      - name: Local-binding gate
-        run: node scripts/check-no-local-bindings.mjs
-
-      - name: Dependency source gate
-        run: node scripts/check-lockfile-registry.mjs
-
-      - name: Package config gate
-        run: node scripts/check-package-config.mjs
+      - name: Repository gate
+        run: npm run check
 
       - name: npm name ownership gate
         run: node scripts/check-npm-names.mjs

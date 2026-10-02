@@ -25,7 +25,6 @@ permissions:
   id-token: write
 
 jobs:
-  # release-please manifest 模式：自动管理各包版本号 + changelog + 创建 Release PR
   release-please:
     if: ${{ github.event_name == 'push' }}
     runs-on: ubuntu-latest
@@ -37,17 +36,69 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-  # 其它独立包并行发布；terminal-mux 与 naming 有明确的发布顺序。
-  publish-npm:
+  # Validate the released revision once. Publish jobs only verify their own
+  # tarball and already-published workspace dependency ranges.
+  release-verify:
     needs: release-please
     if: ${{ github.event_name == 'push' && needs.release-please.outputs.paths_released }}
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run repository gate
+        run: npm run check
+
+  # Wave 1: the shared locale/notice foundation has no workspace dependency.
+  publish-i18n:
+    needs: [release-please, release-verify]
+    if: ${{ always() && github.event_name == 'push' && contains(needs.release-please.outputs.paths_released, 'packages/pi-extensions-i18n') && needs.release-verify.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Update npm for OIDC support
+        run: |
+          corepack enable npm
+          corepack prepare npm@latest --activate
+          npm --version
+
+      - name: Verify tarball
+        working-directory: packages/pi-extensions-i18n
+        run: npm pack --dry-run --json --ignore-scripts > /dev/null
+
+      - name: Publish to npm
+        working-directory: packages/pi-extensions-i18n
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if [[ "$VERSION" =~ -[a-zA-Z] ]]; then
+            npm publish --provenance --tag beta
+          else
+            npm publish --provenance
+          fi
+
+  # Wave 2a: packages whose only workspace dependency is i18n.
+  publish-independent:
+    needs: [release-please, release-verify, publish-i18n]
+    if: ${{ always() && github.event_name == 'push' && needs.release-please.outputs.paths_released && needs.release-verify.result == 'success' && (needs.publish-i18n.result == 'success' || needs.publish-i18n.result == 'skipped') }}
+    runs-on: ubuntu-latest
     strategy:
-      # 单个包发布失败（如缺 trusted publisher / 版本冲突）不连累其它独立包。
       fail-fast: false
       matrix:
         include:
-          - dir: packages/pi-extensions-i18n
           - dir: packages/pi-web-search
           - dir: packages/pi-distill
           - dir: packages/pi-models-discovery
@@ -55,6 +106,86 @@ jobs:
           - dir: packages/pi-context-view
           - dir: packages/pi-rewind
           - dir: packages/pi-spark
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Update npm for OIDC support
+        run: |
+          corepack enable npm
+          corepack prepare npm@latest --activate
+          npm --version
+
+      - name: Verify published workspace dependencies
+        if: ${{ contains(needs.release-please.outputs.paths_released, matrix.dir) }}
+        run: node scripts/verify-published-workspace-deps.mjs "${{ matrix.dir }}"
+
+      - name: Verify tarball
+        if: ${{ contains(needs.release-please.outputs.paths_released, matrix.dir) }}
+        working-directory: ${{ matrix.dir }}
+        run: npm pack --dry-run --json --ignore-scripts > /dev/null
+
+      - name: Publish to npm
+        if: ${{ contains(needs.release-please.outputs.paths_released, matrix.dir) }}
+        working-directory: ${{ matrix.dir }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if [[ "$VERSION" =~ -[a-zA-Z] ]]; then
+            npm publish --provenance --tag beta
+          else
+            npm publish --provenance
+          fi
+
+  # Wave 2b: terminal-mux also waits for i18n, then unlocks its consumers.
+  publish-terminal-mux:
+    needs: [release-please, release-verify, publish-i18n]
+    if: ${{ always() && github.event_name == 'push' && contains(needs.release-please.outputs.paths_released, 'packages/pi-terminal-mux') && needs.release-verify.result == 'success' && (needs.publish-i18n.result == 'success' || needs.publish-i18n.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Update npm for OIDC support
+        run: |
+          corepack enable npm
+          corepack prepare npm@latest --activate
+          npm --version
+
+      - name: Verify published workspace dependencies
+        run: node scripts/verify-published-workspace-deps.mjs packages/pi-terminal-mux
+
+      - name: Verify tarball
+        working-directory: packages/pi-terminal-mux
+        run: npm pack --dry-run --json --ignore-scripts > /dev/null
+
+      - name: Publish to npm
+        working-directory: packages/pi-terminal-mux
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if [[ "$VERSION" =~ -[a-zA-Z] ]]; then
+            npm publish --provenance --tag beta
+          else
+            npm publish --provenance
+          fi
+
+  # Wave 3: both packages import terminal-mux at runtime.
+  publish-terminal-consumers:
+    needs: [release-please, release-verify, publish-i18n, publish-terminal-mux]
+    if: ${{ always() && github.event_name == 'push' && needs.release-please.outputs.paths_released && needs.release-verify.result == 'success' && (needs.publish-i18n.result == 'success' || needs.publish-i18n.result == 'skipped') && (needs.publish-terminal-mux.result == 'success' || needs.publish-terminal-mux.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - dir: packages/pi-naming
           - dir: packages/pi-interactive-subagents
     steps:
       - uses: actions/checkout@v4
@@ -63,7 +194,6 @@ jobs:
         with:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
-          cache: 'npm'
 
       - name: Update npm for OIDC support
         run: |
@@ -71,11 +201,14 @@ jobs:
           corepack prepare npm@latest --activate
           npm --version
 
-      - name: Install dependencies
-        run: npm ci
+      - name: Verify published workspace dependencies
+        if: ${{ contains(needs.release-please.outputs.paths_released, matrix.dir) }}
+        run: node scripts/verify-published-workspace-deps.mjs "${{ matrix.dir }}"
 
-      - name: Run tests
-        run: npm test
+      - name: Verify tarball
+        if: ${{ contains(needs.release-please.outputs.paths_released, matrix.dir) }}
+        working-directory: ${{ matrix.dir }}
+        run: npm pack --dry-run --json --ignore-scripts > /dev/null
 
       - name: Publish to npm
         if: ${{ contains(needs.release-please.outputs.paths_released, matrix.dir) }}
@@ -83,97 +216,12 @@ jobs:
         run: |
           VERSION=$(node -p "require('./package.json').version")
           if [[ "$VERSION" =~ -[a-zA-Z] ]]; then
-            echo "Publishing prerelease version $VERSION with tag 'beta'"
             npm publish --provenance --tag beta
           else
-            echo "Publishing stable version $VERSION"
             npm publish --provenance
           fi
 
-  # pi-naming imports terminal-mux at runtime. When both changed, wait for mux npm publication.
-  publish-terminal-mux:
-    needs: release-please
-    if: ${{ github.event_name == 'push' && contains(needs.release-please.outputs.paths_released, 'packages/pi-terminal-mux') }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
-          cache: 'npm'
-
-      - name: Update npm for OIDC support
-        run: |
-          corepack enable npm
-          corepack prepare npm@latest --activate
-          npm --version
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run tests
-        run: npm test
-
-      - name: Publish to npm
-        working-directory: packages/pi-terminal-mux
-        run: |
-          VERSION=$(node -p "require('./package.json').version")
-          if [[ "$VERSION" =~ -[a-zA-Z] ]]; then
-            echo "Publishing prerelease version $VERSION with tag 'beta'"
-            npm publish --provenance --tag beta
-          else
-            echo "Publishing stable version $VERSION"
-            npm publish --provenance
-          fi
-
-  # If mux is not released in this run, an already published compatible mux satisfies naming.
-  # If mux is released, naming is eligible only after its npm publication succeeds.
-  publish-naming:
-    needs: [release-please, publish-terminal-mux]
-    if: ${{ always() && github.event_name == 'push' && contains(needs.release-please.outputs.paths_released, 'packages/pi-naming') && (needs.publish-terminal-mux.result == 'success' || needs.publish-terminal-mux.result == 'skipped') }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
-          cache: 'npm'
-
-      - name: Update npm for OIDC support
-        run: |
-          corepack enable npm
-          corepack prepare npm@latest --activate
-          npm --version
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run tests
-        run: npm test
-
-      - name: Verify published terminal-mux dependency
-        working-directory: packages/pi-naming
-        run: |
-          RANGE=$(node -p "require('./package.json').dependencies['pi-terminal-mux']")
-          npm view "pi-terminal-mux@$RANGE" version > /dev/null
-
-      - name: Publish to npm
-        working-directory: packages/pi-naming
-        run: |
-          VERSION=$(node -p "require('./package.json').version")
-          if [[ "$VERSION" =~ -[a-zA-Z] ]]; then
-            echo "Publishing prerelease version $VERSION with tag 'beta'"
-            npm publish --provenance --tag beta
-          else
-            echo "Publishing stable version $VERSION"
-            npm publish --provenance
-          fi
-
-  # 手动恢复已创建 GitHub Release 但 npm 发布失败的单个包。
+  # Manual recovery for a GitHub Release whose npm publication failed.
   publish-npm-retry:
     if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
@@ -197,8 +245,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run tests
-        run: npm test
+      - name: Run repository gate
+        run: npm run check
 
       - name: Verify package version
         working-directory: ${{ inputs.package_dir }}
@@ -208,21 +256,19 @@ jobs:
           ACTUAL_VERSION=$(node -p "require('./package.json').version")
           test "$ACTUAL_VERSION" = "$EXPECTED_VERSION"
 
-      - name: Verify published terminal-mux dependency for naming retry
-        if: ${{ inputs.package_dir == 'packages/pi-naming' }}
-        working-directory: packages/pi-naming
-        run: |
-          RANGE=$(node -p "require('./package.json').dependencies['pi-terminal-mux']")
-          npm view "pi-terminal-mux@$RANGE" version > /dev/null
+      - name: Verify published workspace dependencies
+        run: node scripts/verify-published-workspace-deps.mjs "${{ inputs.package_dir }}"
+
+      - name: Verify tarball
+        working-directory: ${{ inputs.package_dir }}
+        run: npm pack --dry-run --json --ignore-scripts > /dev/null
 
       - name: Publish to npm
         working-directory: ${{ inputs.package_dir }}
         run: |
           VERSION=$(node -p "require('./package.json').version")
           if [[ "$VERSION" =~ -[a-zA-Z] ]]; then
-            echo "Publishing prerelease version $VERSION with tag 'beta'"
             npm publish --provenance --tag beta
           else
-            echo "Publishing stable version $VERSION"
             npm publish --provenance
           fi

@@ -100,5 +100,5 @@ Keep unrelated refactors out of a focused pull request. Run `npm run check` befo
 
 ## Releases
 
-Versions and changelogs are managed by release-please. Merging a release PR publishes changed packages to npm through the repository's OIDC trusted-publishing workflow with provenance. Do not publish manually from a local machine unless the release procedure explicitly requires it.
+Versions and changelogs are managed by release-please. Merging a release PR runs the repository gate once, then publishes changed packages to npm in workspace-dependency order: i18n first, terminal-mux and other direct consumers next, and terminal-mux consumers last. Publish jobs verify their own tarball plus the npm visibility of workspace dependency ranges. Do not publish manually from a local machine unless the release procedure explicitly requires it.
 ase procedure explicitly requires it.

@@ -1,18 +1,66 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { collectPublishedPackageJobs, parseReleaseWorkflow } from "./release-publish-coverage.mjs";
 
-const workflow = readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
-const packageDirectory = "packages/pi-terminal-mux";
-const namingDirectory = "packages/pi-naming";
+const ROOT = resolve(import.meta.dirname, "..");
+const PACKAGES_DIR = join(ROOT, "packages");
+const workflowSource = readFileSync(join(ROOT, ".github/workflows/release.yml"), "utf8");
+const workflow = parseReleaseWorkflow(workflowSource);
+const packageJobs = collectPublishedPackageJobs(workflowSource);
+const packageByName = new Map();
 
-assert.match(workflow, /publish-terminal-mux:\n    needs: release-please\n    if: \$\{\{ github\.event_name == 'push' && contains\(needs\.release-please\.outputs\.paths_released, 'packages\/pi-terminal-mux'\) \}\}/);
-assert.match(workflow, /publish-naming:\n    needs: \[release-please, publish-terminal-mux\]\n    if: \$\{\{ always\(\) && github\.event_name == 'push' && contains\(needs\.release-please\.outputs\.paths_released, 'packages\/pi-naming'\) && \(needs\.publish-terminal-mux\.result == 'success' \|\| needs\.publish-terminal-mux\.result == 'skipped'\) \}\}/);
+for (const entry of readdirSync(PACKAGES_DIR, { withFileTypes: true })) {
+  if (!entry.isDirectory()) continue;
+  const manifestPath = join(PACKAGES_DIR, entry.name, "package.json");
+  if (!existsSync(manifestPath)) continue;
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  packageByName.set(manifest.name, { directory: `packages/${entry.name}`, manifest });
+}
 
-const independentPublish = workflow.match(/publish-npm:\n[\s\S]*?\n  publish-terminal-mux:/)?.[0];
-assert.ok(independentPublish, "missing independent package publish job");
-assert.ok(!independentPublish.includes(packageDirectory), "terminal-mux must not publish in parallel with naming");
-assert.ok(!independentPublish.includes(namingDirectory), "naming must wait for terminal-mux");
-assert.match(workflow, /Verify published terminal-mux dependency\n        working-directory: packages\/pi-naming\n        run: \|\n          RANGE=\$\(node -p "require\('\.\/package\.json'\)\.dependencies\['pi-terminal-mux'\]\"\)\n          npm view "pi-terminal-mux@\$RANGE" version > \/dev\/null/);
-assert.match(workflow, /Verify published terminal-mux dependency for naming retry\n        if: \$\{\{ inputs\.package_dir == 'packages\/pi-naming' \}\}/);
+let edgeCount = 0;
+for (const { directory, manifest } of packageByName.values()) {
+  const consumerJob = packageJobs.get(directory);
+  assert.ok(consumerJob, `${manifest.name} has no automatic npm publish job`);
+  assert.ok(jobDependsOn(consumerJob, "release-verify"), `${consumerJob} must wait for the one-time release-verify job`);
 
-console.log("Release order check passed: terminal-mux publishes before pi-naming when both release.");
+  for (const field of ["dependencies", "optionalDependencies"]) {
+    for (const dependencyName of Object.keys(manifest[field] ?? {})) {
+      const dependency = packageByName.get(dependencyName);
+      if (!dependency) continue;
+      const dependencyJob = packageJobs.get(dependency.directory);
+      assert.ok(dependencyJob, `${dependencyName} has no automatic npm publish job`);
+      assert.notEqual(
+        consumerJob,
+        dependencyJob,
+        `${manifest.name} and workspace dependency ${dependencyName} publish in the same parallel job`,
+      );
+      assert.ok(
+        jobDependsOn(consumerJob, dependencyJob),
+        `${consumerJob} must wait for ${dependencyJob} before publishing ${manifest.name}`,
+      );
+      edgeCount += 1;
+    }
+  }
+}
+
+for (const jobName of new Set(packageJobs.values())) {
+  const job = workflow.jobs[jobName];
+  const commands = (job.steps ?? [])
+    .filter((step) => step && typeof step === "object" && typeof step.run === "string")
+    .map((step) => step.run)
+    .join("\n");
+  assert.doesNotMatch(commands, /\bnpm\s+(?:run\s+check|test)\b/, `${jobName} must not rerun the repository test suite`);
+}
+
+console.log(`Release order check passed (${packageJobs.size} packages, ${edgeCount} workspace dependency edges).`);
+
+function jobDependsOn(jobName, dependencyJob, visited = new Set()) {
+  if (jobName === dependencyJob) return true;
+  if (visited.has(jobName)) return false;
+  visited.add(jobName);
+  const job = workflow.jobs[jobName];
+  if (!job || typeof job !== "object") return false;
+  const needs = typeof job.needs === "string" ? [job.needs] : (job.needs ?? []);
+  return needs.some((need) => need === dependencyJob || jobDependsOn(need, dependencyJob, visited));
+}
