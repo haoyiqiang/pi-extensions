@@ -20,10 +20,8 @@ import { Box, Text } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { writeFileSync } from "node:fs";
 import Ajv from "ajv";
-import { createTranslator, loadCatalog } from "pi-extensions-i18n";
 import { createSubagentActivityRecorder } from "./activity.ts";
-
-const i18n = createTranslator(loadCatalog(new URL("../../locales/index.json", import.meta.url)));
+import { i18n } from "./i18n.ts";
 // ctrl+j is Pi's built-in newline (tui.input.newLine). Overriding it warns on every child session.
 const WIDGET_TOGGLE_SHORTCUT = "ctrl+shift+j";
 const ASSISTANT_ROLE = "assistant";

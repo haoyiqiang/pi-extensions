@@ -4,7 +4,7 @@ import { Type, type Static } from "@sinclair/typebox";
 import { Box, Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createTranslator, installNoticeRenderer, loadCatalog, notifyWithSource, type NoticeColor, type NoticeSource } from "pi-extensions-i18n";
+import { installNoticeRenderer, notifyWithSource, type NoticeColor, type NoticeSource } from "pi-extensions-i18n";
 import {
   readdirSync,
   readFileSync,
@@ -84,8 +84,7 @@ import {
   type ActivityReadResult,
   type SubagentActivityState,
 } from "./activity.ts";
-
-const i18n = createTranslator(loadCatalog(new URL("../../locales/index.json", import.meta.url)));
+import { i18n } from "./i18n.ts";
 
 /** 本扩展的提示标签；短且唯一，便于在会话里定位来源。 */
 const NOTICE_TAG = "subagents";

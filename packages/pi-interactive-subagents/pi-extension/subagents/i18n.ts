@@ -1,11 +1,11 @@
 import { scope, type MessageParams } from "pi-extensions-i18n";
 import { registerLocalesFromDir } from "pi-extensions-i18n/loader";
 
-const NAMESPACE = "pi-web-search";
-const loaded = registerLocalesFromDir(NAMESPACE, new URL("../locales/", import.meta.url));
+const NAMESPACE = "pi-interactive-subagents";
+const loaded = registerLocalesFromDir(NAMESPACE, new URL("../../locales/", import.meta.url));
 if (loaded.diagnostics.length > 0) {
   throw new Error(
-    `Failed to load pi-web-search locales: ${loaded.diagnostics.map((item) => `${item.locale}: ${item.error}`).join("; ")}`,
+    `Failed to load pi-interactive-subagents locales: ${loaded.diagnostics.map((item) => `${item.locale}: ${item.error}`).join("; ")}`,
   );
 }
 
