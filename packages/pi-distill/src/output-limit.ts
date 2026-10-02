@@ -1,9 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createTranslator, loadCatalog } from "pi-extensions-i18n";
-
-const i18n = createTranslator(loadCatalog(new URL("../locales/index.json", import.meta.url)));
+import { i18n } from "./i18n.ts";
 
 export type OutputLimitToolResult = {
   content: Array<{ type?: string; text?: string }>;

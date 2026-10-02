@@ -1,8 +1,6 @@
 import { homedir } from "node:os";
 import { extensionConfigPath, readJsonObjectResult, resolveAgentDir } from "pi-extensions-config";
-import { createTranslator, loadCatalog } from "pi-extensions-i18n";
-
-const i18n = createTranslator(loadCatalog(new URL("../locales/summary-utils.json", import.meta.url)));
+import { promptI18n as i18n } from "./i18n.ts";
 
 const DEFAULT_MIN_CHARS = 200;
 const DEFAULT_MAX_CHARS = 100_000;

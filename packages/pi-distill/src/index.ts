@@ -40,7 +40,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { cleanupSessionResources, uuidv7, type Api, type Context, type Model } from "@earendil-works/pi-ai";
-import { NOTICE_TAG_COLOR, createTranslator, installNoticeRenderer, loadCatalog, notifyWithSource, type NoticeColor, type NoticeSource } from "pi-extensions-i18n";
+import { NOTICE_TAG_COLOR, installNoticeRenderer, notifyWithSource, type NoticeColor, type NoticeSource } from "pi-extensions-i18n";
 import {
   buildSummaryPrompt,
   buildSummarySystemPrompt,
@@ -62,8 +62,7 @@ import {
 import { resolveDistillRuntimeModel } from "./model-choice.ts";
 import { listDistillSelectableModels, selectDistillModel } from "./model-picker.ts";
 import { estimateHeuristicTokens } from "./token-estimator.ts";
-
-const i18n = createTranslator(loadCatalog(new URL("../locales/index.json", import.meta.url)));
+import { i18n } from "./i18n.ts";
 
 type ToolResult = {
   content: Array<{ type?: string; text?: string }>;

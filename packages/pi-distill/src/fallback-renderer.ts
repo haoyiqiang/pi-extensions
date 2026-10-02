@@ -1,9 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { type Component, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
-import { createTranslator, loadCatalog } from "pi-extensions-i18n";
-
-const i18n = createTranslator(loadCatalog(new URL("../locales/fallback-renderer.json", import.meta.url)));
 import type { DistillRenderConfig } from "./summary-utils.ts";
+import { rendererI18n as i18n } from "./i18n.ts";
 
 export const DISTILL_AUDIT_ENTRY_TYPE = "pi-distill-audit";
 
