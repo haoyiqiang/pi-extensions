@@ -25,6 +25,11 @@ export const featureSchemas = {
   resources: resourcesConfigSchema,
 } as const;
 
+/** Raw values accepted in spark.json; schema defaults have not been applied yet. */
+export type SparkConfigInput = {
+  [K in keyof typeof featureSchemas]: z.input<(typeof featureSchemas)[K]> | false;
+};
+
 /** Resolved config for every feature; `false` means the feature is disabled. */
 export type SparkConfig = {
   [K in keyof typeof featureSchemas]: z.infer<(typeof featureSchemas)[K]> | false;
