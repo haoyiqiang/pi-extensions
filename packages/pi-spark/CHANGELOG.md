@@ -5,6 +5,8 @@
 ### Features
 
 * absorb pi-metrics elapsed time, TPS, TTFT, token, and cost telemetry; configure it with `metrics` in `spark.json` or `/config:metrics`
+* absorb the pi-session-resources `#` picker into the spark editor; configure it with `resources` in `spark.json` or `/config:session-resources`
+* absorb pi-clean-mode transcript folding, activity rows, action groups, commands, and shortcuts; configure it with `cleanMode` in `spark.json` or `/config:clean-mode`
 
 ### Breaking changes
 

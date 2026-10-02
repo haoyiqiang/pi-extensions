@@ -784,8 +784,7 @@ interface RunningSubagent {
   /**
    * When true, the agent stays in `runningSubagents` (watching, interrupting and
    * result steering keep working) but is left out of the Subagents widget.
-   * Set by orchestration layers that render their own agent panel — currently
-   * pi-dynamic-workflows, whose agents are already shown in the Workflow panel.
+   * Set by orchestration layers that render their own agent panel.
    */
   hiddenFromWidget?: boolean;
 }
@@ -2896,6 +2895,6 @@ export default function subagentsExtension(pi: ExtensionAPI) {
   });
 }
 
-// ── Exported for direct programmatic use (e.g. pi-dynamic-workflows) ──
+// ── Exported for direct programmatic orchestration ──
 export { launchSubagent, watchSubagent };
 export type { RunningSubagent, SubagentResult };

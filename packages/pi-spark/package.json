@@ -1,7 +1,7 @@
 {
   "name": "pi-spark",
   "version": "0.28.0",
-  "description": "Pi package that polishes the daily experience: credits, presets, recap, session metrics, and a compact TUI",
+  "description": "Pi package for a compact TUI, clean transcript, credits, presets, recap, metrics, and session resources",
   "type": "module",
   "main": "./index.ts",
   "exports": {
@@ -16,7 +16,6 @@
     "docs",
     "README.md",
     "README.zh-CN.md",
-    "SKILL.md",
     "CHANGELOG.md",
     "LICENSE.md"
   ],
@@ -30,9 +29,6 @@
     "extensions": [
       "./index.ts",
       "../pi-extensions-i18n/index.ts"
-    ],
-    "skills": [
-      "./SKILL.md"
     ],
     "themes": [
       "./themes"
@@ -67,6 +63,10 @@
     "recap",
     "metrics",
     "telemetry",
+    "clean-mode",
+    "transcript",
+    "resources",
+    "autocomplete",
     "theme"
   ],
   "dependencies": {

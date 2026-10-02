@@ -4,6 +4,7 @@ import { Spinner } from "./spinner";
 import { SplitLine } from "../../components/split-line";
 import { loadConfig } from "../../config";
 import { getElapsedLabel, setElapsedLabel, setElapsedLabelListener } from "../metrics/elapsed-label";
+import { getSessionResourceRuntime, wrapSessionResourceEditor } from "../session-resources/runtime";
 import { PRESET_CHANGE, parsePresetChange } from "../../events";
 import { i18n } from "../../i18n";
 import { formatModel } from "../../utils/format";
@@ -126,7 +127,19 @@ export function registerEditor(pi: ExtensionAPI, events: EventCollector): void {
 
   pi.on("session_start", (_event, ctx) => {
     const config = loadConfig(ctx).editor;
-    if (ctx.mode !== "tui" || !config) return;
+    if (ctx.mode !== "tui") return;
+
+    if (!config) {
+      const resources = getSessionResourceRuntime();
+      if (!resources?.enabled) return;
+      const previousEditorFactory = ctx.ui.getEditorComponent();
+      ctx.ui.setEditorComponent((tui, theme, keybindings) => {
+        const base = previousEditorFactory?.(tui, theme, keybindings)
+          ?? new CustomEditor(tui, theme, keybindings);
+        return wrapSessionResourceEditor(base, ctx, tui, keybindings);
+      });
+      return;
+    }
 
     spinner = new Spinner(config.spinner);
 
@@ -139,7 +152,7 @@ export function registerEditor(pi: ExtensionAPI, events: EventCollector): void {
         editor?.setSlot("modelBefore", payload ? ctx.ui.theme.bold(payload) : undefined);
       });
 
-      return editor;
+      return wrapSessionResourceEditor(editor, ctx, tui, keybindings);
     });
   });
 

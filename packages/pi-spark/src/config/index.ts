@@ -3,7 +3,9 @@ import { join } from "node:path";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { defu } from "defu";
 
+import { readLegacyCleanModeConfig } from "./legacy-clean-mode";
 import { readLegacyMetricsConfig } from "./legacy-metrics";
+import { readLegacySessionResourcesConfig } from "./legacy-resources";
 import { featureSchemas } from "./schema";
 import { i18n, NOTICE_SOURCE } from "../i18n";
 import { notifyWithSource } from "pi-extensions-i18n";
@@ -30,10 +32,20 @@ export function loadConfig(ctx: ExtensionContext): SparkConfig {
   const [globalPath, projectPath] = getConfigPaths(ctx.cwd, CONFIG_FILE);
   const raw = defu(readJson(projectPath) ?? {}, readJson(globalPath) ?? {});
   const errors: string[] = [];
+  if (raw.cleanMode === undefined) {
+    const legacy = readLegacyCleanModeConfig();
+    if (legacy.error) errors.push(legacy.error);
+    else if (legacy.value !== undefined) raw.cleanMode = legacy.value;
+  }
   if (raw.metrics === undefined) {
     const legacy = readLegacyMetricsConfig();
     if (legacy.error) errors.push(legacy.error);
     else if (legacy.value !== undefined) raw.metrics = legacy.value;
+  }
+  if (raw.resources === undefined) {
+    const legacy = readLegacySessionResourcesConfig();
+    if (legacy.error) errors.push(legacy.error);
+    else if (legacy.value === false) raw.resources = false;
   }
 
   // Validate each feature independently so a single invalid field disables only that feature

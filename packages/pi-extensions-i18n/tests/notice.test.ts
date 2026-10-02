@@ -171,21 +171,21 @@ test("warning/error 级别用黄色/红色正文，语义色覆盖优先", () =>
   const warning = renderNoticeLines({ tag: "safety", color: "warning", level: "warning", message: "被拦截" });
   const failed = renderNoticeLines({ tag: "safety", color: "warning", level: "error", message: "被拦截" });
   const overridden = renderNoticeLines({
-    tag: "auto-goal",
+    tag: "distill",
     color: "accent",
     level: "info",
-    message: "已打断，未判定",
+    message: "提炼已跳过",
     textColor: "dim",
   });
 
   assert.match(warning, /<warning>被拦截<\/>/);
   assert.match(failed, /<error>被拦截<\/>/);
-  assert.match(overridden, /<dim>已打断，未判定<\/>/);
+  assert.match(overridden, /<dim>提炼已跳过<\/>/);
 });
 
 test("有细节行的提示在行尾带展开箭头，展开后箭头反向", () => {
-  /** 一条判定结论：正文一行，理由放在细节里。 */
-  const entry = { tag: "auto-goal", color: "warning", level: "info", message: "⚖️ 判定可停止", details: ["理由：已完成"] };
+  /** 一条提炼结论：正文一行，理由放在细节里。 */
+  const entry = { tag: "distill", color: "warning", level: "info", message: "输出已提炼", details: ["理由：输出过长"] };
   const collapsed = renderNoticeLines(entry);
   const expanded = renderNoticeLines(entry, true);
 
@@ -208,17 +208,17 @@ test("没有细节行的提示不带展开箭头，不会指一个点了没反�
 });
 
 test("提示块不留上下空白，细节行只在展开时显示", () => {
-  /** 一次判定结论的细节行：收起时不应出现，展开时应逐行追加。 */
-  const details = ["理由：用户只是打招呼", "判定模型：llm-proxy/LOW"];
-  const entry = { tag: "auto-goal", color: "accent", level: "info", message: "⚖️ 判定可停止 · 置信度 92%", details };
+  /** 一次提炼结论的细节行：收起时不应出现，展开时应逐行追加。 */
+  const details = ["理由：输出过长", "提炼模型：llm-proxy/LOW"];
+  const entry = { tag: "distill", color: "accent", level: "info", message: "输出已提炼", details };
   const collapsed = renderNoticeLines(entry);
   const expanded = renderNoticeLines(entry, true);
 
   // 收起时只有正文，细节行不占屏。
   assert.doesNotMatch(collapsed, /理由/);
   // 展开时追加 dim 细节行。
-  assert.match(expanded, /<dim>理由：用户只是打招呼<\/>/);
-  assert.match(expanded, /<dim>判定模型：llm-proxy\/LOW<\/>/);
+  assert.match(expanded, /<dim>理由：输出过长<\/>/);
+  assert.match(expanded, /<dim>提炼模型：llm-proxy\/LOW<\/>/);
   // 每一行渲染行都有内容：提示块没有上下留白行。
   assert.equal(renderNoticeEntry({ data: entry }, ENTRY_THEME, false).render(RENDER_WIDTH).length, noticeContentLines(entry).length);
 });
@@ -250,11 +250,11 @@ function clickNotice(component: Component): void {
 
 /** 测试用带细节行的条目：能点击展开的那种。 */
 const DETAILED_ENTRY = {
-  tag: "auto-goal",
+  tag: "distill",
   color: "warning",
   level: "info",
-  message: "⚖️ 判定可停止",
-  details: ["理由：已完成"],
+  message: "输出已提炼",
+  details: ["理由：输出过长"],
 };
 
 test("全屏模式下点击提示块展开细节，再点一次收起", () => {
@@ -264,7 +264,7 @@ test("全屏模式下点击提示块展开细节，再点一次收起", () => {
   assert.doesNotMatch(component.render(CLICK_RENDER_WIDTH).join("\n"), /理由/);
 
   clickNotice(component);
-  assert.match(component.render(CLICK_RENDER_WIDTH).join("\n"), /<dim>理由：已完成<\/>/);
+  assert.match(component.render(CLICK_RENDER_WIDTH).join("\n"), /<dim>理由：输出过长<\/>/);
 
   clickNotice(component);
   assert.equal(component.render(CLICK_RENDER_WIDTH).length, 1);
@@ -281,7 +281,7 @@ test("没有细节行的提示块不接管点击，避免无意义的交互", ()
 
 test("全局 Ctrl+O 已展开时，点击可以单独收起这一条", () => {
   const component = renderNoticeEntry({ data: DETAILED_ENTRY }, ENTRY_THEME, true);
-  assert.match(component.render(CLICK_RENDER_WIDTH).join("\n"), /理由：已完成/);
+  assert.match(component.render(CLICK_RENDER_WIDTH).join("\n"), /理由：输出过长/);
 
   clickNotice(component);
   assert.equal(component.render(CLICK_RENDER_WIDTH).length, 1);

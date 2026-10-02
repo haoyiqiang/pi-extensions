@@ -50,21 +50,12 @@ jobs:
           - dir: packages/pi-extensions-i18n
           - dir: packages/pi-web-search
           - dir: packages/pi-distill
-          - dir: packages/pi-tool-supervisor
-          - dir: packages/pi-extensions-tool-display
           - dir: packages/pi-models-discovery
-          - dir: packages/pi-session-resources
           - dir: packages/pi-blackhole
           - dir: packages/pi-context-view
           - dir: packages/pi-rewind
           - dir: packages/pi-spark
-          - dir: packages/pi-dynamic-workflows
           - dir: packages/pi-interactive-subagents
-          - dir: packages/pi-safety-guards
-          - dir: packages/pi-nested-skills
-          - dir: packages/pi-notifications
-          - dir: packages/pi-auto-goal
-          - dir: packages/pi-clean-mode
     steps:
       - uses: actions/checkout@v4
 

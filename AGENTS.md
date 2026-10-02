@@ -8,17 +8,14 @@ This repository contains small, independently installable extensions for the [Pi
 pi-extensions/
 ├── packages/
 │   ├── pi-extensions-i18n/      # Shared locale and catalog runtime
-│   ├── pi-extensions-tool-display/ # Tool-display host and shared rendering protocol
 │   ├── pi-web-search/    # LLM/API search, URL Context, and bounded web fetch
 │   ├── pi-distill/              # Tool-output distillation
-│   ├── pi-tool-supervisor/      # Post-edit file review
 │   ├── pi-terminal-mux/         # Terminal multiplexer abstraction (muxy/cmux/tmux/zellij/wezterm/herdr/otty/orca + headless fallback)
 │   ├── pi-models-discovery/     # Dynamic model discovery for providers marked with discoverModels
-│   ├── pi-session-resources/    # Clickable tabbed # picker for session files, browser URLs, and PR/MR links
 │   ├── pi-blackhole/            # Deterministic compaction, observational memory, and recall
 │   ├── pi-context-view/         # Context usage and injection inspection
 │   ├── pi-rewind/               # Git-backed checkpoints and rewind
-│   ├── pi-spark/                # Provider credits, presets, recap, session metrics, compact TUI
+│   ├── pi-spark/                # Compact TUI, clean transcript, credits, presets, recap, metrics, resources
 ├── scripts/                     # Repository checks and workspace helpers
 ├── .github/workflows/           # CI and release automation
 ├── README.md                    # English project documentation
@@ -31,20 +28,14 @@ Each package owns its entrypoint, tests, configuration example, localization res
 
 ## Package boundaries
 
-- `pi-safety-guards` is independently installable; see `packages/pi-safety-guards/README.md` for its configuration, behavior, and tests.
-- `pi-nested-skills` is independently installable; see `packages/pi-nested-skills/README.md` for its configuration, behavior, and tests.
-- `pi-notifications` is independently installable; see `packages/pi-notifications/README.md` for its configuration, behavior, and tests.
 - `pi-naming` owns automatic Pi session titles and manual terminal naming; it uses pi-ai and terminal-mux. Automatic and manual naming share configurable session/workspace/tab targets.
 
-- `pi-distill` discovers active tools with object parameter schemas and observes their results through Pi's native `tool_call` and `tool_result` events. It does not register duplicate tools.
-- `pi-tool-supervisor` reviews the actual before/after diff of `edit` and `write` against configured rule files. It reports findings but is not an operating-system sandbox or an edit rollback mechanism.
-- `pi-extensions-tool-display` owns the actual Pi tool-display host, built-in tool renderer overrides, and the shared result-rendering middleware protocol. Feature packages register domain-specific panels through it.
+- `pi-distill` discovers active tools with object parameter schemas and observes their results through Pi's native `tool_call` and `tool_result` events. It does not register duplicate tools and renders audit information through its own UI-only session entry.
 - `pi-extensions-i18n` owns locale selection, catalog validation, interpolation, and the `/pi-language` command. Feature packages use it instead of implementing separate locale runtimes.
 - Background chat requests from an extension go through `ctx.modelRegistry.streamSimple(...).result()`, the same way `pi-spark` recap does. `ModelRuntime.prepareRequest` resolves auth and a resolved `baseUrl`. `openai-codex` background calls use an isolated `uuidv7` session and clean it up afterwards. Raw HTTP transports use `modelRegistry.getApiKeyAndHeaders` directly. Do not add another shared request wrapper, and do not call `pi-ai` `complete` / `completeSimple` for these side requests.
 - `pi-web-search` owns the public `web_search`, `url_context`, and `web_fetch` tools. It routes explicitly between LLM built-in web search and one configured Search API, keeps URL Context limited to supported Google/Vertex transports, and returns bounded fetch output with an opt-in rpiv-compatible GitHub repository interceptor, without adding general PDF or local-video pipelines.
 - `pi-terminal-mux` owns terminal multiplexer detection and pane/surface operations. Extensions that need terminal interaction depend on it instead of re-implementing backend detection.
 - `pi-models-discovery` owns dynamic model discovery: it reads `discoverModels` providers from models.json, fetches `{baseUrl}/models`, persists a startup cache, and exposes `/model-discovery` plus `/model-discovery-refresh` commands.
-- `pi-session-resources` observes successful tool results, rebuilds resources from the active session branch, and exposes file, browser, and PR/MR targets through a clickable, tabbed `#` picker above the editor without adding model-context messages.
 - `pi-blackhole` owns deterministic compaction, observational-memory workers, and raw-session recall. Do not combine its automatic compaction ownership with another automatic context owner.
 - `pi-context-view` passively inspects context composition and hidden injections; it must not add persistent model-context instructions or messages.
 - `pi-rewind` owns Git-backed worktree checkpoints and coordinated file/session restore. It is not a substitute for context compaction.
@@ -56,7 +47,7 @@ Keep packages composable and independently installable. Avoid coupling one exten
 - Do not commit user-specific paths, credentials, private domains, internal service names, or machine-specific defaults.
 - Resolve user directories with `os.homedir()` or Pi's standard configuration directory. Support `PI_CODING_AGENT_DIR` where the package already exposes that configuration point.
 - Optional external tools must be detected at runtime and have a graceful fallback or noop path.
-- `pi-spark` owns provider credit reporting, model presets, idle recap, session metrics, and the compact editor/footer TUI. It replaces Pi's editor and footer, so do not combine it with another extension that owns the same surfaces. Session and terminal naming belong to `pi-naming`.
+- `pi-spark` owns transcript folding, provider credit reporting, model presets, idle recap, session metrics, the `#` session resource picker, and the compact editor/footer TUI. It replaces Pi's editor and footer, so do not combine it with another extension that owns the same surfaces. Session and terminal naming belong to `pi-naming`.
 - Do not make network calls, model assumptions, or local daemon availability implicit in deterministic tests.
 - Use configuration or injected adapters for environment-specific behavior.
 

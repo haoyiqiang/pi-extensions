@@ -14,8 +14,7 @@
     "locales",
     "config.json.example",
     "README.md",
-    "README.zh-CN.md",
-    "SKILL.md"
+    "README.zh-CN.md"
   ],
   "scripts": {
     "test": "tsx --test test/subagent-done-nudge.test.ts test/test.ts",
@@ -28,9 +27,6 @@
     "extensions": [
       "./index.ts",
       "../pi-extensions-i18n/index.ts"
-    ],
-    "skills": [
-      "./SKILL.md"
     ]
   },
   "engines": {

@@ -13,7 +13,6 @@
     "README.md",
     "README.zh-CN.md",
     "CHANGELOG.md",
-    "SKILL.md",
     "THIRD_PARTY_NOTICES.md",
     "PI-WEB-SEARCH-LICENSE",
     "RPIV-WEB-TOOLS-LICENSE"
@@ -28,9 +27,6 @@
     "extensions": [
       "./index.ts",
       "../pi-extensions-i18n/index.ts"
-    ],
-    "skills": [
-      "./SKILL.md"
     ]
   },
   "engines": {

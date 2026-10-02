@@ -28,7 +28,7 @@
 
 - Use `@earendil-works/pi-coding-agent`; do not restore the old `@mariozechner` package name.
 - Keep `main`, `exports`, and `pi.extensions` pointed at `./index.ts`.
-- Keep `README.md`, `README.zh-CN.md`, and `SKILL.md` synchronized with command and restore behavior.
+- Keep `README.md` and `README.zh-CN.md` synchronized with command and restore behavior.
 - Versions and npm publication are managed by the parent repository's release-please workflow. Do not add a package-local publish workflow or lockfile.
 
 ## Verification

@@ -43,6 +43,16 @@ pi install git:github.com/maplezzk/pi-extensions
 - `pi --preset <name>` 以指定预设启动。
 - `ctrl+super+p` 向前、`ctrl+shift+super+p` 向后循环。`super` 在 macOS 上是 `command`，需要终端转发该修饰键。
 
+### 清爽模式
+
+清爽模式把一次 agent 运行折叠成一行耗时头，只保留最终答案。按 `F2` 或运行 `/clean` 可展开中间解说、工具调用和扩展工作条目；`Shift+F2` 展开或收起全部动作组。
+
+- agent 运行时保持展开，`agent_settled` 后自动收起；本轮手动切换过时尊重手动状态。
+- 全屏 TUI 可以点击运行头、动作组和单条工具摘要。
+- `/clean config` 和 `/config:clean-mode` 打开配置面板；`/config:clean-mode key=on|off` 可直接修改布尔项。
+- `cleanMode: false` 关闭所有折叠。只有 `spark.json` 没有 `cleanMode` 时，才读取旧的 `extensions/pi-clean-mode/config.json`。
+- 如果还安装了 `npm:pi-clean-mode`，请移除，否则命令和快捷键会冲突。
+
 ### 指标
 
 记录会话耗时和 token 生成遥测。editor 边框显示例如 `⏱ 47s` 的总等待时间，跨轮不归零。
@@ -51,6 +61,15 @@ pi install git:github.com/maplezzk/pi-extensions
 - `live`：每轮结束出一行；多轮运行停下后再补一条 `⏱ <耗时>`。
 - 每一轮仍写入 `tps` session entry。如果还安装了 `npm:@monotykamary/pi-tps`，请移除它，否则两边都会写重复记录。
 - 用 `/config:metrics`，或 `/config:metrics enable|disable|live|on-stop|reset` 配置。只有 `spark.json` 没有 `metrics` 字段时，才会读取旧的 `extensions/pi-metrics/config.json`。
+
+### 会话资源
+
+在输入框的词边界键入 `#`，spark 编辑器上方会打开分类型的资源选择器。它收集当前会话里成功工具结果中的文件、网页和 PR/MR。Enter 插入普通引用，例如 `#src/index.ts`，不会重新读取文件，也不会写入隐藏上下文。
+
+- 选择器包在 spark 编辑器外面，两边不再互相替换。
+- 用 `/config:session-resources`，或 `/config:session-resources enable|disable`。`show|hide` 和 `/session-resources` 仍是别名。
+- `resources: false` 关闭选择器。只有 `spark.json` 没有 `resources` 时，才会读取旧配置里显式的 `"enabled": false`。
+- 如果还安装了 `npm:pi-session-resources`，请移除，否则命令会冲突。
 
 ### Recap
 
@@ -79,12 +98,16 @@ pi install git:github.com/maplezzk/pi-extensions
 
 | 字段 | 取值 | 说明 |
 | --- | --- | --- |
+| `cleanMode` | `CleanModeConfig` | 把一次 agent 运行折叠成耗时头和动作组；设为 `false` 可关闭。 |
 | `credits` | `CreditsConfig` | 状态栏的余额或速率限制用量。`providers` 可逐个 provider 开关。 |
 | `editor` | `EditorConfig` | 顶部边框的 working 指示与模型名。`spinner` 可选 `dots`、`lights`、`tildes`（默认）、`pulse`。 |
 | `footer` | `FooterConfig` | 会话信息、扩展状态、花费与上下文用量。`statusPosition` 可选 `inline`（默认）或 `below`。`style` 可选 `default`（默认）或 `p10k`。 |
 | `metrics` | `MetricsConfig` | 耗时和 TPS/TTFT/token/成本遥测。`display` 为 `on-stop`（默认）或 `live`；设为 `false` 可关闭。 |
+| `resources` | `{}` | `#` 会话资源选择器。设为 `false` 可关闭。 |
 | `presets` | `{ [name]: Preset }` | 具名预设，每个预设必须给出 `provider`、`model`、`thinkingLevel`。 |
 | `recap` | `RecapConfig` | 空闲回顾。`idle` 接受毫秒数或 `parse-duration` 字符串，最小 5000 ms，默认 5 分钟。 |
+
+`CleanModeConfig` 的默认字段：`enabled: true`、`autoExpandWhileRunning: true`、`showRunHeader: true`、`enableActionGroups: true`、`showActivityArea: true`、`activityRows: 4`、`animateActivity: true`、`hideThinking: true`、`hideExtensionEntries: true`。
 
 `thinkingLevel` 的合法值：`off`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`。recap 的 `thinkingLevel` 默认 `off`，并会被模型的可用等级收敛。
 

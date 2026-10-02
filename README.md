@@ -9,28 +9,19 @@ A small collection of composable extensions for the [Pi coding agent](https://gi
 
 ## Packages
 
-Each package is independently installable and keeps its detailed behavior, configuration, examples, and tests in its own README. Every extension package also publishes a `SKILL.md` that Pi loads to guide agents through configuration and verification.
+Each package is independently installable and keeps its detailed behavior, configuration, examples, and tests in its own README.
 
 | Package | Description | Documentation |
 | --- | --- | --- |
-| [`pi-safety-guards`](./packages/pi-safety-guards) | Configurable Bash safety rules, rule actions and custom matchers. | [English](./packages/pi-safety-guards/README.md) · [中文](./packages/pi-safety-guards/README.zh-CN.md) |
-| [`pi-nested-skills`](./packages/pi-nested-skills) | Nested skill discovery, aliases and completion from configured roots. | [English](./packages/pi-nested-skills/README.md) · [中文](./packages/pi-nested-skills/README.zh-CN.md) |
-| [`pi-notifications`](./packages/pi-notifications) | Configurable desktop notifications for agent activity. | [English](./packages/pi-notifications/README.md) · [中文](./packages/pi-notifications/README.zh-CN.md) |
 | [`pi-naming`](./packages/pi-naming) | Unified automatic and manual naming for sessions and owned terminal targets. | [English](./packages/pi-naming/README.md) · [中文](./packages/pi-naming/README.zh-CN.md) |
-| [`pi-auto-goal`](./packages/pi-auto-goal) | Judges every fully settled turn with a second model and continues the task in the user's voice when the agent stopped prematurely. | [English](./packages/pi-auto-goal/README.md) · [中文](./packages/pi-auto-goal/README.zh-CN.md) |
-| [`pi-clean-mode`](./packages/pi-clean-mode) | Collapses a whole agent run into a single duration header, leaving only the final answer visible until you expand it. | [English](./packages/pi-clean-mode/README.md) · [中文](./packages/pi-clean-mode/README.zh-CN.md) |
 | [`pi-blackhole`](./packages/pi-blackhole) | Provides deterministic compaction, session-aware observational memory, and raw-history recall. | [English](./packages/pi-blackhole/README.md) · [中文](./packages/pi-blackhole/README.zh-CN.md) |
 | [`pi-context-view`](./packages/pi-context-view) | Visualizes context usage and inspects system prompt, tool, skill, and extension injections. | [English](./packages/pi-context-view/README.md) · [中文](./packages/pi-context-view/README.zh-CN.md) |
 | [`pi-rewind`](./packages/pi-rewind) | Creates Git-backed checkpoints and restores files, conversation state, or both. | [English](./packages/pi-rewind/README.md) · [中文](./packages/pi-rewind/README.zh-CN.md) |
-| [`pi-spark`](./packages/pi-spark) | Adds provider credits, model presets, idle recaps, session metrics, and a compact editor/footer TUI. | [English](./packages/pi-spark/README.md) · [中文](./packages/pi-spark/README.zh-CN.md) |
+| [`pi-spark`](./packages/pi-spark) | Owns the compact editor/footer TUI, clean transcript folding, provider credits, model presets, idle recaps, metrics, and the `#` resource picker. | [English](./packages/pi-spark/README.md) · [中文](./packages/pi-spark/README.zh-CN.md) |
 | [`pi-distill`](./packages/pi-distill) | Compacts verbose output from every active object-schema tool before it consumes the context window. | [English](./packages/pi-distill/README.md) · [中文](./packages/pi-distill/README.zh-CN.md) |
-| [`pi-tool-supervisor`](./packages/pi-tool-supervisor) | Reviews selected tools before or after execution against matching rules, with diff-aware handling for `edit` and `write`. | [English](./packages/pi-tool-supervisor/README.md) · [中文](./packages/pi-tool-supervisor/README.zh-CN.md) |
 | [`pi-models-discovery`](./packages/pi-models-discovery) | Discovers models from `{baseUrl}/models` for providers marked with `discoverModels` in models.json, with a persistent startup cache and a manual refresh command. | [English](./packages/pi-models-discovery/README.md) · [中文](./packages/pi-models-discovery/README.zh-CN.md) |
-| [`pi-session-resources`](./packages/pi-session-resources) | Collects files, browser URLs, and PR/MR links from successful tool activity and exposes them through a clickable, tabbed `#` resource picker above the editor. | [English](./packages/pi-session-resources/README.md) · [中文](./packages/pi-session-resources/README.zh-CN.md) |
 | [`pi-extensions-i18n`](./packages/pi-extensions-i18n) | Provides shared locale selection, catalog loading, interpolation, and the `/config:language` command. | [English](./packages/pi-extensions-i18n/README.md) · [中文](./packages/pi-extensions-i18n/README.zh-CN.md) |
-| [`pi-extensions-tool-display`](./packages/pi-extensions-tool-display) | Provides the actual Pi tool-display host plus the shared result-rendering protocol and component helpers. | [English](./packages/pi-extensions-tool-display/README.md) · [中文](./packages/pi-extensions-tool-display/README.zh-CN.md) |
 | [`@maplezzk/pi-web-search`](./packages/pi-web-search) | Combines LLM built-in web search, independent Search APIs, Gemini/Vertex URL Context, bounded web fetching, and opt-in GitHub repository extraction. | [English](./packages/pi-web-search/README.md) · [中文](./packages/pi-web-search/README.zh-CN.md) |
-| [`@maplezzk/pi-dynamic-workflows`](./packages/pi-dynamic-workflows) | Claude-Code-style dynamic workflow orchestration with `meta`/`phase()`/`agent()`/`parallel()`/`pipeline()` primitives, configurable via `/config:workflow`. Fork of michaelliv/pi-dynamic-workflows. | [English](./packages/pi-dynamic-workflows/README.md) · [中文](./packages/pi-dynamic-workflows/README.zh-CN.md) |
 | [`@maplezzk/pi-interactive-subagents`](./packages/pi-interactive-subagents) | Non-blocking interactive subagents in multiplexer panes with live status widget, `/plan` and `/iterate` workflows. Fork of HazAT/pi-interactive-subagents. | [English](./packages/pi-interactive-subagents/README.md) · [中文](./packages/pi-interactive-subagents/README.zh-CN.md) |
 
 > `pi-session-tools` has been retired and removed from this repository. Existing sessions with its historical `session-squash` entries remain readable by compatibility code in packages that explicitly support them.
@@ -61,9 +52,7 @@ pi install npm:<package-name>
 
 ## Configuration
 
-Most configurable extensions keep state under the Pi agent directory; exact paths, command names, environment precedence, and verification steps differ by package.
-
-Pi loads each installed extension package's `SKILL.md` so an agent can follow the package-specific configuration workflow. See [`packages/`](./packages) for configuration examples and detailed documentation.
+Most configurable extensions keep state under the Pi agent directory; exact paths, command names, environment precedence, and verification steps differ by package. See [`packages/`](./packages) for configuration examples and detailed documentation.
 
 ## Development
 

@@ -35,10 +35,6 @@ import {
   appendDistillFallbackAudit,
   registerDistillFallbackRenderer,
 } from "./fallback-renderer.ts";
-import {
-  isDistillToolDisplayMiddlewareActive,
-  registerDistillToolDisplayMiddleware,
-} from "./tool-display-bridge.ts";
 import { getTextContent, hasNonTextContent, limitReturnedToolResult } from "./output-limit.ts";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -1608,7 +1604,6 @@ export default function piDistillExtension(pi: ExtensionAPI) {
   const reportedWarnings = new Set<string>();
   let sessionStats = createDistillSessionStats();
   let originalUserPrompt = "";
-  const disposeToolDisplayMiddleware = registerDistillToolDisplayMiddleware();
   registerDistillFallbackRenderer(pi);
   const extendParameters = (ctx: ExtensionContext) => {
     const reportWarning = (message: string) => {
@@ -1683,13 +1678,10 @@ export default function piDistillExtension(pi: ExtensionAPI) {
       pending ? Math.round(performance.now() - pending.startedAt) : 0,
     );
     recordDistillSessionResult(sessionStats, result.details);
-    if (!isDistillToolDisplayMiddlewareActive(event.toolName)) {
-      appendDistillFallbackAudit(pi, event.toolName, result.details, loadDistillConfig().render);
-    }
+    appendDistillFallbackAudit(pi, event.toolName, result.details, loadDistillConfig().render);
     return toToolResultEventResult(result);
   });
   pi.on("agent_end", () => pendingCalls.clear());
-  pi.on("session_shutdown", () => disposeToolDisplayMiddleware());
   registerDistillStatsCommand(pi, () => sessionStats);
   registerDistillConfigCommand(pi, extendParameters);
 }

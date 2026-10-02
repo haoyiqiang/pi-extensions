@@ -68,6 +68,16 @@ pi-spark lets you define named model presets in `spark.json` (see [Configuration
 
 ![Presets](./assets/screenshot-presets.png)
 
+### Clean mode
+
+Clean mode collapses an entire agent run into one duration header, leaving the final answer visible. Press `F2` or run `/clean` to expand the hidden narration, tool calls, and extension work entries. `Shift+F2` expands or collapses all action groups.
+
+- The run stays expanded while the agent is working and collapses after `agent_settled`, unless you manually changed it during that run.
+- Fullscreen TUI supports clicking the run header, action groups, and individual tool summaries.
+- `/clean config` and `/config:clean-mode` open the interactive settings panel. `/config:clean-mode key=on|off` changes a boolean directly.
+- Set `cleanMode` to `false` to disable all folding. An existing `extensions/pi-clean-mode/config.json` is read only when `spark.json` does not set `cleanMode`.
+- Remove `npm:pi-clean-mode` if it is still installed, or its commands and shortcuts will conflict.
+
 ### Metrics
 
 pi-spark records session elapsed time and token-generation telemetry. The editor border shows the total wait, for example `⏱ 47s`, and it keeps counting across turns.
@@ -76,6 +86,15 @@ pi-spark records session elapsed time and token-generation telemetry. The editor
 - `live`: one line is emitted at the end of every turn. A multi-turn run also gets a final `⏱ <duration>` line.
 - Every turn is still stored as a `tps` session entry. Remove `npm:@monotykamary/pi-tps` if it is installed, or both extensions will write duplicate entries.
 - Run `/config:metrics`, or `/config:metrics enable|disable|live|on-stop|reset`. An existing `extensions/pi-metrics/config.json` is used only when `spark.json` does not set `metrics`.
+
+### Session resources
+
+Typing `#` at a token boundary opens a tabbed picker above the spark editor. It lists files, web URLs, and PR/MR links collected from successful tool results in the current session. Enter inserts a normal reference such as `#src/index.ts`; it does not read the file again or add hidden context.
+
+- The picker stays outside the spark editor, so the two no longer replace each other.
+- Run `/config:session-resources`, or `/config:session-resources enable|disable`. `show`/`hide` and `/session-resources` remain aliases.
+- Set `resources` to `false` to disable it. An old `extensions/pi-session-resources/config.json` with `"enabled": false` is used only when `spark.json` does not set `resources`.
+- Remove `npm:pi-session-resources` if it is still installed, or the command names conflict.
 
 ### Recap
 
@@ -126,12 +145,28 @@ All fields are optional. Each top-level feature runs with the defaults below unl
 
 | Field | Value (or `false`) | Description |
 | --- | --- | --- |
+| `cleanMode` | `CleanModeConfig` | Collapses one agent run into a duration header and action groups. |
 | `credits` | `CreditsConfig` | Shows the active provider's credit balance or rate-limit usage in the status line. |
 | `editor` | `EditorConfig` | Shows a working indicator and the current model on the editor's top border. |
 | `footer` | `FooterConfig` | Shows session info, extension statuses, cost, and context usage. |
 | `metrics` | `MetricsConfig` | Shows elapsed time and records TPS, TTFT, token, and cost telemetry. |
+| `resources` | `{}` | Enables the `#` session resource picker. Set it to `false` to disable the picker. |
 | `presets` | `{ [name]: Preset }` | Defines named model presets, keyed by name. |
 | `recap` | `RecapConfig` | Generates a session recap when idle or on demand. |
+
+#### `CleanModeConfig`
+
+| Field | Default | Description |
+| --- | --- | --- |
+| `enabled` | `true` | Master switch. `cleanMode: false` also disables the feature. |
+| `autoExpandWhileRunning` | `true` | Expands work while the agent is running and collapses it after settlement. |
+| `showRunHeader` | `true` | Shows the duration header above the final answer. |
+| `enableActionGroups` | `true` | Groups tool calls into collapsible action summaries. |
+| `showActivityArea` | `true` | Shows current activity above the editor. |
+| `activityRows` | `4` | Maximum activity rows, from 1 to 20. |
+| `animateActivity` | `true` | Animates the activity marker. |
+| `hideThinking` | `true` | Hides thinking blocks in clean mode. |
+| `hideExtensionEntries` | `true` | Collapses informational extension work entries with the run. |
 
 #### `CreditsConfig`
 

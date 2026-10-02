@@ -13,7 +13,6 @@
     "locales",
     "README.md",
     "README.zh-CN.md",
-    "SKILL.md",
     "config.example.json",
     "tsconfig.json"
   ],
@@ -27,9 +26,6 @@
     "extensions": [
       "./index.ts",
       "../pi-extensions-i18n/index.ts"
-    ],
-    "skills": [
-      "./SKILL.md"
     ]
   },
   "engines": {

@@ -1,11 +1,13 @@
 import * as z from "zod";
 
+import { cleanModeConfigSchema } from "../features/clean-mode/config";
 import { creditsConfigSchema } from "../features/credits/config";
 import { editorConfigSchema } from "../features/editor/config";
 import { footerConfigSchema } from "../features/footer/config";
 import { metricsConfigSchema } from "../features/metrics/config";
 import { presetsConfigSchema } from "../features/presets/config";
 import { recapConfigSchema } from "../features/recap/config";
+import { resourcesConfigSchema } from "../features/session-resources/config";
 
 /**
  * Raw option shape for each feature. The enable/disable/default policy lives in `loadConfig`:
@@ -13,12 +15,14 @@ import { recapConfigSchema } from "../features/recap/config";
  * any other value is validated against the feature schema.
  */
 export const featureSchemas = {
+  cleanMode: cleanModeConfigSchema,
   credits: creditsConfigSchema,
   editor: editorConfigSchema,
   footer: footerConfigSchema,
   metrics: metricsConfigSchema,
   presets: presetsConfigSchema,
   recap: recapConfigSchema,
+  resources: resourcesConfigSchema,
 } as const;
 
 /** Resolved config for every feature; `false` means the feature is disabled. */

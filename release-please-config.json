@@ -9,22 +9,13 @@
     "packages/pi-extensions-i18n": {},
     "packages/pi-web-search": {},
     "packages/pi-distill": {},
-    "packages/pi-tool-supervisor": {},
-    "packages/pi-extensions-tool-display": {},
     "packages/pi-terminal-mux": {},
     "packages/pi-models-discovery": {},
-    "packages/pi-session-resources": {},
     "packages/pi-blackhole": {},
     "packages/pi-context-view": {},
     "packages/pi-rewind": {},
     "packages/pi-spark": {},
-    "packages/pi-dynamic-workflows": {},
     "packages/pi-interactive-subagents": {},
-    "packages/pi-safety-guards": {},
-    "packages/pi-nested-skills": {},
-    "packages/pi-notifications": {},
-    "packages/pi-naming": {},
-    "packages/pi-auto-goal": {},
-    "packages/pi-clean-mode": {}
+    "packages/pi-naming": {}
   }
 }

@@ -34,7 +34,7 @@
 - 默认使用当前会话模型。也可以在 `/config:distill` 中从可用模型列表选择独立模型。
 - 在工具结果 details 中保留状态、字符数、压缩比、耗时和异常等诊断信息。
 - 超长输出不再由 pi-distill 写文件或截断，统一交由 Pi 自身的输出限制机制处理。
-- 当前 Pi 展示中间件可用时显示紧凑审计卡片，否则使用自己的 fallback renderer。展示协议由公共运行库 `pi-extensions-tool-display` 提供。
+- 写入一条紧凑的 UI-only 审计 entry，展示状态、prompt 预览和结果预览；这条 entry 不进入模型上下文。
 
 它不会注册第二个 `bash`、`read`、`grep` 或 `find` 工具。
 
@@ -44,7 +44,7 @@
 pi install npm:pi-distill
 ```
 
-包清单会把共享依赖 `pi-extensions-i18n` 和 `pi-extensions-tool-display` 作为扩展入口加载，不需要额外安装这些包。安装 `pi-distill` 后即可使用 `/config:language`。
+包清单会把共享依赖 `pi-extensions-i18n` 作为扩展入口加载，不需要额外安装。安装 `pi-distill` 后即可使用 `/config:language`。
 
 安装后重新加载 Pi：
 
@@ -138,7 +138,7 @@ Agent 消费更适合当前决策的结果，并获得可审计的处理诊断
 ## 覆盖范围与边界
 
 - 自动处理所有当前已启用且参数 schema 为 object 的工具；能否注入 `outputRequest` 由工具 schema 决定，不维护固定工具名单。
-- 不注册替代工具，不改变原工具的执行语义，也不要求额外安装独立的 `pi-tool-display` 宿主包。
+- 不注册替代工具，不改变原工具的执行语义；审计信息通过自己的 UI-only 会话 entry 展示。
 - 文本提炼是有损操作；完整性要求应使用 `RAW`。
 - 非文本结果是完整性边界：图片、音频、二进制和混合 content 不进入文本提炼链路。
 - 超长输出不再由 pi-distill 写临时文件或截断，统一交由 Pi 自身的输出限制机制处理，避免上下文无限膨胀。

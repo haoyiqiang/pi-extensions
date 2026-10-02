@@ -11,11 +11,6 @@ import {
   renderDistillAuditText,
   resolveDistillRenderConfig,
 } from "../src/fallback-renderer.ts";
-import {
-  isDistillToolDisplayMiddlewareActive,
-  registerDistillToolDisplayMiddleware,
-} from "../src/tool-display-bridge.ts";
-import { Text } from "@earendil-works/pi-tui";
 import { complete, fauxAssistantMessage, registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import {
   extendDistillToolParameters,
@@ -1275,80 +1270,6 @@ test("pi-distill 可以追加 UI-only 保底审计", () => {
   );
 
   assert.equal(entries.length, 1);
-});
-
-test("pi-distill 通过通用 tool-display result middleware 渲染且不重复正文", () => {
-  const apiKey = Symbol.for("pi-tool-display.api.v1");
-  let registration: any;
-  const fakeApi = {
-    registerResultRenderMiddleware(value: any) {
-      registration = value;
-      return value.id;
-    },
-    unregisterResultRenderMiddleware: () => true,
-    hasResultRenderMiddleware: (id: string) => id === "pi-distill.result-renderer.v1",
-    isResultRenderPipelineActive: (toolName: string) => ["bash", "custom-tool"].includes(toolName),
-  };
-  (globalThis as any)[apiKey] = fakeApi;
-  const dispose = registerDistillToolDisplayMiddleware();
-  try {
-    assert.equal(isDistillToolDisplayMiddlewareActive("bash"), true);
-    assert.equal(isDistillToolDisplayMiddlewareActive("read"), false);
-    assert.equal(isDistillToolDisplayMiddlewareActive("custom-tool"), true);
-    const component = registration.middleware({
-      toolName: "bash",
-      result: {
-        details: {
-          outputSummaryStatus: "summarized",
-          outputSummaryPrompt: "只保留最终结论",
-          outputSummaryRender: { enabled: true, showPrompt: true, showResult: true },
-          summaryText: "协议渲染的提炼结果",
-          originalOutputChars: 1000,
-          summaryChars: 10,
-        },
-      },
-      options: { expanded: true },
-      theme: {
-        fg: (_color: string, text: string) => text,
-        bold: (text: string) => text,
-      },
-    }, () => new Text("不应重复的基础正文", 0, 0));
-    const renderedLines = component.render(120);
-    assert.equal(renderedLines[0], "");
-    const output = renderedLines.join("\n");
-    assert.match(output, /✓ Distill/);
-    assert.match(output, /├─ outputRequest  只保留最终结论/);
-    assert.match(output, /└─ Summary  协议渲染的提炼结果/);
-    assert.doesNotMatch(output, /不应重复的基础正文/);
-
-    const wrappedComponent = registration.middleware({
-      toolName: "bash",
-      result: {
-        details: {
-          outputSummaryStatus: "summarized",
-          outputSummaryPrompt: "summarize",
-          outputSummaryRender: { enabled: true, showPrompt: true, showResult: true },
-          summaryText: "summary ".repeat(20),
-          outputSummaryAnomalies: ["ineffective-compression"],
-          outputSummaryAdvice: "review the prompt",
-          originalOutputChars: 1000,
-          summaryChars: 900,
-        },
-      },
-      options: { expanded: true },
-      theme: {
-        fg: (_color: string, text: string) => text,
-        bold: (text: string) => text,
-      },
-    }, () => new Text("不应重复的基础正文", 0, 0));
-    const wrappedLines = wrappedComponent.render(48);
-    assert.equal(wrappedLines[0], "");
-    const wrappedOutput = wrappedLines.join("\n");
-    assert.match(wrappedOutput, /\n│       summary/);
-  } finally {
-    dispose();
-    delete (globalThis as any)[apiKey];
-  }
 });
 
 test("用户中断会终止 Pi 事件中尚未完成的提炼请求", async () => {

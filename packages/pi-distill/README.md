@@ -34,7 +34,7 @@ The distillation prompt strictly follows the current locale selected by `/config
 - Uses the current session model by default, or a model selected from the available list in `/config:distill`.
 - Keeps diagnostic metadata such as status, character counts, compression ratio, duration, and anomalies in the tool result details.
 - Oversized output is no longer written to a file or truncated by pi-distill; it is left to Pi's own output-limiting mechanism.
-- Adds a compact audit card when the active Pi display middleware is available, with a fallback renderer otherwise. The shared display protocol is provided by `pi-extensions-tool-display`.
+- Writes a compact, UI-only audit entry with status, prompt preview, and result preview. The entry is excluded from model context.
 
 It does not register a second `bash`, `read`, `grep`, or `find` tool.
 
@@ -44,7 +44,7 @@ It does not register a second `bash`, `read`, `grep`, or `find` tool.
 pi install npm:pi-distill
 ```
 
-The package manifest also loads the shared `pi-extensions-i18n` and `pi-extensions-tool-display` dependencies as extension entries; no separate package installation is required. This makes `/config:language` available after installing `pi-distill`.
+The package manifest also loads the shared `pi-extensions-i18n` dependency as an extension entry; no separate installation is required. This makes `/config:language` available after installing `pi-distill`.
 
 Reload Pi after installation:
 
@@ -136,7 +136,7 @@ The distillation prompt strictly follows the locale selected by `/config:languag
 ## Scope and boundaries
 
 - Handles every enabled active tool with an object parameter schema; whether `outputRequest` can be injected is determined by the tool schema, not a fixed allowlist.
-- Registers no replacement tools, does not change tool execution semantics, and does not require a separately installed `pi-tool-display` host package.
+- Registers no replacement tools and does not change tool execution semantics; audit information is displayed through its own UI-only session entry.
 - Text distillation is lossy; use `RAW` when completeness matters.
 - Non-text results are a completeness boundary: images, audio, binary data, and mixed content bypass text distillation.
 - Oversized distilled or final text is no longer written to a file or truncated by pi-distill; it is left to Pi's own output-limiting mechanism, preventing unbounded context growth.
