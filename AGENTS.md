@@ -17,6 +17,7 @@ pi-extensions/
 │   ├── pi-context-view/         # Context usage and injection inspection
 │   ├── pi-rewind/               # Git-backed checkpoints and rewind
 │   ├── pi-spark/                # Compact TUI, clean transcript, credits, presets, recap, metrics, resources
+│   ├── test-utils/              # Private deterministic workspace test fixtures
 ├── scripts/                     # Repository checks and workspace helpers
 ├── .github/workflows/           # CI and release automation
 ├── README.md                    # English project documentation
@@ -53,6 +54,7 @@ Keep packages composable and independently installable. Avoid coupling one exten
 - Optional external tools must be detected at runtime and have a graceful fallback or noop path.
 - `pi-spark` owns transcript folding, provider credit reporting, model presets, idle recap, session metrics, the `#` session resource picker, and the compact editor/footer TUI. It replaces Pi's editor and footer, so do not combine it with another extension that owns the same surfaces. Session and terminal naming belong to `pi-naming`.
 - Do not make network calls, model assumptions, or local daemon availability implicit in deterministic tests.
+- Shared test scaffolding belongs in the private `@maplezzk/pi-test-utils` workspace; keep domain-specific fixtures with their owning package.
 - Use configuration or injected adapters for environment-specific behavior.
 
 ## User-facing text and localization

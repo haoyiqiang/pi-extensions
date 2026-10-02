@@ -19,6 +19,7 @@ const PACKAGE_LAYERS = new Map([
   ["pi-naming", "capability"],
   ["pi-rewind", "capability"],
   ["pi-context-view", "capability"],
+  ["@maplezzk/pi-test-utils", "internal"],
 ]);
 
 const ALLOWED_WORKSPACE_EDGES = new Set([
@@ -99,13 +100,13 @@ if (errors.length > 0) {
 }
 
 const counts = Object.fromEntries(
-  ["product", "capability", "foundation"].map((layer) => [
+  ["product", "capability", "foundation", "internal"].map((layer) => [
     layer,
     [...PACKAGE_LAYERS.values()].filter((value) => value === layer).length,
   ]),
 );
 console.log(
-  `Package boundary check passed (${counts.product} product, ${counts.capability} capability, ${counts.foundation} foundation).`,
+  `Package boundary check passed (${counts.product} product, ${counts.capability} capability, ${counts.foundation} foundation, ${counts.internal} internal).`,
 );
 
 function collectLocalDependencies(manifest, knownPackages) {

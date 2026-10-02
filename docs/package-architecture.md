@@ -31,6 +31,12 @@ Capability packages may depend on foundations but must not depend on product pac
 
 Foundations must not depend on product or capability packages. A new foundation belongs here only after at least three real consumers need the same stable mechanism.
 
+### Internal packages
+
+- `@maplezzk/pi-test-utils` provides deterministic temp-directory and extension-registration fixtures.
+
+Internal packages are `private: true`. They are part of workspace type checks and tests but never enter release-please, npm tarball checks, or the root Pi profile.
+
 ### Distribution profile
 
 The private root `pi-extensions` package explicitly lists every extension and theme loaded by `pi install git:github.com/maplezzk/pi-extensions`. Adding a workspace package does not automatically add it to the full profile. Pure libraries and future private test packages must never appear in the root Pi manifest.
@@ -70,7 +76,7 @@ Independent semantic versions are intentional. The repository does not use locks
 
 Repository gates enforce:
 
-- declared package layers and allowed workspace dependency edges;
+- declared package layers, including private internal workspaces, and allowed runtime dependency edges;
 - no cross-package private source imports;
 - an explicit, resource-complete root distribution profile;
 - package metadata and locale consistency;

@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
+import { withTempAgentDir } from "@maplezzk/pi-test-utils";
 import piI18n, {
   applyLocale,
   createTranslator,
@@ -20,22 +20,18 @@ import piI18n, {
 import { registerLocalesFromDir } from "../src/loader.ts";
 
 async function withAgentDir(run: (agentDir: string) => void | Promise<void>): Promise<void> {
-  const agentDir = mkdtempSync(join(tmpdir(), "pi-extensions-i18n-"));
-  const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
   const previousLocale = process.env.PI_EXTENSIONS_LOCALE;
-  process.env.PI_CODING_AGENT_DIR = agentDir;
-  delete process.env.PI_EXTENSIONS_LOCALE;
-  resetLocaleState();
-  try {
-    await run(agentDir);
-  } finally {
+  await withTempAgentDir(async (agentDir) => {
+    delete process.env.PI_EXTENSIONS_LOCALE;
     resetLocaleState();
-    if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
-    else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
-    if (previousLocale === undefined) delete process.env.PI_EXTENSIONS_LOCALE;
-    else process.env.PI_EXTENSIONS_LOCALE = previousLocale;
-    rmSync(agentDir, { recursive: true, force: true });
-  }
+    try {
+      await run(agentDir);
+    } finally {
+      resetLocaleState();
+      if (previousLocale === undefined) delete process.env.PI_EXTENSIONS_LOCALE;
+      else process.env.PI_EXTENSIONS_LOCALE = previousLocale;
+    }
+  }, "pi-extensions-i18n-");
 }
 
 test("compatibility catalogs follow persisted and environment locale changes", async () => {

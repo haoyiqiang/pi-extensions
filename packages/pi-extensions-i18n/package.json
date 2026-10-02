@@ -59,6 +59,7 @@
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.87.1",
+    "@maplezzk/pi-test-utils": "0.0.0",
     "@earendil-works/pi-tui": "0.87.1",
     "@types/node": "24.12.4",
     "tsx": "4.23.1",

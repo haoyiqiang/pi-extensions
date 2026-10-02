@@ -15,6 +15,7 @@ for (const entry of readdirSync(PACKAGES_DIR, { withFileTypes: true })) {
   const manifestPath = join(PACKAGES_DIR, entry.name, "package.json");
   if (!existsSync(manifestPath)) continue;
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  if (manifest.private === true) continue;
   packageByName.set(manifest.name, { directory: `packages/${entry.name}`, manifest });
 }
 

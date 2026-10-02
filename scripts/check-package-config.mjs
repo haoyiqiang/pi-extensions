@@ -64,14 +64,20 @@ if (!existsSync(rpConfigPath)) {
     }
   }
 
-  // 1b. Each actual package directory should be in release-please-config
-  const actualDirs = readdirSync(PACKAGES_DIR, { withFileTypes: true })
+  // 1b. Every public package must be released; private workspaces must not be.
+  const actualPackages = readdirSync(PACKAGES_DIR, { withFileTypes: true })
     .filter((d) => d.isDirectory() && existsSync(join(PACKAGES_DIR, d.name, "package.json")))
-    .map((d) => `packages/${d.name}`);
+    .map((d) => {
+      const path = `packages/${d.name}`;
+      const manifest = JSON.parse(readFileSync(join(ROOT, path, "package.json"), "utf8"));
+      return { path, private: manifest.private === true };
+    });
 
-  for (const dir of actualDirs) {
-    if (!rpPackages.includes(dir)) {
-      error(`Package "${dir}" exists on disk but is missing from release-please-config.json`);
+  for (const pkg of actualPackages) {
+    if (pkg.private && rpPackages.includes(pkg.path)) {
+      error(`Private workspace "${pkg.path}" must not appear in release-please-config.json`);
+    } else if (!pkg.private && !rpPackages.includes(pkg.path)) {
+      error(`Public package "${pkg.path}" is missing from release-please-config.json`);
     }
   }
 

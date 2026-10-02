@@ -36,7 +36,7 @@
     "@earendil-works/pi-tui": ">=0.86.1"
   },
   "scripts": {
-    "test": "node scripts/run-workspaces.mjs test",
+    "test": "node scripts/run-workspaces.mjs test && node --import tsx --test test/*.test.ts",
     "typecheck": "node scripts/run-workspaces.mjs typecheck",
     "check": "npm run typecheck && npm test && node scripts/check-no-local-bindings.mjs && node scripts/check-lockfile-registry.mjs && npm run check:boundaries && node scripts/check-package-config.mjs && npm run test:pack && node scripts/check-release-order.mjs && npm run test:release-publish-coverage",
     "check:boundaries": "node scripts/check-package-boundaries.mjs",

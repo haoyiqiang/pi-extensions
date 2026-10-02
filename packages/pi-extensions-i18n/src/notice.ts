@@ -44,7 +44,7 @@ export type NoticeColor = (typeof NOTICE_COLORS)[number];
  * 提示来源标签的统一颜色。
  *
  * 标签只负责标出来源（文本已经说清了是谁），不负责区分来源 —— 9 个色槽分给
- * 16 个包必然撞车，一旦撞车颜色就不再有任何定位价值，反而让人以为两个包是同一个。
+ * 扩展数量超过主题色槽后必然撞车，一旦撞车颜色就不再有定位价值，反而会误导来源判断。
  * 参考 Codex / Claude Code / Gemini CLI / lazygit / k9s 等 TUI：没有谁用颜色标注来源。
  */
 export const NOTICE_TAG_COLOR: NoticeColor = "muted";
@@ -172,11 +172,24 @@ function isNoticeLevel(value: unknown): value is NoticeLevel {
  * 当前会话的提示出口。
  *
  * 这是本模块唯一的可变状态，注入点是扩展入口的 installNoticeRenderer：
- * 提示调用点分散在 15 个包的几十处（含 tps、turn-elapsed 等拿不到 pi 的模块），
+ * 提示调用点分散在多个包的几十处（含 tps、turn-elapsed 等拿不到 pi 的模块），
  * 逐个传参会把 Pi 的写入能力扩散到所有业务函数里，因此只在入口注入一次。
  * 扩展重载会重新执行入口，这里始终保存最近一次的 Pi 实例。
  */
-let noticeApi: NoticeApi | undefined;
+const NOTICE_RUNTIME_KEY = Symbol.for("pi-extensions-i18n.notice-runtime.v1");
+
+interface NoticeRuntime {
+  api?: NoticeApi;
+  registeredApis: WeakSet<object>;
+}
+
+function noticeRuntime(): NoticeRuntime {
+  const global = globalThis as unknown as { [NOTICE_RUNTIME_KEY]?: NoticeRuntime };
+  if (!global[NOTICE_RUNTIME_KEY]) {
+    global[NOTICE_RUNTIME_KEY] = { registeredApis: new WeakSet() };
+  }
+  return global[NOTICE_RUNTIME_KEY];
+}
 
 /** 提示块的水平内边距：让文字不贴边。 */
 const NOTICE_PADDING_X = 1;
@@ -192,19 +205,24 @@ export function installNoticeRenderer(api: NoticeApi): void {
   if (typeof api.appendEntry !== "function" || typeof api.registerEntryRenderer !== "function") {
     return;
   }
-  api.registerEntryRenderer(NOTICE_ENTRY_TYPE, (entry, options, theme) =>
-    renderNoticeEntry(entry, theme, isExpanded(options)));
-  noticeApi = api;
+  const runtime = noticeRuntime();
+  if (!runtime.registeredApis.has(api as object)) {
+    api.registerEntryRenderer(NOTICE_ENTRY_TYPE, (entry, options, theme) =>
+      renderNoticeEntry(entry, theme, isExpanded(options)));
+    runtime.registeredApis.add(api as object);
+  }
+  runtime.api = api;
 }
 
 /** 当前是否已具备把提示画成带底色消息块的能力。 */
 export function hasNoticeRenderer(): boolean {
-  return noticeApi !== undefined;
+  return noticeRuntime().api !== undefined;
 }
 
 /** 测试与重载用：清掉已注入的提示出口。 */
 export function resetNoticeRenderer(): void {
-  noticeApi = undefined;
+  const global = globalThis as unknown as { [NOTICE_RUNTIME_KEY]?: NoticeRuntime };
+  global[NOTICE_RUNTIME_KEY] = { registeredApis: new WeakSet() };
 }
 
 /** 正文默认颜色：warning 黄、error 红、info 用扩展消息正文色。 */
@@ -392,6 +410,7 @@ export function formatNotice(options: NoticeRenderOptions): string {
  */
 export function notifyWithSource(options: NoticeSendOptions): void {
   const { ctx, source, level, message, textColor, details } = options;
+  const noticeApi = noticeRuntime().api;
   if (ctx.mode === NOTICE_COLOR_MODE && noticeApi !== undefined) {
     const data: NoticeEntryData = {
       tag: source.tag,

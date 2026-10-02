@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
+import { withTempDir } from "@maplezzk/pi-test-utils";
 import {
   extensionConfigPath,
   readJsonObject,
@@ -12,15 +12,6 @@ import {
   updateJsonObjectAtomic,
   writeJsonAtomic,
 } from "../index.ts";
-
-function withTempDir(run: (dir: string) => void): void {
-  const dir = mkdtempSync(join(tmpdir(), "pi-extensions-config-"));
-  try {
-    run(dir);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-}
 
 test("agent directory resolution supports defaults and tilde overrides", () => {
   assert.equal(resolveAgentDir({}, "/home/test"), "/home/test/.pi/agent");
@@ -33,8 +24,8 @@ test("extensionConfigPath uses the conventional Pi extension directory", () => {
   assert.equal(extensionConfigPath("pi-example", "settings.json", "/tmp/agent"), "/tmp/agent/extensions/pi-example/settings.json");
 });
 
-test("reader distinguishes missing, loaded, malformed, and non-object files", () => {
-  withTempDir((dir) => {
+test("reader distinguishes missing, loaded, malformed, and non-object files", async () => {
+  await withTempDir("pi-extensions-config-", (dir) => {
     const path = join(dir, "config.json");
     assert.deepEqual(readJsonObjectResult(path), { status: "missing" });
     writeFileSync(path, '{"enabled":true}', "utf8");
@@ -46,8 +37,8 @@ test("reader distinguishes missing, loaded, malformed, and non-object files", ()
   });
 });
 
-test("atomic writes preserve sibling fields and use owner-only permissions", () => {
-  withTempDir((dir) => {
+test("atomic writes preserve sibling fields and use owner-only permissions", async () => {
+  await withTempDir("pi-extensions-config-", (dir) => {
     const path = join(dir, "nested", "config.json");
     writeJsonAtomic(path, { first: 1 });
     updateJsonObjectAtomic(path, (current) => {
@@ -58,8 +49,8 @@ test("atomic writes preserve sibling fields and use owner-only permissions", () 
   });
 });
 
-test("failed writes return false through the user-facing wrapper", () => {
-  withTempDir((dir) => {
+test("failed writes return false through the user-facing wrapper", async () => {
+  await withTempDir("pi-extensions-config-", (dir) => {
     const parent = join(dir, "blocked");
     writeFileSync(parent, "not a directory", "utf8");
     assert.equal(tryWriteJsonAtomic(join(parent, "config.json"), {}), false);
