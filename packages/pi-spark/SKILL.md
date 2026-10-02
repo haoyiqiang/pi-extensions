@@ -1,6 +1,6 @@
 ---
 name: configure-pi-spark
-description: "配置与排查 pi-spark 的 credits、presets、recap、紧凑 TUI 和主题。Use when configuring or diagnosing pi-spark features."
+description: "配置与排查 pi-spark 的 credits、presets、recap、会话指标、紧凑 TUI 和主题。Use when configuring or diagnosing pi-spark features."
 ---
 
 # 配置 pi-spark
@@ -24,7 +24,9 @@ description: "配置与排查 pi-spark 的 credits、presets、recap、紧凑 TU
 }
 ```
 
-顶层字段：`credits`、`editor`、`footer`、`presets`、`recap`。字段含义和默认值见包内 `README.md` 的 References 小节。
+顶层字段：`credits`、`editor`、`footer`、`metrics`、`presets`、`recap`。字段含义和默认值见包内 `README.md` 的 References 小节。`footer.style` 设为 `p10k` 时，左侧使用 lean powerlevel10k（fish 缩短路径、`on`、分支），需要 Nerd Font，且不再显示会话名。
+
+`metrics.display` 为 `on-stop`（默认）或 `live`。`metrics: false` 关闭耗时和遥测。`/config:metrics` 写入全局 `spark.json`。只有两边的 `spark.json` 都没有 `metrics` 时，才读取旧的 `extensions/pi-metrics/config.json`。
 
 ## 命令与快捷键
 
@@ -32,6 +34,7 @@ description: "配置与排查 pi-spark 的 credits、presets、recap、紧凑 TU
 - `pi --preset <name>`：用指定预设启动。
 - `/recap`：立即生成会话回顾。
 - `/codex-resets`：查看并兑换 OpenAI Codex 的 banked rate-limit resets。
+- `/config:metrics`：配置耗时和 TPS 显示；也接受 `enable`、`disable`、`live`、`on-stop`、`reset`。
 - `ctrl+super+p` / `ctrl+shift+super+p`：向前 / 向后循环预设。
 
 ## 诊断
@@ -40,6 +43,7 @@ description: "配置与排查 pi-spark 的 credits、presets、recap、紧凑 TU
 2. 若 credits 状态不显示，检查对应 provider 是否被关闭，并确认该 provider 已配置鉴权。
 3. 若 recap 没有生成，检查模型配置是否完整；不完整时会回退到当前会话模型。
 4. 主题需要在 `/settings` 中选择，或配置 `"theme": "github-light-default/github-dark-default"` 自动切换。
+5. `on-stop` 模式下运行中没有指标行是预期行为。若同时安装了 `npm:@monotykamary/pi-tps`，先移除它，避免重复写入 `tps` session entry。
 
 ## 验证
 

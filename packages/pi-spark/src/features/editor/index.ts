@@ -3,6 +3,7 @@ import { CustomEditor } from "@earendil-works/pi-coding-agent";
 import { Spinner } from "./spinner";
 import { SplitLine } from "../../components/split-line";
 import { loadConfig } from "../../config";
+import { getElapsedLabel, setElapsedLabel, setElapsedLabelListener } from "../metrics/elapsed-label";
 import { PRESET_CHANGE, parsePresetChange } from "../../events";
 import { i18n } from "../../i18n";
 import { formatModel } from "../../utils/format";
@@ -36,6 +37,10 @@ class Editor extends CustomEditor {
 
   setWorkingMessage(message?: string | undefined): void {
     this.workingMessage = message;
+    this.tui.requestRender();
+  }
+
+  refresh(): void {
     this.tui.requestRender();
   }
 
@@ -79,7 +84,12 @@ class Editor extends CustomEditor {
 
     const spinner = this.spinner.getFrame();
     const workingMessage = this.workingMessage;
-    const workingText = [spinner ? theme.fg("accent", spinner) : undefined, workingMessage ? theme.fg("dim", workingMessage) : undefined].filter(Boolean).join(" ");
+    const elapsed = getElapsedLabel();
+    const workingText = [
+      spinner ? theme.fg("accent", spinner) : undefined,
+      workingMessage ? theme.fg("dim", workingMessage) : undefined,
+      elapsed ? theme.fg("dim", elapsed) : undefined,
+    ].filter(Boolean).join(" ");
 
     return [this.getScrollHint("↑", hiddenLineCount), workingText].filter(Boolean).join(theme.fg("dim", " · "));
   }
@@ -185,8 +195,12 @@ export function registerEditor(pi: ExtensionAPI, events: EventCollector): void {
     spinner?.stop();
   });
 
+  setElapsedLabelListener(() => editor?.refresh());
+
   pi.on("session_shutdown", () => {
     runningToolCallIds.clear();
+    setElapsedLabel(undefined);
+    setElapsedLabelListener(undefined);
     editor = undefined;
     spinner?.dispose();
     spinner = undefined;

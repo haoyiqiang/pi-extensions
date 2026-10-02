@@ -22,15 +22,13 @@
 | [`pi-blackhole`](./packages/pi-blackhole) | 提供确定性压缩、会话观察记忆和原始历史 Recall。 | [English](./packages/pi-blackhole/README.md) · [中文](./packages/pi-blackhole/README.zh-CN.md) |
 | [`pi-context-view`](./packages/pi-context-view) | 可视化上下文用量，并检查系统提示、工具、技能和扩展注入。 | [English](./packages/pi-context-view/README.md) · [中文](./packages/pi-context-view/README.zh-CN.md) |
 | [`pi-rewind`](./packages/pi-rewind) | 创建 Git 检查点，并恢复文件、会话状态或两者。 | [English](./packages/pi-rewind/README.md) · [中文](./packages/pi-rewind/README.zh-CN.md) |
-| [`pi-spark`](./packages/pi-spark) | 提供 provider 余额、模型预设、空闲回顾，以及紧凑的 editor/footer TUI。 | [English](./packages/pi-spark/README.md) · [中文](./packages/pi-spark/README.zh-CN.md) |
+| [`pi-spark`](./packages/pi-spark) | 提供 provider 余额、模型预设、空闲回顾、会话指标，以及紧凑的 editor/footer TUI。 | [English](./packages/pi-spark/README.md) · [中文](./packages/pi-spark/README.zh-CN.md) |
 | [`pi-distill`](./packages/pi-distill) | 在所有已启用 object-schema 工具的超长输出占满上下文前进行提炼。 | [English](./packages/pi-distill/README.md) · [中文](./packages/pi-distill/README.zh-CN.md) |
 | [`pi-tool-supervisor`](./packages/pi-tool-supervisor) | 根据匹配规则在工具执行前后进行审查，并对 `edit`、`write` 使用真实 diff。 | [English](./packages/pi-tool-supervisor/README.md) · [中文](./packages/pi-tool-supervisor/README.zh-CN.md) |
-| [`pi-metrics`](./packages/pi-metrics) | 在 working spinner 实时显示会话全程耗时，并在 agent 停下后给一行汇总（`on-stop`，默认），或按 `live` 模式每轮一行。 | [English](./packages/pi-metrics/README.md) · [中文](./packages/pi-metrics/README.zh-CN.md) |
 | [`pi-models-discovery`](./packages/pi-models-discovery) | 自动发现 models.json 中标记 `discoverModels` 的 provider 的模型列表，启动走持久化缓存，并提供手动刷新命令。 | [English](./packages/pi-models-discovery/README.md) · [中文](./packages/pi-models-discovery/README.zh-CN.md) |
 | [`pi-session-resources`](./packages/pi-session-resources) | 从成功工具活动中收集文件、浏览器 URL 和 PR/MR 链接，并通过编辑器上方可点击、可切换类型的 `#` 资源选择器进行引用。 | [English](./packages/pi-session-resources/README.md) · [中文](./packages/pi-session-resources/README.zh-CN.md) |
 | [`pi-extensions-i18n`](./packages/pi-extensions-i18n) | 提供共享的语言选择、catalog 加载、插值和 `/config:language` 命令。 | [English](./packages/pi-extensions-i18n/README.md) · [中文](./packages/pi-extensions-i18n/README.zh-CN.md) |
 | [`pi-extensions-tool-display`](./packages/pi-extensions-tool-display) | 提供实际的 Pi 工具展示宿主，以及共享的结果渲染协议和组件工具。 | [English](./packages/pi-extensions-tool-display/README.md) · [中文](./packages/pi-extensions-tool-display/README.zh-CN.md) |
-| [`pi-model-request`](./packages/pi-model-request) | 让扩展按 Pi 核心的方式单独发一次模型请求：解析鉴权、补齐 provider 会话头、调用 completion。 | [English](./packages/pi-model-request/README.md) · [中文](./packages/pi-model-request/README.zh-CN.md) |
 | [`@maplezzk/pi-web-search`](./packages/pi-web-search) | 整合 LLM 内置网络搜索、独立 Search API、Gemini/Vertex URL Context、有界网页抓取和可选 GitHub 仓库提取。 | [English](./packages/pi-web-search/README.md) · [中文](./packages/pi-web-search/README.zh-CN.md) |
 | [`@maplezzk/pi-dynamic-workflows`](./packages/pi-dynamic-workflows) | Claude-Code 风格的动态 workflow 编排，支持 `meta`/`phase()`/`agent()`/`parallel()`/`pipeline()` 原语，通过 `/config:workflow` 配置。Fork 自 michaelliv/pi-dynamic-workflows。 | [English](./packages/pi-dynamic-workflows/README.md) · [中文](./packages/pi-dynamic-workflows/README.zh-CN.md) |
 | [`@maplezzk/pi-interactive-subagents`](./packages/pi-interactive-subagents) | 终端复用器分屏中的非阻塞交互式子 agent，带实时状态 widget、`/plan` 与 `/iterate` 工作流。Fork 自 HazAT/pi-interactive-subagents。 | [English](./packages/pi-interactive-subagents/README.md) · [中文](./packages/pi-interactive-subagents/README.zh-CN.md) |
@@ -47,7 +45,7 @@
 pi install git:github.com/maplezzk/pi-extensions
 ```
 
-仓库根目录本身也是一个 Pi package。它通过 manifest 加载 `packages/*/index.ts` 下的扩展入口，并排除 `pi-terminal-mux`、`pi-model-request` 等纯库包，因此上面的命令会安装当前全部扩展，但不会误把共享库作为扩展加载。
+仓库根目录本身也是一个 Pi package。它通过 manifest 加载 `packages/*/index.ts` 下的扩展入口，并排除 `pi-terminal-mux` 等纯库包，因此上面的命令会安装当前全部扩展，但不会误把共享库作为扩展加载。
 
 安装后重新加载 Pi：
 

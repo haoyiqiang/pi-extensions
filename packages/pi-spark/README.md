@@ -22,8 +22,8 @@ Reload or restart Pi after installation.
 
 pi-spark ships with a custom editor and footer, replacing the default ones. The compact TUI gives you a calm experience without distraction.
 
-- The editor shows a working indicator inspired by [Amp](https://ampcode.com/) and the current model on the top border. If you use [presets](#presets), the active preset appears there too.
-- The footer shows session information, extension statuses, cost, and context usage on one line.
+- The editor shows a working indicator inspired by [Amp](https://ampcode.com/), the elapsed time since you sent the message, and the current model on the top border. If you use [presets](#presets), the active preset appears there too.
+- The footer shows session information, extension statuses, cost, and context usage on one line. Set `style` to `p10k` for a lean powerlevel10k left prompt (OS icon, fish-shortened path, `on`, and branch). That style needs a Nerd Font.
 
 ![Compact TUI](./assets/screenshot-tui.png)
 
@@ -67,6 +67,15 @@ pi-spark lets you define named model presets in `spark.json` (see [Configuration
 - Cycle presets with `ctrl+super+p` (forward) and `ctrl+shift+super+p` (backward); `super` is `command` on macOS and needs a terminal that forwards it.
 
 ![Presets](./assets/screenshot-presets.png)
+
+### Metrics
+
+pi-spark records session elapsed time and token-generation telemetry. The editor border shows the total wait, for example `⏱ 47s`, and it keeps counting across turns.
+
+- `on-stop` (default): the transcript stays quiet during the run. When the agent settles, one summary line reports elapsed time, blended TPS, TTFT, tokens, stalls, and cost.
+- `live`: one line is emitted at the end of every turn. A multi-turn run also gets a final `⏱ <duration>` line.
+- Every turn is still stored as a `tps` session entry. Remove `npm:@monotykamary/pi-tps` if it is installed, or both extensions will write duplicate entries.
+- Run `/config:metrics`, or `/config:metrics enable|disable|live|on-stop|reset`. An existing `extensions/pi-metrics/config.json` is used only when `spark.json` does not set `metrics`.
 
 ### Recap
 
@@ -120,6 +129,7 @@ All fields are optional. Each top-level feature runs with the defaults below unl
 | `credits` | `CreditsConfig` | Shows the active provider's credit balance or rate-limit usage in the status line. |
 | `editor` | `EditorConfig` | Shows a working indicator and the current model on the editor's top border. |
 | `footer` | `FooterConfig` | Shows session info, extension statuses, cost, and context usage. |
+| `metrics` | `MetricsConfig` | Shows elapsed time and records TPS, TTFT, token, and cost telemetry. |
 | `presets` | `{ [name]: Preset }` | Defines named model presets, keyed by name. |
 | `recap` | `RecapConfig` | Generates a session recap when idle or on demand. |
 
@@ -163,6 +173,17 @@ The `statusPosition` field is optional and defaults to `inline`.
 | --- | --- | --- |
 | `statusPosition` | `inline` (default) | Shows extension statuses on the same line as session info, cost, and context usage. |
 |  | `below` | Moves extension statuses to a new line below. |
+| `style` | `default` (default) | Shortened path, branch, and session name, separated by ` · `. |
+|  | `p10k` | Lean powerlevel10k left prompt. The path stays fish-shortened. Requires a Nerd Font. Omits the session name. |
+
+#### `MetricsConfig`
+
+| Field | Value | Description |
+| --- | --- | --- |
+| `display` | `on-stop` (default) | Emits one summary line after the agent settles. |
+|  | `live` | Emits one line at the end of each turn. |
+
+Set `metrics` to `false` to disable both the elapsed label and telemetry.
 
 #### `Preset`
 

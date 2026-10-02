@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { formatDone, formatTick } from "../src/format-utils.ts";
+import { formatDone, formatTick } from "../src/features/metrics/format-utils.ts";
 
 // formatTick：working 期间的紧凑格式
 test("formatTick 秒级显示", () => {

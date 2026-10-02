@@ -1,4 +1,4 @@
-import { homedir } from "node:os";
+import { homedir, platform } from "node:os";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Text } from "@earendil-works/pi-tui";
@@ -7,24 +7,34 @@ import { SplitLine } from "../../components/split-line";
 import { loadConfig } from "../../config";
 import { formatContextUsage, formatCwd, formatLink, sanitizeText } from "../../utils/format";
 import { getEntryUsage } from "../../utils/usage";
+import { formatP10kLeft, osPromptIcon } from "./p10k";
 
 import type { ExtensionContext, ExtensionAPI, ReadonlyFooterDataProvider, Theme } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
-import type { StatusPosition } from "./config";
+import type { FooterStyle, StatusPosition } from "./config";
 
 const DEFAULT_STATUS_POSITION: StatusPosition = "inline";
+const DEFAULT_STYLE: FooterStyle = "default";
 
 class FooterComponent implements Component {
   private ctx: ExtensionContext;
   private theme: Theme;
   private footerData: ReadonlyFooterDataProvider;
   private statusPosition: StatusPosition;
+  private style: FooterStyle;
 
-  constructor(ctx: ExtensionContext, theme: Theme, footerData: ReadonlyFooterDataProvider, statusPosition: StatusPosition = DEFAULT_STATUS_POSITION) {
+  constructor(
+    ctx: ExtensionContext,
+    theme: Theme,
+    footerData: ReadonlyFooterDataProvider,
+    statusPosition: StatusPosition = DEFAULT_STATUS_POSITION,
+    style: FooterStyle = DEFAULT_STYLE,
+  ) {
     this.ctx = ctx;
     this.theme = theme;
     this.footerData = footerData;
     this.statusPosition = statusPosition;
+    this.style = style;
   }
 
   invalidate(): void {
@@ -50,9 +60,27 @@ class FooterComponent implements Component {
     const url = pathToFileURL(resolve(cwd));
     const cwdText = formatLink(formatCwd(cwd, homedir()), url.href);
     const branch = this.footerData.getGitBranch();
-    const sessionName = this.ctx.sessionManager.getSessionName();
 
+    if (this.style === "p10k") return this.getP10kLeft(cwdText, branch);
+
+    const sessionName = this.ctx.sessionManager.getSessionName();
     return this.theme.fg("dim", [cwdText, branch, sessionName].filter(Boolean).join(" · "));
+  }
+
+  private getP10kLeft(cwdText: string, branch: string | null): string {
+    return formatP10kLeft(
+      {
+        osIcon: osPromptIcon(platform()),
+        path: this.theme.fg("accent", cwdText),
+        branch,
+      },
+      {
+        text: (value) => this.theme.fg("text", value),
+        dim: (value) => this.theme.fg("dim", value),
+        accent: (value) => this.theme.fg("accent", value),
+        success: (value) => this.theme.fg("success", value),
+      },
+    );
   }
 
   private getRight(): string {
@@ -100,6 +128,6 @@ export function registerFooter(pi: ExtensionAPI): void {
     const config = loadConfig(ctx).footer;
     if (ctx.mode !== "tui" || !config) return;
 
-    ctx.ui.setFooter((_tui, theme, footerData) => new FooterComponent(ctx, theme, footerData, config.statusPosition));
+    ctx.ui.setFooter((_tui, theme, footerData) => new FooterComponent(ctx, theme, footerData, config.statusPosition, config.style));
   });
 }

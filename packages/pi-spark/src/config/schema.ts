@@ -3,6 +3,7 @@ import * as z from "zod";
 import { creditsConfigSchema } from "../features/credits/config";
 import { editorConfigSchema } from "../features/editor/config";
 import { footerConfigSchema } from "../features/footer/config";
+import { metricsConfigSchema } from "../features/metrics/config";
 import { presetsConfigSchema } from "../features/presets/config";
 import { recapConfigSchema } from "../features/recap/config";
 
@@ -15,6 +16,7 @@ export const featureSchemas = {
   credits: creditsConfigSchema,
   editor: editorConfigSchema,
   footer: footerConfigSchema,
+  metrics: metricsConfigSchema,
   presets: presetsConfigSchema,
   recap: recapConfigSchema,
 } as const;

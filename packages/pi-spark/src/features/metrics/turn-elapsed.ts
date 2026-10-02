@@ -20,12 +20,12 @@
  * - 非 TUI 模式（rpc / print）下 hasUI 为 false，不启动定时器、不发 notify。
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { notifyWithSource } from "pi-extensions-i18n";
-import { DEFAULT_METRICS_CONFIG, type MetricsDisplay } from "./config.ts";
+import { i18n, NOTICE_SOURCE } from "../../i18n.ts";
+import { setElapsedLabel } from "./elapsed-label.ts";
 import { formatDone, formatTick } from "./format-utils.ts";
-import { i18n } from "./i18n.ts";
-import { NOTICE_SOURCE } from "./notice.ts";
+import type { MetricsDisplay } from "./config.ts";
 
 const TICK_MS = 1000;
 
@@ -113,12 +113,18 @@ export function shouldReportTotalRun(settlement: RunSettlement): boolean {
   return settlement.elapsedMs > 0 && settlement.turns >= MIN_TURNS_FOR_TOTAL;
 }
 
+export type MetricsDisplaySource = MetricsDisplay | ((ctx: ExtensionContext) => MetricsDisplay | false);
+
 /** 耗时模块的可注入依赖：与 tps 共用同一个运行时钟，保证两处耗时一致。 */
 export interface TurnElapsedOptions {
   /** 共享的计时状态；不传就自己造一个（便于单独使用和测试）。 */
   tracker?: ElapsedTracker;
-  /** 显示时机；只有 `live` 才在这里补总耗时提示。 */
-  display?: MetricsDisplay;
+  /** 显示时机；函数返回 false 时不显示。只有 `live` 才在这里补总耗时提示。 */
+  display?: MetricsDisplaySource;
+}
+
+function resolveDisplay(source: MetricsDisplaySource | undefined, ctx: ExtensionContext): MetricsDisplay | false {
+  return typeof source === "function" ? source(ctx) : source ?? "on-stop";
 }
 
 /**
@@ -129,7 +135,6 @@ export interface TurnElapsedOptions {
  */
 export default function (pi: ExtensionAPI, options: TurnElapsedOptions = {}) {
   const tracker = options.tracker ?? createElapsedTracker();
-  const display = options.display ?? DEFAULT_METRICS_CONFIG.display;
   let tickHandle: ReturnType<typeof setInterval> | null = null;
 
   /** live 模式的结算入口：读运行数据后复位，只在本模块负责结算时调用。 */
@@ -146,18 +151,24 @@ export default function (pi: ExtensionAPI, options: TurnElapsedOptions = {}) {
     }
   };
 
-  pi.on("input", async (event) => {
+  pi.on("input", async (event, ctx) => {
+    if (resolveDisplay(options.display, ctx) === false) return;
     // 只在空闲时收到用户消息才记总耗时起点；运行中的 steer/followUp 保留原起点
     if (event.source === "interactive" || event.source === "rpc") tracker.startRun();
   });
 
-  pi.on("agent_start", async () => {
+  pi.on("agent_start", async (_event, ctx) => {
+    if (resolveDisplay(options.display, ctx) === false) return;
     // 兜底：extension 注入消息触发的运行没有用户 input 事件
     tracker.startRun();
   });
 
   pi.on("turn_start", async (_event, ctx) => {
     stopTick();
+    if (resolveDisplay(options.display, ctx) === false) {
+      setElapsedLabel(undefined);
+      return;
+    }
     tracker.startTurn();
     if (!ctx.hasUI) return;
 
@@ -165,36 +176,39 @@ export default function (pi: ExtensionAPI, options: TurnElapsedOptions = {}) {
       // spinner 显示全程总耗时（从用户发出消息起），跨轮不归零
       const elapsed = tracker.runElapsed();
       if (elapsed <= 0) return;
-      ctx.ui.setWorkingMessage(i18n.t("elapsedWorking", { value: formatTick(elapsed) }));
+      const label = i18n.t("elapsedWorking", { value: formatTick(elapsed) });
+      setElapsedLabel(label);
+      ctx.ui.setWorkingMessage(label);
     };
     tick();
     tickHandle = setInterval(tick, TICK_MS);
   });
 
+  const clearWorking = (ctx: ExtensionContext) => {
+    setElapsedLabel(undefined);
+    if (ctx.hasUI) ctx.ui.setWorkingMessage(undefined);
+  };
+
   pi.on("turn_end", async (_event, ctx) => {
     stopTick();
     tracker.endTurn();
-    if (!ctx.hasUI) return;
-
-    // 恢复 pi 默认 working 文字（下次 streaming 由 pi 内部重置）；
-    // 本轮耗时由 tps 那条指标提示带上，不在这里重复发。
-    ctx.ui.setWorkingMessage(undefined);
+    clearWorking(ctx);
   });
 
   pi.on("agent_end", async (_event, ctx) => {
     stopTick();
     tracker.clearTurn();
-    if (!ctx.hasUI) return;
-    ctx.ui.setWorkingMessage(undefined);
+    clearWorking(ctx);
   });
 
   pi.on("agent_settled", async (_event, ctx) => {
     stopTick();
+    const display = resolveDisplay(options.display, ctx);
     // 运行时钟只有一个结算者：live 模式在这里结算，on-stop 模式由 tps 结算（汇总行要同时带上耗时）。
     const settlement = display === "live" ? settleRun() : undefined;
-    if (!ctx.hasUI) return;
+    clearWorking(ctx);
+    if (display === false || !ctx.hasUI) return;
 
-    ctx.ui.setWorkingMessage(undefined);
     if (settlement !== undefined && shouldReportTotalRun(settlement)) {
       notifyWithSource({
         ctx,

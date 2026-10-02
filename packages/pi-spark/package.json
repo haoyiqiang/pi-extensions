@@ -1,7 +1,7 @@
 {
   "name": "pi-spark",
   "version": "0.28.0",
-  "description": "Pi package that polishes the daily experience: credits, presets, recap, and a compact TUI",
+  "description": "Pi package that polishes the daily experience: credits, presets, recap, session metrics, and a compact TUI",
   "type": "module",
   "main": "./index.ts",
   "exports": {
@@ -22,8 +22,9 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit --pretty false",
+    "test": "tsx --test tests/*.test.ts",
     "build": "npm run typecheck",
-    "check": "npm run typecheck && npm pack --dry-run --json > /dev/null"
+    "check": "npm run typecheck && npm test && npm pack --dry-run --json > /dev/null"
   },
   "pi": {
     "extensions": [
@@ -64,6 +65,8 @@
     "credits",
     "presets",
     "recap",
+    "metrics",
+    "telemetry",
     "theme"
   ],
   "dependencies": {

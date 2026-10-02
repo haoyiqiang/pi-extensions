@@ -1,7 +1,7 @@
 /**
  * Token generation metrics for Pi.
  *
- * This is the TPS portion of pi-tps, maintained inside pi-metrics so the
+ * This is the TPS portion of pi-tps, maintained inside pi-spark so the
  * elapsed-time HUD and generation telemetry share one lifecycle.
  *
  * 两种显示时机：
@@ -17,10 +17,9 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { notifyWithSource } from "pi-extensions-i18n";
-import { DEFAULT_METRICS_CONFIG, type MetricsDisplay } from "./config.ts";
+import { i18n, NOTICE_SOURCE } from "../../i18n.ts";
+import type { MetricsDisplay } from "./config.ts";
 import { computeRateUsdPerM, formatDuration, formatNumber } from "./format-utils.ts";
-import { i18n } from "./i18n.ts";
-import { NOTICE_SOURCE } from "./notice.ts";
 import { composeRunSummary, createRunAccumulator, type RunAccumulator } from "./run-summary.ts";
 import type { ElapsedTracker } from "./turn-elapsed.ts";
 
@@ -313,19 +312,24 @@ interface SummaryState {
   effectiveCostUsd: number | null;
 }
 
+export type MetricsDisplaySource = MetricsDisplay | ((ctx: ExtensionContext) => MetricsDisplay | false);
+
 /** tps 模块的可注入依赖：显示时机，以及 on-stop 模式下共用的运行时钟。 */
 export interface TpsOptions {
-  /** 显示时机；`live` 每轮一行，`on-stop` 只在整段停下后汇总一行。 */
-  display?: MetricsDisplay;
+  /** 显示时机；函数返回 false 时本轮不记录。默认 on-stop。 */
+  display?: MetricsDisplaySource;
   /** 共享的运行时钟；只在 `on-stop` 模式下用于汇总行的总耗时。 */
   tracker?: ElapsedTracker;
+}
+
+function resolveDisplay(source: MetricsDisplaySource | undefined, ctx: ExtensionContext): MetricsDisplay | false {
+  return typeof source === "function" ? source(ctx) : source ?? "on-stop";
 }
 
 /**
  * 注册 TPS 指标事件：按 `display` 决定每轮实时出一行，还是整段停下后汇总出一行。
  */
 export default function tpsExtension(pi: ExtensionAPI, options: TpsOptions = {}): void {
-  const display = options.display ?? DEFAULT_METRICS_CONFIG.display;
   let currentTiming: TurnTiming | null = null;
   let pendingNeuralwattBilledCost: { turnIndex: number; costUsd: number } | null = null;
   let lastCommittedTurn: {
@@ -407,7 +411,7 @@ export default function tpsExtension(pi: ExtensionAPI, options: TpsOptions = {})
     committed.telemetry = corrected;
     pi.appendEntry("tps", corrected);
     pi.events?.emit("tps:telemetry", corrected);
-    if (display === "on-stop") {
+    if (resolveDisplay(options.display, committed.ctx) === "on-stop") {
       applyLateBilledCost(committed.turnIndex, costUsd);
       return;
     }
@@ -422,6 +426,7 @@ export default function tpsExtension(pi: ExtensionAPI, options: TpsOptions = {})
 
   pi.on("session_start", (_event, ctx) => {
     clearState();
+    if (resolveDisplay(options.display, ctx) === false) return;
     restoreTPSNotification(ctx, scheduleRestore);
   });
 
@@ -431,6 +436,7 @@ export default function tpsExtension(pi: ExtensionAPI, options: TpsOptions = {})
     runAccumulator = createRunAccumulator();
     lastRunTurn = null;
     lastSummary = null;
+    if (resolveDisplay(options.display, ctx) === false) return;
     restoreTPSNotification(ctx, scheduleRestore);
   });
 
@@ -506,7 +512,11 @@ export default function tpsExtension(pi: ExtensionAPI, options: TpsOptions = {})
   });
 
   pi.on("turn_end", (event: TurnEndEvent, ctx: ExtensionContext) => {
-    if (!currentTiming) return;
+    const display = resolveDisplay(options.display, ctx);
+    if (!currentTiming || display === false) {
+      currentTiming = null;
+      return;
+    }
     const timing = currentTiming;
     currentTiming = null;
     let billedCost = pendingNeuralwattBilledCost?.turnIndex === event.turnIndex
@@ -546,7 +556,7 @@ export default function tpsExtension(pi: ExtensionAPI, options: TpsOptions = {})
   });
 
   pi.on("agent_settled", (_event, ctx: ExtensionContext) => {
-    if (display !== "on-stop") return;
+    if (resolveDisplay(options.display, ctx) !== "on-stop") return;
     // 运行时钟由本模块结算（live 模式下由 turn-elapsed 结算）：先取数再复位，
     // 汇总行里的总耗时就是 spinner 一直在显示的那一段。
     const settlement = options.tracker?.currentRun();

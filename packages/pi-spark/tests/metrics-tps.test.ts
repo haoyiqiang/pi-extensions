@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { computeRateUsdPerM, formatDuration, formatNumber } from "../src/format-utils.ts";
-import tpsExtension from "../src/tps.ts";
-import type { ElapsedTracker } from "../src/turn-elapsed.ts";
+import { computeRateUsdPerM, formatDuration, formatNumber } from "../src/features/metrics/format-utils.ts";
+import tpsExtension from "../src/features/metrics/tps.ts";
+import type { ElapsedTracker } from "../src/features/metrics/turn-elapsed.ts";
 
 /** Pi 事件的处理器签名；测试只需要按名字取出来调用。 */
 type Handler = (event: unknown, ctx: unknown) => unknown;

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createElapsedTracker, shouldReportTotalRun } from "../src/turn-elapsed.ts";
+import { createElapsedTracker, shouldReportTotalRun } from "../src/features/metrics/turn-elapsed.ts";
 
 /** 可控时钟：让计时测试不依赖真实时间。 */
 function createClock(start = 0): { now: () => number; advance: (ms: number) => void } {

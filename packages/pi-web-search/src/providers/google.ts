@@ -4,7 +4,7 @@ import { TextEncoder, TextDecoder } from "util";
 import type { LlmTransport } from "../config.ts";
 import { i18n } from "../i18n.ts";
 import { getConfig } from "./config.ts";
-import { getAuth, getProviderSessionHeaders } from "./auth.ts";
+import { getAuth } from "./auth.ts";
 import { readSseEvents } from "./sse.ts";
 import { deriveSources, pushUniqueSearchResult, sanitizeSearchResults, titleFromUrl } from "./results.ts";
 import type { SearchResultDetail, Source, StreamResult } from "./types.ts";
@@ -112,7 +112,6 @@ export async function callGoogleStream(
     const req = config.buildRequest(requestModel, body, auth);
 
     // Handle auth
-    Object.assign(req.headers, getProviderSessionHeaders(model, ctx) || {});
     if (auth.headers) {
         Object.assign(req.headers, auth.headers);
     }

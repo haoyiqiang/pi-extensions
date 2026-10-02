@@ -194,5 +194,97 @@
   "creditsLimit": {
     "zh-CN": "限额",
     "en-US": "Limit"
+  },
+  "metricsConfigCommandDescription": {
+    "zh-CN": "配置会话指标显示",
+    "en-US": "Configure session metrics display"
+  },
+  "metricsConfigUsage": {
+    "zh-CN": "用法：/config:metrics（打开配置菜单）、enable、disable、live、on-stop 或 reset",
+    "en-US": "Usage: /config:metrics (open settings), enable, disable, live, on-stop, or reset"
+  },
+  "metricsConfigMenuTitle": {
+    "zh-CN": "指标配置",
+    "en-US": "Metrics settings"
+  },
+  "metricsConfigEnabled": {
+    "zh-CN": "启用指标：{value}",
+    "en-US": "Metrics enabled: {value}"
+  },
+  "metricsConfigDisplay": {
+    "zh-CN": "显示时机：{value}",
+    "en-US": "Display: {value}"
+  },
+  "metricsConfigDisplayLive": {
+    "zh-CN": "每轮实时一行",
+    "en-US": "one line per turn"
+  },
+  "metricsConfigDisplayOnStop": {
+    "zh-CN": "停下后汇总一行",
+    "en-US": "one summary line when stopped"
+  },
+  "metricsConfigOn": {
+    "zh-CN": "开",
+    "en-US": "on"
+  },
+  "metricsConfigOff": {
+    "zh-CN": "关",
+    "en-US": "off"
+  },
+  "metricsConfigDone": {
+    "zh-CN": "完成",
+    "en-US": "Done"
+  },
+  "metricsConfigInteractiveOnly": {
+    "zh-CN": "指标配置需要在 TUI 中修改；请在交互式 Pi 会话中执行命令。",
+    "en-US": "Metrics configuration requires the TUI; run this command in an interactive Pi session."
+  },
+  "metricsConfigSaved": {
+    "zh-CN": "指标配置已保存：{path}。下一轮运行生效。",
+    "en-US": "Metrics configuration saved to {path}. It applies on the next run."
+  },
+  "metricsConfigInvalid": {
+    "zh-CN": "指标配置无效：{error}",
+    "en-US": "Invalid metrics configuration: {error}"
+  },
+  "metricsProjectOverride": {
+    "zh-CN": "当前项目的 spark.json 也设置了 metrics，会覆盖这份全局配置。",
+    "en-US": "The project spark.json also sets metrics and overrides this global configuration."
+  },
+  "elapsedWorking": {
+    "zh-CN": "⏱ {value}",
+    "en-US": "⏱ {value}"
+  },
+  "elapsedTotal": {
+    "zh-CN": "⏱ {value}",
+    "en-US": "⏱ {value}"
+  },
+  "tpsValue": {
+    "zh-CN": "TPS {value} tok/s",
+    "en-US": "TPS {value} tok/s"
+  },
+  "tpsUnknown": {
+    "zh-CN": "TPS —",
+    "en-US": "TPS —"
+  },
+  "tpsTtft": {
+    "zh-CN": "TTFT {value}",
+    "en-US": "TTFT {value}"
+  },
+  "tpsInput": {
+    "zh-CN": "in {value}",
+    "en-US": "in {value}"
+  },
+  "tpsOutput": {
+    "zh-CN": "out {value}",
+    "en-US": "out {value}"
+  },
+  "tpsStall": {
+    "zh-CN": "stall {value}×{count}",
+    "en-US": "stall {value}×{count}"
+  },
+  "tpsRate": {
+    "zh-CN": "${value}/M",
+    "en-US": "${value}/M"
   }
 }

@@ -146,7 +146,7 @@ GitHub 提取默认关闭。启用后优先使用 `gh`，克隆时回退到 `git
 
 API provider 优先级：本次调用 `provider` → `PI_WEB_SEARCH_API_PROVIDER` → 旧版 `WEB_SEARCH_PROVIDER` → `api.provider` → Brave。密钥优先读取 provider 环境变量，再读取 `api.apiKeys.<provider>`；不会跨 provider 复用密钥。
 
-模型鉴权统一通过 Pi model registry 和 `pi-model-request` 解析，包括 resolved base URL 与 OpenCode session headers。
+模型鉴权统一通过 Pi model registry 解析，包括解析出的 base URL。原始搜索请求不再额外补 provider 会话头。
 
 ## 开发
 

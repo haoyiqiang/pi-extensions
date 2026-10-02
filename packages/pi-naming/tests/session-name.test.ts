@@ -70,18 +70,15 @@ test("normalizeSessionName 收敛模型的标题格式并限制长度", () => {
   assert.equal(normalizeSessionName("12345678901234567890"), "123456789012345");
 });
 
-test("requestSessionName 使用当前模型和鉴权信息单独请求标题", async () => {
+test("requestSessionName 使用当前模型单独请求标题", async () => {
   let receivedPrompt = "";
-  let receivedApiKey = "";
   let receivedSystem = "";
   let receivedMaxTokens: number | undefined;
   let receivedEffort: string | undefined;
-  let receivedHeaders: Record<string, string | null> | undefined;
   /** 返回固定标题并记录请求参数的 completion 测试替身。 */
   const completion: SessionNameCompletion = async (_model, context, options) => {
     receivedMaxTokens = options?.maxTokens;
     receivedEffort = options?.reasoning;
-    receivedHeaders = options?.headers;
     receivedSystem = context.systemPrompt ?? "";
     receivedPrompt = context.messages[0]?.content instanceof Array
       ? context.messages[0].content
@@ -89,7 +86,6 @@ test("requestSessionName 使用当前模型和鉴权信息单独请求标题", a
         .map((part) => part.text)
         .join("")
       : "";
-    receivedApiKey = options?.apiKey ?? "";
     return {
       role: "assistant",
       content: [{ type: "text", text: '"修复登录超时"' }],
@@ -129,12 +125,9 @@ test("requestSessionName 使用当前模型和鉴权信息单独请求标题", a
 
   assert.equal(name, "修复登录超时");
   assert.match(receivedPrompt, /修复登录超时/);
-  assert.equal(receivedApiKey, "test-key");
   assert.equal(receivedMaxTokens, 2048);
   assert.equal(receivedEffort, "low");
   assert.match(receivedSystem, /15/);
-  // 非 opencode 模型不添加会话头，鉴权头原样传递。
-  assert.deepEqual(receivedHeaders, { "x-test": "1" });
   const title = parseConfig({ title: { maxLength: 4, preferredLength: 3, language: "Japanese", instructions: "Keep API names", effort: "high" } }).title;
   const custom = await requestSessionName({ userMessages: ["任务"], ctx, completion, title });
   assert.equal(receivedEffort, "high");
@@ -149,26 +142,6 @@ test("requestSessionName 使用当前模型和鉴权信息单独请求标题", a
   await requestSessionName({ userMessages: ["任务"], ctx, completion,
     title: parseConfig({ title: { maxTokens: 99999 } }).title });
   assert.equal(receivedMaxTokens, 4096);
-
-  // opencode 系列必须带上会话头，否则请求被 400 拒绝；鉴权头仍然保留。
-  const opencodeCtx = {
-    model: { provider: "opencode-go", id: "title-model", maxTokens: 4096, baseUrl: "https://opencode.ai/zen/go/v1" },
-    modelRegistry: {
-      getApiKeyAndHeaders: async () => ({
-        ok: true as const,
-        apiKey: "test-key",
-        headers: { "x-test": "1" },
-        env: {},
-      }),
-    },
-    sessionManager: { getSessionId: () => "session-abc" },
-  } as unknown as SessionNameRequest["ctx"];
-  await requestSessionName({ userMessages: ["任务"], ctx: opencodeCtx, completion });
-  assert.deepEqual(receivedHeaders, {
-    "x-opencode-session": "session-abc",
-    "x-opencode-client": "pi",
-    "x-test": "1",
-  });
 });
 
 test("requestSessionName 显式报告鉴权、模型和空标题错误", async () => {

@@ -13,7 +13,7 @@
  *
  * 只折「工作条目」，归属在条目第一次渲染时确定：
  * - 一次运行（agent_start → agent_settled）期间 —— 例如 distill 审计行、
- *   tool-supervisor 审计行、pi-metrics 的逐轮遥测；
+ *   tool-supervisor 审计行、pi-spark 的逐轮遥测；
  * - 会话恢复窗口（session_start 之后、首次 agent_start 之前）—— 历史轮次留下的
  *   条目，与历史工具行一样属于工作过程。
  * 运行结束后才出现的条目（提示、汇总）保持可见；pi-extensions-i18n 的通知条目按级别区分

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Features
+
+* absorb pi-metrics elapsed time, TPS, TTFT, token, and cost telemetry; configure it with `metrics` in `spark.json` or `/config:metrics`
+
 ### Breaking changes
 
 * remove automatic session title generation; use `pi-naming` for session and terminal names

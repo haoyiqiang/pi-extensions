@@ -3,7 +3,7 @@ import test from "node:test";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fauxAssistantMessage, registerFauxProvider } from "@earendil-works/pi-ai/compat";
+import { complete, fauxAssistantMessage, registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { default as piSupervisorExtension } from "../src/index.ts";
 
@@ -48,8 +48,16 @@ function createContext(
   cwd: string,
   modelRegistry: Record<string, unknown>,
 ): ExtensionContext {
-  // 审查请求由扩展自己发出，会读取 session id 补 provider 会话头。
-  return { cwd, modelRegistry, sessionManager: { getSessionId: () => "session-test" } } as unknown as ExtensionContext;
+  return {
+    cwd,
+    modelRegistry: {
+      ...modelRegistry,
+      streamSimple: (model: unknown, requestContext: unknown, options: unknown) => ({
+        result: () => complete(model as never, requestContext as never, options as never),
+      }),
+    },
+    sessionManager: { getSessionId: () => "session-test" },
+  } as unknown as ExtensionContext;
 }
 
 /** Registers the supervisor against a handler-capturing Pi test double. */

@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { defu } from "defu";
 
+import { readLegacyMetricsConfig } from "./legacy-metrics";
 import { featureSchemas } from "./schema";
 import { i18n, NOTICE_SOURCE } from "../i18n";
 import { notifyWithSource } from "pi-extensions-i18n";
@@ -14,6 +15,11 @@ const CONFIG_FILE = "spark.json";
 
 const cache = new Map<string, SparkConfig>();
 
+/** Drops the cached spark.json result so the next load sees a freshly saved file. */
+export function clearConfigCache(): void {
+  cache.clear();
+}
+
 /** Loads and validates spark.json once per session lifecycle; later calls return the cached result. */
 export function loadConfig(ctx: ExtensionContext): SparkConfig {
   const cached = cache.get(ctx.cwd);
@@ -23,11 +29,16 @@ export function loadConfig(ctx: ExtensionContext): SparkConfig {
   // leaves while deep objects (e.g., `recap.model`) combine across both.
   const [globalPath, projectPath] = getConfigPaths(ctx.cwd, CONFIG_FILE);
   const raw = defu(readJson(projectPath) ?? {}, readJson(globalPath) ?? {});
+  const errors: string[] = [];
+  if (raw.metrics === undefined) {
+    const legacy = readLegacyMetricsConfig();
+    if (legacy.error) errors.push(legacy.error);
+    else if (legacy.value !== undefined) raw.metrics = legacy.value;
+  }
 
   // Validate each feature independently so a single invalid field disables only that feature
   // (falling back to its enabled defaults) instead of taking down the whole config.
   const config = {} as Record<keyof SparkConfig, unknown>;
-  const errors: string[] = [];
 
   for (const field of Object.keys(featureSchemas) as (keyof SparkConfig)[]) {
     const value = raw[field];

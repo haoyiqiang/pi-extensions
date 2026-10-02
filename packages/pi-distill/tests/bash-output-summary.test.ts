@@ -16,7 +16,7 @@ import {
   registerDistillToolDisplayMiddleware,
 } from "../src/tool-display-bridge.ts";
 import { Text } from "@earendil-works/pi-tui";
-import { fauxAssistantMessage, registerFauxProvider } from "@earendil-works/pi-ai/compat";
+import { complete, fauxAssistantMessage, registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import {
   extendDistillToolParameters,
   formatCompactCount,
@@ -1409,6 +1409,9 @@ test("用户中断会终止 Pi 事件中尚未完成的提炼请求", async () =
       modelRegistry: {
         find: () => faux.getModel(),
         getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "test", headers: {}, env: {} }),
+        streamSimple: (model: unknown, requestContext: unknown, options: unknown) => ({
+          result: () => complete(model as never, requestContext as never, options as never),
+        }),
       },
       sessionManager: { getSessionId: () => "session-test" },
     };
@@ -1606,25 +1609,3 @@ test("pi-distill 独立扩展最终工具 schema，并通过 Pi 事件处理 out
   }
 });
 
-test("opencode 系列提炼请求带上 Pi 的 provider 会话头", async () => {
-  await withFakeSummaryConfig(async () => {
-    let completionOptions: Parameters<TestCompletion>[2];
-    const completion: TestCompletion = async (...args) => {
-      completionOptions = args[2];
-      return fakeCompletion("ERROR E42")(...args);
-    };
-
-    await processToolResult(
-      fakeSummaryContext(
-        () => undefined,
-        { provider: "opencode-go", id: "model", baseUrl: "https://opencode.ai/zen/go/v1" },
-      ),
-      fakeToolResult("FAIL checkout\nERROR E42\nnext: retry\n".repeat(8)),
-      0,
-      completion,
-    );
-
-    assert.equal(completionOptions?.headers?.["x-opencode-session"], "session-test");
-    assert.equal(completionOptions?.headers?.["x-opencode-client"], "pi");
-  });
-});

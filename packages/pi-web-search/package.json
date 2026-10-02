@@ -61,7 +61,6 @@
   ],
   "dependencies": {
     "pi-extensions-i18n": "^0.8.0",
-    "pi-model-request": "^0.1.0",
     "undici": "^7.29.1"
   },
   "peerDependencies": {

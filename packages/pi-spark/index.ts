@@ -2,6 +2,7 @@ import { autoCollectEvents } from "./src/events";
 import { registerCredits } from "./src/features/credits";
 import { registerEditor } from "./src/features/editor";
 import { registerFooter } from "./src/features/footer";
+import { registerMetrics } from "./src/features/metrics";
 import { registerPresets } from "./src/features/presets";
 import { registerRecap } from "./src/features/recap";
 
@@ -20,6 +21,7 @@ export default function (pi: ExtensionAPI) {
   registerCredits(pi);
   registerEditor(pi, events);
   registerFooter(pi);
+  registerMetrics(pi);
   registerPresets(pi);
   registerRecap(pi);
 }

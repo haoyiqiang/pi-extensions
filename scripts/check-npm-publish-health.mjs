@@ -41,7 +41,7 @@ const packageDirs = readdirSync(PACKAGES_DIR, { withFileTypes: true })
 const branch = process.env.GITHUB_HEAD_REF ?? process.env.GITHUB_REF_NAME ?? "";
 const isReleasePleaseBranch = branch.startsWith(RELEASE_PLEASE_BRANCH_PREFIX);
 
-// 读取 release-please manifest（各包预期版本，key 形如 "packages/pi-metrics"）
+// 读取 release-please manifest（各包预期版本，key 形如 "packages/pi-spark"）
 const manifest = existsSync(MANIFEST_PATH)
   ? JSON.parse(readFileSync(MANIFEST_PATH, "utf8"))
   : {};

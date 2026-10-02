@@ -7,9 +7,8 @@
  * ~/.pi/agent/extensions/pi-tool-supervisor/config.json
  */
 
-import { complete } from "@earendil-works/pi-ai/compat";
+import { cleanupSessionResources, uuidv7, type Api, type Context, type Model } from "@earendil-works/pi-ai";
 import { NOTICE_TAG_COLOR, createTranslator, installNoticeRenderer, loadCatalog, notifyWithSource, type NoticeColor, type NoticeLevel, type NoticeSource } from "pi-extensions-i18n";
-import { createModelRequester } from "pi-model-request";
 import type {
   ExtensionAPI,
   ExtensionCommandContext,
@@ -320,6 +319,27 @@ interface RunReviewerOptions {
   afterContent?: string;
 }
 
+/**
+ * 像 pi-spark recap 一样走注册表发旁路请求。
+ * 鉴权和 baseUrl 由 ModelRuntime.prepareRequest 解析；openai-codex 使用独立会话，避免复用主连接。
+ */
+function completeBackground(
+  ctx: Pick<ExtensionContext, "modelRegistry">,
+  model: Model<Api>,
+  context: Context,
+  options?: Parameters<ExtensionContext["modelRegistry"]["streamSimple"]>[2],
+) {
+  if (model.api !== "openai-codex-responses") {
+    return ctx.modelRegistry.streamSimple(model, context, options).result();
+  }
+  const sessionId = uuidv7();
+  try {
+    return ctx.modelRegistry.streamSimple(model, context, { ...options, sessionId }).result();
+  } finally {
+    cleanupSessionResources(sessionId);
+  }
+}
+
 /** Executes one reviewer with parent cancellation and timeout fail-open behavior. */
 async function reviewWithModel(options: RunReviewerOptions): Promise<FileEditReviewResult> {
   const { context, config, reviewer, rules, toolName, filePath, diff, currentFileContext, trigger = AFTER_TRIGGER } = options;
@@ -358,13 +378,11 @@ async function reviewWithModel(options: RunReviewerOptions): Promise<FileEditRev
   context.signal?.addEventListener("abort", abortFromParent, { once: true });
   const timeout = setTimeout(() => controller.abort(), config.timeoutSeconds * MILLISECONDS_PER_SECOND);
   try {
-    // 审查请求由扩展自己发出：鉴权与 provider 会话头交给共享请求器，与 Pi 核心行为一致。
-    const request = createModelRequester(context.ctx, {
-      base: complete,
-      authError: (error) => new Error(`审查模型鉴权失败：${error}`),
-    });
+    const auth = await context.ctx.modelRegistry.getApiKeyAndHeaders(model);
+    if (auth.ok === false) throw new Error(`审查模型鉴权失败：${auth.error}`);
     if (context.signal?.aborted) return createAbortedResult();
-    const response = await request(
+    const response = await completeBackground(
+      context.ctx,
       model,
       {
         messages: [{

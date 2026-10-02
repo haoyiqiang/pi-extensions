@@ -43,8 +43,8 @@ import { getTextContent, hasNonTextContent, limitReturnedToolResult } from "./ou
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { cleanupSessionResources, uuidv7, type Api, type Context, type Model } from "@earendil-works/pi-ai";
 import { NOTICE_TAG_COLOR, createTranslator, installNoticeRenderer, loadCatalog, notifyWithSource, type NoticeColor, type NoticeSource } from "pi-extensions-i18n";
-import { createModelRequester } from "pi-model-request";
 import {
   buildSummaryPrompt,
   buildSummarySystemPrompt,
@@ -774,13 +774,34 @@ async function completeSummaryMessage(
   return { text: rawResponse, usage: normalizeSummaryUsage(response.usage) };
 }
 
+/**
+ * 像 pi-spark recap 一样走注册表发旁路请求。
+ * 鉴权和 baseUrl 由 ModelRuntime.prepareRequest 解析；openai-codex 使用独立会话，避免复用主连接。
+ */
+function completeBackground(
+  ctx: Pick<ExtensionContext, "modelRegistry">,
+  model: Model<Api>,
+  context: Context,
+  options?: Parameters<ExtensionContext["modelRegistry"]["streamSimple"]>[2],
+) {
+  if (model.api !== "openai-codex-responses") {
+    return ctx.modelRegistry.streamSimple(model, context, options).result();
+  }
+  const sessionId = uuidv7();
+  try {
+    return ctx.modelRegistry.streamSimple(model, context, { ...options, sessionId }).result();
+  } finally {
+    cleanupSessionResources(sessionId);
+  }
+}
+
 async function summarizeOutput(
   prompt: string,
   output: string,
   config: BashSummaryConfig,
   context: DistillExecutionContext,
   signal: AbortSignal,
-  completion: SummaryCompletion = complete,
+  completion?: SummaryCompletion,
 ): Promise<SummaryResult> {
   const configuredReference = config.modelProvider && config.modelId
     ? `${config.modelProvider}/${config.modelId}`
@@ -796,17 +817,20 @@ async function summarizeOutput(
       : i18n.t("sessionModelMissing"));
   }
 
-  // 摘要请求由扩展自己发出：鉴权与 provider 会话头交给共享请求器，与 Pi 核心行为一致。
-  const request = createModelRequester(context.ctx, {
-    base: completion,
-    authError: (error) => new Error(`Summarizer authentication failed: ${error}`),
-  });
+  const auth = await context.ctx.modelRegistry.getApiKeyAndHeaders(model);
+  if (auth.ok === false) throw new Error(`Summarizer authentication failed: ${auth.error}`);
 
   const completionOptions = {
     maxTokens: Math.max(256, Math.ceil(config.maxChars / 2)),
     onPayload: addSummaryJsonResponseFormat,
     signal,
   } satisfies SummaryCompletionOptions;
+  // 注入的 completion 只替换测试请求；生产路径走注册表，鉴权由 prepareRequest 解析。
+  const request = completion ?? ((
+    requestModel: Model<Api>,
+    requestContext: Context,
+    requestOptions?: SummaryCompletionOptions,
+  ) => completeBackground(context.ctx, requestModel, requestContext, requestOptions));
   const { text: rawResponse, usage } = await completeSummaryMessage(
     request,
     model,
@@ -871,7 +895,7 @@ async function summarizeOutputWithRetries(
   output: string,
   config: BashSummaryConfig,
   context: DistillExecutionContext,
-  completion: SummaryCompletion,
+  completion?: SummaryCompletion,
 ): Promise<SummaryResult> {
   let timeoutRetries = 0;
   let errorRetries = 0;
@@ -959,7 +983,7 @@ export async function processToolResult(
   context: DistillExecutionContext,
   result: ToolResult,
   toolExecutionMs: number,
-  completion: SummaryCompletion = complete,
+  completion?: SummaryCompletion,
 ): Promise<ToolResult> {
   const prompt = getOutputRequest(context.params);
   const loaded = loadDistillConfig();

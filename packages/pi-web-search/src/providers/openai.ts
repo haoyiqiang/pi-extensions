@@ -3,7 +3,7 @@ import { clampThinkingLevel, type Api, type Model, type ModelThinkingLevel } fro
 import { i18n } from "../i18n.ts";
 import { TextDecoder } from "util";
 import { getProviderKind } from "./config.ts";
-import { getAuth, getProviderSessionHeaders, type ResolvedAuth } from "./auth.ts";
+import { getAuth, type ResolvedAuth } from "./auth.ts";
 import { readSseEvents } from "./sse.ts";
 import {
     applyIndexCitations,
@@ -114,7 +114,6 @@ export async function callOpenAIStream(
     }
 
     const headers = new Headers();
-    for (const [name, value] of Object.entries(getProviderSessionHeaders(model, ctx) || {})) headers.set(name, value);
     for (const [name, value] of Object.entries(model.headers || {})) headers.set(name, value);
     for (const [name, value] of Object.entries(auth.headers || {})) headers.set(name, value);
     if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json");

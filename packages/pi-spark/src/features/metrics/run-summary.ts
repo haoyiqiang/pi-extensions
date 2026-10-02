@@ -7,8 +7,8 @@
  * 聚合与格式化都是纯逻辑，便于不依赖 Pi 运行时做单元测试。
  */
 
+import { i18n } from "../../i18n.ts";
 import { computeRateUsdPerM, formatDone, formatDuration, formatNumber } from "./format-utils.ts";
-import { i18n } from "./i18n.ts";
 
 const TPS_DECIMAL_PLACES = 1;
 const RATE_DECIMAL_PLACES = 2;

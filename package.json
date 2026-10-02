@@ -15,8 +15,7 @@
   "pi": {
     "extensions": [
       "packages/*/index.ts",
-      "!packages/pi-terminal-mux/index.ts",
-      "!packages/pi-model-request/index.ts"
+      "!packages/pi-terminal-mux/index.ts"
     ],
     "skills": [
       "packages/*/SKILL.md"

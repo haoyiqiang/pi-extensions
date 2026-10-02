@@ -1,9 +1,9 @@
+import { cleanupSessionResources, uuidv7, type Api, type Context, type Model } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import type {
   ExtensionContext,
   SessionEntry,
 } from "@earendil-works/pi-coding-agent";
-import { createModelRequester } from "pi-model-request";
 import { i18n } from "./i18n.ts";
 import { DEFAULT_TITLE_CONFIG, type TitleConfig } from "./config.ts";
 
@@ -131,12 +131,33 @@ export function normalizeSessionName(raw: string, maxLength = DEFAULT_TITLE_CONF
   return Array.from(name).slice(0, maxLength).join("").trim();
 }
 
+/**
+ * 像 pi-spark recap 一样走注册表发旁路请求。
+ * 鉴权和 baseUrl 由 ModelRuntime.prepareRequest 解析；openai-codex 使用独立会话，避免复用主连接。
+ */
+async function completeBackground(
+  ctx: Pick<ExtensionContext, "modelRegistry">,
+  model: Model<Api>,
+  context: Context,
+  options?: Parameters<ExtensionContext["modelRegistry"]["streamSimple"]>[2],
+) {
+  if (model.api !== "openai-codex-responses") {
+    return ctx.modelRegistry.streamSimple(model, context, options).result();
+  }
+  const sessionId = uuidv7();
+  try {
+    return await ctx.modelRegistry.streamSimple(model, context, { ...options, sessionId }).result();
+  } finally {
+    cleanupSessionResources(sessionId);
+  }
+}
+
 /** 调用当前 session 模型生成名称，并把鉴权、空响应和模型错误显式抛出。 */
 export async function requestSessionName({
   userMessages,
   ctx,
   signal,
-  completion = completeSimple,
+  completion,
   title = DEFAULT_TITLE_CONFIG,
 }: SessionNameRequest): Promise<string> {
   if (userMessages.length === 0) {
@@ -148,37 +169,37 @@ export async function requestSessionName({
     throw new Error(i18n.t("sessionNameNoModel"));
   }
 
-  // 命名请求由扩展自己发出：鉴权与 provider 会话头交给共享请求器，与 Pi 核心行为一致。
-  const request = createModelRequester(ctx, {
-    base: completion,
-    authError: (error) => new Error(i18n.t("sessionNameAuthFailed", { error })),
-  });
+  const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+  if (auth.ok === false) {
+    throw new Error(i18n.t("sessionNameAuthFailed", { error: auth.error }));
+  }
 
-  const response = await request(
-    model,
-    {
-      systemPrompt: [
-        i18n.t("sessionNameSystem", { maxLength: title.maxLength, preferredLength: title.preferredLength }),
-        title.language === "auto"
-          ? i18n.t("sessionNameLanguageAuto")
-          : i18n.t("sessionNameLanguage", { language: title.language }),
-        title.instructions,
-      ].filter(Boolean).join("\n"),
-      messages: [
-        {
-          role: "user",
-          content: [{ type: "text", text: buildSessionNamePrompt(userMessages) }],
-          timestamp: Date.now(),
-        },
-      ],
-    },
-    {
-      maxTokens: resolveTitleMaxTokens(model, title.maxTokens),
-      // 命名不需要高强度推理；档位可配置，降低思考占用预算的波动。
-      reasoning: title.effort,
-      signal,
-    },
-  );
+  const context = {
+    systemPrompt: [
+      i18n.t("sessionNameSystem", { maxLength: title.maxLength, preferredLength: title.preferredLength }),
+      title.language === "auto"
+        ? i18n.t("sessionNameLanguageAuto")
+        : i18n.t("sessionNameLanguage", { language: title.language }),
+      title.instructions,
+    ].filter(Boolean).join("\n"),
+    messages: [
+      {
+        role: "user" as const,
+        content: [{ type: "text" as const, text: buildSessionNamePrompt(userMessages) }],
+        timestamp: Date.now(),
+      },
+    ],
+  };
+  const options = {
+    maxTokens: resolveTitleMaxTokens(model, title.maxTokens),
+    // 命名不需要高强度推理；档位可配置，降低思考占用预算的波动。
+    reasoning: title.effort,
+    signal,
+  };
+  // 注入的 completion 只给测试和终端消费者替换整次请求；生产路径走注册表。
+  const response = completion
+    ? await completion(model, context, options)
+    : await completeBackground(ctx, model, context, options);
 
   if (response.stopReason === "error" || response.stopReason === "aborted") {
     throw new Error(

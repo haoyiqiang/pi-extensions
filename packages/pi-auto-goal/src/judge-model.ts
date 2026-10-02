@@ -3,9 +3,8 @@
  *
  * 模型类型与鉴权细节都收在本模块，判定流程只依赖 verdict.ts 的窄接口。
  */
-import { completeSimple } from "@earendil-works/pi-ai/compat";
+import { cleanupSessionResources, uuidv7, type Api, type AssistantMessage, type Context, type Model } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { resolveModelRequestAuth, type ModelRequestAuth } from "pi-model-request";
 import { i18n } from "./i18n.ts";
 import {
   buildJudgeSystemPrompt,
@@ -14,22 +13,26 @@ import {
   type JudgeInvoker,
   type JudgeResponse,
 } from "./verdict.ts";
-import type { AutoGoalConfig } from "./config.ts";
+import { DEFAULT_AUTO_GOAL_CONFIG, type AutoGoalConfig, type JudgeThinkingLevel } from "./config.ts";
 
-/**
- * 判定调用的思考强度。
- * 判定只是一次短分类，思考会先花掉输出预算；
- * Pi 会把该值收敛到模型支持的最低档，不支持关闭思考的模型也不会报错。
- */
-const JUDGE_REASONING_LEVEL = "minimal";
+/** 未单独指定时沿用配置默认档，避免调用方漏传后又回到写死的字面量。 */
+const DEFAULT_JUDGE_THINKING_LEVEL: JudgeThinkingLevel = DEFAULT_AUTO_GOAL_CONFIG.thinkingLevel;
 /** 输出被截断时，用翻倍预算重试一次；仍失败则按错误上报。 */
 const TRUNCATION_RETRY_MULTIPLIER = 2;
 
 /** Pi 的模型对象类型；对外暴露以便调用方构造判定来源。 */
-export type PiModel = Parameters<typeof completeSimple>[0];
+export type PiModel = Model<Api>;
 
-/** 鉴权结果；ok 为 false 时判定不可执行。与共享请求器的鉴权结果同形，避免两处定义漂移。 */
-export type JudgeAuth = ModelRequestAuth;
+/** 鉴权结果；ok 为 false 时判定不可执行。与注册表 getApiKeyAndHeaders 同形。 */
+export type JudgeAuth =
+  | {
+      ok: true;
+      apiKey?: string;
+      headers?: Record<string, string>;
+      baseUrl?: string;
+      env?: Record<string, string>;
+    }
+  | { ok: false; error: string };
 
 /**
  * 模型解析所需的最小字段；JudgeModelSource 在它之上增加鉴权解析。
@@ -48,6 +51,15 @@ export interface JudgeModelResolution<T> {
 export interface JudgeModelSource extends JudgeModelResolution<PiModel> {
   /** 取指定模型的鉴权信息。 */
   resolveAuth: (model: PiModel) => Promise<JudgeAuth>;
+  /** 生产路径的注册表请求；测试注入 completion 时不会调用。 */
+  requestModel?: (input: {
+    model: PiModel;
+    systemPrompt: string;
+    userPrompt: string;
+    maxTokens: number;
+    thinkingLevel: JudgeThinkingLevel;
+    signal?: AbortSignal;
+  }) => Promise<JudgeResponse>;
 }
 
 /** 底层 completion 契约；Pi 的 complete 与测试替身都实现它。 */
@@ -62,6 +74,8 @@ export type JudgeCompletion = (options: {
   auth: Extract<JudgeAuth, { ok: true }>;
   /** 输出 token 上限。 */
   maxTokens: number;
+  /** 本次判定使用的思考强度；Pi 会收敛到模型支持的档位。 */
+  thinkingLevel: JudgeThinkingLevel;
   /** 中止信号。 */
   signal?: AbortSignal;
 }) => Promise<JudgeResponse>;
@@ -94,8 +108,38 @@ export function resolveJudgeModel<T>(source: JudgeModelResolution<T>): T | undef
 }
 
 /**
+ * 像 pi-spark recap 一样走注册表发旁路请求。
+ * 鉴权和 baseUrl 由 ModelRuntime.prepareRequest 解析；openai-codex 使用独立会话，避免复用主连接。
+ */
+function completeBackground(
+  ctx: Pick<ExtensionContext, "modelRegistry">,
+  model: Model<Api>,
+  context: Context,
+  options?: Parameters<ExtensionContext["modelRegistry"]["streamSimple"]>[2],
+) {
+  if (model.api !== "openai-codex-responses") {
+    return ctx.modelRegistry.streamSimple(model, context, options).result();
+  }
+  const sessionId = uuidv7();
+  try {
+    return ctx.modelRegistry.streamSimple(model, context, { ...options, sessionId }).result();
+  } finally {
+    cleanupSessionResources(sessionId);
+  }
+}
+
+function toJudgeResponse(response: AssistantMessage): JudgeResponse {
+  return {
+    text: extractResponseText(response.content),
+    stopReason: response.stopReason,
+    errorMessage: response.errorMessage,
+    partTypes: summarizeParts(response.content),
+  };
+}
+
+/**
  * 把 Pi 的扩展上下文包装成判定模型来源。
- * 鉴权与 provider 会话头统一走共享请求器，判定流程只拿到已备好的请求头。
+ * 鉴权读取注册表；真正的判定请求走 streamSimple。
  */
 export function createJudgeModelSource(
   ctx: Pick<ExtensionContext, "model" | "modelRegistry" | "sessionManager">,
@@ -105,49 +149,24 @@ export function createJudgeModelSource(
     configuredModel: config.model,
     sessionModel: ctx.model,
     findModel: (provider: string, modelId: string) => ctx.modelRegistry.find(provider, modelId),
-    resolveAuth: (model: PiModel) => resolveModelRequestAuth(ctx, model),
+    resolveAuth: async (model: PiModel) => ctx.modelRegistry.getApiKeyAndHeaders(model),
+    requestModel: async ({ model, systemPrompt, userPrompt, maxTokens, thinkingLevel, signal }) => {
+      const response = await completeBackground(ctx, model, {
+        systemPrompt,
+        messages: [{
+          role: "user",
+          content: [{ type: "text", text: userPrompt }],
+          timestamp: Date.now(),
+        }],
+      }, {
+        maxTokens,
+        reasoning: thinkingLevel === "off" ? undefined : thinkingLevel,
+        signal,
+      });
+      return toJudgeResponse(response);
+    },
   };
 }
-
-/**
- * 默认 completion：用 Pi 的 completeSimple 发一次判定请求。
- * 这里固定使用 Pi 的 completeSimple；需要替换实现时注入自己的 JudgeCompletion。
- */
-export const piJudgeCompletion: JudgeCompletion = async ({
-  model,
-  systemPrompt,
-  userPrompt,
-  auth,
-  maxTokens,
-  signal,
-}) => {
-  const response = await completeSimple(
-    // 鉴权解析出 baseUrl 时按 Pi 核心的方式覆盖模型地址。
-    auth.baseUrl ? { ...model, baseUrl: auth.baseUrl } : model,
-    {
-      systemPrompt,
-      messages: [{
-        role: "user",
-        content: [{ type: "text", text: userPrompt }],
-        timestamp: Date.now(),
-      }],
-    },
-    {
-      apiKey: auth.apiKey,
-      headers: auth.headers,
-      env: auth.env,
-      maxTokens,
-      reasoning: JUDGE_REASONING_LEVEL,
-      signal,
-    },
-  );
-  return {
-    text: extractResponseText(response.content),
-    stopReason: response.stopReason,
-    errorMessage: response.errorMessage,
-    partTypes: summarizeParts(response.content),
-  };
-};
 
 /**
  * 计算本次判定使用的输出预算：取配置值与模型输出上限的较小值。
@@ -174,8 +193,11 @@ export function createJudgeModelInvoker(options: {
   completion?: JudgeCompletion;
   /** 判定输出 token 上限；默认取模型上限。 */
   maxTokens?: number;
+  /** 判定思考强度；缺省为配置默认档。重试沿用同一次的档位。 */
+  thinkingLevel?: JudgeThinkingLevel;
 }): JudgeInvoker {
-  const { source, completion = piJudgeCompletion } = options;
+  const { source, completion } = options;
+  const thinkingLevel = options.thinkingLevel ?? DEFAULT_JUDGE_THINKING_LEVEL;
   return async ({ snapshot, signal }) => {
     const model = resolveJudgeModel(source);
     if (model === undefined) {
@@ -186,19 +208,21 @@ export function createJudgeModelInvoker(options: {
     const auth = await source.resolveAuth(model);
     if (auth.ok === false) throw new Error(i18n.t("judgeAuthFailed", { error: auth.error }));
 
-    const request = {
-      model,
-      systemPrompt: buildJudgeSystemPrompt(),
-      userPrompt: buildJudgeUserPrompt(snapshot),
-      auth,
-      signal,
+    const systemPrompt = buildJudgeSystemPrompt();
+    const userPrompt = buildJudgeUserPrompt(snapshot);
+    const requestOnce = async (maxTokens: number) => {
+      if (completion) {
+        return completion({ model, systemPrompt, userPrompt, auth, maxTokens, thinkingLevel, signal });
+      }
+      if (!source.requestModel) throw new Error(i18n.t("judgeModelMissing", { model: model.id }));
+      return source.requestModel({ model, systemPrompt, userPrompt, maxTokens, thinkingLevel, signal });
     };
     const maxTokens = resolveJudgeMaxTokens(model, options.maxTokens ?? model.maxTokens);
-    const response = await completion({ ...request, maxTokens });
+    const response = await requestOnce(maxTokens);
     if (!isTruncatedWithoutText(response)) return response;
 
     const retryMaxTokens = resolveJudgeMaxTokens(model, maxTokens * TRUNCATION_RETRY_MULTIPLIER);
     if (retryMaxTokens <= maxTokens) return response;
-    return completion({ ...request, maxTokens: retryMaxTokens });
+    return requestOnce(retryMaxTokens);
   };
 }

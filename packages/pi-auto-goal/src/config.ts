@@ -1,3 +1,4 @@
+import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -10,6 +11,12 @@ const FILE_NOT_FOUND_CODE = "ENOENT";
 
 /** pi-auto-goal 配置；字段含义见 config.example.json 与 SKILL.md。 */
 export type ForcedDecision = "auto" | "continue" | "stop";
+
+/** 判定调用的思考强度，与 Pi 的 ModelThinkingLevel 一致。 */
+export type JudgeThinkingLevel = ModelThinkingLevel;
+
+/** 判定思考强度的合法取值；不支持的档位由 Pi 在发请求时收敛到模型可用档。 */
+export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 
 /** pi-auto-goal 配置；字段含义见 config.example.json 与 SKILL.md。 */
 export interface AutoGoalConfig {
@@ -43,6 +50,8 @@ export interface AutoGoalConfig {
   showVerdictNotice: boolean;
   /** 单次判定调用的输出 token 上限；调试时可适当调高以避免推理占满预算。 */
   judgeMaxTokens: number;
+  /** 判定调用的思考强度；模型不支持时由 Pi 收敛到最近的可用档。 */
+  thinkingLevel: JudgeThinkingLevel;
   /** 自动催促指令模板（作为 system 提示注入）；空字符串表示使用内置模板。支持 {reason} 占位。 */
   continueMessageTemplate: string;
   /** 受控实验：覆写判定结果；auto 表示正常判定。 */
@@ -70,6 +79,8 @@ const DEFAULT_MAX_USER_ANSWER_CHARS = 2000;
  * 却能避免「推理占满预算、只剩空响应」的失败模式。
  */
 const DEFAULT_JUDGE_MAX_TOKENS = 2000;
+/** 默认判定思考强度：短分类尽量少花推理预算；可在配置里调高。 */
+const DEFAULT_THINKING_LEVEL: JudgeThinkingLevel = "minimal";
 /** 判定输出上限下界，同时满足 OpenAI Responses 对 max_output_tokens 的最小要求。 */
 const JUDGE_MAX_TOKENS_MIN = 16;
 /** 判定输出上界，避免配置笔误导致超长请求。 */
@@ -100,6 +111,7 @@ export const DEFAULT_AUTO_GOAL_CONFIG: AutoGoalConfig = {
   notifyOnStopDecision: false,
   showVerdictNotice: true,
   judgeMaxTokens: DEFAULT_JUDGE_MAX_TOKENS,
+  thinkingLevel: DEFAULT_THINKING_LEVEL,
   continueMessageTemplate: "",
   forcedDecision: "auto",
 };
@@ -125,6 +137,7 @@ const KNOWN_FIELDS = new Set([
   ...NON_NEGATIVE_INTEGER_FIELDS,
   ...STRING_FIELDS,
   "forcedDecision",
+  "thinkingLevel",
   "confidenceThreshold",
   "timeoutSeconds",
   "judgeMaxTokens",
@@ -252,8 +265,22 @@ export function parseConfig(value: unknown): AutoGoalConfig {
     throw new Error("forcedDecision must be one of: auto, continue, stop");
   }
   config.forcedDecision = forcedDecision;
+  config.thinkingLevel = parseThinkingLevel(raw.thinkingLevel);
 
   return config;
+}
+
+/** 校验思考强度；缺省时用默认档，非法值明确报错。 */
+function parseThinkingLevel(value: unknown): JudgeThinkingLevel {
+  if (value === undefined) return DEFAULT_THINKING_LEVEL;
+  if (typeof value !== "string" || !isThinkingLevel(value)) {
+    throw new Error(`thinkingLevel must be one of: ${THINKING_LEVELS.join(", ")}`);
+  }
+  return value;
+}
+
+function isThinkingLevel(value: string): value is JudgeThinkingLevel {
+  return (THINKING_LEVELS as readonly string[]).includes(value);
 }
 
 function isForcedDecision(value: string): value is ForcedDecision {

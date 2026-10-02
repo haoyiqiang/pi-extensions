@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { composeRunSummary, createRunAccumulator, type SummaryTurn } from "../src/run-summary.ts";
+import { composeRunSummary, createRunAccumulator, type SummaryTurn } from "../src/features/metrics/run-summary.ts";
 
 /** 造一轮指标：只填汇总真正会读取的字段，其余置零或 null。 */
 function makeTurn(options: {

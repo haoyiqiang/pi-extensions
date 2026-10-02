@@ -179,7 +179,7 @@ API provider resolution is: per-call `provider` → `PI_WEB_SEARCH_API_PROVIDER`
 
 Common environment variables include `BRAVE_SEARCH_API_KEY`, `TAVILY_API_KEY`, `SERPER_API_KEY`, `EXA_API_KEY`, `YOUCOM_API_KEY`, `JINA_API_KEY`, `FIRECRAWL_API_KEY`, `PERPLEXITY_API_KEY`, `SEARXNG_URL`, and `OLLAMA_HOST`.
 
-Model authentication is resolved through Pi's model registry and `pi-model-request`, including resolved base URLs and OpenCode session headers.
+Model authentication is resolved through Pi's model registry, including a resolved base URL. Raw search transports do not add provider session headers.
 
 ## Development
 
