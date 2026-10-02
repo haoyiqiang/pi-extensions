@@ -1,12 +1,9 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { extensionConfigPath, readJsonObject, writeJsonAtomic } from "pi-extensions-config";
 import { i18n } from "./i18n.ts";
 
-const EXTENSIONS_DIR = "extensions";
 const PACKAGE_NAME = "pi-naming";
 const CONFIG_FILENAME = "config.json";
-const FILE_NOT_FOUND_CODE = "ENOENT";
 const MAX_TIMER_MS = 2_147_483_647;
 
 /** 思考档位：与 pi-ai 的 ThinkingLevel 一致，优先级由低到高。 */
@@ -118,7 +115,7 @@ export function parseConfig(value: unknown): NamingConfig {
 export function configPath(
   agentDir = getAgentDir(),
 ): string {
-  return join(agentDir, EXTENSIONS_DIR, PACKAGE_NAME, CONFIG_FILENAME);
+  return extensionConfigPath(PACKAGE_NAME, CONFIG_FILENAME, agentDir);
 }
 
 /** 将经过校验的配置完整写入配置文件，供配置斜杠命令使用。 */
@@ -126,18 +123,12 @@ export function saveConfig(
   config: NamingConfig,
   path = configPath(),
 ): void {
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  writeJsonAtomic(path, config);
 }
 
 /** 仅缺少配置文件时采用默认值，读取和解析错误交给入口报告。 */
 export function loadConfig(
   path = configPath(),
 ): NamingConfig {
-  try {
-    return parseConfig(JSON.parse(readFileSync(path, "utf8")));
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === FILE_NOT_FOUND_CODE) return parseConfig({});
-    throw error;
-  }
+  return parseConfig(readJsonObject(path) ?? {});
 }

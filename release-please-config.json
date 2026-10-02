@@ -6,6 +6,7 @@
     }
   ],
   "packages": {
+    "packages/pi-extensions-config": {},
     "packages/pi-extensions-i18n": {},
     "packages/pi-web-search": {},
     "packages/pi-distill": {},

@@ -24,6 +24,8 @@
 | [`@maplezzk/pi-web-search`](./packages/pi-web-search) | 整合 LLM 内置网络搜索、独立 Search API、Gemini/Vertex URL Context、有界网页抓取和可选 GitHub 仓库提取。 | [English](./packages/pi-web-search/README.md) · [中文](./packages/pi-web-search/README.zh-CN.md) |
 | [`@maplezzk/pi-interactive-subagents`](./packages/pi-interactive-subagents) | 终端复用器分屏中的非阻塞交互式子 agent，带实时状态 widget、`/plan` 与 `/iterate` 工作流。Fork 自 HazAT/pi-interactive-subagents。 | [English](./packages/pi-interactive-subagents/README.md) · [中文](./packages/pi-interactive-subagents/README.zh-CN.md) |
 
+共享库会发布到 npm 供功能包依赖，但不会被当作扩展加载：[`pi-extensions-config`](./packages/pi-extensions-config) 提供可移植的 JSON 配置读写，[`pi-terminal-mux`](./packages/pi-terminal-mux) 提供终端 surface 操作。
+
 > `pi-session-tools` 已退役并从本仓库移除。对于历史会话中的 `session-squash` 条目，明确提供兼容逻辑的包仍可读取。
 
 插件管理类斜杠命令统一采用 `/config:<功能>[-动作]` 命名。改名前的命令会继续作为兼容别名保留；`/plan`、`/iterate`、`/subagent` 是刻意保留的高频工作流快捷命令。

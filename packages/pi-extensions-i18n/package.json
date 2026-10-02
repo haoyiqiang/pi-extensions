@@ -49,6 +49,9 @@
     "i18n",
     "coding-agent"
   ],
+  "dependencies": {
+    "pi-extensions-config": "^0.1.0"
+  },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.80.0",
     "@earendil-works/pi-tui": ">=0.80.0"

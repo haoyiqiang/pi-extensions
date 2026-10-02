@@ -25,6 +25,7 @@ Capability packages may depend on foundations but must not depend on product pac
 
 ### Foundation packages
 
+- `pi-extensions-config` owns portable agent-dir paths, JSON object reads, atomic writes, and preserving updates.
 - `pi-extensions-i18n` owns locale state, catalogs, and the shared notice outlet.
 - `pi-terminal-mux` exposes the terminal-surface abstraction used by naming and subagents.
 
@@ -39,7 +40,9 @@ The private root `pi-extensions` package explicitly lists every extension and th
 The current allowed workspace edges are intentionally narrow:
 
 ```text
+selected feature packages ─────→ pi-extensions-config
 feature packages ───────────────→ pi-extensions-i18n
+pi-extensions-i18n ─────────────→ pi-extensions-config
 pi-terminal-mux ────────────────→ pi-extensions-i18n
 pi-naming ──────────────────────→ pi-terminal-mux
 @maplezzk/pi-interactive-subagents → pi-terminal-mux

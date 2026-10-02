@@ -2,10 +2,9 @@ import type {
   ExtensionAPI,
   ExtensionCommandContext,
 } from "@earendil-works/pi-coding-agent";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { homedir } from "node:os";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { extensionConfigPath, readJsonObjectResult, resolveAgentDir, writeJsonAtomic } from "pi-extensions-config";
 import {
   NOTICE_TAG_COLOR,
   installNoticeRenderer,
@@ -51,40 +50,25 @@ export function parseLocalePreference(value: string): LocalePreference | undefin
   return normalizeLocale(value);
 }
 
-function resolveAgentDir(): string {
-  const configured = process.env.PI_CODING_AGENT_DIR;
-  if (!configured) return join(homedir(), ".pi", "agent");
-  if (configured === "~") return homedir();
-  return configured.startsWith("~/")
-    ? join(homedir(), configured.slice(2))
-    : configured;
-}
-
 export function getLocaleConfigPath(agentDir = resolveAgentDir()): string {
-  return join(agentDir, LOCALE_CONFIG_DIR, LOCALE_CONFIG_FILE);
+  return extensionConfigPath("pi-extensions-i18n", LOCALE_CONFIG_FILE, agentDir);
 }
 
 function readPersistedPreference(agentDir: string): LocalePreference | undefined {
   const configPath = getLocaleConfigPath(agentDir);
-  try {
-    const raw = readFileSync(configPath, "utf8");
-    const parsed: unknown = JSON.parse(raw);
-    const value = normalizeLocale(
-      typeof parsed === "object" && parsed !== null
-        ? (parsed as Record<string, unknown>).locale
-        : undefined,
-    );
-    if (value) return value;
+  const loaded = readJsonObjectResult(configPath);
+  if (loaded.status === "missing") return undefined;
+  if (loaded.status === "invalid") {
     console.warn(
-      `[pi-extensions-i18n] Invalid locale in ${configPath}; using ${DEFAULT_LOCALE_PREFERENCE}.`,
+      `[pi-extensions-i18n] Failed to read ${configPath}; using ${DEFAULT_LOCALE_PREFERENCE}: ${loaded.error.message}`,
     );
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      console.warn(
-        `[pi-extensions-i18n] Failed to read ${configPath}; using ${DEFAULT_LOCALE_PREFERENCE}: ${String(error)}`,
-      );
-    }
+    return undefined;
   }
+  const value = normalizeLocale(loaded.value.locale);
+  if (value) return value;
+  console.warn(
+    `[pi-extensions-i18n] Invalid locale in ${configPath}; using ${DEFAULT_LOCALE_PREFERENCE}.`,
+  );
   return undefined;
 }
 
@@ -131,9 +115,8 @@ export function saveLocalePreference(
   }
 
   const configPath = getLocaleConfigPath(agentDir);
-  mkdirSync(dirname(configPath), { recursive: true });
   const config: LocaleConfig = { locale: normalized };
-  writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  writeJsonAtomic(configPath, config);
   runtimePreference = normalized;
   return configPath;
 }

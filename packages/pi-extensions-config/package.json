@@ -1,7 +1,7 @@
 {
-  "name": "pi-distill",
-  "version": "1.9.2",
-  "description": "Pi tool-output distillation with file-first configuration",
+  "name": "pi-extensions-config",
+  "version": "0.1.0",
+  "description": "Shared portable JSON configuration I/O for Pi extensions",
   "type": "module",
   "main": "./index.ts",
   "exports": {
@@ -10,11 +10,9 @@
   "files": [
     "index.ts",
     "src",
-    "locales",
-    "assets",
-    "config.example.json",
     "README.md",
-    "README.zh-CN.md"
+    "README.zh-CN.md",
+    "tsconfig.json"
   ],
   "scripts": {
     "test": "tsx --test tests/*.test.ts",
@@ -22,23 +20,17 @@
     "build": "npm run typecheck",
     "check": "npm run typecheck && npm test && npm pack --dry-run --json > /dev/null"
   },
-  "pi": {
-    "extensions": [
-      "./index.ts",
-      "../pi-extensions-i18n/index.ts"
-    ]
-  },
   "engines": {
     "node": ">=22"
   },
   "license": "MIT",
   "author": "maplezzk",
-  "homepage": "https://github.com/maplezzk/pi-extensions/tree/main/packages/pi-distill",
+  "homepage": "https://github.com/maplezzk/pi-extensions/tree/main/packages/pi-extensions-config",
   "bugs": "https://github.com/maplezzk/pi-extensions/issues",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/maplezzk/pi-extensions.git",
-    "directory": "packages/pi-distill"
+    "directory": "packages/pi-extensions-config"
   },
   "publishConfig": {
     "access": "public",
@@ -47,22 +39,10 @@
   "keywords": [
     "pi-package",
     "pi",
-    "pi-extension",
+    "configuration",
     "coding-agent"
   ],
-  "peerDependencies": {
-    "@earendil-works/pi-ai": ">=0.80.0",
-    "@earendil-works/pi-coding-agent": ">=0.80.0",
-    "@earendil-works/pi-tui": ">=0.80.0"
-  },
-  "dependencies": {
-    "pi-extensions-config": "^0.1.0",
-    "pi-extensions-i18n": "^0.8.0"
-  },
   "devDependencies": {
-    "@earendil-works/pi-ai": "0.87.1",
-    "@earendil-works/pi-coding-agent": "0.87.1",
-    "@earendil-works/pi-tui": "0.87.1",
     "@types/node": "24.12.4",
     "tsx": "4.23.1",
     "typescript": "5.9.3"

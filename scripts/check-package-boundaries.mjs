@@ -7,6 +7,7 @@ const ROOT = resolve(import.meta.dirname, "..");
 const PACKAGES_DIR = join(ROOT, "packages");
 
 const PACKAGE_LAYERS = new Map([
+  ["pi-extensions-config", "foundation"],
   ["pi-extensions-i18n", "foundation"],
   ["pi-terminal-mux", "foundation"],
   ["pi-spark", "product"],
@@ -21,14 +22,18 @@ const PACKAGE_LAYERS = new Map([
 ]);
 
 const ALLOWED_WORKSPACE_EDGES = new Set([
+  "pi-extensions-i18n -> pi-extensions-config",
   "pi-terminal-mux -> pi-extensions-i18n",
+  "pi-spark -> pi-extensions-config",
   "pi-spark -> pi-extensions-i18n",
   "pi-blackhole -> pi-extensions-i18n",
   "@maplezzk/pi-interactive-subagents -> pi-extensions-i18n",
   "@maplezzk/pi-interactive-subagents -> pi-terminal-mux",
+  "pi-distill -> pi-extensions-config",
   "pi-distill -> pi-extensions-i18n",
   "@maplezzk/pi-web-search -> pi-extensions-i18n",
   "pi-models-discovery -> pi-extensions-i18n",
+  "pi-naming -> pi-extensions-config",
   "pi-naming -> pi-extensions-i18n",
   "pi-naming -> pi-terminal-mux",
   "pi-rewind -> pi-extensions-i18n",

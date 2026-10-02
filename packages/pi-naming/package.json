@@ -53,6 +53,7 @@
     "workspace"
   ],
   "dependencies": {
+    "pi-extensions-config": "^0.1.0",
     "pi-extensions-i18n": "^0.8.0",
     "pi-terminal-mux": "^0.6.5"
   },

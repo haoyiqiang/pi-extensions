@@ -7,6 +7,7 @@ This repository contains small, independently installable extensions for the [Pi
 ```text
 pi-extensions/
 ├── packages/
+│   ├── pi-extensions-config/    # Shared portable JSON config I/O
 │   ├── pi-extensions-i18n/      # Shared locale and catalog runtime
 │   ├── pi-web-search/    # LLM/API search, URL Context, and bounded web fetch
 │   ├── pi-distill/              # Tool-output distillation
@@ -33,6 +34,7 @@ The layer model, allowed workspace dependency edges, UI ownership, and root dist
 - `pi-naming` owns automatic Pi session titles and manual terminal naming; it uses pi-ai and terminal-mux. Automatic and manual naming share configurable session/workspace/tab targets.
 
 - `pi-distill` discovers active tools with object parameter schemas and observes their results through Pi's native `tool_call` and `tool_result` events. It does not register duplicate tools and renders audit information through its own UI-only session entry.
+- `pi-extensions-config` owns only portable agent-dir resolution, JSON object reads, atomic writes, and preserving updates. Feature schemas, defaults, migrations, and UI remain in feature packages.
 - `pi-extensions-i18n` owns locale selection, catalog validation, interpolation, and the `/pi-language` command. Feature packages use it instead of implementing separate locale runtimes.
 - Background chat requests from an extension go through `ctx.modelRegistry.streamSimple(...).result()`, the same way `pi-spark` recap does. `ModelRuntime.prepareRequest` resolves auth and a resolved `baseUrl`. `openai-codex` background calls use an isolated `uuidv7` session and clean it up afterwards. Raw HTTP transports use `modelRegistry.getApiKeyAndHeaders` directly. Do not add another shared request wrapper, and do not call `pi-ai` `complete` / `completeSimple` for these side requests.
 - `pi-web-search` owns the public `web_search`, `url_context`, and `web_fetch` tools. It routes explicitly between LLM built-in web search and one configured Search API, keeps URL Context limited to supported Google/Vertex transports, and returns bounded fetch output with an opt-in rpiv-compatible GitHub repository interceptor, without adding general PDF or local-video pipelines.
@@ -100,5 +102,5 @@ Keep unrelated refactors out of a focused pull request. Run `npm run check` befo
 
 ## Releases
 
-Versions and changelogs are managed by release-please. Merging a release PR runs the repository gate once, then publishes changed packages to npm in workspace-dependency order: i18n first, terminal-mux and other direct consumers next, and terminal-mux consumers last. Publish jobs verify their own tarball plus the npm visibility of workspace dependency ranges. Do not publish manually from a local machine unless the release procedure explicitly requires it.
+Versions and changelogs are managed by release-please. Merging a release PR runs the repository gate once, then publishes changed packages to npm in workspace-dependency order: config first, i18n next, terminal-mux and other direct consumers after that, and terminal-mux consumers last. Publish jobs verify their own tarball plus the npm visibility of workspace dependency ranges. Do not publish manually from a local machine unless the release procedure explicitly requires it.
 ase procedure explicitly requires it.

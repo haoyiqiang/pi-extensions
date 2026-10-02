@@ -24,6 +24,8 @@ Each package is independently installable and keeps its detailed behavior, confi
 | [`@maplezzk/pi-web-search`](./packages/pi-web-search) | Combines LLM built-in web search, independent Search APIs, Gemini/Vertex URL Context, bounded web fetching, and opt-in GitHub repository extraction. | [English](./packages/pi-web-search/README.md) · [中文](./packages/pi-web-search/README.zh-CN.md) |
 | [`@maplezzk/pi-interactive-subagents`](./packages/pi-interactive-subagents) | Non-blocking interactive subagents in multiplexer panes with live status widget, `/plan` and `/iterate` workflows. Fork of HazAT/pi-interactive-subagents. | [English](./packages/pi-interactive-subagents/README.md) · [中文](./packages/pi-interactive-subagents/README.zh-CN.md) |
 
+Shared libraries are published for feature-package dependencies but are not loaded as extensions: [`pi-extensions-config`](./packages/pi-extensions-config) provides portable JSON config I/O, while [`pi-terminal-mux`](./packages/pi-terminal-mux) provides terminal surface operations.
+
 > `pi-session-tools` has been retired and removed from this repository. Existing sessions with its historical `session-squash` entries remain readable by compatibility code in packages that explicitly support them.
 
 Extension management slash commands use the `/config:<feature>[-action]` convention. Legacy names remain as compatibility aliases where a command was renamed; `/plan`, `/iterate`, and `/subagent` are intentionally short workflow shortcuts.

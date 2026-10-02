@@ -51,6 +51,6 @@ test("malformed and non-object files fail instead of erasing configuration", () 
   withTempDir((dir) => {
     const path = sparkConfigPath(dir);
     writeFileSync(path, "[]", "utf8");
-    assert.throws(() => patchGlobalFeature("resources", false, dir), /configuration must be an object/);
+    assert.throws(() => patchGlobalFeature("resources", false, dir), /configuration must be a JSON object/);
   });
 });

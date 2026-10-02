@@ -1,6 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { extensionConfigPath, readJsonObjectResult, resolveAgentDir } from "pi-extensions-config";
 import { createTranslator, loadCatalog } from "pi-extensions-i18n";
 
 const i18n = createTranslator(loadCatalog(new URL("../locales/summary-utils.json", import.meta.url)));
@@ -86,19 +85,13 @@ export function resolvePiAgentDir(
   env: NodeJS.ProcessEnv = process.env,
   homeDirectory = homedir(),
 ): string {
-  const configuredDir = env.PI_CODING_AGENT_DIR;
-  if (!configuredDir) return join(homeDirectory, ".pi", "agent");
-  if (configuredDir === "~") return homeDirectory;
-  if (configuredDir.startsWith("~/") || configuredDir.startsWith("~\\")) {
-    return join(homeDirectory, configuredDir.slice(2));
-  }
-  return configuredDir;
+  return resolveAgentDir(env, homeDirectory);
 }
 
 export function getDistillConfigPath(
   env: NodeJS.ProcessEnv = process.env,
 ): string {
-  return join(resolvePiAgentDir(env), "extensions", CONFIG_DIRECTORY, CONFIG_FILE_NAME);
+  return extensionConfigPath(CONFIG_DIRECTORY, CONFIG_FILE_NAME, resolvePiAgentDir(env));
 }
 
 /**
@@ -334,20 +327,18 @@ export function loadDistillConfig(
   let enabled = true;
   let file: Record<string, unknown> | undefined;
 
-  if (existsSync(configFile)) {
-    try {
-      const parsed = JSON.parse(readFileSync(configFile, "utf8")) as unknown;
-      if (!isRecord(parsed)) {
-        warnings.push(`Distill config must be a JSON object: ${configFile}`);
-      } else {
-        file = parsed;
-        if ("enabled" in parsed) {
-          if (typeof parsed.enabled === "boolean") enabled = parsed.enabled;
-          else warnings.push("Config field enabled must be boolean.");
-        }
-      }
-    } catch (error) {
-      warnings.push(`Could not parse Distill config ${configFile}: ${error instanceof Error ? error.message : String(error)}`);
+  const loadedFile = readJsonObjectResult(configFile);
+  if (loadedFile.status === "invalid") {
+    if (loadedFile.error.message === "configuration must be a JSON object") {
+      warnings.push(`Distill config must be a JSON object: ${configFile}`);
+    } else {
+      warnings.push(`Could not parse Distill config ${configFile}: ${loadedFile.error.message}`);
+    }
+  } else if (loadedFile.status === "loaded") {
+    file = loadedFile.value;
+    if ("enabled" in file) {
+      if (typeof file.enabled === "boolean") enabled = file.enabled;
+      else warnings.push("Config field enabled must be boolean.");
     }
   }
 
