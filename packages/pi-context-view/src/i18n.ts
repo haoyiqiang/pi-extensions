@@ -1,12 +1,27 @@
 import {
   NOTICE_TAG_COLOR,
-  createTranslator,
-  loadCatalog,
+  scope,
+  type MessageParams,
   type NoticeColor,
   type NoticeSource,
 } from "pi-extensions-i18n";
+import { registerLocalesFromDir } from "pi-extensions-i18n/loader";
 
-export const i18n = createTranslator(loadCatalog(new URL("../locales/index.json", import.meta.url)));
+const NAMESPACE = "pi-context-view";
+const loaded = registerLocalesFromDir(NAMESPACE, new URL("../locales/", import.meta.url));
+if (loaded.diagnostics.length > 0) {
+  throw new Error(
+    `Failed to load pi-context-view locales: ${loaded.diagnostics.map((item) => `${item.locale}: ${item.error}`).join("; ")}`,
+  );
+}
+
+const translate = scope(NAMESPACE);
+
+export const i18n = {
+  t(key: string, params?: MessageParams): string {
+    return translate(key, key, params);
+  },
+};
 
 /** 本扩展的提示标签；短且唯一，便于在会话里定位来源。 */
 const NOTICE_TAG = "context";
