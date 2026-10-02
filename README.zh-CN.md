@@ -36,7 +36,9 @@
 pi install git:github.com/maplezzk/pi-extensions
 ```
 
-仓库根目录本身也是一个 Pi package。它通过 manifest 加载 `packages/*/index.ts` 下的扩展入口，并排除 `pi-terminal-mux` 等纯库包，因此上面的命令会安装当前全部扩展，但不会误把共享库作为扩展加载。
+仓库根目录本身也是一个显式维护的全量 Pi profile。manifest 逐项列出扩展入口，并包含 `pi-spark` 主题；`pi-terminal-mux` 等纯库包不会被当成扩展加载。新增 workspace 包不会自动进入这个 profile。
+
+全量 profile 会有意同时启用若干侵入性能力：`pi-spark` 替换 editor/footer 并折叠运行过程，`pi-blackhole` 接管自动压缩，`pi-distill` 改写工具结果，`pi-rewind` 管理 Git 检查点，交互式子 agent 会创建终端 surface。如果不需要完整组合，优先按 npm 包名单独安装。
 
 安装后重新加载 Pi：
 

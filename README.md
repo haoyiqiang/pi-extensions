@@ -36,7 +36,9 @@ Requirements: Pi with the compatible extension API and Node.js 22 or newer.
 pi install git:github.com/maplezzk/pi-extensions
 ```
 
-The repository root is also a Pi package. Its manifest loads extension entrypoints under `packages/*/index.ts` while excluding library-only packages such as `pi-terminal-mux`, so the command above installs all current extensions without trying to load shared libraries as extensions.
+The repository root is also an explicit full-suite Pi profile. Its manifest allowlists every extension and includes the `pi-spark` themes; library-only packages such as `pi-terminal-mux` are never loaded as extensions. Adding a workspace package does not automatically add it to this profile.
+
+The full profile intentionally enables invasive features together: `pi-spark` replaces the editor/footer and folds transcript activity, `pi-blackhole` owns automatic compaction, `pi-distill` transforms tool results, `pi-rewind` manages Git-backed checkpoints, and interactive subagents create terminal surfaces. Prefer single-package npm installs when you do not want the complete composition.
 
 Reload Pi after installation:
 

@@ -11,7 +11,7 @@
  * 4. package.json has required fields (name, version, description, main, exports, files, license)
  * 5. i18n catalogs have both zh-CN and en-US for every key
  * 6. package.json "files" includes README.md and README.zh-CN.md
- * 7. The root Pi package excludes library-only workspace entrypoints
+ * 7. The root Pi distribution profile explicitly lists every extension and theme
  * 8. Pi development dependency pins use one exact version across all workspaces
  */
 
@@ -112,11 +112,17 @@ const packageDirs = readdirSync(PACKAGES_DIR, { withFileTypes: true })
 
 const rootPackageJson = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
 const rootExtensionEntries = rootPackageJson.pi?.extensions ?? [];
+const rootThemeEntries = rootPackageJson.pi?.themes ?? [];
 const WORKSPACE_PACKAGES_PATH = "packages";
 const EXTENSION_ENTRY_FILE = "index.ts";
 const PACKAGE_EXTENSION_ENTRY = `./${EXTENSION_ENTRY_FILE}`;
-const ROOT_EXTENSION_GLOB = `${WORKSPACE_PACKAGES_PATH}/*/${EXTENSION_ENTRY_FILE}`;
-const rootLoadsAllPackageIndexes = rootExtensionEntries.includes(ROOT_EXTENSION_GLOB);
+const expectedRootExtensionEntries = new Set();
+const expectedRootThemeEntries = new Set();
+for (const entry of [...rootExtensionEntries, ...rootThemeEntries]) {
+  if (entry.includes("*") || entry.startsWith("!")) {
+    error(`Root Pi manifest must use an explicit resource allowlist, found "${entry}"`);
+  }
+}
 const REQUIRED_FILES = ["package.json", "index.ts", "README.md", "README.zh-CN.md", "tsconfig.json"];
 const REQUIRED_PKG_FIELDS = ["name", "version", "description", "main", "exports", "files", "license"];
 const PI_DEV_DEPENDENCIES = new Set([
@@ -141,12 +147,25 @@ for (const dir of packageDirs) {
     piDevPins.set(version, users);
   }
 
-  // The root Git package uses a workspace glob. Utility packages still have
-  // index.ts library entrypoints, so they must be excluded from Pi's loader.
+  // The root Git package is an explicit full-suite distribution profile.
   const exposesIndexAsExtension = pkgJson.pi?.extensions?.includes(PACKAGE_EXTENSION_ENTRY) ?? false;
-  const rootExclusion = `!${WORKSPACE_PACKAGES_PATH}/${dir}/${EXTENSION_ENTRY_FILE}`;
-  if (rootLoadsAllPackageIndexes && !exposesIndexAsExtension && !rootExtensionEntries.includes(rootExclusion)) {
-    error(`${label}: root Pi manifest must exclude library-only entrypoint "${rootExclusion.slice(1)}"`);
+  const rootExtensionEntry = `${WORKSPACE_PACKAGES_PATH}/${dir}/${EXTENSION_ENTRY_FILE}`;
+  if (exposesIndexAsExtension) {
+    expectedRootExtensionEntries.add(rootExtensionEntry);
+    if (!rootExtensionEntries.includes(rootExtensionEntry)) {
+      error(`${label}: root Pi manifest is missing extension entry "${rootExtensionEntry}"`);
+    }
+  } else if (rootExtensionEntries.includes(rootExtensionEntry)) {
+    error(`${label}: library-only entrypoint must not be loaded by the root Pi manifest`);
+  }
+
+  for (const themeEntry of pkgJson.pi?.themes ?? []) {
+    if (typeof themeEntry !== "string" || !themeEntry.startsWith("./")) continue;
+    const rootThemeEntry = `${WORKSPACE_PACKAGES_PATH}/${dir}/${themeEntry.slice(2)}`;
+    expectedRootThemeEntries.add(rootThemeEntry);
+    if (!rootThemeEntries.includes(rootThemeEntry)) {
+      error(`${label}: root Pi manifest is missing theme entry "${rootThemeEntry}"`);
+    }
   }
 
   // 3. Required files
@@ -212,6 +231,17 @@ for (const dir of packageDirs) {
         }
       }
     }
+  }
+}
+
+for (const entry of rootExtensionEntries) {
+  if (!expectedRootExtensionEntries.has(entry)) {
+    error(`Root Pi manifest references unknown or non-extension entry "${entry}"`);
+  }
+}
+for (const entry of rootThemeEntries) {
+  if (!expectedRootThemeEntries.has(entry)) {
+    error(`Root Pi manifest references unknown theme entry "${entry}"`);
   }
 }
 

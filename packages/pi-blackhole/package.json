@@ -10,6 +10,7 @@
   "files": [
     "index.ts",
     "src",
+    "!src/**/*.test.ts",
     "locales",
     "docs",
     "README.md",

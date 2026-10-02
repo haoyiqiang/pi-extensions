@@ -26,6 +26,8 @@ pi-extensions/
 
 Each package owns its entrypoint, tests, configuration example, localization resources, and package README. The public package source of truth is this repository; consumers should install the published npm packages instead of copying package source into another project.
 
+The layer model, allowed workspace dependency edges, UI ownership, and root distribution-profile rules are defined in `docs/package-architecture.md` and enforced by `scripts/check-package-boundaries.mjs`. The root Pi manifest is an explicit allowlist; never restore a `packages/*/index.ts` loading glob.
+
 ## Package boundaries
 
 - `pi-naming` owns automatic Pi session titles and manual terminal naming; it uses pi-ai and terminal-mux. Automatic and manual naming share configurable session/workspace/tab targets.
@@ -80,7 +82,7 @@ npm test
 npm run check
 ```
 
-`npm run check` is the repository gate. It runs type checks, package tests, packaging checks, and the local-binding policy check. Tests should be deterministic and must not require API keys, a live reviewer model, or a particular filesystem layout.
+`npm run check` is the repository gate. It runs type checks, package tests, dependency-boundary checks, npm tarball manifest checks, release checks, and the local-binding policy check. Tests should be deterministic and must not require API keys, a live reviewer model, or a particular filesystem layout.
 Workspace development dependencies on `@earendil-works/pi-agent-core`, `pi-ai`, `pi-coding-agent`, and `pi-tui` use one exact version (`0.87.1` at this revision). Keep them in lockstep; package peer ranges continue to describe the package's tested runtime compatibility.
 
 When changing a package, also inspect its package-level README and `config.example.json`. If the public behavior changes, add or update focused tests and document the configuration or compatibility impact.
