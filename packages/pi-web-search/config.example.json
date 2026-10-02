@@ -1,0 +1,22 @@
+{
+  "mode": "auto",
+  "fallbackOn": ["unsupported"],
+  "llm": {
+    "provider": "google",
+    "model": "gemini-3.8-flash",
+    "transport": "vertex-express"
+  },
+  "api": {
+    "provider": "brave",
+    "apiKeys": {
+      "brave": ""
+    },
+    "baseUrls": {
+      "searxng": "http://localhost:8080",
+      "ollama": "http://localhost:11434"
+    }
+  },
+  "interceptors": {
+    "github": false
+  }
+}

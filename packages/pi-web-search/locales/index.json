@@ -1,0 +1,690 @@
+{
+  "webSearch.label": {
+    "zh-CN": "网络搜索",
+    "en-US": "Web Search"
+  },
+  "urlContext.label": {
+    "zh-CN": "URL 上下文",
+    "en-US": "URL Context"
+  },
+  "webFetch.label": {
+    "zh-CN": "网页读取",
+    "en-US": "Web Fetch"
+  },
+  "webSearch.description": {
+    "zh-CN": "Search the web with an LLM provider's built-in web search or a configured Search API. Auto mode prefers LLM search and falls back to API search as configured.",
+    "en-US": "Search the web with an LLM provider's built-in web search or a configured Search API. Auto mode prefers LLM search and falls back to API search as configured."
+  },
+  "webSearch.query": {
+    "zh-CN": "The search query or question to answer",
+    "en-US": "The search query or question to answer"
+  },
+  "webSearch.mode": {
+    "zh-CN": "Search mode: auto, llm, or api",
+    "en-US": "Search mode: auto, llm, or api"
+  },
+  "webSearch.provider": {
+    "zh-CN": "API search provider; used as the fallback provider in auto mode",
+    "en-US": "API search provider; used as the fallback provider in auto mode"
+  },
+  "webSearch.maxResults": {
+    "zh-CN": "Number of API search results, from 1 to 10",
+    "en-US": "Number of API search results, from 1 to 10"
+  },
+  "webSearch.urls": {
+    "zh-CN": "Additional URLs to analyze with model search, up to 20",
+    "en-US": "Additional URLs to analyze with model search, up to 20"
+  },
+  "webSearch.searching": {
+    "zh-CN": "正在搜索“{query}”…",
+    "en-US": "Searching for “{query}”…"
+  },
+  "webSearch.searchingUrls": {
+    "zh-CN": "正在搜索并分析 {count} 个 URL…",
+    "en-US": "Searching and analyzing {count} URL(s)…"
+  },
+  "webSearch.apiSearching": {
+    "zh-CN": "正在使用 {provider} 搜索“{query}”…",
+    "en-US": "Searching {provider} for “{query}”…"
+  },
+  "webSearch.noResults": {
+    "zh-CN": "未找到“{query}”的结果。",
+    "en-US": "No results found for “{query}”."
+  },
+  "webSearch.resultsHeading": {
+    "zh-CN": "“{query}”的搜索结果：",
+    "en-US": "Search results for “{query}”:"
+  },
+  "webSearch.unsupported": {
+    "zh-CN": "当前或配置的模型不支持 LLM 网络搜索。",
+    "en-US": "The current or configured model does not support LLM web search."
+  },
+  "webSearch.urlsRequireLlm": {
+    "zh-CN": "API 搜索不支持 urls。请使用 llm 模式、url_context 或 web_fetch。",
+    "en-US": "API search does not support urls. Use llm mode, url_context, or web_fetch."
+  },
+  "webSearch.error": {
+    "zh-CN": "搜索失败：{message}",
+    "en-US": "Search failed: {message}"
+  },
+  "webSearch.fallbackFailed": {
+    "zh-CN": "LLM 搜索失败：{llm}；API 回退（{provider}）失败：{api}",
+    "en-US": "LLM search failed: {llm}; API fallback ({provider}) failed: {api}"
+  },
+  "urlContext.description": {
+    "zh-CN": "Analyze up to 20 public URLs with built-in URL Context from Google Gemini Developer API or Vertex Express; public YouTube URLs are handled as video input.",
+    "en-US": "Analyze up to 20 public URLs with built-in URL Context from Google Gemini Developer API or Vertex Express; public YouTube URLs are handled as video input."
+  },
+  "urlContext.query": {
+    "zh-CN": "Question or task to perform on the URLs",
+    "en-US": "Question or task to perform on the URLs"
+  },
+  "urlContext.urls": {
+    "zh-CN": "Public URLs to analyze, from 1 to 20",
+    "en-US": "Public URLs to analyze, from 1 to 20"
+  },
+  "urlContext.analyzing": {
+    "zh-CN": "正在分析 {count} 个 URL…",
+    "en-US": "Analyzing {count} URL(s)…"
+  },
+  "urlContext.unsupported": {
+    "zh-CN": "url_context 需要 Google Gemini Developer API 或 Vertex Express 模型。当前模型：{model}。",
+    "en-US": "url_context requires a Google Gemini Developer API or Vertex Express model. Current model: {model}."
+  },
+  "urlContext.unverified": {
+    "zh-CN": "提供商 {provider} 未返回已验证的 URL Context 元数据；除非工具详情中包含来源或已获取 URL，否则请将回答视为未溯源。",
+    "en-US": "Provider {provider} returned no verified URL Context metadata. Treat the answer as ungrounded unless tool details contain sources or retrieved URLs."
+  },
+  "urlContext.singleYouTube": {
+    "zh-CN": "Gemini 每次请求只支持一个公开 YouTube URL。请分别调用 url_context。",
+    "en-US": "Gemini supports only one public YouTube URL per request. Call url_context separately for each video."
+  },
+  "output.urlStatus": {
+    "zh-CN": "URL 状态",
+    "en-US": "URL Status"
+  },
+  "output.retrieved": {
+    "zh-CN": "已获取",
+    "en-US": "Retrieved"
+  },
+  "output.failed": {
+    "zh-CN": "失败",
+    "en-US": "Failed"
+  },
+  "output.sources": {
+    "zh-CN": "来源",
+    "en-US": "Sources"
+  },
+  "output.additionalResults": {
+    "zh-CN": "其他搜索结果",
+    "en-US": "Additional Search Results"
+  },
+  "output.moreResults": {
+    "zh-CN": "工具详情中还有 {count} 条结果。",
+    "en-US": "There are {count} more results in tool details."
+  },
+  "output.urlVerification": {
+    "zh-CN": "URL Context 验证",
+    "en-US": "URL Context Verification"
+  },
+  "output.truncated": {
+    "zh-CN": "输出已截断",
+    "en-US": "Output truncated"
+  },
+  "provider.operation.search": {
+    "zh-CN": "搜索",
+    "en-US": "Search"
+  },
+  "provider.operation.fetch": {
+    "zh-CN": "抓取",
+    "en-US": "Fetch"
+  },
+  "provider.error.missingCredential": {
+    "zh-CN": "未配置 {env}。请运行 /config:web-search，或导出该环境变量。",
+    "en-US": "{env} is not configured. Run /config:web-search or export the environment variable."
+  },
+  "provider.error.api": {
+    "zh-CN": "{provider} {operation} API 错误（{status}）{hint}：{message}",
+    "en-US": "{provider} {operation} API error ({status}){hint}: {message}"
+  },
+  "provider.error.operation": {
+    "zh-CN": "{provider} {operation} API 错误：{message}",
+    "en-US": "{provider} {operation} API error: {message}"
+  },
+  "provider.error.extractionFailed": {
+    "zh-CN": "{provider} 无法提取 {url}：{message}",
+    "en-US": "{provider} failed to extract {url}: {message}"
+  },
+  "provider.error.emptyFetch": {
+    "zh-CN": "{provider} 抓取 API 没有返回 {url} 的正文。",
+    "en-US": "{provider} Fetch API returned no content for {url}."
+  },
+  "provider.error.invalidBaseUrl": {
+    "zh-CN": "{env} 不是有效 URL：{value}",
+    "en-US": "{env} is not a valid URL: {value}"
+  },
+  "provider.error.invalidBaseProtocol": {
+    "zh-CN": "{env} 必须使用 http:// 或 https://，不能使用 {protocol}://。",
+    "en-US": "{env} must use http:// or https://, not {protocol}://."
+  },
+  "provider.error.missingBaseUrl": {
+    "zh-CN": "未配置 {env}。请运行 /config:web-search，或导出该环境变量。",
+    "en-US": "{env} is not configured. Run /config:web-search or export the environment variable."
+  },
+  "provider.error.connectionRefused": {
+    "zh-CN": "无法连接 {host} 上的 {provider}。请确认服务正在运行。",
+    "en-US": "Could not connect to {provider} at {host}. Make sure the service is running."
+  },
+  "provider.error.scrapeFailed": {
+    "zh-CN": "抓取失败",
+    "en-US": "scrape failed"
+  },
+  "provider.error.unknown": {
+    "zh-CN": "未知错误",
+    "en-US": "unknown error"
+  },
+  "provider.hint.searxngAuth": {
+    "zh-CN": "（SearXNG 反向代理拒绝了 Bearer token；请检查 SEARXNG_API_KEY 或 api.apiKeys.searxng）",
+    "en-US": " (the SearXNG reverse proxy rejected the Bearer token; check SEARXNG_API_KEY or api.apiKeys.searxng)"
+  },
+  "provider.hint.searxngJson": {
+    "zh-CN": "（SearXNG 可能未启用 JSON 输出；请在 settings.yml 的 search.formats 中启用 json）",
+    "en-US": " (the SearXNG instance may have JSON output disabled; enable json under search.formats in settings.yml)"
+  },
+  "provider.hint.ollamaAuth": {
+    "zh-CN": "（请运行 ollama signin 完成鉴权）",
+    "en-US": " (run ollama signin to authenticate)"
+  },
+  "provider.hint.ollamaUnsupported": {
+    "zh-CN": "（该 Ollama 实例可能不支持网络搜索；请升级到较新版本）",
+    "en-US": " (the Ollama instance may not support web search; use a recent version)"
+  },
+  "webFetch.description": {
+    "zh-CN": "Read one HTTP(S) URL and return its content through a hosted fetch provider or built-in HTML-to-text extraction.",
+    "en-US": "Read one HTTP(S) URL and return its content through a hosted fetch provider or built-in HTML-to-text extraction."
+  },
+  "webFetch.url": {
+    "zh-CN": "The HTTP(S) URL to fetch",
+    "en-US": "The HTTP(S) URL to fetch"
+  },
+  "webFetch.raw": {
+    "zh-CN": "Return the raw response body when using built-in HTTP fetch",
+    "en-US": "Return the raw response body when using built-in HTTP fetch"
+  },
+  "webFetch.fetching": {
+    "zh-CN": "正在读取 {url}…",
+    "en-US": "Fetching {url}…"
+  },
+  "webFetch.fetched": {
+    "zh-CN": "已读取：{url}",
+    "en-US": "Fetched: {url}"
+  },
+  "webFetch.title": {
+    "zh-CN": "标题：{title}",
+    "en-US": "Title: {title}"
+  },
+  "webFetch.contentType": {
+    "zh-CN": "内容类型：{contentType}",
+    "en-US": "Content-Type: {contentType}"
+  },
+  "webFetch.truncated": {
+    "zh-CN": "内容已截断；完整内容保存到：{path}",
+    "en-US": "Content was truncated; full content saved to: {path}"
+  },
+  "webFetch.error": {
+    "zh-CN": "网页读取失败：{message}",
+    "en-US": "Web fetch failed: {message}"
+  },
+  "error.unsupportedContentType": {
+    "zh-CN": "不支持内容类型 {contentType}；web_fetch 只支持文本页面。",
+    "en-US": "Unsupported content type: {contentType}. web_fetch supports text pages only."
+  },
+  "error.redirectWithoutLocation": {
+    "zh-CN": "{url} 返回重定向，但没有 Location 响应头。",
+    "en-US": "HTTP redirect without Location for {url}."
+  },
+  "error.tooManyRedirects": {
+    "zh-CN": "读取 {url} 时重定向次数过多。",
+    "en-US": "Too many redirects while fetching {url}."
+  },
+  "error.httpStatus": {
+    "zh-CN": "{url} 返回 HTTP {status} {statusText}。",
+    "en-US": "HTTP {status} {statusText} for {url}."
+  },
+  "error.responseTooLarge": {
+    "zh-CN": "响应正文超过 {maxBytes} 字节。",
+    "en-US": "Response body exceeds {maxBytes} bytes."
+  },
+  "error.unknownApiProvider": {
+    "zh-CN": "未知 API 搜索提供商：{provider}",
+    "en-US": "Unknown API search provider: {provider}"
+  },
+  "error.invalidUrl": {
+    "zh-CN": "无效 URL：{url}",
+    "en-US": "Invalid URL: {url}"
+  },
+  "error.unsupportedUrlProtocol": {
+    "zh-CN": "不支持 URL 协议：{protocol}",
+    "en-US": "Unsupported URL protocol: {protocol}"
+  },
+  "error.urlCredentials": {
+    "zh-CN": "web_fetch 不支持 URL 中携带用户名或密码。",
+    "en-US": "Credentials in fetched URLs are not supported."
+  },
+  "error.privateAddress": {
+    "zh-CN": "拒绝读取私网或回环地址：{host}",
+    "en-US": "Refusing to fetch private/loopback address: {host}"
+  },
+  "error.noDnsAddress": {
+    "zh-CN": "未找到 {host} 的 DNS 地址。",
+    "en-US": "No DNS addresses found for {host}."
+  },
+  "error.privateDnsAddress": {
+    "zh-CN": "拒绝读取 {host}：DNS 解析到了私网或回环地址 {address}。",
+    "en-US": "Refusing to fetch {host}: DNS resolved to private/loopback address {address}."
+  },
+  "config.object": {
+    "zh-CN": "{label} 必须是 JSON 对象。",
+    "en-US": "{label} must be a JSON object."
+  },
+  "config.nonEmptyString": {
+    "zh-CN": "{label} 必须是非空字符串。",
+    "en-US": "{label} must be a non-empty string."
+  },
+  "config.mode": {
+    "zh-CN": "mode 必须是 auto、llm 或 api。",
+    "en-US": "mode must be auto, llm, or api."
+  },
+  "config.fallbackArray": {
+    "zh-CN": "fallbackOn 必须是数组。",
+    "en-US": "fallbackOn must be an array."
+  },
+  "config.fallbackValue": {
+    "zh-CN": "不支持 fallbackOn 值：{value}",
+    "en-US": "Unsupported fallbackOn value: {value}"
+  },
+  "config.transport": {
+    "zh-CN": "llm.transport 必须是 auto、google-developer 或 vertex-express。",
+    "en-US": "llm.transport must be auto, google-developer, or vertex-express."
+  },
+  "config.apiProvider": {
+    "zh-CN": "未知 api.provider：{provider}",
+    "en-US": "Unknown api.provider: {provider}"
+  },
+  "config.stringMap": {
+    "zh-CN": "{label} 必须是字符串。",
+    "en-US": "{label} must be a string."
+  },
+  "output.resultLabel": {
+    "zh-CN": "结果 {index}",
+    "en-US": "Result {index}"
+  },
+  "llm.noModel": {
+    "zh-CN": "无",
+    "en-US": "none"
+  },
+  "llm.noPrompt": {
+    "zh-CN": "请求正文中没有提示文本。",
+    "en-US": "No prompt text was found in the request body."
+  },
+  "llm.unsupportedProvider": {
+    "zh-CN": "提供商不支持 LLM 网络搜索：{provider}（{api}）",
+    "en-US": "Provider does not support LLM web search: {provider} ({api})"
+  },
+  "llm.unsupportedGoogleProvider": {
+    "zh-CN": "不支持 Google 提供商：{provider}",
+    "en-US": "Unsupported Google provider: {provider}"
+  },
+  "llm.authFailed": {
+    "zh-CN": "无法获取 API 密钥或鉴权请求头。",
+    "en-US": "Failed to get API key and authentication headers."
+  },
+  "llm.apiError": {
+    "zh-CN": "{provider} API 错误（{status}）：{message}",
+    "en-US": "{provider} API error ({status}): {message}"
+  },
+  "llm.noAnswer": {
+    "zh-CN": "提供商没有返回回答。",
+    "en-US": "No answer was returned."
+  },
+  "llm.unknownSource": {
+    "zh-CN": "未知来源",
+    "en-US": "Unknown"
+  },
+  "llm.noResponseBody": {
+    "zh-CN": "响应没有正文。",
+    "en-US": "The response has no body."
+  },
+  "llm.aborted": {
+    "zh-CN": "请求已中止。",
+    "en-US": "The request was aborted."
+  },
+  "llm.searchingProvider": {
+    "zh-CN": "正在使用 {provider} 搜索网络…",
+    "en-US": "Searching the web with {provider}..."
+  },
+  "llm.additionalUrlsPrompt": {
+    "zh-CN": "Also analyze these URLs:",
+    "en-US": "Also analyze these URLs:"
+  },
+  "llm.urlsHeading": {
+    "zh-CN": "URLs:",
+    "en-US": "URLs:"
+  },
+  "llm.codexInstruction": {
+    "zh-CN": "Answer the user's request using web search when needed.",
+    "en-US": "Answer the user's request using web search when needed."
+  },
+  "llm.claudeCodeSystem": {
+    "zh-CN": "You are Claude Code, Anthropic's official CLI for Claude.",
+    "en-US": "You are Claude Code, Anthropic's official CLI for Claude."
+  },
+  "llm.codexCredential": {
+    "zh-CN": "openai-codex 模型未配置 OAuth 凭证。",
+    "en-US": "No OAuth credential is configured for the openai-codex model."
+  },
+  "llm.codexAccount": {
+    "zh-CN": "openai-codex 凭证中没有 ChatGPT account ID。",
+    "en-US": "No ChatGPT account ID is configured for the openai-codex model."
+  },
+  "llm.codexAccountExtract": {
+    "zh-CN": "无法从 openai-codex 凭证提取 ChatGPT account ID。",
+    "en-US": "Failed to extract the ChatGPT account ID from openai-codex credentials."
+  },
+  "configPanel.commandDescription": {
+    "zh-CN": "打开网络搜索配置面板",
+    "en-US": "Open the web search configuration panel"
+  },
+  "configPanel.title": {
+    "zh-CN": "网络搜索配置 · {path}",
+    "en-US": "Web Search Configuration · {path}"
+  },
+  "configPanel.row": {
+    "zh-CN": "{label}：{value}",
+    "en-US": "{label}: {value}"
+  },
+  "configPanel.modeLabel": {
+    "zh-CN": "搜索模式",
+    "en-US": "Search mode"
+  },
+  "configPanel.llmModelLabel": {
+    "zh-CN": "LLM 模型",
+    "en-US": "LLM model"
+  },
+  "configPanel.transportLabel": {
+    "zh-CN": "LLM 传输",
+    "en-US": "LLM transport"
+  },
+  "configPanel.apiProviderLabel": {
+    "zh-CN": "API 提供商",
+    "en-US": "API provider"
+  },
+  "configPanel.apiKeyLabel": {
+    "zh-CN": "API 凭证",
+    "en-US": "API credential"
+  },
+  "configPanel.baseUrlLabel": {
+    "zh-CN": "API 地址",
+    "en-US": "API base URL"
+  },
+  "configPanel.fallbackLabel": {
+    "zh-CN": "自动回退",
+    "en-US": "Automatic fallback"
+  },
+  "configPanel.modeTitle": {
+    "zh-CN": "选择搜索模式",
+    "en-US": "Select search mode"
+  },
+  "configPanel.llmModelTitle": {
+    "zh-CN": "选择 LLM 搜索模型",
+    "en-US": "Select the LLM search model"
+  },
+  "configPanel.transportTitle": {
+    "zh-CN": "选择 LLM 传输",
+    "en-US": "Select LLM transport"
+  },
+  "configPanel.apiProviderTitle": {
+    "zh-CN": "选择 Search API 提供商",
+    "en-US": "Select Search API provider"
+  },
+  "configPanel.apiKeyTitle": {
+    "zh-CN": "{provider} API key",
+    "en-US": "{provider} API key"
+  },
+  "configPanel.baseUrlTitle": {
+    "zh-CN": "{provider} API 地址",
+    "en-US": "{provider} API base URL"
+  },
+  "configPanel.fallbackTitle": {
+    "zh-CN": "选择 auto 模式允许回退的错误；完成后返回",
+    "en-US": "Select errors that may fall back in auto mode, then choose Done"
+  },
+  "configPanel.mode.auto": {
+    "zh-CN": "Auto：先 LLM，按规则回退 API",
+    "en-US": "Auto: LLM first, then configured API fallback"
+  },
+  "configPanel.mode.llm": {
+    "zh-CN": "LLM：只使用模型内置搜索",
+    "en-US": "LLM: model built-in web search only"
+  },
+  "configPanel.mode.api": {
+    "zh-CN": "API：只使用 Search API",
+    "en-US": "API: Search API only"
+  },
+  "configPanel.transport.auto": {
+    "zh-CN": "Auto",
+    "en-US": "Auto"
+  },
+  "configPanel.transport.google-developer": {
+    "zh-CN": "Google Developer API",
+    "en-US": "Google Developer API"
+  },
+  "configPanel.transport.vertex-express": {
+    "zh-CN": "Vertex Express",
+    "en-US": "Vertex Express"
+  },
+  "configPanel.fallback.unsupported": {
+    "zh-CN": "不支持",
+    "en-US": "Unsupported"
+  },
+  "configPanel.fallback.quota": {
+    "zh-CN": "额度不足",
+    "en-US": "Quota"
+  },
+  "configPanel.fallback.rate-limit": {
+    "zh-CN": "限流",
+    "en-US": "Rate limit"
+  },
+  "configPanel.fallback.network": {
+    "zh-CN": "网络错误",
+    "en-US": "Network"
+  },
+  "configPanel.fallback.timeout": {
+    "zh-CN": "超时",
+    "en-US": "Timeout"
+  },
+  "configPanel.fallback.invalid-response": {
+    "zh-CN": "无效响应",
+    "en-US": "Invalid response"
+  },
+  "configPanel.currentModelValue": {
+    "zh-CN": "当前会话模型（{model}）",
+    "en-US": "Current session model ({model})"
+  },
+  "configPanel.noCurrentModel": {
+    "zh-CN": "当前没有可用模型",
+    "en-US": "No current model"
+  },
+  "configPanel.useCurrentModel": {
+    "zh-CN": "跟随当前会话模型",
+    "en-US": "Follow the current session model"
+  },
+  "configPanel.configured": {
+    "zh-CN": "（已配置）",
+    "en-US": "(configured)"
+  },
+  "configPanel.notConfigured": {
+    "zh-CN": "未配置",
+    "en-US": "Not configured"
+  },
+  "configPanel.fromEnvironment": {
+    "zh-CN": "来自环境变量 {name}",
+    "en-US": "From environment variable {name}"
+  },
+  "configPanel.none": {
+    "zh-CN": "无",
+    "en-US": "None"
+  },
+  "configPanel.done": {
+    "zh-CN": "完成",
+    "en-US": "Done"
+  },
+  "configPanel.secretKeepOrClear": {
+    "zh-CN": "输入新值；留空保留 {masked}；输入 {clear} 清除",
+    "en-US": "Enter a new value; leave empty to keep {masked}; enter {clear} to clear"
+  },
+  "configPanel.secretEnterOrSkip": {
+    "zh-CN": "输入 API key；留空不修改；输入 {clear} 清除",
+    "en-US": "Enter an API key; leave empty unchanged; enter {clear} to clear"
+  },
+  "configPanel.valueKeepOrClear": {
+    "zh-CN": "输入新地址；留空保留 {value}；输入 {clear} 清除",
+    "en-US": "Enter a new URL; leave empty to keep {value}; enter {clear} to clear"
+  },
+  "configPanel.baseUrlDefault": {
+    "zh-CN": "输入地址；留空不修改；默认 {value}；输入 {clear} 清除",
+    "en-US": "Enter a URL; leave empty unchanged; default {value}; enter {clear} to clear"
+  },
+  "configPanel.requiresUi": {
+    "zh-CN": "/config:web-search 需要交互界面。",
+    "en-US": "/config:web-search requires interactive mode."
+  },
+  "configPanel.loadFailed": {
+    "zh-CN": "读取网络搜索配置失败：{error}",
+    "en-US": "Failed to load web search configuration: {error}"
+  },
+  "configPanel.saveFailed": {
+    "zh-CN": "保存配置到 {path} 失败：{error}",
+    "en-US": "Failed to save configuration to {path}: {error}"
+  },
+  "configPanel.saved": {
+    "zh-CN": "网络搜索配置已保存到 {path}。",
+    "en-US": "Web search configuration saved to {path}."
+  },
+  "configPanel.providerEnvOverride": {
+    "zh-CN": "环境变量正在把 API provider 覆盖为 {provider}；面板保存的 provider 会在移除该环境变量后生效。",
+    "en-US": "An environment variable currently overrides the API provider with {provider}; the panel selection takes effect after that variable is removed."
+  },
+  "config.positiveNumber": {
+    "zh-CN": "{label} 必须是大于 0 的数字。",
+    "en-US": "{label} must be a number greater than 0."
+  },
+  "config.boolean": {
+    "zh-CN": "{label} 必须是布尔值。",
+    "en-US": "{label} must be a boolean."
+  },
+  "configPanel.githubInterceptorLabel": {
+    "zh-CN": "GitHub 仓库提取",
+    "en-US": "GitHub repository extraction"
+  },
+  "configPanel.enabled": {
+    "zh-CN": "已启用",
+    "en-US": "Enabled"
+  },
+  "configPanel.disabled": {
+    "zh-CN": "已禁用",
+    "en-US": "Disabled"
+  },
+  "github.ghHint": {
+    "zh-CN": "[pi-web-search] 安装 `gh` CLI 可更好地访问 GitHub 仓库，包括私有仓库。",
+    "en-US": "[pi-web-search] Install the `gh` CLI for better GitHub repository access, including private repositories."
+  },
+  "github.totalEntries": {
+    "zh-CN": "…（共 {count} 个条目）",
+    "en-US": "... ({count} total entries)"
+  },
+  "github.readmeTruncated": {
+    "zh-CN": "[README 已截断到 8K 字符]",
+    "en-US": "[README truncated at 8K chars]"
+  },
+  "github.fileTruncated": {
+    "zh-CN": "[文件已截断到 100K 字符]",
+    "en-US": "[File truncated at 100K chars]"
+  },
+  "github.structure": {
+    "zh-CN": "结构",
+    "en-US": "Structure"
+  },
+  "github.apiOnly": {
+    "zh-CN": "这是仅 API 视图。若需深入浏览，请克隆仓库或使用 `read`/`bash`。",
+    "en-US": "This is an API-only view. Clone the repository or use `read`/`bash` for deeper exploration."
+  },
+  "github.shaApiNote": {
+    "zh-CN": "注意：commit SHA URL 使用 GitHub API，而不是克隆。",
+    "en-US": "Note: Commit SHA URLs use the GitHub API instead of cloning."
+  },
+  "github.largeRepoNote": {
+    "zh-CN": "注意：仓库大小为 {size}MB（阈值：{threshold}MB）。将显示 API 获取的内容，而不是完整克隆。如需完整克隆，请再次使用相同 URL 调用 web_fetch。",
+    "en-US": "Note: Repository is {size}MB (threshold: {threshold}MB). Showing API-fetched content instead of a full clone. To clone the full repository, call web_fetch again with the same URL."
+  },
+  "github.outsideSkipped": {
+    "zh-CN": "[已跳过仓库外路径]",
+    "en-US": "[outside repository skipped]"
+  },
+  "github.skipped": {
+    "zh-CN": "[已跳过]",
+    "en-US": "[skipped]"
+  },
+  "github.treeTruncated": {
+    "zh-CN": "…（截断于 {count} 个条目）",
+    "en-US": "... (truncated at {count} entries)"
+  },
+  "github.pathEscapes": {
+    "zh-CN": "（路径超出仓库根目录）",
+    "en-US": "(path escapes repository root)"
+  },
+  "github.directoryUnreadable": {
+    "zh-CN": "（目录不可读）",
+    "en-US": "(directory not readable)"
+  },
+  "github.outsideRepo": {
+    "zh-CN": "仓库外",
+    "en-US": "outside repository"
+  },
+  "github.unreadable": {
+    "zh-CN": "不可读",
+    "en-US": "unreadable"
+  },
+  "github.clonedTo": {
+    "zh-CN": "仓库已克隆到：{path}",
+    "en-US": "Repository cloned to: {path}"
+  },
+  "github.explore": {
+    "zh-CN": "使用上方路径配合 `read` 和 `bash` 工具继续浏览。",
+    "en-US": "Use the `read` and `bash` tools at the path above to explore further."
+  },
+  "github.pathNotFound": {
+    "zh-CN": "克隆中未找到路径 `{path}`，改为显示仓库根目录。",
+    "en-US": "Path `{path}` was not found in the clone. Showing the repository root instead."
+  },
+  "github.inspectFailed": {
+    "zh-CN": "无法检查 `{path}`：{message}",
+    "en-US": "Could not inspect `{path}`: {message}"
+  },
+  "github.binaryFile": {
+    "zh-CN": "二进制文件（{extension}，{size}）。请使用上方路径配合 `read` 或 `bash` 检查。",
+    "en-US": "Binary file ({extension}, {size}). Use `read` or `bash` at the path above to inspect it."
+  },
+  "github.readFailed": {
+    "zh-CN": "无法将 `{path}` 作为 UTF-8 文本读取。",
+    "en-US": "Could not read `{path}` as UTF-8 text."
+  },
+  "github.fullFile": {
+    "zh-CN": "[文件已截断到 100K 字符。完整文件：{path}]",
+    "en-US": "[File truncated at 100K chars. Full file: {path}]"
+  },
+  "github.unsafeClonePath": {
+    "zh-CN": "拒绝使用超出 GitHub 克隆根目录的路径。",
+    "en-US": "Refusing to use a path outside the GitHub clone root."
+  }
+}

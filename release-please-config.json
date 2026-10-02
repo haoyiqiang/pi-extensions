@@ -8,6 +8,7 @@
   "packages": {
     "packages/pi-extensions-i18n": {},
     "packages/pi-model-request": {},
+    "packages/pi-web-search": {},
     "packages/pi-distill": {},
     "packages/pi-tool-supervisor": {},
     "packages/pi-extensions-tool-display": {},

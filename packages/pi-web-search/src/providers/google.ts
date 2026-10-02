@@ -1,0 +1,242 @@
+import type { ExtensionContext, AgentToolUpdateCallback } from "@earendil-works/pi-coding-agent";
+import type { Api, Model } from "@earendil-works/pi-ai";
+import { TextEncoder, TextDecoder } from "util";
+import type { LlmTransport } from "../config.ts";
+import { i18n } from "../i18n.ts";
+import { getConfig } from "./config.ts";
+import { getAuth, getProviderSessionHeaders } from "./auth.ts";
+import { readSseEvents } from "./sse.ts";
+import { deriveSources, pushUniqueSearchResult, sanitizeSearchResults, titleFromUrl } from "./results.ts";
+import type { SearchResultDetail, Source, StreamResult } from "./types.ts";
+
+export function extractPromptFromGeminiBody(body: any): string {
+    const parts: string[] = [];
+    for (const content of body?.contents || []) {
+        for (const part of content?.parts || []) {
+            if (typeof part?.text === "string") {
+                parts.push(part.text);
+            } else if (part?.file_data?.file_uri) {
+                parts.push(String(part.file_data.file_uri));
+            }
+        }
+    }
+    return parts.join("\n\n").trim();
+}
+
+function isGoogleGroundingRedirect(url: string | undefined): boolean {
+    return !!url && /^https:\/\/vertexaisearch\.cloud\.google\.com\/grounding-api-redirect\//.test(url);
+}
+
+async function resolveGoogleGroundingRedirectUrls(searchResults: SearchResultDetail[], citations: SearchResultDetail[], signal?: AbortSignal) {
+    const redirectUrls = [...new Set([...searchResults, ...citations].map((item) => item.url).filter((url): url is string => isGoogleGroundingRedirect(url)))];
+    if (redirectUrls.length === 0) return;
+
+    const resolved = new Map<string, string>();
+    await Promise.all(redirectUrls.slice(0, 20).map(async (url) => {
+        try {
+            const response = await fetch(url, { method: "HEAD", redirect: "manual", signal });
+            const location = response.headers.get("location");
+            if (location) resolved.set(url, location);
+        } catch {
+            // Ignore redirect resolution failures and keep the original URL.
+        }
+    }));
+
+    if (resolved.size === 0) return;
+    for (const item of [...searchResults, ...citations]) {
+        if (!item.url) continue;
+        const canonicalUrl = resolved.get(item.url);
+        if (!canonicalUrl) continue;
+        item.url = canonicalUrl;
+        if (!item.title || item.title === i18n.t("llm.unknownSource") || item.title === "Unknown") {
+            item.title = titleFromUrl(canonicalUrl);
+        }
+    }
+}
+
+function extractGoogleSearchDetails(groundingMetadata: any): { searchQueries: string[]; searchResults: SearchResultDetail[]; citations: SearchResultDetail[] } {
+    const searchQueries = groundingMetadata?.webSearchQueries || [];
+    const chunks = groundingMetadata?.groundingChunks || [];
+    const supports = groundingMetadata?.groundingSupports || [];
+    const searchResults: SearchResultDetail[] = [];
+    const citations: SearchResultDetail[] = [];
+
+    chunks.forEach((chunk: any, index: number) => {
+        if (!chunk?.web) return;
+        pushUniqueSearchResult(searchResults, {
+            title: chunk.web.title || i18n.t("llm.unknownSource"),
+            url: chunk.web.uri || "",
+            source: "google.groundingChunks",
+            type: "web",
+            raw: { index, ...chunk.web },
+        });
+    });
+
+    supports.forEach((support: any) => {
+        for (const index of support?.groundingChunkIndices || []) {
+            const web = chunks[index]?.web;
+            if (!web) continue;
+            pushUniqueSearchResult(citations, {
+                title: web.title || i18n.t("llm.unknownSource"),
+                url: web.uri || "",
+                citedText: support?.segment?.text,
+                source: "google.groundingSupports",
+                type: "citation",
+                raw: support,
+            });
+        }
+    });
+
+    return { searchQueries, searchResults, citations };
+}
+
+export async function callGoogleStream(
+    ctx: ExtensionContext,
+    model: Model<Api>,
+    body: any,
+    onUpdate?: AgentToolUpdateCallback,
+    signal?: AbortSignal,
+    transport: LlmTransport = "auto",
+): Promise<StreamResult> {
+    const config = getConfig(model, transport);
+    if (!config.buildRequest) {
+        throw new Error(i18n.t("llm.unsupportedGoogleProvider", { provider: model.provider }));
+    }
+
+    const auth = await getAuth(ctx, model);
+    if (auth.ok === false) {
+        throw new Error(auth.error || i18n.t("llm.authFailed"));
+    }
+
+    const requestModel = auth.baseUrl ? { ...model, baseUrl: auth.baseUrl } : model;
+    const req = config.buildRequest(requestModel, body, auth);
+
+    // Handle auth
+    Object.assign(req.headers, getProviderSessionHeaders(model, ctx) || {});
+    if (auth.headers) {
+        Object.assign(req.headers, auth.headers);
+    }
+    if (auth.apiKey && model.provider !== "antigravity" && model.api !== "antigravity") {
+        req.headers["x-goog-api-key"] = auth.apiKey;
+    }
+
+    const response = await fetch(req.url, {
+        method: "POST",
+        headers: req.headers,
+        body: JSON.stringify(req.body),
+        signal
+    });
+
+    if (!response.ok) {
+        throw new Error(i18n.t("llm.apiError", {
+            provider: "Google",
+            status: response.status,
+            message: await response.text(),
+        }));
+    }
+
+    let accumulatedText = "";
+    let groundingMetadata: any;
+    let urlContextMetadata: any;
+
+    await readSseEvents(response, signal, ({ data: chunk }) => {
+        if (chunk.error) {
+            const errorMsg = chunk.error.message || JSON.stringify(chunk.error);
+            throw new Error(i18n.t("llm.apiError", {
+                provider: "Google",
+                status: chunk.error.code || chunk.error.status || i18n.t("provider.error.unknown"),
+                message: errorMsg,
+            }));
+        }
+
+        // Unwrap response for internal APIs
+        const data = chunk.response || chunk;
+        const candidate = data.candidates?.[0];
+
+        if (candidate?.content?.parts) {
+            for (const part of candidate.content.parts) {
+                if (part.text) {
+                    accumulatedText += part.text;
+                    onUpdate?.({
+                        content: [{ type: "text", text: accumulatedText }],
+                        details: { streaming: true }
+                    });
+                }
+            }
+        }
+
+        // Capture metadata from final chunk
+        if (candidate?.groundingMetadata) {
+            groundingMetadata = candidate.groundingMetadata;
+        }
+        // Handle both camelCase and snake_case
+        if (candidate?.urlContextMetadata || candidate?.url_context_metadata) {
+            urlContextMetadata = candidate.urlContextMetadata || candidate.url_context_metadata;
+        }
+    });
+
+    const searchDetails = extractGoogleSearchDetails(groundingMetadata);
+    await resolveGoogleGroundingRedirectUrls(searchDetails.searchResults, searchDetails.citations, signal);
+    const searchResults = sanitizeSearchResults(searchDetails.searchResults);
+    const citations = sanitizeSearchResults(searchDetails.citations);
+    return {
+        text: accumulatedText || i18n.t("llm.noAnswer"),
+        sources: deriveSources(searchResults, citations),
+        providerKind: "google",
+        llmSearchUsed: searchDetails.searchQueries.length > 0 || searchResults.length > 0,
+        llmSearchEvents: searchDetails.searchQueries.length > 0 ? ["google.groundingMetadata.webSearchQueries"] : [],
+        searchQueries: searchDetails.searchQueries,
+        searchResults,
+        citations,
+        groundingMetadata,
+        urlContextMetadata
+    };
+}
+
+// --- Citation Processing (byte-safe) ---
+
+export function applyCitations(text: string, groundingMetadata: any): { text: string; sources: Source[] } {
+    const chunks = groundingMetadata?.groundingChunks || [];
+    const supports = groundingMetadata?.groundingSupports || [];
+
+    const sources = chunks
+        .filter((c: any) => c.web)
+        .map((c: any) => ({ title: c.web.title || i18n.t("llm.unknownSource"), url: c.web.uri || "" }));
+
+    if (!supports.length || !sources.length) return { text, sources };
+
+    // Collect insertions, sort descending
+    const insertions = supports
+        .filter((s: any) => s.segment?.endIndex !== undefined && s.groundingChunkIndices?.length)
+        .map((s: any) => ({
+            index: s.segment.endIndex,
+            marker: s.groundingChunkIndices.map((i: number) => `[${i + 1}]`).join("")
+        }))
+        .sort((a: any, b: any) => b.index - a.index);
+
+    // Byte-safe insertion
+    const encoder = new TextEncoder();
+    const decoder = new TextDecoder();
+    const bytes = encoder.encode(text);
+
+    const parts: Uint8Array[] = [];
+    let lastIndex = bytes.length;
+
+    for (const ins of insertions) {
+        const pos = Math.min(ins.index, lastIndex);
+        if (pos < lastIndex) parts.unshift(bytes.subarray(pos, lastIndex));
+        parts.unshift(encoder.encode(ins.marker));
+        lastIndex = pos;
+    }
+    if (lastIndex > 0) parts.unshift(bytes.subarray(0, lastIndex));
+
+    const total = parts.reduce((acc, p) => acc + p.length, 0);
+    const final = new Uint8Array(total);
+    let offset = 0;
+    for (const part of parts) {
+        final.set(part, offset);
+        offset += part.length;
+    }
+
+    return { text: decoder.decode(final), sources };
+}

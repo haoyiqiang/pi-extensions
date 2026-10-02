@@ -49,6 +49,7 @@ jobs:
         include:
           - dir: packages/pi-extensions-i18n
           - dir: packages/pi-model-request
+          - dir: packages/pi-web-search
           - dir: packages/pi-distill
           - dir: packages/pi-tool-supervisor
           - dir: packages/pi-extensions-tool-display

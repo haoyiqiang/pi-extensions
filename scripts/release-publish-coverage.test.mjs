@@ -14,6 +14,7 @@ test("真实发布工作流覆盖 matrix 与专用自动发布 job，并去重",
   assert.deepEqual(collectPublishedPackageDirectories(source), [
     "packages/pi-extensions-i18n",
     "packages/pi-model-request",
+    "packages/pi-web-search",
     "packages/pi-distill",
     "packages/pi-tool-supervisor",
     "packages/pi-extensions-tool-display",
