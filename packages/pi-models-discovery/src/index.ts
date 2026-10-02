@@ -51,9 +51,22 @@ import { getAgentDir, readStoredCredential } from "@earendil-works/pi-coding-age
 import type { ExtensionAPI, ProviderModelConfig } from "@earendil-works/pi-coding-agent";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { NOTICE_TAG_COLOR, createTranslator, installNoticeRenderer, loadCatalog, notifyWithSource, type NoticeColor, type NoticeSource } from "pi-extensions-i18n";
+import { NOTICE_TAG_COLOR, installNoticeRenderer, notifyWithSource, scope, type MessageParams, type NoticeColor, type NoticeSource } from "pi-extensions-i18n";
+import { registerLocalesFromDir } from "pi-extensions-i18n/loader";
 
-const i18n = createTranslator(loadCatalog(new URL("../locales/index.json", import.meta.url)));
+const NAMESPACE = "pi-models-discovery";
+const loadedLocales = registerLocalesFromDir(NAMESPACE, new URL("../locales/", import.meta.url));
+if (loadedLocales.diagnostics.length > 0) {
+	throw new Error(
+		`Failed to load pi-models-discovery locales: ${loadedLocales.diagnostics.map((item) => `${item.locale}: ${item.error}`).join("; ")}`,
+	);
+}
+const translate = scope(NAMESPACE);
+const i18n = {
+	t(key: string, params?: MessageParams): string {
+		return translate(key, key, params);
+	},
+};
 
 const FETCH_TIMEOUT_MS = 5000;
 const DISCOVERY_MARKER = "discoverModels";

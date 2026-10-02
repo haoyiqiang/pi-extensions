@@ -5,13 +5,17 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { buildModel, modelMatchesDiscovery } from "../src/index.ts";
 
-test("locales catalog provides zh-CN and en-US for every key", () => {
-	const catalog = JSON.parse(
-		readFileSync(new URL("../locales/index.json", import.meta.url), "utf-8"),
-	) as Record<string, Record<string, string>>;
-	for (const [key, entry] of Object.entries(catalog)) {
-		assert.ok(typeof entry["zh-CN"] === "string" && entry["zh-CN"].length > 0, `${key} missing zh-CN`);
-		assert.ok(typeof entry["en-US"] === "string" && entry["en-US"].length > 0, `${key} missing en-US`);
+test("per-locale catalogs provide the same non-empty keys", () => {
+	const english = JSON.parse(
+		readFileSync(new URL("../locales/en-US.json", import.meta.url), "utf-8"),
+	) as Record<string, string>;
+	const chinese = JSON.parse(
+		readFileSync(new URL("../locales/zh-CN.json", import.meta.url), "utf-8"),
+	) as Record<string, string>;
+	assert.deepEqual(Object.keys(english).sort(), Object.keys(chinese).sort());
+	for (const key of Object.keys(english)) {
+		assert.ok(english[key].length > 0, `${key} missing en-US`);
+		assert.ok(chinese[key].length > 0, `${key} missing zh-CN`);
 	}
 });
 
