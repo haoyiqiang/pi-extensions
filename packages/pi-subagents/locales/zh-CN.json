@@ -1,4 +1,7 @@
 {
+  "backend.missingSession": "进程内执行器未返回原生会话。",
+  "backend.invalidSession": "此会话不属于所选执行后端。",
+  "backend.closedSession": "此执行会话已关闭。",
   "terminal.invalidSummary": "终端记录摘要存在时必须为字符串。",
   "terminal.unknownError": "未知错误",
   "terminal.invalidInterpreter": "终端脚本解释器必须为 bash 或 powershell。",

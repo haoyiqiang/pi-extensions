@@ -44,10 +44,10 @@ describe("AgentManager — record GC", () => {
   });
 
   /** Spawn a background agent and settle it, returning its id and record. */
-  async function settled(prompt: string) {
+  async function settled(prompt: string, nativeSession?: any) {
     vi.mocked(runAgent).mockResolvedValue({
       responseText: "done",
-      session: { dispose: vi.fn() } as any,
+      session: nativeSession ?? { dispose: vi.fn() } as any,
       aborted: false,
       steered: false,
     } as any);
@@ -71,9 +71,8 @@ describe("AgentManager — record GC", () => {
 
   it("evicts a record that completed before the cutoff and disposes its session", async () => {
     manager = new AgentManager();
-    const { id, record } = await settled("stale");
     const dispose = vi.fn();
-    record.session = { dispose } as any;
+    const { id, record } = await settled("stale", { dispose });
     record.completedAt = Date.now() - (TEN_MINUTES + 30_000);
 
     await vi.advanceTimersByTimeAsync(TICK);
@@ -89,13 +88,12 @@ describe("AgentManager — record GC", () => {
     // an extension armed in `session_start` stayed armed — and its next tick threw
     // `assertActive()` from a bare timer callback, killing interactive pi.
     manager = new AgentManager();
-    const { id, record } = await settled("stale");
     const emit = vi.fn(async () => {});
     const dispose = vi.fn();
-    record.session = {
+    const { id, record } = await settled("stale", {
       dispose,
       extensionRunner: { hasHandlers: (event: string) => event === "session_shutdown", emit },
-    } as any;
+    });
     record.completedAt = Date.now() - (TEN_MINUTES + 30_000);
 
     await vi.advanceTimersByTimeAsync(TICK);
@@ -110,14 +108,16 @@ describe("AgentManager — record GC", () => {
   it("never evicts a running agent, however old its timestamp looks", async () => {
     // A live agent's session being disposed mid-run is the worst failure this
     // guard prevents, and `completedAt` on a running record is meaningless.
-    vi.mocked(runAgent).mockImplementation(() => new Promise(() => {}));
+    const dispose = vi.fn();
+    vi.mocked(runAgent).mockImplementation((_ctx, _type, _prompt, options) => {
+      options.onSessionCreated?.({ dispose } as any);
+      return new Promise(() => {});
+    });
     manager = new AgentManager();
     const id = manager.spawn(mockPi, mockCtx, "X", "live", { description: "live", isBackground: true });
     const record = manager.getRecord(id)!;
     expect(record.status).toBe("running");
     record.completedAt = Date.now() - 10 * TEN_MINUTES;
-    const dispose = vi.fn();
-    record.session = { dispose } as any;
 
     await vi.advanceTimersByTimeAsync(TICK * 5);
 

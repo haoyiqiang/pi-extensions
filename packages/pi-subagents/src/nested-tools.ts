@@ -1,6 +1,5 @@
 import type { Model } from "@earendil-works/pi-ai";
 import {
-  type AgentSession,
   defineTool,
   type ExtensionAPI,
   type ExtensionContext,
@@ -8,6 +7,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { abortable } from "./abortable.js";
+import type { ExecutionSession } from "./backends/session.js";
 import {
   buildAgentRegistry,
   getAgentConfigIn,
@@ -61,7 +61,7 @@ interface NestedSpawnOptions {
   invocation?: AgentInvocation;
   signal?: AbortSignal;
   onAssistantUsage?: (usage: { input: number; output: number; cacheWrite: number }) => void;
-  onSessionCreated?: (session: AgentSession) => void;
+  onSessionCreated?: (session: ExecutionSession) => void;
   depth: number;
   parentAgentId: string;
   maxSubagentDepth: number;

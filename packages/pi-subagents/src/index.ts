@@ -19,7 +19,9 @@ import { abortable } from "./abortable.js";
 import { hasAgentBadge, renderAgentName } from "./agent-color.js";
 import { buildNewAgentFile, disableInContent, enableInContent, isEmptyStub, locateAgentFile, personalAgentsDir, projectAgentsDir, serializeAgentFile } from "./agent-file-toggle.js";
 import { AgentManager, isTopLevelAgent } from "./agent-manager.js";
-import { getAgentConversation, getDefaultMaxTurns, getGraceTurns, getRememberAgents, normalizeMaxTurns, resolveEffectiveMaxTurns, SUBAGENT_TOOL_NAMES, setDefaultMaxTurns, setGraceTurns, setRememberAgents } from "./agent-runner.js";
+import type { ExecutionSession } from "./backends/session.js";
+import { getAgentConversation } from "./transcript.js";
+import { getDefaultMaxTurns, getGraceTurns, getRememberAgents, normalizeMaxTurns, resolveEffectiveMaxTurns, SUBAGENT_TOOL_NAMES, setDefaultMaxTurns, setGraceTurns, setRememberAgents } from "./agent-runner.js";
 import { BUILTIN_TOOL_NAMES, getAgentConfig, getAllTypes, getAvailableTypes, getConfig, getFallbackSubagent, isDefaultsDisabled, NO_FALLBACK, registerAgents, resolveSpawnType, resolveType, setDefaultsDisabled, setFallbackSubagent } from "./agent-types.js";
 import { inChildSessionContext } from "./child-context.js";
 import { type RpcHandle, registerRpcHandlers } from "./cross-extension-rpc.js";
@@ -134,7 +136,7 @@ function createActivityTracker(maxTurns?: number, onStreamUpdate?: () => void) {
       state.turnCount = turnCount;
       onStreamUpdate?.();
     },
-    onSessionCreated: (session: any) => {
+    onSessionCreated: (session: ExecutionSession) => {
       state.session = session;
     },
     // Spend is accumulated on the AgentRecord (agent-manager), which is what
@@ -2041,7 +2043,7 @@ Terse command-style prompts produce shallow, generic work.
         // rather than closing over a value that doesn't exist yet.
         let id: string;
         const origBgOnSession = bgCallbacks.onSessionCreated;
-        bgCallbacks.onSessionCreated = (session: any) => {
+        bgCallbacks.onSessionCreated = (session: ExecutionSession) => {
           origBgOnSession(session);
           const rec = manager.getRecord(id);
           if (rec?.outputFile) {
@@ -2168,7 +2170,7 @@ Terse command-style prompts produce shallow, generic work.
       // The output file path is set synchronously after spawn (below),
       // before onSessionCreated fires — same pattern as background agents.
       const origOnSession = fgCallbacks.onSessionCreated;
-      fgCallbacks.onSessionCreated = (session: any) => {
+      fgCallbacks.onSessionCreated = (session: ExecutionSession) => {
         origOnSession(session);
         // It really started — stop reporting it as queued, and repaint now
         // rather than leaving the stale line up for the next spinner tick.

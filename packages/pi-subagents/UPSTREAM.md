@@ -63,9 +63,10 @@ compatibility with untested future Pi releases.
   bound and adding idempotency and early timer cleanup.
 - Updated steering test doubles and added backend injection/lifecycle/facade tests.
 
-The manager seam intentionally still uses native Pi session types (see
-[execution boundary](./docs/execution-backend.md)). Full terminal integration, shared
-configuration migration, localization, and release activation remain separate steps.
+The original seam used native Pi session types. It has since moved to the opaque
+session boundary described below (see [execution boundary](./docs/execution-backend.md)).
+Full terminal integration, shared configuration migration, localization, and release
+activation remain separate steps.
 
 ## Terminal lifecycle groundwork
 
@@ -84,4 +85,29 @@ operations. New diagnostic catalogs use `pi-extensions-i18n`; neither dependency
 activates this private workspace. The strict source consumer enables
 `allowImportingTsExtensions` for these source-distributed dependencies; a guarded
 Herdr diagnostic interpolation was made strict-null-safe without changing behavior. See [terminal lifecycle](./docs/terminal-lifecycle.md)
-for explicitly deferred CLI/child-bridge, session-store, manager, and workflow work.
+for explicitly deferred CLI/child-bridge, session-store, terminal-manager wiring, and workflow work.
+
+## Backend-neutral session observations
+
+- Added `src/backends/session.ts` for read-only messages, observation events, stats,
+  identity, and model/thinking metadata, without importing native session/event types.
+- Added a per-manager embedded adapter that keeps native sessions in private weak
+  lookups. Controls accept only owned handles; closed sessions cannot resume/steer.
+  Event subscription teardown is idempotent and suppresses late callbacks.
+- `AgentRecord.session`, manager/nested creation callbacks, UI, output streaming,
+  and result formatting now consume these views. The raw runner facade still uses
+  native sessions; its execution implementation is unchanged.
+- Moved the existing transcript formatter into `src/transcript.ts`, preserving its
+  facade export and display wording. Live getters preserve message identity and
+  compaction replacement; no provider/custom message fields are stripped from output.
+- Adapted GC fixtures to create sessions through the runner rather than overwrite
+  manager records with raw SDK objects, and completed two RPC result fixtures that
+  omitted required session/result fields. Preserved synchronous startup-error timing
+  so failed launches are not announced as started. Added adapter ownership/lifecycle tests and
+  a native-free fake backend covering manager resume, output, compaction, and viewer
+  rendering. Workflow-menu sorting fixtures use distinct deterministic timestamps
+  instead of relying on wall-clock millisecond differences. This fake backend is not
+  a real terminal execution adapter.
+
+Request preparation still uses Pi context and existing runner option types. There is
+no new configuration, root-profile change, release activation, or public API promise.

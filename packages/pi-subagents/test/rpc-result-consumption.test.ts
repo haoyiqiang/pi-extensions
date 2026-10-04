@@ -142,7 +142,10 @@ describe("subagents:rpc:consume", () => {
   it("notifies for an RPC-spawned agent nobody consumed", async () => {
     // The behaviour that makes the notification worth keeping: an unread result
     // is the caller's only signal that the agent finished.
-    vi.mocked(runAgent).mockResolvedValue({ responseText: "TASK_EXECUTE_AGENT_OK" } as any);
+    vi.mocked(runAgent).mockResolvedValue({
+      responseText: "TASK_EXECUTE_AGENT_OK", session: { dispose: vi.fn() } as any,
+      aborted: false, steered: false,
+    });
     const { pi, bus } = await boot();
 
     await spawnOverRpc(bus, "req-spawn-1");
@@ -152,7 +155,10 @@ describe("subagents:rpc:consume", () => {
   });
 
   it("suppresses the notification once the caller consumes the result", async () => {
-    vi.mocked(runAgent).mockResolvedValue({ responseText: "TASK_EXECUTE_AGENT_OK" } as any);
+    vi.mocked(runAgent).mockResolvedValue({
+      responseText: "TASK_EXECUTE_AGENT_OK", session: { dispose: vi.fn() } as any,
+      aborted: false, steered: false,
+    });
     const { pi, bus } = await boot();
 
     // Join the agent the way pi-tasks does — off the lifecycle event, not the tool.

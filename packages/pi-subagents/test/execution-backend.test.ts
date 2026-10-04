@@ -1,8 +1,12 @@
-import type { AgentSession, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { afterEach, describe, expect, it } from "vitest";
 import { AgentManager } from "../src/agent-manager.js";
-import type { RunOptions, RunResult } from "../src/backends/embedded.js";
-import type { AgentExecutionBackend } from "../src/backends/types.js";
+import type { ExecutionSession } from "../src/backends/session.js";
+import type {
+  AgentExecutionBackend,
+  ExecutionRunOptions,
+  ExecutionRunResult,
+} from "../src/backends/types.js";
 import type { SubagentType } from "../src/types.js";
 
 interface Deferred<T> {
@@ -21,25 +25,34 @@ function deferred<T>(): Deferred<T> {
   return { promise, resolve, reject };
 }
 
-function session(label: string): AgentSession {
-  return {
-    label,
-    dispose: vi.fn(),
-    sessionManager: { getSessionFile: vi.fn(() => `/sessions/${label}.jsonl`) },
-  } as unknown as AgentSession;
+function session(label: string): ExecutionSession {
+  const messages: ExecutionSession["messages"] = [];
+  return Object.freeze({
+    reference: Object.freeze({
+      backend: "embedded" as const,
+      sessionId: label,
+      sessionFile: `/sessions/${label}.jsonl`,
+    }),
+    messages,
+    getSessionStats: () => ({
+      tokens: { input: 0, output: 0, cacheWrite: 0 },
+      contextUsage: { percent: null },
+    }),
+    subscribe: () => () => {},
+  });
 }
 
 interface RunCall {
   ctx: ExtensionContext;
   type: SubagentType;
   prompt: string;
-  options: RunOptions;
-  result: Deferred<RunResult>;
-  session?: AgentSession;
+  options: ExecutionRunOptions;
+  result: Deferred<ExecutionRunResult>;
+  session?: ExecutionSession;
 }
 
 interface ResumeCall {
-  session: AgentSession;
+  session: ExecutionSession;
   prompt: string;
   options: Parameters<AgentExecutionBackend["resume"]>[2];
   result: Deferred<{ text: string; failure?: string }>;
@@ -49,19 +62,24 @@ class FakeExecutionBackend implements AgentExecutionBackend {
   readonly kind = "embedded" as const;
   readonly runCalls: RunCall[] = [];
   readonly resumeCalls: ResumeCall[] = [];
-  readonly steerCalls: { session: AgentSession; message: string }[] = [];
-  readonly shutdownCalls: (AgentSession | undefined)[] = [];
-  steerImplementation: (target: AgentSession, message: string) => Promise<void> = async () => {};
-  shutdownImplementation: (target: AgentSession | undefined) => Promise<void> = async () => {};
+  readonly steerCalls: { session: ExecutionSession; message: string }[] = [];
+  readonly shutdownCalls: (ExecutionSession | undefined)[] = [];
+  steerImplementation: (target: ExecutionSession, message: string) => Promise<void> = async () => {};
+  shutdownImplementation: (target: ExecutionSession | undefined) => Promise<void> = async () => {};
 
-  run(ctx: ExtensionContext, type: SubagentType, prompt: string, options: RunOptions): Promise<RunResult> {
-    const result = deferred<RunResult>();
+  run(
+    ctx: ExtensionContext,
+    type: SubagentType,
+    prompt: string,
+    options: ExecutionRunOptions,
+  ): Promise<ExecutionRunResult> {
+    const result = deferred<ExecutionRunResult>();
     this.runCalls.push({ ctx, type, prompt, options, result });
     return result.promise;
   }
 
   resume(
-    target: AgentSession,
+    target: ExecutionSession,
     prompt: string,
     options?: Parameters<AgentExecutionBackend["resume"]>[2],
   ): Promise<{ text: string; failure?: string }> {
@@ -70,17 +88,17 @@ class FakeExecutionBackend implements AgentExecutionBackend {
     return result.promise;
   }
 
-  steer(target: AgentSession, message: string): Promise<void> {
+  steer(target: ExecutionSession, message: string): Promise<void> {
     this.steerCalls.push({ session: target, message });
     return this.steerImplementation(target, message);
   }
 
-  shutdown(target: AgentSession | undefined): Promise<void> {
+  shutdown(target: ExecutionSession | undefined): Promise<void> {
     this.shutdownCalls.push(target);
     return this.shutdownImplementation(target);
   }
 
-  openSession(index: number, target: AgentSession = session(`run-${index}`)): AgentSession {
+  openSession(index: number, target: ExecutionSession = session(`run-${index}`)): ExecutionSession {
     const call = this.runCalls[index];
     if (!call) throw new Error(`Missing run call ${index}`);
     if (!call.session) {
@@ -90,7 +108,7 @@ class FakeExecutionBackend implements AgentExecutionBackend {
     return call.session;
   }
 
-  finishRun(index: number, overrides: Partial<RunResult> = {}): AgentSession {
+  finishRun(index: number, overrides: Partial<ExecutionRunResult> = {}): ExecutionSession {
     const call = this.runCalls[index];
     if (!call) throw new Error(`Missing run call ${index}`);
     const target = this.openSession(index, overrides.session);

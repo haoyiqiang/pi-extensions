@@ -33,9 +33,13 @@ SDK 执行实现已移至 `src/backends/embedded.ts`，steer 与 session 清理�
 执行接口用于测试和组合，但队列、记录、取消、worktree 与通知仍由它负责。
 工具的 steer 不再绕过此接口。
 
-接口仍使用原生 Pi session 类型，尚不是可承载 terminal 的最终接口，也不是公开
-workflow API。详细范围、兼容约定和剩余耦合见 [执行边界](./docs/execution-backend.md)。
-此步没有新增用户配置。
+Manager 的会话句柄以及 UI/输出观察接口已与原生 `AgentSession` 脱钩。
+`embedded-adapter.ts` 在每个 backend 内部保管原生会话，拒绝跨实例或已关闭句柄的控制请求。
+只读视图保留消息对象、压缩、统计和模型元数据，但不暴露 SDK 控制方法或模型鉴权头。
+原始 runner 兼容入口保持不变。
+
+请求准备仍使用 Pi context，真实 terminal backend 尚未接入。私有回调契约变化、兼容约定
+及剩余工作见 [执行边界](./docs/execution-backend.md)。此步没有新增用户配置。
 
 ## Terminal 生命周期基础
 
@@ -82,5 +86,5 @@ npm run check
 - [上游 RPC 协议参考](./docs/rpc.md)
 - [上游脚本 workflow 参考](./docs/workflows.md)
 
-下一步：迁移 manager/UI/输出订阅对原生 session 的依赖，接入 terminal 执行与子进程策略，
-再完善会话存储语义、后端路由、本地化和统一 UI/配置。完成整合后才切换根 profile 与发布元数据。
+下一步：接入 terminal 执行、远端会话观察与子进程策略，再完善会话存储语义、后端路由、
+本地化和统一 UI/配置。完成整合后才切换根 profile 与发布元数据。

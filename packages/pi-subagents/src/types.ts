@@ -3,7 +3,7 @@
  */
 
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
-import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import type { ExecutionSession } from "./backends/session.js";
 import type { LifetimeUsage } from "./usage.js";
 
 export type { ThinkingLevel };
@@ -177,7 +177,8 @@ export interface AgentRecord {
   toolUses: number;
   startedAt: number;
   completedAt?: number;
-  session?: AgentSession;
+  /** Backend-owned handle and read-only observations; never a native SDK session. */
+  session?: ExecutionSession;
   abortController?: AbortController;
   promise?: Promise<string>;
   /**

@@ -8,7 +8,7 @@
 import { appendFileSync, chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-agent";
+import type { SessionView, SessionViewEvent } from "./backends/session.js";
 
 /**
  * Project/global default for writing a subagent's `.output` transcript; a custom
@@ -98,7 +98,7 @@ export function writeInitialEntry(path: string, agentId: string, prompt: string,
  * Returns a cleanup function that does a final flush and unsubscribes.
  */
 export function streamToOutputFile(
-  session: AgentSession,
+  session: SessionView,
   path: string,
   agentId: string,
   cwd: string,
@@ -130,7 +130,7 @@ export function streamToOutputFile(
     }
   };
 
-  const unsubscribe = session.subscribe((event: AgentSessionEvent) => {
+  const unsubscribe = session.subscribe((event: SessionViewEvent) => {
     if (event.type === "turn_end") flush();
     // Compaction replaces session.messages with a shorter, summarized array,
     // leaving writtenCount past the new end — without re-anchoring, the flush

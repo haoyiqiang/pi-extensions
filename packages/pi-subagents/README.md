@@ -39,9 +39,15 @@ compatibility re-export. `AgentManager` accepts a private execution port for tes
 and composition, while continuing to own queues, records, cancellation, worktrees,
 and notifications. Tool steering no longer bypasses that port.
 
-The port still uses native Pi session types; it is not yet a terminal-capable or
-public workflow API. See [execution boundary](./docs/execution-backend.md) for the
-scope, preserved contracts, and remaining coupling. No new user configuration is added.
+Manager session handles and UI/output observations are now backend-neutral.
+`embedded-adapter.ts` keeps native sessions behind per-backend lookups; controls reject
+foreign or closed handles. Live read-only views preserve transcript identity,
+compaction behavior, stats, and metadata without exposing SDK controls or model headers.
+The raw runner facade remains compatible.
+
+Request preparation still uses Pi context and no real terminal backend is connected.
+See [execution boundary](./docs/execution-backend.md) for the private callback-contract
+change, preserved behavior, and remaining work. No new user configuration is added.
 
 ## Terminal lifecycle groundwork
 
@@ -51,8 +57,8 @@ selection. Data-only run/session references
 separate a single invocation from its persistent conversation. Startup/cancellation
 cleanup is idempotent; resumed output excludes old turns and stale completion markers.
 
-This does not select models, construct child CLI policy, register tools, or replace
-the embedded manager's native session interface. See [terminal lifecycle](./docs/terminal-lifecycle.md)
+This does not select models, construct child CLI policy, register tools, or implement
+remote observation for the manager's new session-view interface. See [terminal lifecycle](./docs/terminal-lifecycle.md)
 for its prepared-launch contract, limitations, and remaining integration. New terminal
 diagnostics have English/Chinese catalogs; the imported embedded strings are not yet migrated.
 
@@ -94,7 +100,6 @@ terminal multiplexer, or local Pi daemon are needed. Test fixtures under
 - [Upstream RPC reference](./docs/rpc.md)
 - [Upstream scripted workflow reference](./docs/workflows.md)
 
-Next: migrate the manager/UI/output consumers off native session control, connect
-terminal execution and child-policy construction, then add session-store semantics,
-backend routing, and unified UI/config/localization. Switch the root profile and
+Next: connect terminal execution, remote observation and child-policy construction,
+then add session-store semantics, backend routing, and unified UI/config/localization. Switch the root profile and
 release metadata only after that integration is complete.

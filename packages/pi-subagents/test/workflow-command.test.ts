@@ -145,8 +145,16 @@ describe("/agents → Workflows", () => {
     async function withRuns(count: number) {
       const booted = bootCommand();
       const runCtx = ctx({ cwd: hermetic.dir });
-      for (let i = 0; i < count; i++) {
-        await booted.tools.get("SubagentWorkflow").execute(`tc-${i}`, { script: script(`wf-${i}`) }, undefined, undefined, runCtx);
+      // Fast launches can share a wall-clock millisecond. Give sorting fixtures
+      // distinct timestamps instead of depending on machine speed or sleeps.
+      let now = Date.now();
+      const clock = vi.spyOn(Date, "now").mockImplementation(() => now++);
+      try {
+        for (let i = 0; i < count; i++) {
+          await booted.tools.get("SubagentWorkflow").execute(`tc-${i}`, { script: script(`wf-${i}`) }, undefined, undefined, runCtx);
+        }
+      } finally {
+        clock.mockRestore();
       }
       return booted;
     }

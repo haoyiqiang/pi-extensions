@@ -1,4 +1,7 @@
 {
+  "backend.missingSession": "The embedded runner did not return a native session.",
+  "backend.invalidSession": "This session is not owned by the selected execution backend.",
+  "backend.closedSession": "This execution session has already been closed.",
   "terminal.invalidSummary": "Terminal artifact summary must be a string when present.",
   "terminal.unknownError": "Unknown error",
   "terminal.invalidInterpreter": "Terminal script interpreter must be bash or powershell.",

@@ -18,9 +18,10 @@ import { randomUUID } from "node:crypto";
 import { statSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import type { Model } from "@earendil-works/pi-ai";
-import type { AgentSession, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { resumeAgent, runAgent, type ToolActivity } from "./agent-runner.js";
-import { shutdownEmbeddedSession, steerEmbeddedSession } from "./backends/embedded-lifecycle.js";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ToolActivity } from "./agent-runner.js";
+import { createEmbeddedExecutionBackend } from "./backends/embedded-adapter.js";
+import type { ExecutionSession } from "./backends/session.js";
 import type { AgentExecutionBackend } from "./backends/types.js";
 import { assignHandle, handleBase } from "./mention.js";
 import { describeModel } from "./model-resolver.js";
@@ -286,7 +287,7 @@ interface SpawnOptions {
   /** Called on streaming text deltas from the assistant response. */
   onTextDelta?: (delta: string, fullText: string) => void;
   /** Called when the agent session is created (for accessing session stats). */
-  onSessionCreated?: (session: AgentSession) => void;
+  onSessionCreated?: (session: ExecutionSession) => void;
   /** Called at the end of each agentic turn with the cumulative count. */
   onTurnEnd?: (turnCount: number) => void;
   /** Called once per assistant message_end with that message's usage delta. */
@@ -330,15 +331,6 @@ interface ResumeOptions {
    */
   onStarted?: () => void;
 }
-
-/** Keep the upstream runner entrypoint injectable/mocked without duplicating execution logic. */
-const embeddedExecution: AgentExecutionBackend = {
-  kind: "embedded",
-  run: (...args) => runAgent(...args),
-  resume: (...args) => resumeAgent(...args),
-  steer: steerEmbeddedSession,
-  shutdown: shutdownEmbeddedSession,
-};
 
 export class AgentManager {
   private agents = new Map<string, AgentRecord>();
@@ -398,7 +390,7 @@ export class AgentManager {
     onStart?: OnAgentStart,
     onCompact?: OnAgentCompact,
     onUsage?: OnAgentUsage,
-    private readonly execution: AgentExecutionBackend = embeddedExecution,
+    private readonly execution: AgentExecutionBackend = createEmbeddedExecutionBackend(),
   ) {
     this.onComplete = onComplete;
     this.onStart = onStart;
@@ -790,11 +782,8 @@ export class AgentManager {
         // path is the only thing that can reopen the conversation, and an
         // in-memory session reports undefined, which correctly means
         // "nothing to come back to".
-        // Optional chaining, not defensiveness for its own sake: this is the
-        // only field read off the session at creation, so an older pi or a
-        // stubbed session must degrade to "not resumable" rather than throw
-        // and take the whole spawn down with it.
-        record.sessionFile = session.sessionManager?.getSessionFile?.();
+        // Native SDK compatibility lives in the adapter; the manager only sees identity data.
+        record.sessionFile = session.reference.sessionFile;
         // Same reason, different field: the model and thinking level are only
         // knowable once pi has resolved its defaults and clamped the level to
         // what the model supports. Writing them back here makes the record

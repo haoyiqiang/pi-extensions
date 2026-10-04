@@ -5,7 +5,8 @@
  * Subscribes to session events for real-time streaming updates.
  */
 
-import { type AgentSession, getMarkdownTheme } from "@earendil-works/pi-coding-agent";
+import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
+import type { SessionView, TranscriptBlock, TranscriptMessage } from "../backends/session.js";
 import { type Component, Input, Markdown, type MarkdownOptions, type MarkdownTheme, matchesKey, type TUI, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { renderAgentName } from "../agent-color.js";
 import { extractText } from "../context.js";
@@ -162,7 +163,7 @@ export class ConversationViewer implements Component {
 
   constructor(
     private tui: TUI,
-    private session: AgentSession,
+    private session: SessionView,
     private record: AgentRecord,
     private activity: AgentActivity | undefined,
     private theme: Theme,
@@ -404,7 +405,7 @@ export class ConversationViewer implements Component {
   }
 
   /** Render `text` as Markdown, reusing this message's component instance. */
-  private markdownLines(msg: AgentSession["messages"][number], text: string, width: number, dim: boolean): string[] {
+  private markdownLines(msg: TranscriptMessage, text: string, width: number, dim: boolean): string[] {
     let entry = this.markdownCache.get(msg);
     if (!entry) {
       entry = {
@@ -524,7 +525,7 @@ export class ConversationViewer implements Component {
       if (msg.role === "user") {
         const text = typeof msg.content === "string"
           ? msg.content
-          : extractText(msg.content);
+          : extractText(msg.content ?? []);
         if (!text.trim()) continue;
         if (needsSeparator) lines.push(th.fg("dim", "───"));
         lines.push(th.fg("accent", "[User]"));
@@ -534,10 +535,13 @@ export class ConversationViewer implements Component {
       } else if (msg.role === "assistant") {
         const textParts: string[] = [];
         const toolCalls: string[] = [];
-        for (const c of msg.content) {
+        const content: readonly TranscriptBlock[] = typeof msg.content === "string"
+          ? [{ type: "text", text: msg.content }]
+          : msg.content ?? [];
+        for (const c of content) {
           if (c.type === "text" && c.text) textParts.push(c.text);
           else if (c.type === "toolCall") {
-            toolCalls.push((c as any).name ?? (c as any).toolName ?? "unknown");
+            toolCalls.push(c.name ?? c.toolName ?? "unknown");
           }
         }
         if (needsSeparator) lines.push(th.fg("dim", "───"));
@@ -552,7 +556,7 @@ export class ConversationViewer implements Component {
           lines.push(truncateToWidth(th.fg("muted", `  [Tool: ${name}]`), width));
         }
       } else if (msg.role === "toolResult") {
-        const { text, elided } = capResult(extractText(msg.content).trim());
+        const { text, elided } = capResult((typeof msg.content === "string" ? msg.content : extractText(msg.content ?? [])).trim());
         if (!text) continue;
         if (needsSeparator) lines.push(th.fg("dim", "───"));
         lines.push(th.fg("dim", "[Result]"));

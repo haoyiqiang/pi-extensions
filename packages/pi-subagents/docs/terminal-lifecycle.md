@@ -92,11 +92,12 @@ fallback for this run's assistant entries.
 
 ## Remaining integration
 
-The embedded manager port still contains `AgentSession` dependencies. Before wiring
-terminal execution into it, migrate the native transcript/output/UI consumers and
-introduce backend-neutral session operations. Then migrate command/child-extension
-construction, activity reporting, model/tool policy, session writer ownership, and
-configuration routing. None of those are supplied by this lifecycle primitive.
+The manager and transcript/output/UI consumers now use backend-neutral session
+handles and read-only observation interfaces. The embedded adapter alone unwraps
+native sessions for controls. Wiring terminal execution into that port still requires
+remote observation plus command/child-extension construction, activity reporting,
+model/tool policy, session writer ownership, and configuration routing. None of those
+are supplied by this lifecycle primitive.
 
 The old lineage-only mode creates an empty conversation with parent metadata; it is
 **not** a full-context fork. Workflow fresh/reattach/fork semantics need a separate

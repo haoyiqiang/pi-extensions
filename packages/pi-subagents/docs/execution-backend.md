@@ -1,4 +1,4 @@
-# Embedded execution boundary
+# Execution and session observation boundary
 
 This is a private refactoring boundary, **not** the final dual-backend API. The
 workspace remains inactive and unpublished. No terminal backend, backend
@@ -16,12 +16,20 @@ Agent tool / nested tools / workflow host / UI
              AgentExecutionBackend
           run / resume / steer / shutdown
                       |
+       ExecutionSession (read-only view)
+                      |
+         backends/embedded-adapter.ts
+                      |
          backends/embedded.ts
          backends/embedded-lifecycle.ts
                       |
                  Pi AgentSession
 ```
 
+- `src/backends/session.ts` defines read-only transcript, observation-event, metadata,
+  and session-identity contracts. It imports no native session class or event type.
+- `src/backends/embedded-adapter.ts` owns per-backend handle/native lookup and SDK
+  observation adaptation. Every default manager gets its own backend instance.
 - `src/backends/embedded.ts` owns the original SDK runner: resource loading,
   model/tool/skill resolution, session creation, turn limits, event forwarding,
   structured-output retry, signal handling, and per-invocation result extraction.
@@ -41,7 +49,9 @@ worktree creation/cleanup, and completion notifications. The backend must not ad
 second queue, record registry, or notification path.
 
 `run()` and `resume()` return completion promises and receive an execution abort
-signal. Manager cancellation marks the run stopped immediately; the backend forwards
+signal. Synchronous runner startup errors remain synchronous so the manager's
+startup gate can reject them instead of announcing a failed launch as started.
+Manager cancellation marks the run stopped immediately; the backend forwards
 the signal to Pi and settles through the existing manager path. Queued cancellation
 never constructs a child session. Pool slots are released by settlement, not twice
 by cancellation and settlement.
@@ -52,9 +62,17 @@ Steering has two consumers:
 - Tools use `manager.steerAndWait()` and report delivery errors. Both route through
   the same backend. Messages queued before session creation are flushed in order.
 
-Session creation callbacks retain their timing and native Pi session payload. The
-manager publishes the session and metadata before forwarding the caller callback;
-streaming, usage, and structured-result fields are unchanged.
+Manager session creation callbacks retain their timing but now carry an opaque
+`ExecutionSession`, **not** a native Pi session. The manager publishes this handle
+and its metadata before forwarding the caller callback. `AgentRecord.session` uses
+the same handle; resuming it does not create a new view or native session. The
+low-level `agent-runner` facade still returns native sessions for compatibility.
+Streaming, usage, structured-result fields, and model-facing tool contracts are unchanged.
+
+The embedded adapter accepts only its own handles for control operations. It rejects
+foreign handles and resume/steer after shutdown; repeated valid shutdown stays
+idempotent. UI and transcript code cannot reach SDK controls, extension runners,
+model runtimes, or credential-bearing model headers through this view.
 
 Shutdown emits `session_shutdown` before disposing the SDK session. A 3-second bound
 prevents a hanging handler from blocking quit. Concurrent/repeated cleanup of the
@@ -62,14 +80,33 @@ same session shares one promise; failed handlers still reach disposal, and the
 shutdown timer is cleared when cleanup finishes early. Eviction remains detached,
 while manager disposal awaits child shutdown.
 
+## Observation semantics
+
+The manager, nested tools, output writer, conversation viewer, and result formatter
+use read-only views rather than `AgentSession`. Messages are exposed by a live
+getter: original message identity/extra fields survive, including array replacement
+after compaction. This preserves rendering caches and complete output records.
+Read-only is a TypeScript contract, not a sandbox or a deep copy of model messages.
+
+Observers receive `changed`, `turn_end`, `compaction_start`, or `compaction_end`.
+Compaction completion carries only aborted/success markers. The output writer keeps
+its existing microtask re-anchor after successful compaction, so overflow-retry
+trimming does not skip the next message. Unsubscribe and adapter shutdown suppress
+late callbacks and detach native subscriptions. Missing SDK stats in partial mocks
+remain harmless; UI context percentages are optional rather than invented.
+
+The neutral text formatter lives in `src/transcript.ts`; the upstream facade still
+re-exports it, while UI/tool consumers no longer import the execution engine to format text.
+
 ## Deliberate remaining coupling
 
-The port still uses `ExtensionContext`, `RunOptions`, and `AgentSession`, and
-`AgentRecord.session` remains available to existing transcript/UI consumers. This
-batch does **not** pretend a terminal process can provide an in-process session.
-Separating opaque run/session references and remote transcript views is the next
-step when integrating the second backend. There is no public package subpath for
-this interface yet.
+Request preparation still uses `ExtensionContext` and options derived from the SDK
+runner (`ExecutionRunOptions` replaces the native callback). This is not yet a
+serialized cross-process protocol or public workflow API. A native-free fake backend
+now exercises the manager, UI, output, and resume path; it is not an implementation
+of real terminal session observation. Connecting the terminal primitive still needs
+CLI/child-policy construction, remote observation, writer ownership, and session-store
+fresh/reattach/fork semantics. There is no public package subpath for this interface.
 
 The mention clone remains a separate throwaway launcher. The agent it starts flows
 through the manager normally; its off-screen prompt is not a new backend or registry.
@@ -79,5 +116,6 @@ through the manager normally; its off-screen prompt is not a new backend or regi
 Existing runner, SDK/faux-provider, queue, worktree, nested delegation, usage,
 structured-output, and workflow tests continue exercising the same implementation
 through the compatibility entrypoint. Additional tests cover injected execution,
-steer delivery, cancellation, cleanup idempotency/timeouts, and shared facade state.
+steer delivery, cancellation, cleanup idempotency/timeouts, shared facade state,
+handle ownership, observation lifetime, and native-free UI/output integration.
 All tests remain offline; terminal/mux behavior is outside this batch.
