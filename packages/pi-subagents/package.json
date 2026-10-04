@@ -1,0 +1,58 @@
+{
+  "name": "@maplezzk/pi-subagents",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Private migration baseline for unified embedded and terminal Pi subagents, imported from tintinweb/pi-subagents",
+  "type": "module",
+  "main": "./index.ts",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "files": [
+    "index.ts",
+    "src",
+    "docs",
+    "examples",
+    "README.md",
+    "README.zh-CN.md",
+    "UPSTREAM.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT",
+  "author": "tintinweb",
+  "contributors": ["maplezzk"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/maplezzk/pi-extensions.git",
+    "directory": "packages/pi-subagents"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit --pretty false",
+    "test": "vitest run",
+    "test:e2e": "vitest run e2e",
+    "build": "npm run typecheck",
+    "check": "npm run typecheck && npm test"
+  },
+  "dependencies": {
+    "@sinclair/typebox": "^0.34.49",
+    "croner": "^10.0.1",
+    "nanoid": "^5.1.16",
+    "typebox": "1.3.34"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": ">=0.87.1 <1.0.0",
+    "@earendil-works/pi-coding-agent": ">=0.87.1 <1.0.0",
+    "@earendil-works/pi-tui": ">=0.87.1 <1.0.0"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "0.87.1",
+    "@earendil-works/pi-coding-agent": "0.87.1",
+    "@earendil-works/pi-tui": "0.87.1",
+    "@types/node": "24.12.4",
+    "typescript": "5.9.3",
+    "vitest": "5.0.1"
+  }
+}

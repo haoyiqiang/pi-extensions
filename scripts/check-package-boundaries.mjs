@@ -20,6 +20,7 @@ const PACKAGE_LAYERS = new Map([
   ["pi-rewind", "capability"],
   ["pi-context-view", "capability"],
   ["@maplezzk/pi-test-utils", "internal"],
+  ["@maplezzk/pi-subagents", "internal"],
 ]);
 
 const ALLOWED_WORKSPACE_EDGES = new Set([

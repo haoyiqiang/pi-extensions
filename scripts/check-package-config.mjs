@@ -153,6 +153,19 @@ for (const dir of packageDirs) {
     piDevPins.set(version, users);
   }
 
+  // Private workspaces can contain extension source for tests/incubation, but
+  // must never claim installable Pi resources or enter the distribution profile.
+  if (pkgJson.private === true) {
+    for (const kind of ["extensions", "themes", "skills", "prompts"]) {
+      if (pkgJson.pi?.[kind]?.length) error(`${label}: private workspaces must not declare Pi ${kind}`);
+      for (const entry of rootPackageJson.pi?.[kind] ?? []) {
+        if (entry.startsWith(`${WORKSPACE_PACKAGES_PATH}/${dir}/`)) {
+          error(`${label}: private workspace resource must not appear in the root Pi profile: "${entry}"`);
+        }
+      }
+    }
+  }
+
   // The root Git package is an explicit full-suite distribution profile.
   const exposesIndexAsExtension = pkgJson.pi?.extensions?.includes(PACKAGE_EXTENSION_ENTRY) ?? false;
   const rootExtensionEntry = `${WORKSPACE_PACKAGES_PATH}/${dir}/${EXTENSION_ENTRY_FILE}`;
