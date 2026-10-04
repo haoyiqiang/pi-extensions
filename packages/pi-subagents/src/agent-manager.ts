@@ -20,6 +20,8 @@ import { isAbsolute } from "node:path";
 import type { Model } from "@earendil-works/pi-ai";
 import type { AgentSession, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { resumeAgent, runAgent, type ToolActivity } from "./agent-runner.js";
+import { shutdownEmbeddedSession, steerEmbeddedSession } from "./backends/embedded-lifecycle.js";
+import type { AgentExecutionBackend } from "./backends/types.js";
 import { assignHandle, handleBase } from "./mention.js";
 import { describeModel } from "./model-resolver.js";
 import type { AgentInvocation, AgentRecord, AgentTombstone, IsolationMode, MentionResolution, SubagentType, ThinkingLevel } from "./types.js";
@@ -329,36 +331,14 @@ interface ResumeOptions {
   onStarted?: () => void;
 }
 
-/** Best-effort ceiling on one child's shutdown handlers, so teardown can't strand a quit. */
-const CHILD_SHUTDOWN_TIMEOUT_MS = 3_000;
-
-/**
- * Close the extension lifecycle `runAgent` opened with `bindExtensions`, then dispose.
- *
- * `AgentSession.dispose()` only calls `ExtensionRunner.invalidate()` — pi emits the event
- * itself in `AgentSessionRuntime.dispose()` beforehand, and this is the one place that binds
- * extensions onto a session without going through that path. Without the emit, everything an
- * extension armed in `session_start` leaks once per spawn, and its next tick throws
- * `assertActive()` from a bare timer callback — an uncaughtException that kills pi (#242).
- */
-async function shutdownChildSession(session: AgentSession | undefined): Promise<void> {
-  try {
-    const runner = session?.extensionRunner;
-    // Optional all the way down: on a pi without the getter, or a stubbed session from a
-    // partial `onSessionCreated`, skip the emit — the same degrade as before this fix.
-    if (runner?.hasHandlers?.("session_shutdown")) {
-      // Raced, not awaited outright. `emit` runs every handler serially with no timeout of
-      // its own, and dispose() is reached from pi's own `session_shutdown` with the TUI
-      // already torn down — one hung handler would leave a dead terminal.
-      await Promise.race([
-        runner.emit({ type: "session_shutdown", reason: "quit" }),
-        new Promise<void>(resolve => setTimeout(resolve, CHILD_SHUTDOWN_TIMEOUT_MS).unref()),
-      ]);
-    }
-  } catch { /* a partial session must degrade, not take the teardown down with it */ }
-  // Always, even on timeout: disposal is what this function ultimately exists to do.
-  try { session?.dispose?.(); } catch { /* ignore */ }
-}
+/** Keep the upstream runner entrypoint injectable/mocked without duplicating execution logic. */
+const embeddedExecution: AgentExecutionBackend = {
+  kind: "embedded",
+  run: (...args) => runAgent(...args),
+  resume: (...args) => resumeAgent(...args),
+  steer: steerEmbeddedSession,
+  shutdown: shutdownEmbeddedSession,
+};
 
 export class AgentManager {
   private agents = new Map<string, AgentRecord>();
@@ -418,6 +398,7 @@ export class AgentManager {
     onStart?: OnAgentStart,
     onCompact?: OnAgentCompact,
     onUsage?: OnAgentUsage,
+    private readonly execution: AgentExecutionBackend = embeddedExecution,
   ) {
     this.onComplete = onComplete;
     this.onStart = onStart;
@@ -758,7 +739,7 @@ export class AgentManager {
     }
     const detach = () => { detachParentSignal?.(); detachParentSignal = undefined; };
 
-    const promise = runAgent(ctx, type, prompt, {
+    const promise = this.execution.run(ctx, type, prompt, {
       pi,
       agentId: id,
       model: options.model,
@@ -839,7 +820,7 @@ export class AgentManager {
         // Flush any steers that arrived before the session was ready
         if (record.pendingSteers?.length) {
           for (const msg of record.pendingSteers) {
-            session.steer(msg).catch(() => {});
+            this.execution.steer(session, msg).catch(() => {});
           }
           record.pendingSteers = undefined;
         }
@@ -1174,7 +1155,7 @@ export class AgentManager {
     record.error = undefined;
 
     try {
-      const { text, failure } = await resumeAgent(record.session, prompt, {
+      const { text, failure } = await this.execution.resume(record.session, prompt, {
         onToolActivity: (activity) => {
           if (activity.type === "end") record.toolUses++;
           options?.onToolActivity?.(activity);
@@ -1265,7 +1246,7 @@ export class AgentManager {
       this.drainQueue();
     };
 
-    const promise = resumeAgent(record.session, prompt, {
+    const promise = this.execution.resume(record.session, prompt, {
       onToolActivity: (activity) => {
         if (activity.type === "end") record.toolUses++;
         options.onToolActivity?.(activity);
@@ -1317,16 +1298,26 @@ export class AgentManager {
    * (unknown id, or no longer running/queued).
    */
   steer(id: string, message: string): boolean {
-    const record = this.agents.get(id);
-    if (!record) return false;
-    if (record.status !== "running" && record.status !== "queued") return false;
-    if (record.session) {
-      record.session.steer(message).catch(() => {});
-    } else {
-      if (!record.pendingSteers) record.pendingSteers = [];
-      record.pendingSteers.push(message);
-    }
+    const delivery = this.deliverSteer(id, message);
+    if (delivery === false) return false;
+    void delivery.catch(() => {});
     return true;
+  }
+
+  /** Tool callers await delivery so a failed steer is not announced as successful. */
+  async steerAndWait(id: string, message: string): Promise<boolean> {
+    const delivery = this.deliverSteer(id, message);
+    if (delivery === false) return false;
+    await delivery;
+    return true;
+  }
+
+  private deliverSteer(id: string, message: string): Promise<void> | false {
+    const record = this.agents.get(id);
+    if (!record || (record.status !== "running" && record.status !== "queued")) return false;
+    if (record.session) return this.execution.steer(record.session, message);
+    (record.pendingSteers ??= []).push(message);
+    return Promise.resolve();
   }
 
   getRecord(id: string): AgentRecord | undefined {
@@ -1439,7 +1430,7 @@ export class AgentManager {
     // Fire-and-forget is right here and only here: this runs from the 60s cleanup timer
     // and from `clearCompleted()` on session boundaries, with the process staying alive,
     // so handlers get their full window. The quit path awaits instead — see dispose().
-    void shutdownChildSession(session);
+    void this.execution.shutdown(session);
   }
 
   /**
@@ -1576,6 +1567,6 @@ export class AgentManager {
     // Awaited, unlike the eviction path: pi awaits this extension's `session_shutdown`
     // handler and the process exits right after it returns, so anything left unawaited
     // here never runs at all. Bounded — each call carries its own ceiling, concurrently.
-    await Promise.all(sessions.map(session => shutdownChildSession(session)));
+    await Promise.all(sessions.map(session => this.execution.shutdown(session)));
   }
 }

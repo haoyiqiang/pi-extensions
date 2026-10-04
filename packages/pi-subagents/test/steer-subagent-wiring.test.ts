@@ -17,10 +17,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../src/agent-runner.js", async () => {
   const actual = await vi.importActual<typeof import("../src/agent-runner.js")>("../src/agent-runner.js");
-  return { ...actual, runAgent: vi.fn(), steerAgent: vi.fn() };
+  return { ...actual, runAgent: vi.fn() };
+});
+vi.mock("../src/backends/embedded-lifecycle.js", async () => {
+  const actual = await vi.importActual<typeof import("../src/backends/embedded-lifecycle.js")>("../src/backends/embedded-lifecycle.js");
+  return { ...actual, steerEmbeddedSession: vi.fn() };
 });
 
-import { runAgent, steerAgent } from "../src/agent-runner.js";
+import { runAgent } from "../src/agent-runner.js";
+import { steerEmbeddedSession as steerAgent } from "../src/backends/embedded-lifecycle.js";
 import subagentsExtension from "../src/index.js";
 import { ctx, flush, makePi, textOf } from "./helpers/boot-extension.js";
 
@@ -28,7 +33,9 @@ import { ctx, flush, makePi, textOf } from "./helpers/boot-extension.js";
 // call history has to be reset or a "was never called" assertion depends on the
 // order the cases happen to run in.
 beforeEach(() => {
-  vi.mocked(steerAgent).mockReset();
+  vi.mocked(steerAgent).mockReset().mockImplementation(async (session, message) => {
+    await session.steer(message);
+  });
   vi.mocked(runAgent).mockReset();
 });
 

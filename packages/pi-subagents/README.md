@@ -30,6 +30,18 @@ Repository Pi development dependencies are pinned to **0.87.1**, TypeScript to
 **5.9.3**, and Vitest to **5.0.1**. Local SDK compatibility changes are documented in
 [UPSTREAM.md](./UPSTREAM.md). The original MIT notice is retained in [LICENSE](./LICENSE).
 
+## Embedded backend extraction
+
+The SDK execution implementation now lives in `src/backends/embedded.ts`, with
+session steering/shutdown in `embedded-lifecycle.ts`. `agent-runner.ts` remains a
+compatibility re-export. `AgentManager` accepts a private execution port for tests
+and composition, while continuing to own queues, records, cancellation, worktrees,
+and notifications. Tool steering no longer bypasses that port.
+
+The port still uses native Pi session types; it is not yet a terminal-capable or
+public workflow API. See [execution boundary](./docs/execution-backend.md) for the
+scope, preserved contracts, and remaining coupling. No new user configuration is added.
+
 ## Configuration
 
 No new production configuration is introduced, so this workspace intentionally has
@@ -68,6 +80,6 @@ terminal multiplexer, or local Pi daemon are needed. Test fixtures under
 - [Upstream RPC reference](./docs/rpc.md)
 - [Upstream scripted workflow reference](./docs/workflows.md)
 
-Next: extract an embedded execution backend without changing its behavior, integrate
-the current terminal backend behind the same interface, localize and unify UI/config,
-then switch the root profile and release metadata before removing the old package.
+Next: separate backend-neutral run/session references and integrate the current
+terminal implementation, localize and unify UI/config, then switch the root profile
+and release metadata before removing the old package.

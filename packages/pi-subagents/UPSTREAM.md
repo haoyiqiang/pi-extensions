@@ -51,6 +51,19 @@ The upstream access to the registry facade's wrapped `.runtime` remains a compat
 boundary; a real-SDK regression test pins it for 0.87.1. This import is not a claim of
 compatibility with untested future Pi releases.
 
-Backend extraction, terminal integration, shared configuration migration, full
-localization, and release activation belong to later batches. No code from
-`pi-interactive-subagents` is imported yet.
+## Embedded backend extraction
+
+- Moved the original runner to `src/backends/embedded.ts`; `src/agent-runner.ts`
+  preserves its exports and shared configuration instance.
+- Added a private `AgentExecutionBackend` port to AgentManager; queues, records,
+  ownership, worktrees, completion, and abort-controller policy remain manager-owned.
+- Routed top-level/nested tool steering and queued steer delivery through the manager
+  to the backend, retaining awaitable errors for tools and fire-and-forget UI behavior.
+- Moved lifecycle cleanup to `embedded-lifecycle.ts`, retaining the 3-second shutdown
+  bound and adding idempotency and early timer cleanup.
+- Updated steering test doubles and added backend injection/lifecycle/facade tests.
+
+The seam intentionally still uses native Pi session types (see
+[execution boundary](./docs/execution-backend.md)). Terminal integration, shared
+configuration migration, full localization, and release activation belong to later
+batches. No code from `pi-interactive-subagents` is imported yet.

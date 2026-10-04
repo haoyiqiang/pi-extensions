@@ -25,6 +25,17 @@ Pi 开发依赖统一为 **0.87.1**，TypeScript 为 **5.9.3**，Vitest 为 **5.
 本地 SDK 兼容调整记录在 [UPSTREAM.md](./UPSTREAM.md)，原始 MIT 版权声明保留在
 [LICENSE](./LICENSE)。
 
+## Embedded backend 抽取
+
+SDK 执行实现已移至 `src/backends/embedded.ts`，steer 与 session 清理位于
+`embedded-lifecycle.ts`；`agent-runner.ts` 保留兼容导出。AgentManager 可注入私有
+执行接口用于测试和组合，但队列、记录、取消、worktree 与通知仍由它负责。
+工具的 steer 不再绕过此接口。
+
+接口仍使用原生 Pi session 类型，尚不是可承载 terminal 的最终接口，也不是公开
+workflow API。详细范围、兼容约定和剩余耦合见 [执行边界](./docs/execution-backend.md)。
+此步没有新增用户配置。
+
 ## 配置
 
 本批次没有新增生产配置，因此有意不添加 `config.example.json`。隔离开发仍使用上游的
@@ -59,5 +70,5 @@ npm run check
 - [上游 RPC 协议参考](./docs/rpc.md)
 - [上游脚本 workflow 参考](./docs/workflows.md)
 
-下一步：保持行为不变地抽取 embedded backend，再集成当前 terminal backend，完成
+下一步：分离 backend-neutral 的 run/session 引用并集成当前 terminal 实现，完成
 本地化、UI/配置统一后，一次切换根 profile 与发布元数据，最后删除旧包。

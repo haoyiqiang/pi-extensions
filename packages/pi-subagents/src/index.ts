@@ -19,7 +19,7 @@ import { abortable } from "./abortable.js";
 import { hasAgentBadge, renderAgentName } from "./agent-color.js";
 import { buildNewAgentFile, disableInContent, enableInContent, isEmptyStub, locateAgentFile, personalAgentsDir, projectAgentsDir, serializeAgentFile } from "./agent-file-toggle.js";
 import { AgentManager, isTopLevelAgent } from "./agent-manager.js";
-import { getAgentConversation, getDefaultMaxTurns, getGraceTurns, getRememberAgents, normalizeMaxTurns, resolveEffectiveMaxTurns, SUBAGENT_TOOL_NAMES, setDefaultMaxTurns, setGraceTurns, setRememberAgents, steerAgent } from "./agent-runner.js";
+import { getAgentConversation, getDefaultMaxTurns, getGraceTurns, getRememberAgents, normalizeMaxTurns, resolveEffectiveMaxTurns, SUBAGENT_TOOL_NAMES, setDefaultMaxTurns, setGraceTurns, setRememberAgents } from "./agent-runner.js";
 import { BUILTIN_TOOL_NAMES, getAgentConfig, getAllTypes, getAvailableTypes, getConfig, getFallbackSubagent, isDefaultsDisabled, NO_FALLBACK, registerAgents, resolveSpawnType, resolveType, setDefaultsDisabled, setFallbackSubagent } from "./agent-types.js";
 import { inChildSessionContext } from "./child-context.js";
 import { type RpcHandle, registerRpcHandlers } from "./cross-extension-rpc.js";
@@ -2843,14 +2843,13 @@ Terse command-style prompts produce shallow, generic work.
       }
       if (!record.session) {
         // Session not ready yet — queue the steer for delivery once initialized
-        if (!record.pendingSteers) record.pendingSteers = [];
-        record.pendingSteers.push(params.message);
+        manager.steer(record.id, params.message);
         pi.events.emit("subagents:steered", { id: record.id, message: params.message });
         return textResult(`Steering message queued for agent ${record.id}. It will be delivered once the session initializes.`);
       }
 
       try {
-        await steerAgent(record.session, params.message);
+        await manager.steerAndWait(record.id, params.message);
         pi.events.emit("subagents:steered", { id: record.id, message: params.message });
         const tokens = formatLifetimeTokens(record);
         const contextPercent = getSessionContextPercent(record.session);

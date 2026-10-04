@@ -81,6 +81,13 @@ beforeEach(() => {
     awaitStartup: vi.fn(async () => {}),
     getRecord: (id: string) => records.get(id),
     resume: vi.fn(),
+    steerAndWait: vi.fn(async (id: string, message: string) => {
+      const record = records.get(id);
+      if (!record || record.status !== "running") return false;
+      if (record.session) await record.session.steer(message);
+      else (record.pendingSteers ??= []).push(message);
+      return true;
+    }),
   } as any;
 });
 

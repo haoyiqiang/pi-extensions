@@ -90,6 +90,7 @@ export interface NestedAgentManager {
   ): Promise<{ id: string; record: AgentRecord }>;
   getRecord(id: string): AgentRecord | undefined;
   resume(id: string, prompt: string, signal?: AbortSignal): Promise<AgentRecord | undefined>;
+  steerAndWait(id: string, message: string): Promise<boolean>;
 }
 
 export interface NestedToolContext {
@@ -408,12 +409,11 @@ export function createNestedSubagentTools(context: NestedToolContext): ToolDefin
       // Session not ready yet — queue the steer. The manager flushes pending
       // steers when the session is created (same contract as the top-level tool).
       if (!record.session) {
-        if (!record.pendingSteers) record.pendingSteers = [];
-        record.pendingSteers.push(params.message);
+        await context.manager.steerAndWait(record.id, params.message);
         return textResult(`Steering message queued for nested agent ${params.agent_id}.`);
       }
       try {
-        await record.session.steer(params.message);
+        await context.manager.steerAndWait(record.id, params.message);
       } catch (err) {
         return toolError(`Failed to steer nested agent: ${err instanceof Error ? err.message : String(err)}`);
       }
