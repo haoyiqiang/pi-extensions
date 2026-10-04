@@ -27,7 +27,8 @@ import { buildMemoryBlock, buildReadOnlyMemoryBlock } from "../memory.js";
 import { createNestedSubagentTools, getMaxSubagentDepth, type NestedAgentManager } from "../nested-tools.js";
 import { buildAgentPrompt, type PromptExtras } from "../prompts.js";
 import { preloadSkills } from "../skill-loader.js";
-import { createStructuredCapture, createStructuredOutputTool, structuredRetryPrompt } from "../structured-output.js";
+import { createStructuredCapture, createStructuredOutputTool, structuredFailure, structuredRetryPrompt } from "../structured-output.js";
+import { i18n } from "../i18n.js";
 import type { SubagentType, ThinkingLevel } from "../types.js";
 import type { LifetimeUsage } from "../usage.js";
 import type { CompiledSchema } from "../workflow/json-schema.js";
@@ -1069,7 +1070,7 @@ export async function runAgent(
       if (maxTurns != null) {
         if (!softLimitReached && turnCount >= maxTurns) {
           softLimitReached = true;
-          session.steer("You have reached your turn limit. Wrap up immediately — provide your final answer now.");
+          session.steer(i18n.t("terminalPolicy.wrapUp"));
         } else if (softLimitReached && turnCount >= maxTurns + graceTurns) {
           aborted = true;
           session.abort();
@@ -1143,17 +1144,13 @@ export async function runAgent(
   // A child asked for structured output that never gave any has failed, however
   // articulate its prose was. Reported through `failure` so it travels the same
   // path as a provider error rather than arriving as a successful empty answer.
-  const structuredFailure = structuredCapture !== undefined && structuredCapture.json === undefined
-    ? structuredCapture.lastError !== undefined
-      ? `The agent's StructuredOutput call did not match the required schema: ${structuredCapture.lastError}`
-      : "The agent did not report its answer through StructuredOutput."
-    : undefined;
+  const schemaFailure = structuredCapture !== undefined ? structuredFailure(structuredCapture) : undefined;
   return {
     responseText,
     session,
     aborted,
     steered: softLimitReached,
-    failure: finalTurnError(session, startLen) ?? structuredFailure,
+    failure: finalTurnError(session, startLen) ?? schemaFailure,
     ...(structuredCapture?.json !== undefined ? { structuredJson: structuredCapture.json } : {}),
     ...(structuredRetried ? { structuredRetried } : {}),
   };

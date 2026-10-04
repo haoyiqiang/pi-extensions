@@ -67,7 +67,12 @@ Manager session creation callbacks retain their timing but now carry an opaque
 and its metadata before forwarding the caller callback. `AgentRecord.session` uses
 the same handle; resuming it does not create a new view or native session. The
 low-level `agent-runner` facade still returns native sessions for compatibility.
-Streaming, usage, structured-result fields, and model-facing tool contracts are unchanged.
+Streaming and usage contracts are unchanged. `ExecutionResumeResult` now adds optional
+structured JSON/retry metadata and abort/steer flags to the existing text/failure
+result. Both manager resume paths clear stale structured fields and apply fresh-run
+status precedence without overwriting an external stop. Existing embedded adapters
+remain structurally compatible; this does not install new enforcement subscriptions
+on the upstream embedded resume implementation.
 
 The embedded adapter accepts only its own handles for control operations. It rejects
 foreign handles and resume/steer after shutdown; repeated valid shutdown stays

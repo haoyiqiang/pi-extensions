@@ -12,6 +12,9 @@ import type {
 import { BUILTIN_TOOL_NAMES } from "../../agent-types.js";
 import { i18n } from "../../i18n.js";
 import type { LifetimeUsage } from "../../usage.js";
+import { createStructuredCapture, createStructuredOutputTool, structuredFailure, structuredRetryPrompt,
+  STRUCTURED_OUTPUT_TOOL_NAME, type StructuredCapture } from "../../structured-output.js";
+import { compileTerminalSchema, policyContinuation, validTurnBudget } from "./run-policy.js";
 import type { SessionViewEvent, TranscriptMessage } from "../session.js";
 import {
   BRIDGE_VERSION,
@@ -55,6 +58,11 @@ export function registerTerminalChild(
   let cleaned = false;
   let sequence = 0;
   let turnCount = 0;
+  let softLimitReached = false;
+  let hardLimitReached = false;
+  let structuredCapture: StructuredCapture | undefined;
+  let structuredRetried = false;
+  const allowedTools = () => [...(manifest?.tools ?? []), ...(structuredCapture ? [STRUCTURED_OUTPUT_TOOL_NAME] : [])];
   let permitted = false;
   let agentStarted = false;
   const pendingSteers: Array<Extract<ParentControl, { type: "steer" }>> = [];
@@ -367,7 +375,22 @@ export function registerTerminalChild(
       failClosed(i18n.t("bridge.modelMismatch"), ctx, { report: false });
       return;
     }
-    if (!enforceTools(ctx, manifest.tools)) return;
+    if (manifest.structuredSchema !== undefined) {
+      try {
+        const compiled = compileTerminalSchema(manifest.structuredSchema);
+        if (pi.getAllTools().some((tool) => tool.name === STRUCTURED_OUTPUT_TOOL_NAME)) throw invalidManifest();
+        structuredCapture = createStructuredCapture();
+        const tool = createStructuredOutputTool(compiled, structuredCapture);
+        pi.registerTool({ ...tool, execute: async (id, params, signal, onUpdate, toolCtx) => {
+          if (state !== "running" || !permitted || abortRequested || signal?.aborted) throw new Error(i18n.t("bridge.notRunning"));
+          return tool.execute(id, params, signal, onUpdate, toolCtx);
+        } });
+      } catch {
+        failClosed(i18n.t("bridge.invalidManifest"), ctx, { report: false });
+        return;
+      }
+    }
+    if (!enforceTools(ctx, allowedTools())) return;
     const validatedManifest = manifest;
 
     state = "connecting";
@@ -430,7 +453,7 @@ export function registerTerminalChild(
       failClosed(i18n.t("bridge.modelMismatch"), ctx);
       return { action: "handled" };
     }
-    if (!enforceTools(ctx, manifest.tools)) return { action: "handled" };
+    if (!enforceTools(ctx, allowedTools())) return { action: "handled" };
     return { action: "continue" };
   });
 
@@ -441,7 +464,7 @@ export function registerTerminalChild(
   });
 
   pi.on("before_agent_start", (event, ctx) => {
-    if (!manifest || state !== "running" || !permitted) {
+    if (!manifest || state !== "running" || !permitted || abortRequested) {
       if (state !== "failed" && state !== "closed") failClosed(i18n.t("bridge.notRunning"), ctx);
       event.systemPromptOptions.selectedTools = [];
       return;
@@ -456,12 +479,12 @@ export function registerTerminalChild(
       failClosed(i18n.t("bridge.modelMismatch"), ctx);
       return;
     }
-    if (!enforceTools(ctx, manifest.tools)) {
+    if (!enforceTools(ctx, allowedTools())) {
       event.systemPromptOptions.selectedTools = [];
       return;
     }
 
-    event.systemPromptOptions.selectedTools = [...manifest.tools];
+    event.systemPromptOptions.selectedTools = allowedTools();
     event.systemPromptOptions.forceSystemPrompt = manifest.systemPrompt;
     return { systemPrompt: manifest.systemPrompt };
   });
@@ -499,14 +522,36 @@ export function registerTerminalChild(
     }
   });
 
-  pi.on("turn_end", (_event, ctx) => {
-    if (state !== "running") return;
+  pi.on("turn_end", (event, ctx) => {
+    // Pi may emit an abort bookkeeping turn after the hard boundary, without another request.
+    if (state !== "running" || hardLimitReached) return;
     turnCount++;
     if (!sendFeedback({ type: "turn", count: turnCount })) {
       failClosed(i18n.t("bridge.disconnected"), ctx, { report: false });
       return;
     }
     sendSnapshot({ type: "turn_end" }, ctx);
+    if (event.outcome === "aborted") abortRequested = true;
+    if (state !== "running" || abortRequested || policyFailure || manifest?.maxTurns === undefined) return;
+    if (turnCount >= manifest.maxTurns + manifest.graceTurns!) {
+      hardLimitReached = true;
+      abortRequested = true;
+      pendingSteers.length = 0;
+      safeAbort(ctx);
+      return { continue: false };
+    }
+    if (!softLimitReached && turnCount >= manifest.maxTurns && event.outcome === "completed") {
+      softLimitReached = true;
+      return policyContinuation(i18n.t("terminalPolicy.wrapUp"));
+    }
+  });
+
+  pi.on("agent_before_settle", (event) => {
+    if (event.outcome === "aborted") abortRequested = true;
+    if (state !== "running" || !permitted || abortRequested || policyFailure || !structuredCapture
+      || structuredCapture.json !== undefined || structuredRetried || event.outcome !== "completed") return;
+    structuredRetried = true;
+    return policyContinuation(structuredRetryPrompt(structuredCapture));
   });
 
   pi.on("session_before_compact", (event, ctx) => {
@@ -526,14 +571,14 @@ export function registerTerminalChild(
   });
 
   pi.on("before_provider_request", (_event, ctx) => {
-    if (!manifest || state !== "running" || !permitted || abortRequested) { safeAbort(ctx); return; }
+    if (!manifest || state !== "running" || !permitted || abortRequested || policyFailure) { safeAbort(ctx); return; }
     if (!matchesSession(manifest, ctx)) failClosed(i18n.t("bridge.identityMismatch"), ctx);
     else if (!matchesModel(manifest, ctx)) failClosed(i18n.t("bridge.modelMismatch"), ctx);
   });
 
   pi.on("tool_call", (event, ctx) => {
     if (state === "running" && permitted && !abortRequested && manifest
-      && matchesSession(manifest, ctx) && matchesModel(manifest, ctx) && manifest.tools.includes(event.toolName)) return;
+      && matchesSession(manifest, ctx) && matchesModel(manifest, ctx) && allowedTools().includes(event.toolName)) return;
     policyFailure = i18n.t("bridge.toolDenied", { name: event.toolName });
     return { block: true, reason: policyFailure, terminate: true };
   });
@@ -556,8 +601,12 @@ export function registerTerminalChild(
       snapshot: finalSnapshot,
       text: finalAssistant ? assistantText(finalAssistant).trim() : "",
       aborted,
-      ...settledFailure(finalAssistant, aborted),
-      ...(policyFailure ? { failure: policyFailure } : {}),
+      failure: (hardLimitReached ? i18n.t("terminalPolicy.turnLimit") : policyFailure)
+        ?? settledFailure(finalAssistant, aborted).failure
+        ?? (structuredCapture ? structuredFailure(structuredCapture) : undefined),
+      ...(structuredCapture?.json !== undefined ? { structuredJson: structuredCapture.json } : {}),
+      ...(structuredRetried ? { structuredRetried: true } : {}),
+      ...(softLimitReached ? { steered: true } : {}),
     };
 
     const sent = writeFrame(nextPacket(feedback), {
@@ -614,9 +663,10 @@ function validateManifest(value: unknown): TerminalChildManifest {
     || typeof value.systemPrompt !== "string"
     || !Array.isArray(value.tools)
     || value.tools.some((tool) => !nonEmptyString(tool) || !BUILTIN_TOOLS.has(tool as string))
-    || new Set(value.tools).size !== value.tools.length) {
+    || new Set(value.tools).size !== value.tools.length || !validTurnBudget(value.maxTurns, value.graceTurns)) {
     throw invalidManifest();
   }
+  if (value.structuredSchema !== undefined) compileTerminalSchema(value.structuredSchema);
   return value as unknown as TerminalChildManifest;
 }
 

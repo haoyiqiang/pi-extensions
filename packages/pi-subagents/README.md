@@ -60,8 +60,11 @@ cleanup is idempotent; resumed output excludes old turns and stale completion ma
 `createTerminalExecutionBackend()` now connects that primitive to a real Pi CLI child,
 credential-free launch policy, authenticated loopback feedback, canonical session
 views, acknowledged steering, and fresh-process resume of owned sessions. The first
-slice requires POSIX/Bash, `isolated: true` and autonomous completion; unsupported inheritance,
-reattach/fork, structured output, memory, turn limits and native Windows fail explicitly.
+slice requires POSIX/Bash, `isolated: true` and autonomous completion. JSON Schema
+structured output and soft/grace/hard turn limits now work across fresh and owned-session
+resume runs; each invocation resets capture, retry and turn counters. Resume results
+propagate structured data and abort/steer flags without reusing the previous result.
+Unsupported inheritance, reattach/fork, memory and native Windows fail explicitly.
 Completion uses a per-run supervisor receipt rather than spoofable screen text.
 
 See [terminal backend](./docs/terminal-backend.md) for the supported contract and

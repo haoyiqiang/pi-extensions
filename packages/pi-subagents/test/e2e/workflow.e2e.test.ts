@@ -193,7 +193,9 @@ describe("Workflow end to end", () => {
           childPrompts.push(seen);
           // Answer through the injected tool exactly once, then stop — a model
           // that kept calling it every turn would just spin.
-          const alreadyAnswered = currentTools.length > 0 && /Recorded\./.test(seen);
+          const alreadyAnswered = context.messages.some(message =>
+            message.role === "toolResult" && message.toolName === "StructuredOutput" && !message.isError,
+          );
           return alreadyAnswered
             ? fauxText("done")
             : fauxToolCall("StructuredOutput", { files: ["a.ts", "b.ts"] }, { id: "so-1" });

@@ -161,6 +161,8 @@ import {
   setRememberAgents,
 } from "../src/agent-runner.js";
 import { compileJsonSchema } from "../src/workflow/json-schema.js";
+import { structuredRetryPrompt } from "../src/structured-output.js";
+import { i18n } from "../src/i18n.js";
 
 /** The most recent session built by `createSession` — read by `lastToolsPassed()`. */
 let lastSession: ReturnType<typeof createSession>["session"] | undefined;
@@ -1357,7 +1359,7 @@ describe("agent-runner master tool allowlist", () => {
       const result = await runAgent(ctx, "Explore", "go", { pi, structuredOutput: STRUCTURED });
 
       expect(session.prompt).toHaveBeenCalledTimes(2);
-      expect(String(session.prompt.mock.calls[1][0])).toMatch(/Call StructuredOutput now/);
+      expect(String(session.prompt.mock.calls[1][0])).toBe(structuredRetryPrompt({ called: false }));
       expect(result.structuredJson).toBeUndefined();
       expect(result.structuredRetried).toBe(true);
       // Reported as a failure, not as a completion holding prose the caller
@@ -1410,7 +1412,7 @@ describe("agent-runner master tool allowlist", () => {
       const retry = String(session.prompt.mock.calls[1][0]);
       // "you got the shape wrong" and "you never answered" need different
       // corrections; telling it the wrong one sends it hunting.
-      expect(retry).toMatch(/did not match the required schema/);
+      expect(retry).toBe(structuredRetryPrompt({ called: true, lastError: String(STRUCTURED.check({ wrong: 1 })) }));
       expect(retry).toContain("answer");
     });
 
@@ -2604,7 +2606,7 @@ describe("agent-runner turn limits", () => {
     setGraceTurns(5);
     const { session, result } = await runWithTurns(5, { maxTurns: 5 });
     expect(session.steer).toHaveBeenCalledTimes(1);
-    expect(session.steer.mock.calls[0][0]).toContain("turn limit");
+    expect(session.steer.mock.calls[0][0]).toBe(i18n.t("terminalPolicy.wrapUp"));
     expect(session.abort).not.toHaveBeenCalled();
     expect(result.steered).toBe(true);
   });

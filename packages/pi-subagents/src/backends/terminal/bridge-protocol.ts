@@ -25,6 +25,9 @@ export interface TerminalChildManifest {
   modelFingerprint?: string;
   tools: string[];
   systemPrompt: string;
+  structuredSchema?: Record<string, unknown>;
+  maxTurns?: number;
+  graceTurns?: number;
 }
 
 export type ChildFeedback =
@@ -35,7 +38,8 @@ export type ChildFeedback =
   | { type: "usage"; usage: LifetimeUsage }
   | { type: "turn"; count: number }
   | { type: "compaction"; info: { reason: "manual" | "threshold" | "overflow"; tokensBefore: number } }
-  | { type: "settled"; snapshot: TerminalSnapshot; text: string; aborted: boolean; failure?: string }
+  | { type: "settled"; snapshot: TerminalSnapshot; text: string; aborted: boolean; failure?: string;
+      structuredJson?: string; structuredRetried?: boolean; steered?: boolean }
   | { type: "ack"; id: string; error?: string }
   | { type: "failure"; error: string };
 

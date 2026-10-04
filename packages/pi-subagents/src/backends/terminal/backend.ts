@@ -12,17 +12,21 @@ import {
 } from "./prepare.js";
 import type { TerminalDependencies, TerminalRun } from "./types.js";
 import { waitForProcessExit } from "./process-exit.js";
+import { compileTerminalSchema } from "./run-policy.js";
+import type { CompiledSchema } from "../../workflow/json-schema.js";
 
 export type { TerminalBackendConfig } from "./prepare.js";
 export const TERMINAL_BACKEND_CAPABILITIES = Object.freeze({
   isolated: true, fresh: true, resumeOwnedSession: true, steer: true,
-  inheritContext: false, reattach: false, fork: false, structuredOutput: false, maxTurns: false,
+  inheritContext: false, reattach: false, fork: false, structuredOutput: true, maxTurns: true,
   nativeWindows: false, powershellRuntime: false,
 });
 
 interface SessionState {
   handle: ExecutionSession;
   policy: TerminalPolicy;
+  structuredCheck?: (value: unknown) => true | string;
+  wireSchema?: CompiledSchema;
   snapshot: TerminalSnapshot;
   listeners: Set<(event: SessionViewEvent) => void>;
   closed: boolean;
@@ -33,6 +37,17 @@ interface SessionState {
   terminal?: TerminalRun;
   operation?: Promise<ExecutionRunResult>;
   shutdown?: Promise<void>;
+}
+
+function validateStructuredResult(state: SessionState, final: Extract<ChildFeedback, { type: "settled" }>): { json?: string; failure?: string } {
+  const invalid = () => ({ failure: i18n.t("terminalPolicy.invalidResult") });
+  if (!state.wireSchema) return final.structuredJson !== undefined || final.structuredRetried ? invalid() : {};
+  if (final.structuredJson === undefined) return final.failure || final.aborted ? {} : invalid();
+  try {
+    const value: unknown = JSON.parse(final.structuredJson);
+    if (state.wireSchema.check(value) !== true || state.structuredCheck?.(value) !== true) return invalid();
+    return { json: JSON.stringify(value) };
+  } catch { return invalid(); }
 }
 
 /** Injectable transport/bridge for deterministic tests; production always uses the real child bridge. */
@@ -156,12 +171,15 @@ export function createTerminalExecutionBackend(
         text = final.text;
         const result = await withExitDeadline(terminal.completion, exitTimeout);
         if (result.cleanupError || result.status === "cancelled") state.poisoned = true;
+        const structured = validateStructuredResult(state, final);
         return {
           session: state.handle,
           responseText: final.text,
           aborted: final.aborted || result.status === "cancelled",
-          steered: false,
-          failure: final.failure ?? (result.status === "failed" ? result.error ?? result.summary
+          steered: final.steered === true,
+          ...(structured.json !== undefined ? { structuredJson: structured.json } : {}),
+          ...(final.structuredRetried ? { structuredRetried: true } : {}),
+          failure: structured.failure ?? final.failure ?? (result.status === "failed" ? result.error ?? result.summary
             : result.cleanupError ? i18n.t("terminalBackend.cleanupFailed", { error: result.cleanupError }) : undefined),
         };
       } catch (error) {
@@ -199,6 +217,8 @@ export function createTerminalExecutionBackend(
       const listeners = new Set<(event: SessionViewEvent) => void>();
       const state = {
         policy, listeners, closed: false, poisoned: false, running: false,
+        wireSchema: policy.structuredSchema ? compileTerminalSchema(policy.structuredSchema) : undefined,
+        structuredCheck: options.structuredOutput?.check.bind(options.structuredOutput),
         snapshot: { messages: [] as readonly TranscriptMessage[], stats: { tokens: { input: 0, output: 0, cacheWrite: 0 }, contextUsage: { percent: null } } },
       } as SessionState;
       const handle: ExecutionSession = Object.freeze({
@@ -219,7 +239,13 @@ export function createTerminalExecutionBackend(
     async resume(handle, prompt, options) {
       const state = getState(handle);
       const result = await invoke(state, prompt, options);
-      return { text: result.responseText, failure: result.failure ?? (result.aborted ? i18n.t("terminal.cancelled") : undefined) };
+      return {
+        text: result.responseText, failure: result.failure ?? (result.aborted ? i18n.t("terminal.cancelled") : undefined),
+        ...(result.aborted ? { aborted: true } : {}),
+        ...(result.steered ? { steered: true } : {}),
+        ...(result.structuredJson !== undefined ? { structuredJson: result.structuredJson } : {}),
+        ...(result.structuredRetried ? { structuredRetried: true } : {}),
+      };
     },
     async steer(handle, text) {
       const state = getState(handle);

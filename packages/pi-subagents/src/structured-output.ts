@@ -26,6 +26,7 @@
  */
 
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { i18n } from "./i18n.js";
 import type { CompiledSchema } from "./workflow/json-schema.js";
 
 /**
@@ -63,15 +64,10 @@ export function createStructuredOutputTool(
 ): ToolDefinition {
   return defineTool({
     name: STRUCTURED_OUTPUT_TOOL_NAME,
-    label: "Structured Output",
-    description:
-      "Report your final answer. Call this exactly once, with the complete result, and put everything the "
-      + "caller needs inside the arguments — text written outside this call is discarded. If a call is "
-      + "rejected for not matching the schema, fix the reported fields and call it again.",
-    promptSnippet: "Report your final answer as structured data",
-    promptGuidelines: [
-      "Your final answer MUST be reported by calling StructuredOutput. Prose outside that call is discarded.",
-    ],
+    label: i18n.t("structuredOutput.label"),
+    description: i18n.t("structuredOutput.description"),
+    promptSnippet: i18n.t("structuredOutput.snippet"),
+    promptGuidelines: [i18n.t("structuredOutput.guideline", { tool: STRUCTURED_OUTPUT_TOOL_NAME })],
     // The caller's schema *is* the tool's input schema, verbatim — that is what
     // makes the provider fill the fields. pi types this as TypeBox's `TSchema`,
     // which v1 defines as an open interface, so a plain JSON Schema satisfies
@@ -98,14 +94,15 @@ export function createStructuredOutputTool(
         // Pi 0.87.1 marks tool failures only when execute throws. The error
         // becomes the failed tool result shown to the model, which can correct
         // itself inside this same run. The prompt-level retry is the backstop.
-        throw new Error(
-          `StructuredOutput did not match the required schema:\n${verdict}\nCall it again with a corrected value.`,
-        );
+        throw new Error(i18n.t("structuredOutput.invalid", {
+          tool: STRUCTURED_OUTPUT_TOOL_NAME,
+          error: verdict,
+        }));
       }
       // Last valid call wins: a model that calls twice meant the second one.
       capture.json = JSON.stringify(params);
       capture.lastError = undefined;
-      return { content: [{ type: "text", text: "Recorded." }], details: {} };
+      return { content: [{ type: "text", text: i18n.t("structuredOutput.recorded") }], details: {} };
     },
   }) as ToolDefinition;
 }
@@ -119,7 +116,15 @@ export function createStructuredOutputTool(
  */
 export function structuredRetryPrompt(capture: StructuredCapture): string {
   const reason = capture.called && capture.lastError !== undefined
-    ? `Your last ${STRUCTURED_OUTPUT_TOOL_NAME} call did not match the required schema: ${capture.lastError}`
-    : `You did not call ${STRUCTURED_OUTPUT_TOOL_NAME}, so your answer was not recorded.`;
-  return `${reason}\n\nCall ${STRUCTURED_OUTPUT_TOOL_NAME} now with your complete final answer. Do not reply with prose.`;
+    ? i18n.t("structuredOutput.retryInvalid", { tool: STRUCTURED_OUTPUT_TOOL_NAME, error: capture.lastError })
+    : i18n.t("structuredOutput.retryMissing", { tool: STRUCTURED_OUTPUT_TOOL_NAME });
+  return i18n.t("structuredOutput.retry", { reason, tool: STRUCTURED_OUTPUT_TOOL_NAME });
+}
+
+/** Report an unsuccessful structured run; a previously validated payload still wins. */
+export function structuredFailure(capture: StructuredCapture): string | undefined {
+  if (capture.json !== undefined) return undefined;
+  return capture.lastError !== undefined
+    ? i18n.t("structuredOutput.failureInvalid", { tool: STRUCTURED_OUTPUT_TOOL_NAME, error: capture.lastError })
+    : i18n.t("structuredOutput.failureMissing", { tool: STRUCTURED_OUTPUT_TOOL_NAME });
 }

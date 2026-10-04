@@ -137,3 +137,33 @@ no new persisted configuration, root-profile change, release activation, or publ
 This new bridge does not import the old product's private implementation or duplicate
 its registry, notifications or widget. See [terminal backend](./docs/terminal-backend.md)
 for the exact supported slice, lifetime limits and work deferred before activation.
+
+## Terminal structured output and invocation limits
+
+This step supersedes the initial slice's schema/finite-turn-limit rejection:
+
+- Terminal preparation snapshots JSON-only schemas and resolved soft/grace turn
+  budgets before environment work. Both the CLI registry allowlist and the child
+  event/tool guards admit the synthetic `StructuredOutput` tool, including with
+  no builtins enabled; unrelated provider tools remain excluded.
+- The child reuses the shared validated capture tool and requests at most one
+  missing-output continuation at `agent_before_settle`. Turn counting spans those
+  continuations and automatic recovery; soft limits request wrap-up and exhausted
+  grace aborts. Abort bookkeeping after that boundary does not add budget turns.
+- Feedback carries structured JSON, retry and wrap-up flags. The parent validates
+  returned JSON again, including any caller-side check, before exposing it. Owned
+  terminal resumes retain policy but reset capture/retry/turn state per invocation.
+- The neutral resume result and both manager paths propagate this metadata and
+  discard stale prior results. A foreground resume now owns a fresh cancellation
+  controller, busy resumes cannot replace it, and already-aborted parent signals
+  reach both resume paths. Pool/notification ownership stays with the manager.
+- Shared structured tool/schema diagnostics and the wrap-up prompt use bilingual
+  catalogs without changing TypeBox's process-global locale. Embedded fresh-run
+  behavior is unchanged apart from localized wording and the shared failure helper;
+  embedded resume policy subscriptions remain a separate parity task.
+- Extended the offline real Pi CLI provider/tests for schema correction, bounded
+  recovery, sticky resume policy, turn-limit precedence and active-request cancel.
+
+No configuration switch, root-profile activation, public export or release metadata
+is added. External reattach/fork and the remaining backend parity work are still
+required before production routing.

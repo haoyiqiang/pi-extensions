@@ -6,7 +6,7 @@ import {
   registerAgents,
   setDefaultsDisabled,
 } from "../src/agent-types.js";
-import { setDefaultMaxTurns } from "../src/backends/embedded.js";
+import { setDefaultMaxTurns, setGraceTurns } from "../src/backends/embedded.js";
 import type { PersistentSessionReference } from "../src/backends/session-reference.js";
 import type { ExecutionRunOptions } from "../src/backends/types.js";
 import { TERMINAL_MANIFEST_ENV, type TerminalChildManifest } from "../src/backends/terminal/bridge-protocol.js";
@@ -18,6 +18,7 @@ import {
   type TerminalPolicy,
 } from "../src/backends/terminal/prepare.js";
 import type { AgentConfig } from "../src/types.js";
+import { compileJsonSchema } from "../src/workflow/json-schema.js";
 
 const tempDirectories: string[] = [];
 
@@ -107,12 +108,14 @@ beforeEach(() => {
   setDefaultsDisabled(false);
   registerAgents(new Map());
   setDefaultMaxTurns(undefined);
+  setGraceTurns(5);
 });
 
 afterEach(() => {
   setDefaultsDisabled(false);
   registerAgents(new Map());
   setDefaultMaxTurns(undefined);
+  setGraceTurns(5);
   for (const directory of tempDirectories.splice(0)) rmSync(directory, { recursive: true, force: true });
 });
 
@@ -190,7 +193,7 @@ describe("terminal policy preparation", () => {
     ["inherited conversation context", (base: ExecutionRunOptions) => ({ ...base, inheritContext: true })],
     ["session resume", (base: ExecutionRunOptions) => ({ ...base, resumeSessionFile: "/tmp/old.jsonl" })],
     ["structured output", (base: ExecutionRunOptions) => ({ ...base, structuredOutput: {} as any })],
-    ["turn limits", (base: ExecutionRunOptions) => ({ ...base, maxTurns: 2 })],
+    ["invalid turn limit", (base: ExecutionRunOptions) => ({ ...base, maxTurns: NaN })],
   ])("rejects %s before environment process work", async (_name, mutate) => {
     const cwd = temp("terminal-reject-option");
     install(agent());
@@ -203,7 +206,6 @@ describe("terminal policy preparation", () => {
   it.each([
     ["memory", { memory: "project" as const }],
     ["disabled persistence", { persistSession: false }],
-    ["agent turn limit", { maxTurns: 4 }],
   ])("rejects agent %s before environment process work", async (_name, overrides) => {
     const cwd = temp("terminal-reject-agent");
     install(agent(overrides));
@@ -213,14 +215,45 @@ describe("terminal policy preparation", () => {
     expect(piExec).not.toHaveBeenCalled();
   });
 
-  it("rejects the global effective turn limit before environment process work", async () => {
-    const cwd = temp("terminal-reject-global-turns");
+  it("resolves explicit, agent and global budgets with the existing unlimited override", async () => {
+    const cwd = temp("terminal-resolve-budget");
     install(agent());
     setDefaultMaxTurns(9);
-    const piExec = vi.fn();
-    await expect(prepareTerminalPolicy(context(cwd), "terminal-test", options(piExec)))
-      .rejects.toThrow();
-    expect(piExec).not.toHaveBeenCalled();
+    setGraceTurns(2);
+    expect(await prepareTerminalPolicy(context(cwd), "terminal-test", options())).toMatchObject({ maxTurns: 9, graceTurns: 2 });
+    install(agent({ maxTurns: 4 }));
+    expect(await prepareTerminalPolicy(context(cwd), "terminal-test", options())).toMatchObject({ maxTurns: 4, graceTurns: 2 });
+    expect(await prepareTerminalPolicy(context(cwd), "terminal-test", { ...options(), maxTurns: 1 })).toMatchObject({ maxTurns: 1, graceTurns: 2 });
+    const unlimited = await prepareTerminalPolicy(context(cwd), "terminal-test", { ...options(), maxTurns: 0 });
+    expect(unlimited.maxTurns).toBeUndefined();
+    expect(unlimited.graceTurns).toBeUndefined();
+  });
+
+  it("snapshots JSON-only schemas and carries policy through the private manifest", async () => {
+    const cwd = temp("terminal-schema");
+    install(agent());
+    const schema = { type: "object", properties: { answer: { type: "string" } }, required: ["answer"] };
+    const result = compileJsonSchema(schema);
+    if (result.ok === false) throw new Error(result.message);
+    const selected = await prepareTerminalPolicy(context(cwd), "terminal-test", { ...options(), structuredOutput: result.compiled, workflow: true, maxTurns: 3 });
+    expect(selected.systemPrompt).not.toContain("<workflow_child>");
+    schema.properties.answer.type = "number";
+    expect((selected.structuredSchema!.properties as any).answer.type).toBe("string");
+    expect(Object.isFrozen(selected.structuredSchema!.properties)).toBe(true);
+    const session = createTerminalSession(selected, config(cwd));
+    const launch = prepareTerminalLaunch(selected, session, "run", endpoint(), "task", config(cwd));
+    const manifest = json(join(dirname(launch.launchScriptFile), "manifest.json"));
+    expect(manifest).toMatchObject({ maxTurns: 3, graceTurns: 5, structuredSchema: selected.structuredSchema });
+    expect(manifest.tools).not.toContain("StructuredOutput");
+    expect(JSON.stringify(manifest)).not.toContain("check");
+  });
+
+  it.each([Infinity, NaN, Number.MAX_SAFE_INTEGER])("rejects invalid budgets before environment work: %s", async (maxTurns) => {
+    const cwd = temp("terminal-invalid-budget");
+    install(agent());
+    const exec = vi.fn();
+    await expect(prepareTerminalPolicy(context(cwd), "terminal-test", { ...options(exec), maxTurns })).rejects.toThrow();
+    expect(exec).not.toHaveBeenCalled();
   });
 
   it("fails unknown isolated tools and a missing model before environment process work", async () => {
@@ -239,6 +272,17 @@ describe("terminal policy preparation", () => {
 });
 
 describe("terminal session and launch preparation", () => {
+  it.each([{ tools: [] }, { tools: ["read"] }])("admits the synthetic tool in Pi's persistent CLI allowlist, with builtins %j", ({ tools }) => {
+    const root = temp("terminal-structured-cli");
+    const selected = policy(root, { tools, structuredSchema: { type: "object" } });
+    const session = createTerminalSession(selected, config(root));
+    const launch = prepareTerminalLaunch(selected, session, "schema-run", endpoint(), "task", config(root));
+    const launchConfig = json(join(dirname(launch.launchScriptFile), "launch.json"));
+    expect(launchConfig.args).not.toContain("--no-tools");
+    expect(launchConfig.args[launchConfig.args.indexOf("--tools") + 1]).toBe([...tools, "StructuredOutput"].join(","));
+    expect(json(join(dirname(launch.launchScriptFile), "manifest.json")).tools).toEqual(tools);
+  });
+
   it("seeds a fresh private v3 transcript and returns a stable persistent reference", () => {
     const root = temp("terminal-session");
     const selectedPolicy = policy(root);

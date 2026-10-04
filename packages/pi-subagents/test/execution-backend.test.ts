@@ -207,7 +207,8 @@ describe("AgentManager execution backend seam", () => {
     const foreground = manager.resume(id, "foreground", foregroundAbort.signal);
     expect(backend.resumeCalls).toHaveLength(1);
     expect(backend.resumeCalls[0]).toMatchObject({ session: target, prompt: "foreground" });
-    expect(backend.resumeCalls[0].options?.signal).toBe(foregroundAbort.signal);
+    expect(backend.resumeCalls[0].options?.signal).toBe(manager.getRecord(id)?.abortController?.signal);
+    expect(backend.resumeCalls[0].options?.signal).not.toBe(foregroundAbort.signal);
 
     backend.finishResume(0, { text: "foreground result" });
     await expect(foreground).resolves.toMatchObject({

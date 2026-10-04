@@ -50,8 +50,11 @@ Manager 的会话句柄以及 UI/输出观察接口已与原生 `AgentSession` �
 
 `createTerminalExecutionBackend()` 已将该实现接入真实 Pi CLI 子进程、启动策略、带认证的
 本地反馈通道、规范会话视图、带确认的 steer，以及同一会话的新进程 resume。
-首批仅支持 POSIX/Bash、`isolated: true` 的自主完成型任务；继承上下文、外部 reattach/fork、结构化输出、
-memory、turn limit 和原生 Windows 等未接通能力会明确报错，不静默降级。
+目前支持 POSIX/Bash、`isolated: true` 的自主完成型任务。已接通 JSON Schema 结构化输出
+（缺失时最多补救一次）及 turn limit 的软上限、宽限和硬中止。owned-session resume 保留策略，
+但每次重置捕获、补救次数和 turn 计数；manager 传回新的结构化结果与中止/收尾状态，不复用旧结果。
+继承上下文、外部 reattach/fork、memory 和原生 Windows 等未接通能力仍明确报错，不静默降级。
+embedded resume 的上游策略行为暂未改写，完整双后端语义对齐仍是后续工作。
 完成判断使用独立的进程退出回执，不信任屏幕文本中的结束标记。
 
 完整契约与限制见 [terminal 后端](./docs/terminal-backend.md) 和

@@ -24,11 +24,13 @@
  * provider*, not an enforcement point. Every guarantee the script gets about
  * the shape of its result is made here.
  *
- * Pure and pi-free on purpose, so `runtime.ts` can import it without dragging
- * sessions and models into the runtime's tests.
+ * Uses the shared locale catalog, but no Pi session/model runtime, so
+ * `runtime.ts` can validate serialized schemas without starting an agent.
  */
 
+import type { TLocalizedValidationError, TValidationError } from "typebox/error";
 import { Check, Errors } from "typebox/value";
+import { i18n } from "../i18n.js";
 
 /** Largest schema we will accept, serialized. */
 const MAX_SCHEMA_BYTES = 64 * 1024;
@@ -57,15 +59,13 @@ export type SchemaCompilation =
  */
 export function compileJsonSchema(schema: unknown): SchemaCompilation {
   if (typeof schema !== "object" || schema === null || Array.isArray(schema)) {
-    return { ok: false, message: "agent() opts.schema must be a JSON Schema object." };
+    return { ok: false, message: i18n.t("jsonSchema.objectRequired") };
   }
   const root = schema as Record<string, unknown>;
   if (root.type !== "object") {
     return {
       ok: false,
-      message:
-        'agent() opts.schema must have `type: "object"` at its root — it becomes the tool\'s input schema, '
-        + "and a non-object root is not something a model can be asked to fill.",
+      message: i18n.t("jsonSchema.objectRootRequired"),
     };
   }
 
@@ -73,12 +73,12 @@ export function compileJsonSchema(schema: unknown): SchemaCompilation {
   try {
     serialized = JSON.stringify(root);
   } catch {
-    return { ok: false, message: "agent() opts.schema must be JSON-serializable." };
+    return { ok: false, message: i18n.t("jsonSchema.serializableRequired") };
   }
   if (serialized.length > MAX_SCHEMA_BYTES) {
     return {
       ok: false,
-      message: `agent() opts.schema is too large (${serialized.length} bytes; the limit is ${MAX_SCHEMA_BYTES}).`,
+      message: i18n.t("jsonSchema.tooLarge", { size: serialized.length, limit: MAX_SCHEMA_BYTES }),
     };
   }
 
@@ -90,9 +90,9 @@ export function compileJsonSchema(schema: unknown): SchemaCompilation {
   } catch (error) {
     return {
       ok: false,
-      message: `agent() opts.schema is not a schema this runtime can validate: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
+      message: i18n.t("jsonSchema.unsupported", {
+        error: error instanceof Error ? error.message : String(error),
+      }),
     };
   }
 
@@ -106,7 +106,9 @@ function checkAgainst(schema: Record<string, unknown>, value: unknown): true | s
   } catch (error) {
     // Reported rather than thrown: a schema that compiled but trips on a
     // particular value must fail that call, not the run.
-    return `the value could not be validated: ${error instanceof Error ? error.message : String(error)}`;
+    return i18n.t("jsonSchema.validationFailed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
   if (valid) return true;
 
@@ -117,12 +119,65 @@ function checkAgainst(schema: Record<string, unknown>, value: unknown): true | s
       // JavaScript, so it reads `$.a.b` far more easily.
       const path = String(error.instancePath ?? "");
       const where = path === "" ? "$" : `$${path.replace(/\//g, ".")}`;
-      reported.push(`${where}: ${error.message}`);
+      reported.push(i18n.t("jsonSchema.atPath", { path: where, error: validationMessage(error) }));
       if (reported.length >= MAX_REPORTED_ERRORS) break;
     }
   } catch {
     // Errors() can trip where Check() merely returned false. A vaguer message
     // still names the right problem.
   }
-  return reported.length > 0 ? reported.join("; ") : "the value does not match the required schema";
+  return reported.length > 0 ? reported.join("; ") : i18n.t("jsonSchema.mismatch");
+}
+
+// Format TypeBox diagnostics locally; changing its global locale would affect
+// unrelated validators in the parent or child process.
+const VALIDATION_KEYS: Record<TValidationError["keyword"], string> = {
+  additionalProperties: "jsonSchema.validation.additionalProperties",
+  anyOf: "jsonSchema.validation.anyOf",
+  boolean: "jsonSchema.validation.boolean",
+  const: "jsonSchema.validation.const",
+  contains: "jsonSchema.validation.contains",
+  dependencies: "jsonSchema.validation.dependencies",
+  dependentRequired: "jsonSchema.validation.dependencies",
+  enum: "jsonSchema.validation.enum",
+  exclusiveMaximum: "jsonSchema.validation.comparison",
+  exclusiveMinimum: "jsonSchema.validation.comparison",
+  format: "jsonSchema.validation.format",
+  if: "jsonSchema.validation.if",
+  maximum: "jsonSchema.validation.comparison",
+  maxItems: "jsonSchema.validation.maxItems",
+  maxLength: "jsonSchema.validation.maxLength",
+  maxProperties: "jsonSchema.validation.maxProperties",
+  minimum: "jsonSchema.validation.comparison",
+  minItems: "jsonSchema.validation.minItems",
+  minLength: "jsonSchema.validation.minLength",
+  minProperties: "jsonSchema.validation.minProperties",
+  multipleOf: "jsonSchema.validation.multipleOf",
+  not: "jsonSchema.validation.not",
+  oneOf: "jsonSchema.validation.oneOf",
+  pattern: "jsonSchema.validation.pattern",
+  propertyNames: "jsonSchema.validation.propertyNames",
+  "~refine": "jsonSchema.validation.refine",
+  required: "jsonSchema.validation.required",
+  type: "jsonSchema.validation.type",
+  unevaluatedItems: "jsonSchema.validation.unevaluatedItems",
+  unevaluatedProperties: "jsonSchema.validation.unevaluatedProperties",
+  uniqueItems: "jsonSchema.validation.uniqueItems",
+};
+
+function validationMessage(error: TLocalizedValidationError): string {
+  if (error.keyword === "type" && Array.isArray(error.params.type)) {
+    return i18n.t("jsonSchema.validation.typeUnion", {
+      types: error.params.type.join(i18n.t("jsonSchema.validation.or")),
+    });
+  }
+  const key = VALIDATION_KEYS[error.keyword];
+  if (key === undefined) {
+    return i18n.t("jsonSchema.validation.unknown", { error: error.message });
+  }
+  const params = Object.fromEntries(Object.entries(error.params).map(([name, value]) => [
+    name,
+    Array.isArray(value) ? value.map(String).join(", ") : String(value),
+  ]));
+  return i18n.t(key, params);
 }

@@ -22,7 +22,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import type { ToolActivity } from "./agent-runner.js";
 import { createEmbeddedExecutionBackend } from "./backends/embedded-adapter.js";
 import type { ExecutionSession } from "./backends/session.js";
-import type { AgentExecutionBackend } from "./backends/types.js";
+import type { AgentExecutionBackend, ExecutionResumeResult } from "./backends/types.js";
 import { assignHandle, handleBase } from "./mention.js";
 import { describeModel } from "./model-resolver.js";
 import type { AgentInvocation, AgentRecord, AgentTombstone, IsolationMode, MentionResolution, SubagentType, ThinkingLevel } from "./types.js";
@@ -330,6 +330,32 @@ interface ResumeOptions {
    * torn that subscription down.
    */
   onStarted?: () => void;
+}
+
+/** Match fresh-run precedence, including an external stop during the await. */
+function applyResumeResult(record: AgentRecord, result: ExecutionResumeResult): void {
+  if (record.status !== "stopped") {
+    if (result.aborted) {
+      record.status = "aborted";
+    } else if (result.failure) {
+      record.status = "error";
+      record.error = result.failure;
+    } else {
+      record.status = result.steered ? "steered" : "completed";
+    }
+  }
+  record.result = result.text;
+  record.structuredJson = result.structuredJson;
+  record.structuredRetried = result.structuredRetried;
+}
+
+function applyResumeError(record: AgentRecord, error: unknown): void {
+  if (record.status !== "stopped") {
+    record.status = "error";
+    record.error = error instanceof Error ? error.message : String(error);
+  }
+  record.structuredJson = undefined;
+  record.structuredRetried = undefined;
 }
 
 export class AgentManager {
@@ -1082,6 +1108,8 @@ export class AgentManager {
   ): Promise<AgentRecord | undefined> {
     const record = this.agents.get(id);
     if (!record?.session) return undefined;
+    // A refused resume must not replace a live controller or clear its result fields.
+    if (record.status === "running" || record.status === "queued") return undefined;
 
     // Background resume: settle asynchronously and notify on completion exactly
     // like a background spawn, returning immediately with the record still
@@ -1099,11 +1127,11 @@ export class AgentManager {
       // whose settle path would abort the LIVE run's children and report a
       // failure for a run that is still going. Refuse instead, leaving the
       // record untouched; the caller decides whether to wait or steer.
-      if (record.status === "running" || record.status === "queued") return undefined;
-
       record.isBackground = true;
       record.resultConsumed = false;
       record.result = undefined;
+      record.structuredJson = undefined;
+      record.structuredRetried = undefined;
       record.error = undefined;
       record.completedAt = undefined;
       record.status = "queued";
@@ -1122,9 +1150,8 @@ export class AgentManager {
             try {
               start();
             } catch (err) {
-              record.status = "error";
-              record.error = err instanceof Error ? err.message : String(err);
-              record.completedAt = Date.now();
+              applyResumeError(record, err);
+              record.completedAt ??= Date.now();
               this.onComplete?.(record);
             }
           },
@@ -1141,10 +1168,17 @@ export class AgentManager {
     record.startedAt = Date.now();
     record.completedAt = undefined;
     record.result = undefined;
+    record.structuredJson = undefined;
+    record.structuredRetried = undefined;
     record.error = undefined;
+    const abortController = new AbortController();
+    record.abortController = abortController;
+    const onParentAbort = () => { if (record.abortController === abortController && !abortController.signal.aborted) this.abort(id); };
+    if (signal?.aborted) onParentAbort();
+    else signal?.addEventListener("abort", onParentAbort, { once: true });
 
     try {
-      const { text, failure } = await this.execution.resume(record.session, prompt, {
+      const result = await this.execution.resume(record.session, prompt, {
         onToolActivity: (activity) => {
           if (activity.type === "end") record.toolUses++;
           options?.onToolActivity?.(activity);
@@ -1159,18 +1193,15 @@ export class AgentManager {
           this.onCompact?.(record, info);
           options?.onCompaction?.(info);
         },
-        signal,
+        signal: abortController.signal,
       });
-      // Same contract as the spawn path (#144): a failed final turn is an
-      // error, not a completion — but the resumed text stays available.
-      record.status = failure ? "error" : "completed";
-      if (failure) record.error = failure;
-      record.result = text;
-      record.completedAt = Date.now();
+      applyResumeResult(record, result);
+      record.completedAt ??= Date.now();
     } catch (err) {
-      record.status = "error";
-      record.error = err instanceof Error ? err.message : String(err);
-      record.completedAt = Date.now();
+      applyResumeError(record, err);
+      record.completedAt ??= Date.now();
+    } finally {
+      signal?.removeEventListener("abort", onParentAbort);
     }
 
     // Same contract as the spawn settle paths: children spawned during the
@@ -1211,9 +1242,10 @@ export class AgentManager {
     // for a detached one — background spawns omit it for exactly this reason.
     let detachParentSignal: (() => void) | undefined;
     if (parentSignal) {
-      const onParentAbort = () => this.abort(id);
+      const onParentAbort = () => { if (record.abortController === abortController && !abortController.signal.aborted) this.abort(id); };
       parentSignal.addEventListener("abort", onParentAbort, { once: true });
       detachParentSignal = () => parentSignal.removeEventListener("abort", onParentAbort);
+      if (parentSignal.aborted) onParentAbort();
     }
 
     // Per-run side effects (output streaming) — see ResumeOptions.onStarted.
@@ -1252,24 +1284,14 @@ export class AgentManager {
       },
       signal: abortController.signal,
     })
-      .then(({ text, failure }) => {
-        // Don't overwrite status if externally stopped via abort().
-        if (record.status !== "stopped") {
-          // Same contract as the spawn path (#144): a failed final turn is an
-          // error, not a completion — but the resumed text stays available.
-          record.status = failure ? "error" : "completed";
-          if (failure) record.error = failure;
-        }
-        record.result = text;
+      .then((result) => {
+        applyResumeResult(record, result);
         record.completedAt ??= Date.now();
         settle();
-        return text;
+        return result.text;
       })
       .catch((err) => {
-        if (record.status !== "stopped") {
-          record.status = "error";
-          record.error = err instanceof Error ? err.message : String(err);
-        }
+        applyResumeError(record, err);
         record.completedAt ??= Date.now();
         settle();
         return "";

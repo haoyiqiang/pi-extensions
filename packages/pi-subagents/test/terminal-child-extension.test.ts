@@ -17,6 +17,7 @@ import {
   type TerminalChildManifest,
 } from "../src/backends/terminal/bridge-protocol.js";
 import { i18n } from "../src/i18n.js";
+import { STRUCTURED_OUTPUT_TOOL_NAME } from "../src/structured-output.js";
 
 interface WriteRecord {
   readonly data: string;
@@ -123,6 +124,7 @@ function createHarness(options: HarnessOptions = {}) {
   const state = { idle: options.idle ?? true };
   let activeTools = ["read", "bash", "provider_fixture_tool"];
 
+  const tools = new Map<string, any>();
   const on = vi.fn((event: string, handler: Handler) => {
     const list = handlers.get(event) ?? [];
     list.push(handler);
@@ -134,6 +136,8 @@ function createHarness(options: HarnessOptions = {}) {
   });
   const piValue = {
     on,
+    registerTool: vi.fn((tool: any) => { tools.set(tool.name, tool); }),
+    getAllTools: vi.fn(() => [...tools.values()]),
     getActiveTools: vi.fn(() => [...activeTools]),
     setActiveTools: vi.fn((names: string[]) => { activeTools = [...names]; }),
     getThinkingLevel: vi.fn(() => "high"),
@@ -193,6 +197,7 @@ function createHarness(options: HarnessOptions = {}) {
     socket,
     source,
     state,
+    tools,
   };
 }
 
@@ -232,7 +237,109 @@ function promptOptions(): NormalizedBuildSystemPromptOptions {
   };
 }
 
+const structuredSchema = { type: "object", properties: { ok: { type: "boolean" }, count: { type: "integer" }, empty: { type: "null" } }, required: ["ok", "count", "empty"] };
+const completedBoundary = { outcome: "completed", context: { canContinue: true } };
+
 describe("terminal child extension", () => {
+  it("registers the validated schema tool without widening the builtin allowlist", async () => {
+    const h = createHarness({ manifest: manifest({ structuredSchema }) });
+    await start(h);
+    expect(h.pi.getActiveTools()).toEqual(["read", "bash", STRUCTURED_OUTPUT_TOOL_NAME]);
+    const tool = h.tools.get(STRUCTURED_OUTPUT_TOOL_NAME);
+    expect(tool.parameters).toEqual(structuredSchema);
+    expect(await h.emit("tool_call", { toolName: STRUCTURED_OUTPUT_TOOL_NAME })).toEqual([undefined]);
+    await tool.execute("capture", { ok: false, count: 0, empty: null }, undefined, undefined, h.ctx);
+    await h.emit("message_end", { message: assistant("ordinary prose") });
+    expect(await h.emit("agent_before_settle", completedBoundary)).toEqual([undefined]);
+    await h.emit("agent_settled");
+    expect(packets(h.socket, "settled")[0]).toMatchObject({ structuredJson: '{"ok":false,"count":0,"empty":null}', text: "ordinary prose" });
+    expect(packets(h.socket, "settled")[0].failure).toBeUndefined();
+    await expect(tool.execute("late", { ok: true, count: 1, empty: null })).rejects.toThrow();
+  });
+
+  it("allows one missing/invalid-output continuation, never accepts prose as data", async () => {
+    const h = createHarness({ manifest: manifest({ structuredSchema }) });
+    await start(h);
+    const tool = h.tools.get(STRUCTURED_OUTPUT_TOOL_NAME);
+    await expect(tool.execute("bad", { ok: "wrong" })).rejects.toThrow();
+    await h.emit("message_end", { message: assistant("unstructured prose") });
+    const [retry] = await h.emit("agent_before_settle", completedBoundary) as any[];
+    expect(retry).toMatchObject({ continue: true, entries: [{ type: "custom_message", display: false }] });
+    expect(retry.entries[0].content).toContain(STRUCTURED_OUTPUT_TOOL_NAME);
+    expect(h.pi.sendUserMessage).not.toHaveBeenCalled();
+    expect(await h.emit("agent_before_settle", completedBoundary)).toEqual([undefined]);
+    await h.emit("agent_settled");
+    const result = packets(h.socket, "settled")[0];
+    expect(result.structuredRetried).toBe(true);
+    expect(result.structuredJson).toBeUndefined();
+    expect(result.failure).toBeTruthy();
+  });
+
+  it.each(["aborted", "error", "denied tool"])("does not retry after %s", async (kind) => {
+    const h = createHarness({ manifest: manifest({ structuredSchema }) });
+    await start(h);
+    if (kind === "denied tool") await h.emit("tool_call", { toolName: "provider_fixture_tool" });
+    const event = { outcome: kind === "aborted" || kind === "error" ? kind : "completed", context: { canContinue: true } };
+    expect(await h.emit("agent_before_settle", event)).toEqual([undefined]);
+    await h.emit("agent_settled");
+    expect(packets(h.socket, "settled")[0].structuredRetried).toBeUndefined();
+  });
+
+  it("adds runnable context when the last assistant message cannot continue by itself", async () => {
+    const h = createHarness({ manifest: manifest({ structuredSchema, maxTurns: 1, graceTurns: 2 }) });
+    await start(h);
+    const idleContext = { outcome: "completed", context: { canContinue: false } };
+    expect(await h.emit("turn_end", idleContext)).toMatchObject([{ continue: true, entries: [{ type: "custom_message" }] }]);
+    expect(await h.emit("agent_before_settle", idleContext)).toMatchObject([{ continue: true, entries: [{ type: "custom_message" }] }]);
+  });
+
+  it("enforces soft and hard limits across automatic continuations and schema retry", async () => {
+    const h = createHarness({ manifest: manifest({ structuredSchema, maxTurns: 1, graceTurns: 2 }) });
+    await start(h);
+    await h.emit("message_end", { message: assistant("not structured") });
+    expect(await h.emit("turn_end", completedBoundary)).toMatchObject([{ continue: true }]);
+    expect(await h.emit("agent_before_settle", completedBoundary)).toMatchObject([{ continue: true }]);
+    await h.emit("agent_start"); // the schema continuation must not reset the budget
+    expect(await h.emit("turn_end", completedBoundary)).toEqual([undefined]);
+    expect(await h.emit("turn_end", completedBoundary)).toEqual([{ continue: false }]);
+    expect(h.abort).toHaveBeenCalled();
+    expect(await h.emit("agent_before_settle", completedBoundary)).toEqual([undefined]);
+    await expect(h.tools.get(STRUCTURED_OUTPUT_TOOL_NAME).execute("late", { ok: true, count: 1, empty: null })).rejects.toThrow();
+    await h.emit("agent_settled");
+    expect(packets(h.socket, "turn").map((packet) => packet.count)).toEqual([1, 2, 3]);
+    expect(packets(h.socket, "settled")[0]).toMatchObject({ aborted: true, steered: true, structuredRetried: true, failure: i18n.t("terminalPolicy.turnLimit") });
+  });
+
+  it("does not let recovery errors bypass the hard budget before a soft warning was possible", async () => {
+    const h = createHarness({ manifest: manifest({ maxTurns: 1, graceTurns: 1 }) });
+    await start(h);
+    const error = { outcome: "error", context: { canContinue: false } };
+    expect(await h.emit("turn_end", error)).toEqual([undefined]);
+    expect(await h.emit("turn_end", error)).toEqual([{ continue: false }]);
+    expect(h.abort).toHaveBeenCalledOnce();
+  });
+
+  it("does not restore a previous run's structured capture from its transcript", async () => {
+    const h = createHarness({ manifest: manifest({ structuredSchema }), messages: [assistant("old result", {
+      content: [{ type: "toolCall", id: "old", name: STRUCTURED_OUTPUT_TOOL_NAME, arguments: { ok: true, count: 3, empty: null } }],
+    })] });
+    await start(h);
+    expect(await h.emit("agent_before_settle", completedBoundary)).toMatchObject([{ continue: true }]);
+    await h.emit("agent_settled");
+    expect(packets(h.socket, "settled")[0].structuredJson).toBeUndefined();
+  });
+
+  it.each([
+    { structuredSchema: { type: "array" } },
+    { maxTurns: 2 }, { maxTurns: 0, graceTurns: 1 }, { maxTurns: Infinity, graceTurns: 1 },
+    { maxTurns: 2, graceTurns: NaN }, { graceTurns: 2 },
+  ])("rejects malformed run policy before transport: %j", async (override) => {
+    const h = createHarness({ manifest: manifest(override) });
+    await h.emit("session_start");
+    expect(h.connect).not.toHaveBeenCalled();
+    expect(h.shutdown).toHaveBeenCalledOnce();
+  });
+
   it("does not activate as a normally discovered extension without the private manifest environment", () => {
     const previous = process.env[TERMINAL_MANIFEST_ENV];
     delete process.env[TERMINAL_MANIFEST_ENV];

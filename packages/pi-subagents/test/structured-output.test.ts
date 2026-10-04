@@ -6,14 +6,19 @@
  * says enough afterwards to tell "never answered" from "answered wrongly".
  */
 
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { i18n } from "../src/i18n.js";
 import {
   createStructuredCapture,
   createStructuredOutputTool,
   STRUCTURED_OUTPUT_TOOL_NAME,
+  structuredFailure,
   structuredRetryPrompt,
 } from "../src/structured-output.js";
 import { compileJsonSchema } from "../src/workflow/json-schema.js";
+
+beforeEach(() => vi.stubEnv("PI_EXTENSIONS_LOCALE", "en-US"));
+afterEach(() => vi.unstubAllEnvs());
 
 const SCHEMA = {
   type: "object",
@@ -89,6 +94,16 @@ describe("the StructuredOutput tool", () => {
     expect(JSON.parse(capture.json as string)).toEqual({ file: "second.ts" });
   });
 
+  it("preserves a valid capture when a later call fails", async () => {
+    const { tool, capture } = build();
+    await call(tool, { file: "valid.ts" });
+    await expect(call(tool, { line: 0 })).rejects.toThrow();
+
+    expect(JSON.parse(capture.json as string)).toEqual({ file: "valid.ts" });
+    expect(capture.lastError).toBeDefined();
+    expect(structuredFailure(capture)).toBeUndefined();
+  });
+
   it("recovers a payload sent as a JSON string", async () => {
     // A common model slip; parsing it here saves a whole retry.
     const { tool, capture } = build();
@@ -101,6 +116,51 @@ describe("the StructuredOutput tool", () => {
   it("leaves an unparseable string alone for validation to reject", async () => {
     const { tool } = build();
     expect(tool.prepareArguments?.("not json at all")).toBe("not json at all");
+  });
+});
+
+describe("the structured failure", () => {
+  it("reports missing output separately from a rejected call", () => {
+    expect(structuredFailure(createStructuredCapture()))
+      .toBe("The agent did not report its answer through StructuredOutput.");
+    expect(structuredFailure({ called: true, lastError: "$.file: must be string" }))
+      .toBe("The agent's StructuredOutput call did not match the required schema: $.file: must be string");
+  });
+
+  it("succeeds only when JSON has been captured, not merely when a tool was called", () => {
+    expect(structuredFailure({ called: true })).toBeDefined();
+    expect(structuredFailure({ called: true, json: "{}" })).toBeUndefined();
+  });
+});
+
+describe("bilingual structured-output helpers", () => {
+  it.each(["en-US", "zh-CN"])("uses the %s catalog for every tool-facing surface", async (locale) => {
+    vi.stubEnv("PI_EXTENSIONS_LOCALE", locale);
+    const { tool, capture } = build();
+    const params = { tool: STRUCTURED_OUTPUT_TOOL_NAME };
+    expect(tool.label).toBe(locale === "en-US" ? "Structured Output" : "结构化输出");
+    expect(tool.description).toBe(i18n.t("structuredOutput.description"));
+    expect(tool.promptSnippet).toBe(i18n.t("structuredOutput.snippet"));
+    expect(tool.promptGuidelines).toEqual([i18n.t("structuredOutput.guideline", params)]);
+
+    const missing = i18n.t("structuredOutput.retryMissing", params);
+    expect(structuredRetryPrompt(capture)).toBe(i18n.t("structuredOutput.retry", { ...params, reason: missing }));
+    expect(structuredFailure(capture)).toBe(i18n.t("structuredOutput.failureMissing", params));
+
+    const rejected = await call(tool, { line: 0 }).catch((error: Error) => error);
+    expect(rejected).toBeInstanceOf(Error);
+    const invalid = { ...params, error: capture.lastError! };
+    expect((rejected as Error).message).toBe(i18n.t("structuredOutput.invalid", invalid));
+    expect(structuredRetryPrompt(capture)).toBe(i18n.t("structuredOutput.retry", {
+      ...params,
+      reason: i18n.t("structuredOutput.retryInvalid", invalid),
+    }));
+    expect(structuredFailure(capture)).toBe(i18n.t("structuredOutput.failureInvalid", invalid));
+
+    const result = await call(tool, { file: "fixed.ts" });
+    expect(result.content[0].text).toBe(locale === "en-US" ? "Recorded." : "已记录。");
+    expect(capture.lastError).toBeUndefined();
+    expect(structuredFailure(capture)).toBeUndefined();
   });
 });
 

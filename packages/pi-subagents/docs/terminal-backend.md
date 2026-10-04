@@ -6,13 +6,15 @@ just a prepared-launch primitive. It is **programmatic opt-in only**. Default
 loads `pi-interactive-subagents`. There is no public package export, command,
 configuration switch, or workflow-provider registration for this backend yet.
 
-## Supported first slice
+## Supported private slice
 
 - POSIX/Bash, isolated, autonomous invocations (`isolated: true`), with built-in tool policy,
   resolved model/thinking and the existing agent prompt builder.
 - Fresh persisted session and subsequent invocations of an **owned** session handle.
   Resume retains its session ID/file/view and starts a fresh process, surface, run ID,
   feedback channel and artifact directory.
+- JSON Schema structured output, one bounded missing-output recovery, and resolved
+  soft/grace/hard turn limits; these policies survive owned-session resume.
 - Completion after the child reports `agent_settled` **and** its process exits.
 - Read-only canonical transcript/model/context snapshots, text deltas, tool activity,
   turn/usage/compaction feedback, and acknowledged model steering.
@@ -22,7 +24,7 @@ configuration switch, or workflow-provider registration for this backend yet.
 
 Unsupported requests fail before launch rather than silently selecting embedded or
 losing semantics: non-isolated execution, `inheritContext`, `resumeSessionFile`,
-structured output, finite effective turn limits, agent memory, and an explicit
+agent memory, and an explicit
 `persistSession: false`. Isolated execution already disables nested delegation,
 skills, and discovered extensions, matching the embedded isolated policy.
 
@@ -77,6 +79,43 @@ exit receipt. Parent completion watches that private file, not screen text: assi
 or tool output containing the legacy sentinel cannot finish a run. The old stdout
 marker remains compatibility output only. Missing receipts after settled hit the
 retirement deadline, close the surface and quarantine the session.
+
+## Structured output and turn budgets
+
+Pass the existing `ExecutionRunOptions.structuredOutput` compiled schema and/or
+`maxTurns`. Preparation snapshots a JSON-only schema, recompiles it before any
+launch, and serializes schema data only, never validator functions. The child
+registers `StructuredOutput` at session startup and admits it in addition to the
+resolved builtin allowlist. It does not enable arbitrary provider tools. The tool
+uses constrained sampling when available, throws validation errors as failed tool
+results, and retains the last valid payload (including false/zero/null properties).
+
+At `agent_before_settle`, a completed run without a valid payload may request one
+extra provider turn through a hidden custom message and `continue: true`. This is
+not a nested `prompt()` call or completion at `agent_end`. The parent revalidates
+returned JSON against the immutable wire schema and the caller's validator; prose,
+missing data and invalid feedback cannot become a successful structured answer.
+A custom validator closure is parent-only: its rejection fails the run, but cannot
+be used for a child-side corrective retry. Use a serializable JSON Schema for
+validation the model needs to correct.
+
+The effective soft limit follows explicit option > agent setting > project default;
+zero remains an explicit unlimited override. The existing grace-turn setting is
+snapshotted too. Every model `turn_end` counts, including recovery and schema-retry
+turns. At the soft limit the child adds a wrap-up continuation once; at soft+grace it
+aborts even if that last turn supplied an answer, matching the embedded fresh-run
+boundary rule. These are turn counts, not wall-clock, tool-timeout or transport-retry
+budgets. Cancellation, provider/policy errors and hard limits suppress schema retry.
+
+An owned terminal resume retains the schema/limit policy, but starts a fresh capture,
+retry allowance and turn counter. It never reconstructs output from old tool calls.
+The manager carries `structuredJson`, `structuredRetried`, `aborted` and `steered`
+through both resume paths and clears prior structured metadata when accepting a
+resume. Status precedence is stopped > aborted > error > steered > completed.
+Embedded resume still has its upstream invocation-policy behavior; porting its
+fresh-run enforcement onto resume is a remaining parity task, not implied by the
+additive result fields. Normal retired policy failures may resume; uncertain process
+retirement still quarantines the handle.
 
 ## Feedback and control
 

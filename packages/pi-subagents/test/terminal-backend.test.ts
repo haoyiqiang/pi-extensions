@@ -9,6 +9,8 @@ import type { ChildFeedback, TerminalSnapshot } from "../src/backends/terminal/b
 import type { ExecutionSession } from "../src/backends/session.js";
 import type { TerminalDependencies, TerminalExit } from "../src/backends/terminal/types.js";
 import { i18n } from "../src/i18n.js";
+import { compileJsonSchema } from "../src/workflow/json-schema.js";
+import type { ExecutionRunOptions } from "../src/backends/types.js";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -61,16 +63,16 @@ function fixture(exitTimeoutMs?: number) {
   const ctx = { cwd: dir, getSystemPrompt: () => "parent", model: { provider: "faux", id: "local", name: "Local" },
     modelRegistry: { find: () => undefined, getAll: () => [] } } as unknown as ExtensionContext;
   const pi = { exec: vi.fn(async () => ({ code: 1, stdout: "", stderr: "" })) } as any;
-  function finish(index: number, text = "wire result") {
+  function finish(index: number, text = "wire result", extra: Partial<Extract<ChildFeedback, { type: "settled" }>> = {}) {
     const call = calls[index];
-    const final = { type: "settled" as const, snapshot: { ...snapshot, messages: [{ role: "assistant", content: [{ type: "text", text }] }] }, text, aborted: false };
+    const final = { type: "settled" as const, snapshot: { ...snapshot, messages: [{ role: "assistant", content: [{ type: "text", text }] }] }, text, aborted: false, ...extra };
     call.feedback(final);
     call.settled.resolve(final);
     call.exit.resolve({ reason: "sentinel", exitCode: 0 });
   }
-  async function running(signal?: AbortSignal) {
+  async function running(signal?: AbortSignal, extra: Partial<ExecutionRunOptions> = {}) {
     const ready = deferred<ExecutionSession>();
-    const promise = backend.run(ctx, "general-purpose", "task", { pi, isolated: true, signal, onSessionCreated: ready.resolve });
+    const promise = backend.run(ctx, "general-purpose", "task", { pi, isolated: true, signal, ...extra, onSessionCreated: ready.resolve });
     void promise.catch(ready.reject);
     const handle = await ready.promise;
     return { promise, handle };
@@ -78,7 +80,52 @@ function fixture(exitTimeoutMs?: number) {
   return { backend, calls, transport, ctx, pi, finish, running };
 }
 
+function compiledSchema() {
+  const result = compileJsonSchema({ type: "object", properties: { answer: { type: "string" } }, required: ["answer"] });
+  if (result.ok === false) throw new Error(result.message);
+  return result.compiled;
+}
+
 describe("real terminal backend coordinator port", () => {
+  it("propagates validated schema data and flags, refreshing them on resume", async () => {
+    const f = fixture();
+    const first = await f.running(undefined, { structuredOutput: compiledSchema(), maxTurns: 2 });
+    f.finish(0, "prose", { structuredJson: '{"answer":"first"}', structuredRetried: true, steered: true });
+    await expect(first.promise).resolves.toMatchObject({ structuredJson: '{"answer":"first"}', structuredRetried: true, steered: true });
+    const ready = new Promise<void>((resolve) => { const off = first.handle.subscribe(() => { off(); resolve(); }); });
+    const resumed = f.backend.resume(first.handle, "again");
+    await ready;
+    f.finish(1, "new prose", { structuredJson: '{"answer":"second"}' });
+    await expect(resumed).resolves.toEqual({ text: "new prose", failure: undefined, structuredJson: '{"answer":"second"}' });
+    await f.backend.shutdown(first.handle);
+  });
+
+  it.each([undefined, "broken JSON", '{"answer":42}', "null", "[]"])("rejects invalid or missing wire data despite a success claim: %s", async (structuredJson) => {
+    const f = fixture();
+    const run = await f.running(undefined, { structuredOutput: compiledSchema() });
+    f.finish(0, "not a substitute", { structuredJson });
+    const result = await run.promise;
+    expect(result.failure).toBe(i18n.t("terminalPolicy.invalidResult"));
+    expect(result.structuredJson).toBeUndefined();
+    await f.backend.shutdown(run.handle);
+  });
+
+  it("also applies the caller's validator without serializing its closure", async () => {
+    const f = fixture();
+    const run = await f.running(undefined, { structuredOutput: { ...compiledSchema(), check: () => "caller rejected" } });
+    f.finish(0, "prose", { structuredJson: '{"answer":"valid JSON Schema but caller rejects"}' });
+    await expect(run.promise).resolves.toMatchObject({ failure: i18n.t("terminalPolicy.invalidResult") });
+    await f.backend.shutdown(run.handle);
+  });
+
+  it("rejects unsolicited structured data for a plain invocation", async () => {
+    const f = fixture();
+    const run = await f.running();
+    f.finish(0, "prose", { structuredJson: '{"answer":"unrequested"}' });
+    await expect(run.promise).resolves.toMatchObject({ failure: i18n.t("terminalPolicy.invalidResult") });
+    await f.backend.shutdown(run.handle);
+  });
+
   it("fails closed for native Windows until job-object retirement is available", () => {
     const descriptor = Object.getOwnPropertyDescriptor(process, "platform")!;
     try {

@@ -7,14 +7,16 @@ import { BUILTIN_TOOL_NAMES, getAgentConfig, getToolNamesForType, isDefaultsDisa
 import { DEFAULT_AGENTS } from "../../default-agents.js";
 import { detectEnv } from "../../env.js";
 import { i18n } from "../../i18n.js";
+import { STRUCTURED_OUTPUT_TOOL_NAME } from "../../structured-output.js";
 import { buildAgentPrompt, type PromptExtras } from "../../prompts.js";
 import type { AgentConfig, SubagentType, ThinkingLevel } from "../../types.js";
-import { resolveDefaultModel, resolveEffectiveMaxTurns } from "../embedded.js";
+import { getGraceTurns, resolveDefaultModel, resolveEffectiveMaxTurns } from "../embedded.js";
 import type { PersistentSessionReference } from "../session-reference.js";
 import type { ExecutionRunOptions } from "../types.js";
 import { TERMINAL_MANIFEST_ENV, modelFingerprint, type TerminalChildManifest } from "./bridge-protocol.js";
 import type { TerminalLaunchPlan } from "./types.js";
 import type { ProcessExitReceipt } from "./process-exit.js";
+import { compileTerminalSchema, validTurnBudget } from "./run-policy.js";
 
 const DEFAULT_ROOT_DIRECTORY = "terminal-subagents";
 const DEFAULT_INTERPRETER = "bash";
@@ -47,6 +49,9 @@ export interface TerminalPolicy {
   readonly thinkingLevel?: ThinkingLevel;
   readonly tools: readonly string[];
   readonly systemPrompt: string;
+  readonly structuredSchema?: Record<string, unknown>;
+  readonly maxTurns?: number;
+  readonly graceTurns?: number;
 }
 
 interface ResolvedTerminalBackendConfig {
@@ -78,7 +83,13 @@ export async function prepareTerminalPolicy(
 
   // Terminal execution is deliberately narrower than the embedded backend. Keep
   // these checks ahead of detectEnv(), the first operation that may spawn a process.
-  rejectUnsupportedOptions(type, agent, options);
+  rejectUnsupportedOptions(agent, options);
+  if (options.structuredOutput !== undefined && (!options.structuredOutput || typeof options.structuredOutput.check !== "function")) invalidConfig();
+  const structuredSchema = options.structuredOutput === undefined ? undefined
+    : compileTerminalSchema(options.structuredOutput.schema).schema;
+  const maxTurns = resolveEffectiveMaxTurns(type, options.maxTurns);
+  const graceTurns = maxTurns === undefined ? undefined : getGraceTurns();
+  if (!validTurnBudget(maxTurns, graceTurns)) invalidConfig();
 
   const tools = resolveTools(type, agent);
   const selectedModel = options.model ?? resolveDefaultModel(ctx.model, ctx.modelRegistry, agent.model);
@@ -92,7 +103,7 @@ export async function prepareTerminalPolicy(
   const env = await detectEnv(options.pi, cwd);
   const extras: PromptExtras = {};
   if (options.worktreeBase) extras.worktreeBase = options.worktreeBase;
-  if (options.workflow) extras.workflowChild = true;
+  if (options.workflow && !structuredSchema) extras.workflowChild = true;
   const systemPrompt = buildAgentPrompt(agent, cwd, env, ctx.getSystemPrompt(), extras);
   const thinkingLevel = options.thinkingLevel ?? agent.thinking;
 
@@ -105,6 +116,8 @@ export async function prepareTerminalPolicy(
     ...(thinkingLevel !== undefined ? { thinkingLevel } : {}),
     tools: Object.freeze(tools),
     systemPrompt,
+    ...(structuredSchema ? { structuredSchema } : {}),
+    ...(maxTurns !== undefined ? { maxTurns, graceTurns } : {}),
   });
 }
 
@@ -166,6 +179,8 @@ export function prepareTerminalLaunch(
     ...(policy.modelFingerprint ? { modelFingerprint: policy.modelFingerprint } : {}),
     tools: [...policy.tools],
     systemPrompt: policy.systemPrompt,
+    ...(policy.structuredSchema ? { structuredSchema: policy.structuredSchema } : {}),
+    ...(policy.maxTurns !== undefined ? { maxTurns: policy.maxTurns, graceTurns: policy.graceTurns } : {}),
   };
 
   const args = buildCliArguments(policy, session, promptFile, systemPromptFile, resolved);
@@ -219,15 +234,12 @@ function resolveAgent(type: SubagentType): AgentConfig {
 }
 
 function rejectUnsupportedOptions(
-  type: SubagentType,
   agent: AgentConfig,
   options: ExecutionRunOptions,
 ): void {
   if (options.isolated !== true) unsupported("isolated=false");
   if (options.inheritContext === true) unsupported("inheritContext");
   if (options.resumeSessionFile !== undefined) unsupported("resumeSessionFile");
-  if (options.structuredOutput !== undefined) unsupported("structuredOutput");
-  if (resolveEffectiveMaxTurns(type, options.maxTurns) !== undefined) unsupported("maxTurns");
   if (agent.memory !== undefined) unsupported("memory");
   if (agent.persistSession === false) unsupported("persistSession=false");
   // nestedRuntime is intentionally ignored: isolated embedded runs do not admit
@@ -285,8 +297,10 @@ function buildCliArguments(
     "--system-prompt",
     systemPromptFile,
   );
-  if (policy.tools.length === 0) args.push("--no-tools");
-  else args.push("--tools", policy.tools.join(","));
+  // Pi keeps --tools as a registry-level allowlist, including later dynamic tools.
+  const cliTools = [...policy.tools, ...(policy.structuredSchema ? [STRUCTURED_OUTPUT_TOOL_NAME] : [])];
+  if (cliTools.length === 0) args.push("--no-tools");
+  else args.push("--tools", cliTools.join(","));
   if (config.mode === "json") args.push("--mode", "json");
   args.push("--", `@${promptFile}`);
   return args;
@@ -331,7 +345,8 @@ function validatePolicy(policy: TerminalPolicy): void {
   if (!policy || !nonEmpty(policy.type) || !nonEmpty(policy.name) || !nonEmpty(policy.cwd)
     || !isAbsolute(policy.cwd) || !policy.model || !nonEmpty(policy.model.provider)
     || !nonEmpty(policy.model.id) || typeof policy.systemPrompt !== "string" || !Array.isArray(policy.tools)
-    || policy.tools.some((tool) => !nonEmpty(tool))) invalidConfig();
+    || policy.tools.some((tool) => !nonEmpty(tool)) || !validTurnBudget(policy.maxTurns, policy.graceTurns)) invalidConfig();
+  if (policy.structuredSchema !== undefined) compileTerminalSchema(policy.structuredSchema);
 }
 
 function validateSession(session: PersistentSessionReference<"terminal">): void {
