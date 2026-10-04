@@ -1,8 +1,9 @@
 # Embedded execution boundary
 
 This is a private refactoring boundary, **not** the final dual-backend API. The
-workspace remains inactive and unpublished. No terminal implementation, backend
-configuration, or workflow adapter is introduced here.
+workspace remains inactive and unpublished. No terminal backend, backend
+configuration, or workflow adapter is connected here. A separate
+[terminal lifecycle primitive](./terminal-lifecycle.md) prepares the next integration step.
 
 ## Implementation map
 

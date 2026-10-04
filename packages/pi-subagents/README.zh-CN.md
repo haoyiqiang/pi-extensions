@@ -12,7 +12,8 @@ v0.19.0 的实现，固定上游提交为 `e955e29c51b7a6cce37e1108cd2d6c57a77e1
 - 不加入根 Pi profile、release-please、发布流程或公开包 tarball 门禁。
 - 现有 `@maplezzk/pi-interactive-subagents` 保持不变，仍是正式使用的扩展。
 - 入口只导出上游扩展工厂，不调用它；迁移期间不要在生产会话同时加载两套产品。
-- 本批次不实现 terminal backend、backend 路由、配置迁移或 rpiv-workflow 适配器。
+- 私有 terminal 生命周期已可用于开发验证，但尚未接入 AgentManager；后端路由、配置迁移
+  和 rpiv-workflow 适配器仍未实现。
 
 ## 导入范围
 
@@ -35,6 +36,17 @@ SDK 执行实现已移至 `src/backends/embedded.ts`，steer 与 session 清理�
 接口仍使用原生 Pi session 类型，尚不是可承载 terminal 的最终接口，也不是公开
 workflow API。详细范围、兼容约定和剩余耦合见 [执行边界](./docs/execution-backend.md)。
 此步没有新增用户配置。
+
+## Terminal 生命周期基础
+
+`src/backends/terminal/` 新增了可注入依赖的启动、完成等待、Escape 中断、取消和清理实现，
+通过 `pi-terminal-mux` 的公开 API 操作终端，支持显式选择 Bash/PowerShell。
+纯数据 run/session 引用区分单次执行和持久会话；
+启动失败和取消均清理自建 pane，resume 结果不会复用旧轮次文本或旧完成标记。
+
+这还没有接入 AgentManager，也不负责模型选择、子进程 CLI 策略或工具注册。
+完整契约与限制见 [terminal 生命周期](./docs/terminal-lifecycle.md)。新增诊断已使用中英文
+catalog；上游 embedded 文案仍待迁移。
 
 ## 配置
 
@@ -70,5 +82,5 @@ npm run check
 - [上游 RPC 协议参考](./docs/rpc.md)
 - [上游脚本 workflow 参考](./docs/workflows.md)
 
-下一步：分离 backend-neutral 的 run/session 引用并集成当前 terminal 实现，完成
-本地化、UI/配置统一后，一次切换根 profile 与发布元数据，最后删除旧包。
+下一步：迁移 manager/UI/输出订阅对原生 session 的依赖，接入 terminal 执行与子进程策略，
+再完善会话存储语义、后端路由、本地化和统一 UI/配置。完成整合后才切换根 profile 与发布元数据。

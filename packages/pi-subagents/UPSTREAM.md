@@ -63,7 +63,25 @@ compatibility with untested future Pi releases.
   bound and adding idempotency and early timer cleanup.
 - Updated steering test doubles and added backend injection/lifecycle/facade tests.
 
-The seam intentionally still uses native Pi session types (see
-[execution boundary](./docs/execution-backend.md)). Terminal integration, shared
-configuration migration, full localization, and release activation belong to later
-batches. No code from `pi-interactive-subagents` is imported yet.
+The manager seam intentionally still uses native Pi session types (see
+[execution boundary](./docs/execution-backend.md)). Full terminal integration, shared
+configuration migration, localization, and release activation remain separate steps.
+
+## Terminal lifecycle groundwork
+
+The private lifecycle primitive in `src/backends/terminal/` adapts the Pi-backed
+launch/watch/interrupt semantics and session-summary extraction from this repository's
+`@maplezzk/pi-interactive-subagents@3.16.2` (last package change `7ed4655`). That product
+is derived from [HazAT/pi-interactive-subagents](https://github.com/HazAT/pi-interactive-subagents).
+Its MIT notice is retained verbatim in [docs/LICENSE.interactive-subagents](./docs/LICENSE.interactive-subagents).
+The active old package is not modified or imported as a runtime dependency.
+
+This is a selective extraction, not a wholesale source copy. It replaces the global
+run map/module abort/UI notification coupling with per-run handles and injected ports,
+separates run/session identities, closes surfaces on startup failure, preserves exit
+payloads, and excludes prior turns on resume. Public `pi-terminal-mux` handles terminal
+operations. New diagnostic catalogs use `pi-extensions-i18n`; neither dependency
+activates this private workspace. The strict source consumer enables
+`allowImportingTsExtensions` for these source-distributed dependencies; a guarded
+Herdr diagnostic interpolation was made strict-null-safe without changing behavior. See [terminal lifecycle](./docs/terminal-lifecycle.md)
+for explicitly deferred CLI/child-bridge, session-store, manager, and workflow work.

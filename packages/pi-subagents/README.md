@@ -15,8 +15,9 @@ unified embedded/terminal subagent package, **not an installable replacement yet
 - Existing `@maplezzk/pi-interactive-subagents` remains unchanged and active.
 - Importing the entrypoint exports the upstream extension factory; it does not
   invoke it. Do not load both products into a production session during migration.
-- No terminal backend, backend router, config migration, or rpiv-workflow adapter
-  has been implemented in this batch.
+- A private terminal lifecycle primitive is available for development, but no
+  terminal backend is connected to AgentManager. Backend routing, config migration,
+  and the rpiv-workflow adapter remain unimplemented.
 
 ## Imported scope
 
@@ -41,6 +42,19 @@ and notifications. Tool steering no longer bypasses that port.
 The port still uses native Pi session types; it is not yet a terminal-capable or
 public workflow API. See [execution boundary](./docs/execution-backend.md) for the
 scope, preserved contracts, and remaining coupling. No new user configuration is added.
+
+## Terminal lifecycle groundwork
+
+`src/backends/terminal/` now provides an injected launch/completion/interrupt/cancel
+primitive and a public `pi-terminal-mux` adapter, with explicit Bash/PowerShell
+selection. Data-only run/session references
+separate a single invocation from its persistent conversation. Startup/cancellation
+cleanup is idempotent; resumed output excludes old turns and stale completion markers.
+
+This does not select models, construct child CLI policy, register tools, or replace
+the embedded manager's native session interface. See [terminal lifecycle](./docs/terminal-lifecycle.md)
+for its prepared-launch contract, limitations, and remaining integration. New terminal
+diagnostics have English/Chinese catalogs; the imported embedded strings are not yet migrated.
 
 ## Configuration
 
@@ -80,6 +94,7 @@ terminal multiplexer, or local Pi daemon are needed. Test fixtures under
 - [Upstream RPC reference](./docs/rpc.md)
 - [Upstream scripted workflow reference](./docs/workflows.md)
 
-Next: separate backend-neutral run/session references and integrate the current
-terminal implementation, localize and unify UI/config, then switch the root profile
-and release metadata before removing the old package.
+Next: migrate the manager/UI/output consumers off native session control, connect
+terminal execution and child-policy construction, then add session-store semantics,
+backend routing, and unified UI/config/localization. Switch the root profile and
+release metadata only after that integration is complete.

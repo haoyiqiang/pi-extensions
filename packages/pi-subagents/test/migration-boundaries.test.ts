@@ -53,6 +53,20 @@ describe("private migration boundary", () => {
     }
   });
 
+  it("keeps terminal dependencies public and includes both locale catalogs and the original notice", () => {
+    const manifest = readJson("package.json", packageRoot);
+    expect(manifest.dependencies["pi-terminal-mux"]).toBe("^0.6.5");
+    expect(manifest.dependencies["pi-extensions-i18n"]).toBe("^0.8.0");
+    expect(manifest.dependencies["@maplezzk/pi-interactive-subagents"]).toBeUndefined();
+    expect(manifest.files).toContain("locales");
+    const en = readJson("locales/en-US.json", packageRoot);
+    const zh = readJson("locales/zh-CN.json", packageRoot);
+    expect(Object.keys(en).sort()).toEqual(Object.keys(zh).sort());
+    expect(Object.keys(en).length).toBeGreaterThan(0);
+    expect(readFileSync(new URL("docs/LICENSE.interactive-subagents", packageRoot), "utf8"))
+      .toBe(readFileSync(new URL("packages/pi-interactive-subagents/LICENSE", repositoryRoot), "utf8"));
+  });
+
   it("runs under isolated test directories with live models disabled", () => {
     expect(process.env.PI_E2E_LIVE).toBe("0");
     expect(process.env.PI_CODING_AGENT_DIR).toContain("pi-subagents-test-home-");

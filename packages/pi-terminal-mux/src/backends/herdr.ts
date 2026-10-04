@@ -47,7 +47,7 @@ export function resolveHerdrSurfaceMode(value = process.env.PI_SUBAGENT_HERDR_MO
   const normalized = value?.trim().toLowerCase();
   if (!normalized || normalized === HERDR_SURFACE_MODE_SPLIT) return DEFAULT_HERDR_SURFACE_MODE;
   if (normalized === HERDR_SURFACE_MODE_TAB) return HERDR_SURFACE_MODE_TAB;
-  throw new Error(i18n.t("error.invalidHerdrMode", { value }));
+  throw new Error(i18n.t("error.invalidHerdrMode", { value: value ?? "" }));
 }
 
 /**

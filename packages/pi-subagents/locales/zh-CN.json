@@ -1,0 +1,16 @@
+{
+  "terminal.invalidSummary": "终端记录摘要存在时必须为字符串。",
+  "terminal.unknownError": "未知错误",
+  "terminal.invalidInterpreter": "终端脚本解释器必须为 bash 或 powershell。",
+  "terminal.scriptOverwritesSession": "启动脚本不能覆盖会话文件或其完成标记。",
+  "terminal.assistantFailed": "子代理最后一轮回复失败或被中止。",
+  "terminal.cancelled": "子代理已取消。",
+  "terminal.finished": "子代理已退出，但没有输出。",
+  "terminal.exitError": "子代理已退出，退出码为 {code}。",
+  "terminal.failed": "子代理出错：{error}",
+  "terminal.notRunning": "此终端运行已结束。",
+  "terminal.invalidDelay": "Shell 就绪等待时间必须为有限的非负数。",
+  "terminal.sessionMismatch": "终端会话标识与已有会话文件不一致。",
+  "terminal.transcriptChanged": "终端运行期间会话记录被替换或截断。",
+  "terminal.invalidReference": "终端执行需要 terminal 会话引用、非空的 run/session ID，以及绝对会话路径和脚本路径。"
+}

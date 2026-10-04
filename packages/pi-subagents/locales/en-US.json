@@ -1,0 +1,16 @@
+{
+  "terminal.invalidSummary": "Terminal artifact summary must be a string when present.",
+  "terminal.unknownError": "Unknown error",
+  "terminal.invalidInterpreter": "Terminal script interpreter must be bash or powershell.",
+  "terminal.scriptOverwritesSession": "The launch script must not overwrite the session file or its completion marker.",
+  "terminal.assistantFailed": "The child assistant's final turn failed or was aborted.",
+  "terminal.cancelled": "Subagent cancelled.",
+  "terminal.finished": "Subagent exited without output.",
+  "terminal.exitError": "Subagent exited with code {code}.",
+  "terminal.failed": "Subagent error: {error}",
+  "terminal.notRunning": "The terminal run has already finished.",
+  "terminal.invalidDelay": "The shell readiness delay must be a finite non-negative number.",
+  "terminal.sessionMismatch": "Terminal session identity does not match the existing session file.",
+  "terminal.transcriptChanged": "The session transcript was replaced or truncated during the terminal run.",
+  "terminal.invalidReference": "Terminal execution requires a terminal session reference with non-empty run/session IDs and absolute session/script paths."
+}

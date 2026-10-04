@@ -40,6 +40,8 @@ const ALLOWED_WORKSPACE_EDGES = new Set([
   "pi-naming -> pi-terminal-mux",
   "pi-rewind -> pi-extensions-i18n",
   "pi-context-view -> pi-extensions-i18n",
+  "@maplezzk/pi-subagents -> pi-extensions-i18n",
+  "@maplezzk/pi-subagents -> pi-terminal-mux",
 ]);
 
 const errors = [];
