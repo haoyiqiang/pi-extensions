@@ -12,8 +12,8 @@ v0.19.0 的实现，固定上游提交为 `e955e29c51b7a6cce37e1108cd2d6c57a77e1
 - 不加入根 Pi profile、release-please、发布流程或公开包 tarball 门禁。
 - 现有 `@maplezzk/pi-interactive-subagents` 保持不变，仍是正式使用的扩展。
 - 入口只导出上游扩展工厂，不调用它；迁移期间不要在生产会话同时加载两套产品。
-- 私有 terminal 生命周期已可用于开发验证，但尚未接入 AgentManager；后端路由、配置迁移
-  和 rpiv-workflow 适配器仍未实现。
+- 真实 terminal backend 已可通过私有工厂显式注入用于开发验证；AgentManager 默认仍为
+  embedded。配置路由、迁移与 rpiv-workflow 适配器尚未实现。
 
 ## 导入范围
 
@@ -38,19 +38,25 @@ Manager 的会话句柄以及 UI/输出观察接口已与原生 `AgentSession` �
 只读视图保留消息对象、压缩、统计和模型元数据，但不暴露 SDK 控制方法或模型鉴权头。
 原始 runner 兼容入口保持不变。
 
-请求准备仍使用 Pi context，真实 terminal backend 尚未接入。私有回调契约变化、兼容约定
+请求准备仍使用 Pi context，terminal 需要显式私有工厂注入。私有回调契约变化、兼容约定
 及剩余工作见 [执行边界](./docs/execution-backend.md)。此步没有新增用户配置。
 
-## Terminal 生命周期基础
+## Terminal 执行（私有显式启用）
 
 `src/backends/terminal/` 新增了可注入依赖的启动、完成等待、Escape 中断、取消和清理实现，
 通过 `pi-terminal-mux` 的公开 API 操作终端，支持显式选择 Bash/PowerShell。
 纯数据 run/session 引用区分单次执行和持久会话；
 启动失败和取消均清理自建 pane，resume 结果不会复用旧轮次文本或旧完成标记。
 
-这还没有接入 AgentManager，也不负责模型选择、子进程 CLI 策略或工具注册。
-完整契约与限制见 [terminal 生命周期](./docs/terminal-lifecycle.md)。新增诊断已使用中英文
-catalog；上游 embedded 文案仍待迁移。
+`createTerminalExecutionBackend()` 已将该实现接入真实 Pi CLI 子进程、启动策略、带认证的
+本地反馈通道、规范会话视图、带确认的 steer，以及同一会话的新进程 resume。
+首批仅支持 POSIX/Bash、`isolated: true` 的自主完成型任务；继承上下文、外部 reattach/fork、结构化输出、
+memory、turn limit 和原生 Windows 等未接通能力会明确报错，不静默降级。
+完成判断使用独立的进程退出回执，不信任屏幕文本中的结束标记。
+
+完整契约与限制见 [terminal 后端](./docs/terminal-backend.md) 和
+[terminal 生命周期](./docs/terminal-lifecycle.md)。新增诊断已有中英文 catalog；上游
+embedded 文案仍待迁移，目前没有用户配置开关。
 
 ## 配置
 
@@ -86,5 +92,4 @@ npm run check
 - [上游 RPC 协议参考](./docs/rpc.md)
 - [上游脚本 workflow 参考](./docs/workflows.md)
 
-下一步：接入 terminal 执行、远端会话观察与子进程策略，再完善会话存储语义、后端路由、
-本地化和统一 UI/配置。完成整合后才切换根 profile 与发布元数据。
+下一步：完善会话存储、恢复和 terminal 能力对齐，再加入后端路由、本地化和统一 UI/配置。完成整合后才切换根 profile 与发布元数据。

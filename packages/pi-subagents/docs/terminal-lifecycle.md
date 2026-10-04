@@ -1,8 +1,9 @@
 # Private terminal lifecycle primitive
 
 This batch extracts the Pi terminal-run lifecycle from the existing interactive
-product without loading it in the root profile. It is **not** a selectable
-`AgentExecutionBackend`, public API, workflow host, or replacement tool yet.
+product without loading it in the root profile. It is **not** a public API, workflow
+host, or replacement tool. The [private terminal backend](./terminal-backend.md) now
+adapts it to `AgentExecutionBackend` for an explicitly limited execution slice.
 
 ## Components
 
@@ -42,8 +43,8 @@ callers still own trusted path selection (including filesystem aliases).
 
 The caller must prepare session storage and CLI/model/tool/extension policy before
 launch. The command must use the designated session file and session ID (for a fresh
-Pi CLI session, use the matching `--session` and `--session-id`, or prepare a correct
-session header). The transcript reader rejects mismatched IDs rather than silently
+Pi CLI session, prepare a correct session header and use `--session`, or use
+`--session-id` alone; the CLI rejects combining those two flags). The transcript reader rejects mismatched IDs rather than silently
 reporting a different conversation. Command construction and child-extension
 selection are not migrated in this batch.
 
@@ -94,10 +95,10 @@ fallback for this run's assistant entries.
 
 The manager and transcript/output/UI consumers now use backend-neutral session
 handles and read-only observation interfaces. The embedded adapter alone unwraps
-native sessions for controls. Wiring terminal execution into that port still requires
-remote observation plus command/child-extension construction, activity reporting,
-model/tool policy, session writer ownership, and configuration routing. None of those
-are supplied by this lifecycle primitive.
+native sessions for controls. The separate terminal backend now supplies remote
+observation and command/child-extension construction for isolated autonomous tasks.
+Those features are not responsibilities of this lower-level primitive. Full policy
+parity, interrupted-session recovery and configuration routing remain deferred.
 
 The old lineage-only mode creates an empty conversation with parent metadata; it is
 **not** a full-context fork. Workflow fresh/reattach/fork semantics need a separate

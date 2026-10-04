@@ -1,9 +1,9 @@
 # Execution and session observation boundary
 
 This is a private refactoring boundary, **not** the final dual-backend API. The
-workspace remains inactive and unpublished. No terminal backend, backend
-configuration, or workflow adapter is connected here. A separate
-[terminal lifecycle primitive](./terminal-lifecycle.md) prepares the next integration step.
+workspace remains inactive and unpublished. An opt-in [terminal backend](./terminal-backend.md)
+now implements this port for isolated autonomous invocations. Default construction
+remains embedded; backend configuration and workflow-provider registration are deferred.
 
 ## Implementation map
 
@@ -103,10 +103,10 @@ re-exports it, while UI/tool consumers no longer import the execution engine to 
 Request preparation still uses `ExtensionContext` and options derived from the SDK
 runner (`ExecutionRunOptions` replaces the native callback). This is not yet a
 serialized cross-process protocol or public workflow API. A native-free fake backend
-now exercises the manager, UI, output, and resume path; it is not an implementation
-of real terminal session observation. Connecting the terminal primitive still needs
-CLI/child-policy construction, remote observation, writer ownership, and session-store
-fresh/reattach/fork semantics. There is no public package subpath for this interface.
+exercises the manager, UI, output, and resume path independently of the SDK. The real
+terminal implementation adds CLI/child policy and authenticated remote observations
+for a restricted first slice. External reattach/fork, interrupted-process recovery,
+full policy parity and configuration routing remain separate integration steps. There is no public package subpath for this interface.
 
 The mention clone remains a separate throwaway launcher. The agent it starts flows
 through the manager normally; its off-screen prompt is not a new backend or registry.
@@ -118,4 +118,5 @@ structured-output, and workflow tests continue exercising the same implementatio
 through the compatibility entrypoint. Additional tests cover injected execution,
 steer delivery, cancellation, cleanup idempotency/timeouts, shared facade state,
 handle ownership, observation lifetime, and native-free UI/output integration.
-All tests remain offline; terminal/mux behavior is outside this batch.
+Tests remain offline. A dedicated terminal suite explicitly uses real Pi child
+processes with a scripted provider and headless transport, not a live model/mux daemon.

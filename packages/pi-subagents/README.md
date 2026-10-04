@@ -15,9 +15,9 @@ unified embedded/terminal subagent package, **not an installable replacement yet
 - Existing `@maplezzk/pi-interactive-subagents` remains unchanged and active.
 - Importing the entrypoint exports the upstream extension factory; it does not
   invoke it. Do not load both products into a production session during migration.
-- A private terminal lifecycle primitive is available for development, but no
-  terminal backend is connected to AgentManager. Backend routing, config migration,
-  and the rpiv-workflow adapter remain unimplemented.
+- A real terminal backend is available through explicit factory injection for
+  isolated development. Default AgentManager construction remains embedded; config
+  routing, migration, and the rpiv-workflow adapter remain unimplemented.
 
 ## Imported scope
 
@@ -45,11 +45,11 @@ foreign or closed handles. Live read-only views preserve transcript identity,
 compaction behavior, stats, and metadata without exposing SDK controls or model headers.
 The raw runner facade remains compatible.
 
-Request preparation still uses Pi context and no real terminal backend is connected.
+Request preparation still uses Pi context; terminal execution is an explicit private opt-in.
 See [execution boundary](./docs/execution-backend.md) for the private callback-contract
 change, preserved behavior, and remaining work. No new user configuration is added.
 
-## Terminal lifecycle groundwork
+## Terminal execution (private opt-in)
 
 `src/backends/terminal/` now provides an injected launch/completion/interrupt/cancel
 primitive and a public `pi-terminal-mux` adapter, with explicit Bash/PowerShell
@@ -57,10 +57,17 @@ selection. Data-only run/session references
 separate a single invocation from its persistent conversation. Startup/cancellation
 cleanup is idempotent; resumed output excludes old turns and stale completion markers.
 
-This does not select models, construct child CLI policy, register tools, or implement
-remote observation for the manager's new session-view interface. See [terminal lifecycle](./docs/terminal-lifecycle.md)
-for its prepared-launch contract, limitations, and remaining integration. New terminal
-diagnostics have English/Chinese catalogs; the imported embedded strings are not yet migrated.
+`createTerminalExecutionBackend()` now connects that primitive to a real Pi CLI child,
+credential-free launch policy, authenticated loopback feedback, canonical session
+views, acknowledged steering, and fresh-process resume of owned sessions. The first
+slice requires POSIX/Bash, `isolated: true` and autonomous completion; unsupported inheritance,
+reattach/fork, structured output, memory, turn limits and native Windows fail explicitly.
+Completion uses a per-run supervisor receipt rather than spoofable screen text.
+
+See [terminal backend](./docs/terminal-backend.md) for the supported contract and
+[terminal lifecycle](./docs/terminal-lifecycle.md) for the underlying primitive.
+New diagnostics have English/Chinese catalogs; imported embedded strings remain a
+separate migration. There is no user-facing configuration switch yet.
 
 ## Configuration
 
@@ -100,6 +107,6 @@ terminal multiplexer, or local Pi daemon are needed. Test fixtures under
 - [Upstream RPC reference](./docs/rpc.md)
 - [Upstream scripted workflow reference](./docs/workflows.md)
 
-Next: connect terminal execution, remote observation and child-policy construction,
-then add session-store semantics, backend routing, and unified UI/config/localization. Switch the root profile and
+Next: extend session-store/recovery and terminal capability parity, then add backend
+routing and unified UI/config/localization. Switch the root profile and
 release metadata only after that integration is complete.

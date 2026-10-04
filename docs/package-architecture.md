@@ -34,7 +34,7 @@ Foundations must not depend on product or capability packages. A new foundation 
 ### Internal packages
 
 - `@maplezzk/pi-test-utils` provides deterministic temp-directory and extension-registration fixtures.
-- `@maplezzk/pi-subagents` is a private upstream migration baseline. It retains embedded subagent source/tests and an injected terminal lifecycle primitive using the public i18n/mux foundations, but is not activated; `@maplezzk/pi-interactive-subagents` remains the active product. Backend integration, shared config/localization, and the eventual product-layer promotion are separate changes.
+- `@maplezzk/pi-subagents` is a private upstream migration baseline. It retains the embedded engine, backend-neutral session views, and an opt-in isolated terminal backend using the public i18n/mux foundations, but is not activated; `@maplezzk/pi-interactive-subagents` remains the active product. Backend integration, shared config/localization, and the eventual product-layer promotion are separate changes.
 
 Internal packages are `private: true`. They are part of workspace type checks and tests but never enter release-please, npm tarball checks, or the root Pi profile.
 

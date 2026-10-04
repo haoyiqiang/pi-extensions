@@ -110,4 +110,30 @@ for explicitly deferred CLI/child-bridge, session-store, terminal-manager wiring
   a real terminal execution adapter.
 
 Request preparation still uses Pi context and existing runner option types. There is
-no new configuration, root-profile change, release activation, or public API promise.
+no new persisted configuration, root-profile change, release activation, or public API promise.
+
+## Real terminal execution, initial private slice
+
+- Added `terminal/backend.ts` implementing the manager port through a real Pi CLI
+  process, canonical remote session views and acknowledged steering. Default manager
+  construction remains embedded; only explicit factory injection selects terminal.
+- Added an isolated launch-policy preparer reusing existing agent/model/prompt
+  resolution. Unsupported inheritance, external resume/fork, memory, schemas and
+  finite turn limits fail rather than silently degrade. The child uses the installed
+  Pi peer's CLI, disables resource discovery and automatic refresh, and validates
+  model identity plus a credential-free API/endpoint fingerprint.
+- Added per-run authenticated loopback feedback with bounded sequenced frames. The
+  child waits for authentication and a parent start grant; early steering is queued
+  until the SDK's agent_start. Completion uses agent_settled, not agent_end.
+- Added a process supervisor, owned POSIX group/visible-descendant cleanup, atomic
+  exit receipts and bounded post-settlement retirement. Screen sentinels are never
+  completion authority for this backend. Uncertain shutdown quarantines a session.
+  Native Windows/PowerShell runtime is explicitly unsupported pending job-object
+  guarantees; the lower-level command-construction helpers remain available.
+- Added real Pi CLI/headless tests using a scripted native provider, alongside
+  transport, child policy, process-tree, receipt, timeout and ownership regressions.
+  No external model, credential or mux daemon is required by the tests.
+
+This new bridge does not import the old product's private implementation or duplicate
+its registry, notifications or widget. See [terminal backend](./docs/terminal-backend.md)
+for the exact supported slice, lifetime limits and work deferred before activation.
