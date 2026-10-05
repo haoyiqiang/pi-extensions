@@ -3,6 +3,7 @@ import { closeSync, constants, fstatSync, lstatSync, openSync, readSync, realpat
 import { isAbsolute } from "node:path";
 import { parseFrontmatter } from "@earendil-works/pi-coding-agent";
 import { snapshotRequiredTools } from "../backends/tool-requirements.js";
+import { snapshotPromptBinding, type PromptBinding } from "../backends/prompt-binding.js";
 import { i18n } from "../i18n.js";
 import { MAX_PREPARED_PROMPT_BYTES, MAX_PROMPT_RESOURCES, snapshotPreparedPrompt, validSkillName,
   type WorkflowPromptPreparer, type WorkflowPromptResource } from "./prompt-preparation.js";
@@ -10,6 +11,19 @@ import { expandWorkflowSkillArguments } from "./skill-arguments.js";
 
 const MAX_SKILL_BYTES = 256 * 1024;
 const MAX_TOTAL_SKILL_BYTES = 2 * 1024 * 1024;
+
+/** Bump when command parsing, wrapping or local argument semantics change. */
+export const WORKFLOW_SKILL_RESOLVER_ID = "pi-subagents/workflow-skills@1";
+
+export interface WorkflowSkillResourceSnapshot extends WorkflowPromptResource {
+  readonly requiredTools: readonly string[];
+}
+
+/** Callable compatibility plus immutable identity of the complete approved set, not just one input. */
+export type WorkflowSkillPreparer = WorkflowPromptPreparer & {
+  readonly promptBinding: PromptBinding;
+  readonly resources: readonly WorkflowSkillResourceSnapshot[];
+};
 
 export interface WorkflowSkillApproval {
   name: string;
@@ -101,7 +115,7 @@ function xmlAttribute(value: string): string {
 }
 
 /** Construction synchronously snapshots instruction files, not their supporting assets or tool grants. */
-export function createWorkflowSkillPreparer(approvals: readonly WorkflowSkillApproval[]): WorkflowPromptPreparer {
+export function createWorkflowSkillPreparer(approvals: readonly WorkflowSkillApproval[]): WorkflowSkillPreparer {
   if (!Array.isArray(approvals)) fail("invalidApproval");
   if (approvals.length > MAX_PROMPT_RESOURCES) fail("resourceLimit");
   const skills = new Map<string, SkillSnapshot>();
@@ -130,7 +144,17 @@ export function createWorkflowSkillPreparer(approvals: readonly WorkflowSkillApp
     skills.set(name, Object.freeze({ resource, body, requiredTools }));
   }
 
-  return (input, context) => {
+  // Locale-independent name/tool ordering makes approval order irrelevant to identity.
+  const resources = Object.freeze([...skills.values()]
+    .sort((a, b) => a.resource.name < b.resource.name ? -1 : a.resource.name > b.resource.name ? 1 : 0)
+    .map(({ resource, requiredTools }) => Object.freeze({ ...resource,
+      requiredTools: Object.freeze([...(requiredTools ?? [])].sort()),
+    })));
+  const canonical = { version: 1, resolverId: WORKFLOW_SKILL_RESOLVER_ID, assetMode: "live" as const, resources };
+  const promptBinding = snapshotPromptBinding({ resolverId: canonical.resolverId, assetMode: canonical.assetMode,
+    resourceSetDigest: createHash("sha256").update(JSON.stringify(canonical)).digest("hex"),
+  });
+  const prepare: WorkflowPromptPreparer = (input, context) => {
     context.signal.throwIfAborted();
     if (typeof input !== "string" || Buffer.byteLength(input, "utf8") > MAX_PREPARED_PROMPT_BYTES) fail("invalidPreparation");
     const command = input.trimStart();
@@ -149,4 +173,5 @@ export function createWorkflowSkillPreparer(approvals: readonly WorkflowSkillApp
     const suffix = !args ? "" : format === "pi" ? `\n\n${args}` : `\n\n${i18n.t("workflowResources.skillInput")}\n${args}`;
     return snapshotPreparedPrompt({ text: block + suffix, requiredTools, resources: [resource] });
   };
+  return Object.freeze(Object.assign(prepare, { promptBinding, resources }));
 }

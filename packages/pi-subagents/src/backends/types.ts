@@ -5,6 +5,7 @@ import type { ExecutionBackendKind, PersistentSessionReference } from "./session
 import type { CompiledSchema } from "../workflow/json-schema.js";
 import type { ExecutionSession, SessionBranchEntry } from "./session.js";
 import type { ManagedPolicy } from "./managed-policy.js";
+import type { PromptBinding } from "./prompt-binding.js";
 
 export type ExecutionRunOptions = Omit<RunOptions, "onSessionCreated"> & {
   onSessionCreated?: (session: ExecutionSession) => void;
@@ -12,6 +13,8 @@ export type ExecutionRunOptions = Omit<RunOptions, "onSessionCreated"> & {
 export type ExecutionRunResult = Omit<RunResult, "session"> & { session: ExecutionSession };
 export type ExecutionResumeOptions = Parameters<typeof resumeAgent>[2];
 export interface ExecutionRestoreOptions {
+  /** Expected saved resolver/resource identity. Presence must also match. */
+  promptBinding?: PromptBinding;
   /** Embedded restoration rebinds the current model runtime/auth; never persisted. */
   ctx?: ExtensionContext;
   signal?: AbortSignal;

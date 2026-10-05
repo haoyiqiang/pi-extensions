@@ -44,6 +44,37 @@ test("full profile extensions register together without command, tool, or render
   }, "pi-composition-");
 });
 
+test("explicit workflow frontend and executor compose without enabling the legacy subagent product", async () => {
+  await withTempAgentDir(async () => {
+    const [{ default: workflow }, { default: executor }, { default: interactive }, i18nModule] = await Promise.all([
+      import("../packages/pi-workflow/extension.ts"),
+      import("../packages/pi-subagents/workflow-executor.ts"),
+      import("../packages/pi-interactive-subagents/index.ts"),
+      import("../packages/pi-extensions-i18n/index.ts"),
+    ]);
+    i18nModule.resetNoticeRenderer();
+    const harness = createExtensionRegistrationHarness();
+    try {
+      await harness.load("pi-extensions-i18n", i18nModule.default);
+      await harness.load("pi-interactive-subagents", interactive);
+      await harness.load("pi-subagents-executor", executor);
+      await harness.load("pi-workflow", workflow);
+      assert.equal(harness.commands.get("wf")?.owner, "pi-workflow");
+      assert.equal(harness.commands.get("wf-cancel")?.owner, "pi-workflow");
+      assert.equal(harness.tools.get("subagent")?.owner, "pi-interactive-subagents");
+      assert.equal(harness.tools.has("Agent"), false);
+      assert.equal(harness.tools.has("SubagentWorkflow"), false);
+      assert.equal(harness.commands.has("agents"), false);
+      assert.equal(harness.entryRenderers.get("pi-extensions-notice")?.owner, "pi-extensions-i18n");
+    } finally {
+      const shutdown = harness.events.filter(event => event.event === "session_shutdown"
+        && ["pi-workflow", "pi-subagents-executor"].includes(event.owner));
+      for (const event of shutdown) await event.handler({ type: "session_shutdown" }, { hasUI: false });
+      i18nModule.resetNoticeRenderer();
+    }
+  }, "pi-workflow-composition-");
+});
+
 test("only pi-spark runtime source claims the editor and footer surfaces", () => {
   const violations: string[] = [];
   for (const packageName of readdirSync(join(ROOT, "packages"))) {

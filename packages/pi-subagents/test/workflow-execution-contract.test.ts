@@ -5,6 +5,9 @@ import type {
 } from "../src/workflow/execution-contract.js";
 import type { ManagedWorkflowExecutionProvider as Provider } from "../src/workflow/execution-provider.js";
 
+import type { WorkflowExecutorOffer as LocalConsumerOffer, WorkflowExecutorRequest as LocalConsumerRequest } from "../../pi-workflow/src/pi-protocol.js";
+import type { WorkflowExecutorOffer, WorkflowExecutorRequest } from "../src/workflow/executor-protocol.js";
+
 // Structural fixture for rpiv-workflow 2.12.0, commit 68d9a0014b70006d7b04b57933752338a2716db7.
 // Adapted from host.ts/execution-host.ts; attribution: docs/LICENSE.rpiv-workflow.
 // No checkout path, installed rpiv package, Pi 0.80.6 dependency or runner registration.
@@ -58,4 +61,9 @@ it("keeps the private provider structurally assignable without confusing shape w
   expectTypeOf<ManagedWorkflowSessionContext>().toExtend<ConsumerSession>();
   expectTypeOf<ManagedWorkflowExecution>().toExtend<ConsumerExecution>();
   expectTypeOf<Provider>().toExtend<ConsumerProvider>();
+});
+
+it("checks the actual local consumer and executor DTOs without a production dependency", () => {
+  expectTypeOf<WorkflowExecutorOffer>().toExtend<LocalConsumerOffer>();
+  expectTypeOf<LocalConsumerRequest>().toExtend<WorkflowExecutorRequest>();
 });

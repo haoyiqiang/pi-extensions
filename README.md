@@ -68,7 +68,7 @@ npm run check
 
 The check command runs workspace type checks, tests, and the portability/i18n gates.
 
-[`packages/pi-subagents`](./packages/pi-subagents/README.md) is a private migration baseline imported from `tintinweb/pi-subagents`. It participates in development checks but is neither published nor loaded by the root Pi profile; the existing interactive-subagents package remains active.
+[`packages/pi-subagents`](./packages/pi-subagents/README.md) and [`packages/pi-workflow`](./packages/pi-workflow/README.md) are private migration workspaces. The former provides managed embedded/terminal execution; the latter retains an independent workflow DSL, runner, journals and `/wf` frontend imported from `rpiv-workflow`. They collaborate through an explicit event-bus executor protocol rather than importing each other's internals. Both participate in development checks but are neither published nor loaded by the root Pi profile; the existing interactive-subagents package remains active.
 
 The repository pins `https://registry.npmjs.org/` in `.npmrc` so lockfile tarball URLs stay portable. Installing through a mirror registry rewrites those URLs and makes `npm ci` fail on npm 12+ with `EALLOWREMOTE`; `node scripts/check-lockfile-registry.mjs` (part of `npm run check`) blocks that before merge.
 

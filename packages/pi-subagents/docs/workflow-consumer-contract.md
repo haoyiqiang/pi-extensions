@@ -1,8 +1,14 @@
-# Remaining workflow consumer contract
+# Workflow consumer contract and upstream audit
 
-The managed provider and explicit prompt preparation are private, unregistered
-interfaces. This document records **consumer-side requirements**, not implemented
-rpiv-workflow changes or a promise of drop-in compatibility.
+The managed host/provider remain private source APIs. Independent `packages/pi-workflow`
+is now the local consumer implementation; the explicit `workflow-executor.ts` entry
+exposes managed execution through `pi-workflow:executor:discover:v1`, without importing
+that product or modifying its registration slot. See the
+[local consumer README](../../pi-workflow/README.md) for activation and compatibility.
+
+The remainder records the **unmodified upstream consumer's gaps** and acceptance
+requirements that motivated that local integration, not changes published to
+`@juicesharp/rpiv-workflow` or a promise of drop-in compatibility.
 
 The inspected reference is `@juicesharp/rpiv-workflow` 2.12.0 in `juicesharp/rpiv-mono`
 at `68d9a0014b70006d7b04b57933752338a2716db7`. This is a source/export audit, not a
@@ -107,7 +113,8 @@ Required cases include:
 6. Explicit resource formats, required tools and saved-policy restrictions are
    honored rather than bypassed by ambient skill/extension hooks.
 
-The repository's structural fixture and offline backend tests validate our boundary,
-not these still-unimplemented consumer changes. The next real integration step must
-name and modify the consumer startup/shutdown owner, rather than add another unused
-registration wrapper inside pi-subagents.
+The original structural fixture and offline host tests validate only the boundary.
+Local consumer tests additionally exercise the real imported engine; the Pi frontend
+owns provider registration/teardown, and the executor owns backend lifecycle. Keep
+that distinction when adding coverage: a fake runner or type-only compatibility check
+cannot establish consumer cancellation, durable-state or retirement behavior.

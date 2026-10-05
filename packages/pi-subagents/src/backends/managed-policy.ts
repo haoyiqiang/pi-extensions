@@ -10,11 +10,13 @@ import type { AgentConfig, EffectiveThinkingLevel, SubagentType } from "../types
 import { getGraceTurns, resolveDefaultModel, resolveEffectiveMaxTurns } from "./embedded.js";
 import { compileInvocationSchema, validTurnBudget } from "./invocation-policy.js";
 import { modelFingerprint } from "./model-identity.js";
+import { snapshotPromptBinding, type PromptBinding } from "./prompt-binding.js";
 import type { ExecutionRunOptions } from "./types.js";
 import { assertRequiredTools, snapshotRequiredTools } from "./tool-requirements.js";
 
 /** Fully resolved, credential-free policy for one isolated managed conversation. */
 export interface ManagedPolicy {
+  readonly promptBinding?: PromptBinding;
   readonly type: SubagentType;
   readonly name: string;
   readonly cwd: string;
@@ -36,6 +38,7 @@ export async function prepareManagedPolicy(
   diagnosticPrefix: "terminalBackend" | "managedEmbedded" = "terminalBackend",
 ): Promise<ManagedPolicy> {
   const requiredTools = snapshotRequiredTools(options.requiredTools);
+  const promptBinding = snapshotPromptBinding(options.promptBinding);
   const invalidConfig = (): never => { throw new Error(i18n.t(`${diagnosticPrefix}.invalidConfig`)); };
   const unsupported = (feature: string): never => { throw new Error(i18n.t(`${diagnosticPrefix}.unsupported`, { feature })); };
   const agent = resolveAgent(type, invalidConfig);
@@ -68,6 +71,7 @@ export async function prepareManagedPolicy(
   const thinkingLevel = options.thinkingLevel ?? agent.thinking;
 
   return Object.freeze({
+    ...(promptBinding !== undefined ? { promptBinding } : {}),
     type,
     name: agent.displayName ?? agent.name,
     cwd,
@@ -91,6 +95,7 @@ export function validateManagedPolicy(value: unknown): asserts value is ManagedP
     || (policy.modelFingerprint !== undefined && !/^[a-f0-9]{64}$/.test(policy.modelFingerprint))
     || (policy.thinkingLevel !== undefined && !["off", "minimal", "low", "medium", "high", "xhigh", "max"].includes(policy.thinkingLevel))
     || !validTurnBudget(policy.maxTurns, policy.graceTurns)) invalidConfig();
+  snapshotPromptBinding(policy.promptBinding);
   if (policy.structuredSchema !== undefined) compileInvocationSchema(policy.structuredSchema);
 }
 

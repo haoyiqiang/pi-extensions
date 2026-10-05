@@ -22,6 +22,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import type { ToolActivity } from "./agent-runner.js";
 import { createEmbeddedExecutionBackend } from "./backends/embedded-adapter.js";
 import { snapshotRequiredTools } from "./backends/tool-requirements.js";
+import { snapshotPromptBinding, type PromptBinding } from "./backends/prompt-binding.js";
 import type { ExecutionSession } from "./backends/session.js";
 import type { PersistentSessionReference, SessionReference } from "./backends/session-reference.js";
 import type { AgentExecutionBackend, ExecutionResumeResult, ExecutionRunOptions, ExecutionRunResult } from "./backends/types.js";
@@ -174,6 +175,7 @@ interface SpawnArgs {
 
 interface SpawnOptions {
   description: string;
+  promptBinding?: PromptBinding;
   /** Minimum active tool names for this invocation, not permission grants. */
   requiredTools?: readonly string[];
   /**
@@ -313,6 +315,7 @@ interface SpawnOptions {
 
 /** Private managed adoption: metadata belongs to this manager, policy to the backend. */
 export interface RestoreOptions {
+  promptBinding?: PromptBinding;
   mode?: "reattach" | "fork";
   type: SubagentType;
   description: string;
@@ -427,6 +430,10 @@ export class AgentManager {
   /** Backend completion has arrived; only manager-owned settlement remains. */
   private settling = new WeakSet<AgentRecord>();
   private recordShutdowns = new WeakMap<AgentRecord, Set<Promise<void>>>();
+  /** Strict managed owners surface retirement failures without changing legacy best-effort cleanup. */
+  private retirementFailures: unknown[] = [];
+  private sessionRetirementFailures = new WeakMap<ExecutionSession, unknown[]>();
+  private recordRetirementFailures = new WeakMap<AgentRecord, unknown[]>();
 
   /**
    * Startup phases, keyed by agent id. `spawn()` still returns synchronously,
@@ -474,6 +481,7 @@ export class AgentManager {
     onCompact?: OnAgentCompact,
     onUsage?: OnAgentUsage,
     private readonly execution: AgentExecutionBackend = createEmbeddedExecutionBackend(),
+    private readonly strictRetirement = false,
   ) {
     this.onComplete = onComplete;
     this.onStart = onStart;
@@ -549,7 +557,7 @@ export class AgentManager {
     prompt: string,
     options: SpawnOptions,
   ): string {
-    options = { ...options, requiredTools: snapshotRequiredTools(options.requiredTools) };
+    options = { ...options, requiredTools: snapshotRequiredTools(options.requiredTools), promptBinding: snapshotPromptBinding(options.promptBinding) };
     if (this.disposed) throw new Error(i18n.t("managerRestore.disposed"));
     // Validate before the queue branch — a queued spawn should fail at the
     // call, not minutes later at drain. Throw (not warn): programmatic callers
@@ -662,7 +670,7 @@ export class AgentManager {
     // Snapshot identity and metadata before yielding; caller mutation cannot retarget
     // the reservation or change ownership while backend preparation is pending.
     reference = Object.freeze({ ...reference });
-    options = { ...options };
+    options = { ...options, promptBinding: snapshotPromptBinding(options.promptBinding) };
     if (mode === "reattach") {
       this.assertRestoreAvailable(reference);
       this.restoreReservations.add(reference);
@@ -687,6 +695,7 @@ export class AgentManager {
       return restore.call(this.execution, reference, {
         ctx: options.ctx,
         structuredOutput: options.structuredOutput,
+        promptBinding: options.promptBinding,
         signal: controller.signal,
       });
     });
@@ -999,6 +1008,7 @@ export class AgentManager {
       thinkingLevel: options.thinkingLevel,
       structuredOutput: options.structuredOutput,
       requiredTools: options.requiredTools,
+      promptBinding: options.promptBinding,
       resumeSessionFile: options.resumeSessionFile,
       nested: options.parentAgentId !== undefined,
       workflow: options.workflowId !== undefined,
@@ -1717,8 +1727,8 @@ export class AgentManager {
    *
    * Await known handles, worktree startup and settlement already owned by the manager,
    * never an opaque backend invocation. Late handles/results retain their detached
-   * cleanup paths. Completion does not certify backend retirement or release a lease:
-   * uncertain retirement remains the backend's quarantine responsibility.
+   * cleanup paths. Legacy completion does not certify backend retirement; strict
+   * managed owners reject with known retirement failures after bounded cleanup.
    */
   release(id: string): Promise<void> {
     const pending = this.releases.get(id);
@@ -1726,7 +1736,9 @@ export class AgentManager {
     const record = this.agents.get(id);
     if (!record) return Promise.resolve();
     let resolve!: () => void;
-    const released = new Promise<void>(done => { resolve = done; });
+    let reject!: (error: unknown) => void;
+    const released = new Promise<void>((done, fail) => { resolve = done; reject = fail; });
+    void released.catch(() => {});
     // Publish before abort/shutdown callbacks can reenter release().
     this.releases.set(id, released);
     const startup = this.startups.get(id);
@@ -1749,17 +1761,20 @@ export class AgentManager {
     if (session) void this.shutdownRecordSession(record, session);
     this.drainQueue();
     void (async () => {
-      await Promise.allSettled(startup ? [startup] : []);
-      // Include handles published during startup or another shutdown callback, but
-      // never wait for unrelated records' cleanup or for unpublished backend work.
-      while (this.recordShutdowns.get(record)?.size) {
-        await Promise.allSettled([...this.recordShutdowns.get(record)!]);
-      }
-      if (invocation && this.settling.has(record)) await invocation;
-    })().finally(() => {
-      this.releases.delete(id);
-      resolve();
-    }).catch(() => {});
+      try {
+        await Promise.allSettled(startup ? [startup] : []);
+        // Include handles published during startup or another shutdown callback, but
+        // never wait for unrelated records' cleanup or for unpublished backend work.
+        while (this.recordShutdowns.get(record)?.size) {
+          await Promise.allSettled([...this.recordShutdowns.get(record)!]);
+        }
+        if (invocation && this.settling.has(record)) await invocation;
+        const failures = this.recordRetirementFailures.get(record);
+        if (this.strictRetirement && failures?.length) reject(retirementFailure(failures));
+        else resolve();
+      } catch (error) { reject(error); }
+      finally { this.releases.delete(id); }
+    })();
     return released;
   }
 
@@ -1770,7 +1785,7 @@ export class AgentManager {
   }
 
   private shutdownRecordSession(record: AgentRecord, session: ExecutionSession): Promise<void> {
-    const pending = this.shutdownSession(session);
+    const pending = this.shutdownSession(session, record);
     let shutdowns = this.recordShutdowns.get(record);
     if (!shutdowns) this.recordShutdowns.set(record, shutdowns = new Set());
     shutdowns.add(pending);
@@ -1778,11 +1793,35 @@ export class AgentManager {
     return pending;
   }
 
-  /** Observe all rejections, including a backend that throws before returning a promise. */
-  private shutdownSession(session: ExecutionSession | undefined): Promise<void> {
+  private associateRecordRetirementFailure(record: AgentRecord, error: unknown): void {
+    let failures = this.recordRetirementFailures.get(record);
+    if (!failures) this.recordRetirementFailures.set(record, failures = []);
+    if (!failures.includes(error)) failures.push(error);
+  }
+
+  private recordRetirementFailure(error: unknown, session?: ExecutionSession, record?: AgentRecord): void {
+    if (!this.strictRetirement) return;
+    this.retirementFailures.push(error);
+    if (session) {
+      let failures = this.sessionRetirementFailures.get(session);
+      if (!failures) this.sessionRetirementFailures.set(session, failures = []);
+      failures.push(error);
+    }
+    if (record) this.associateRecordRetirementFailure(record, error);
+  }
+
+  /** Observe every backend rejection; strict managed owners surface it at their owned barrier. */
+  private shutdownSession(session: ExecutionSession | undefined, record?: AgentRecord): Promise<void> {
     if (session) {
       const closed = this.closedSessions.get(session);
-      if (closed) return closed;
+      if (closed) {
+        if (this.strictRetirement && record) void closed.then(() => {
+          for (const error of this.sessionRetirementFailures.get(session) ?? []) {
+            this.associateRecordRetirementFailure(record, error);
+          }
+        });
+        return closed;
+      }
     }
     let resolve!: () => void;
     const settled = new Promise<void>(done => { resolve = done; });
@@ -1794,8 +1833,12 @@ export class AgentManager {
       if (session) this.shutdowns.delete(session);
       resolve();
     };
-    try { Promise.resolve(this.execution.shutdown(session)).then(finish, finish); }
-    catch { finish(); }
+    const failed = (error: unknown) => {
+      this.recordRetirementFailure(error, session, record);
+      finish();
+    };
+    try { Promise.resolve(this.execution.shutdown(session)).then(finish, failed); }
+    catch (error) { failed(error); }
     return settled;
   }
 
@@ -1920,7 +1963,7 @@ export class AgentManager {
     const sessions = [...this.agents.values()].map(record => {
       const session = record.session;
       record.session = undefined;
-      return session;
+      return { record, session };
     });
     const startups = [...this.startups.values()];
     this.agents.clear();
@@ -1939,9 +1982,18 @@ export class AgentManager {
     // Await known handles, managed restores and manager-owned startup. run() has no
     // separate readiness promise: opaque backend preflight is cancelled by its signal;
     // late handle callbacks/results are closed above, without awaiting an unbounded run.
-    const closing = sessions.map(session => this.shutdownSession(session));
+    const closing = sessions.map(({ record, session }) => this.shutdownSession(session, record));
     await Promise.allSettled([...closing, ...this.shutdowns.values(), ...this.restorations.values(), ...this.releases.values(), ...startups]);
     // Startup may finish a worktree copy or hand back a late session while we wait.
     await Promise.allSettled([...this.shutdowns.values()]);
+    if (this.strictRetirement && this.retirementFailures.length) throw retirementFailure(this.retirementFailures);
   }
+}
+
+function retirementFailure(errors: readonly unknown[]): Error {
+  if (errors.length === 1) {
+    const error = errors[0];
+    return error instanceof Error ? error : new Error(i18n.t("manager.retirementFailed"), { cause: error });
+  }
+  return new AggregateError([...errors], i18n.t("manager.retirementFailed"));
 }

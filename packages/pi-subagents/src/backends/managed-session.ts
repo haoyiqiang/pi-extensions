@@ -11,6 +11,7 @@ import { acquireSessionLease, type SessionLease } from "./session-lease.js";
 import { compileInvocationSchema } from "./invocation-policy.js";
 import { validateManagedPolicy, type ManagedPolicy } from "./managed-policy.js";
 import { sessionWitness, type SessionWitness } from "./session-witness.js";
+import { assertPromptBindingMatches, snapshotPromptBinding } from "./prompt-binding.js";
 
 const MAX_TRANSCRIPT_BYTES = 64 * 1024 * 1024;
 const MAX_POLICY_BYTES = 4 * 1024 * 1024;
@@ -87,6 +88,7 @@ function snapshotPolicy(value: unknown): ManagedPolicy {
     validateManagedPolicy(value);
     const policy: ManagedPolicy = {
       type: value.type, name: value.name, cwd: value.cwd,
+      ...(value.promptBinding !== undefined ? { promptBinding: snapshotPromptBinding(value.promptBinding) } : {}),
       model: Object.freeze({ provider: value.model.provider, id: value.model.id }),
       ...(value.modelFingerprint !== undefined ? { modelFingerprint: value.modelFingerprint } : {}),
       ...(value.thinkingLevel !== undefined ? { thinkingLevel: value.thinkingLevel } : {}),
@@ -104,7 +106,7 @@ function validateReference(reference: PersistentSessionReference, expectedBacken
     || !text(reference.sessionFile) || !isAbsolute(reference.sessionFile)) fail("sessionStore.invalidRecord");
 }
 
-function parseRecord<K extends ExecutionBackendKind>(raw: Buffer, file: string, expectedBackend: K, sessionId?: string): PolicyRecord<K> {
+function parseRecord<K extends ExecutionBackendKind>(raw: Buffer, file: string, expectedBackend: K, sessionId?: string, requireReady = true): PolicyRecord<K> {
   let record: unknown;
   try { record = JSON.parse(raw.toString("utf8")); } catch { fail("sessionStore.invalidRecord"); }
   if (!object(record) || record.version !== 1 || !object(record.reference)) fail("sessionStore.invalidRecord");
@@ -115,7 +117,7 @@ function parseRecord<K extends ExecutionBackendKind>(raw: Buffer, file: string, 
     || !Number.isSafeInteger(record.checkpoint.entries) || record.checkpoint.entries < 0
     || !Number.isSafeInteger(record.checkpoint.bytes) || record.checkpoint.bytes < 0
     || typeof record.checkpoint.digest !== "string" || !/^[a-f0-9]{64}$/.test(record.checkpoint.digest)) fail("sessionStore.invalidRecord");
-  if (record.state !== "ready") fail("sessionStore.unsafe");
+  if (record.state !== "ready" && (requireReady || (record.state !== "running" && record.state !== "quarantined"))) fail("sessionStore.unsafe");
   return { ...record, policy: snapshotPolicy(record.policy) } as PolicyRecord<K>;
 }
 
@@ -145,6 +147,7 @@ export function inspectManagedSession(file: string, expectedBackend: ExecutionBa
 }
 
 function validateRestore(policy: ManagedPolicy, options: ExecutionRestoreOptions): void {
+  assertPromptBindingMatches(policy.promptBinding, options.promptBinding);
   if (policy.structuredSchema === undefined) {
     if (options.structuredOutput !== undefined) fail("sessionStore.schemaMismatch");
     return;
@@ -201,9 +204,18 @@ export class ManagedSession<K extends ExecutionBackendKind> {
 
   static open<K extends ExecutionBackendKind>(reference: PersistentSessionReference, expectedBackend: K, options: ExecutionRestoreOptions = {}): ManagedSession<K> {
     validateReference(reference, expectedBackend);
-    const lease = acquireSessionLease(reference.sessionFile);
+    options = { ...options, promptBinding: snapshotPromptBinding(options.promptBinding) };
+    let canonical: string;
+    try { canonical = realpathSync(reference.sessionFile); } catch { return fail("sessionStore.invalidFile"); }
+    // Reject incompatible identity before creating even a temporary writer lease.
+    const before = privateRead(recordPath(canonical), MAX_POLICY_BYTES, "sessionStore.invalidRecord");
+    // Leave running/quarantined ownership diagnostics unchanged for matching/unbound callers.
+    const candidate = parseRecord(before, canonical, expectedBackend, reference.sessionId, false);
+    assertPromptBindingMatches(candidate.policy.promptBinding, options.promptBinding);
+    const lease = acquireSessionLease(canonical);
     try {
       const raw = privateRead(recordPath(lease.sessionFile), MAX_POLICY_BYTES, "sessionStore.invalidRecord");
+      if (!raw.equals(before)) fail("sessionStore.invalidRecord");
       const record = parseRecord(raw, lease.sessionFile, expectedBackend, reference.sessionId);
       validateRestore(record.policy, options);
       const managed = new ManagedSession<K>(lease, record, raw);

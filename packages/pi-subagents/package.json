@@ -6,10 +6,12 @@
   "type": "module",
   "main": "./index.ts",
   "exports": {
-    ".": "./index.ts"
+    ".": "./index.ts",
+    "./workflow-executor": "./workflow-executor.ts"
   },
   "files": [
     "index.ts",
+    "workflow-executor.ts",
     "src",
     "locales",
     "docs",

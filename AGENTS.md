@@ -18,7 +18,8 @@ pi-extensions/
 │   ├── pi-rewind/               # Git-backed checkpoints and rewind
 │   ├── pi-spark/                # Compact TUI, clean transcript, credits, presets, recap, metrics, resources, naming
 │   ├── test-utils/              # Private deterministic workspace test fixtures
-│   ├── pi-subagents/            # Private upstream migration baseline; not activated or published
+│   ├── pi-subagents/            # Private managed executor and upstream migration baseline
+│   └── pi-workflow/             # Private independent workflow engine; explicit opt-in only
 ├── scripts/                     # Repository checks and workspace helpers
 ├── .github/workflows/           # CI and release automation
 ├── README.md                    # English project documentation
@@ -48,7 +49,7 @@ The layer model, allowed workspace dependency edges, UI ownership, and root dist
 
 Keep packages composable and independently installable. Avoid coupling one extension to another extension's private implementation details or display state.
 
-`packages/pi-subagents` is a private, inactive import baseline. Preserve upstream provenance and regression tests; do not add it to the root profile or release metadata until terminal-backend integration, localization, shared config, and composition checks are complete. The existing interactive-subagents product remains unchanged during incubation.
+`packages/pi-subagents` and `packages/pi-workflow` are private migration workspaces. Preserve upstream provenance and regression tests; do not add them to the root profile or release metadata until product integration and composition checks are complete. `pi-workflow` owns DSL/orchestration, journals, retries/recovery and `/wf`; `pi-subagents` owns managed execution through its isolated `workflow-executor.ts` entry. They collaborate through a versioned Pi event-bus protocol, without cross-product source imports. Do not activate the retained upstream `SubagentWorkflow` as a second formal engine. The existing interactive-subagents product remains unchanged during incubation.
 
 ## Portability and safety
 

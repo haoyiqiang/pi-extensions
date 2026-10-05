@@ -1,9 +1,11 @@
 # Private managed workflow execution
 
-This is an **unregistered development interface**, not a replacement `/wf` product.
-The package remains private, the default manager remains legacy embedded, and the
-active interactive-subagents extension is unchanged. There is no configuration
-switch, root-profile entry, public package subpath, or workflow-engine dependency.
+This is a **private development interface**, not the complete replacement subagent product.
+The default manager remains legacy embedded and the active interactive-subagents extension
+is unchanged. Its factory has no registration side effect. The explicit
+`workflow-executor.ts` entry offers this profile to independent `pi-workflow` through
+Pi's event bus, without a workflow-engine dependency or root-profile entry. Workflow
+execution configuration and `/wf` belong to that consumer.
 
 ## Contract and ownership
 
@@ -111,9 +113,9 @@ sends are cancelled, and active work is retired without prematurely releasing ca
 `cancellationError(signal)` must return the consumer's **actual cancellation error**
 when that consumer uses nominal `instanceof` checks. The local default
 `WorkflowExecutionAbortError` is not rpiv-workflow's class. The inspected reference
-runner exposes provider registration but does not expose a public cancellation
-constructor/factory; wiring that bridge remains consumer integration work. Similarly named local or DOM errors do
-not silently solve it.
+runner exposes provider registration but not a public cancellation constructor/factory.
+The local `pi-workflow` consumer extends that contract by supplying its own factory
+on each execution request; similarly named local or DOM errors are still not substitutes.
 
 An aborted spawn/wait rejects promptly. Invocations retain execution capacity
 until their real promises settle; status changes alone do not release it. Child
@@ -127,8 +129,12 @@ it. Our provider therefore closes admission and cancels synchronously, observes
 cleanup errors, and additionally exposes `close(): Promise<void>` for callers that
 own an awaited teardown barrier. That shared barrier is published before firing abort
 or shutdown callbacks, so reentrant disposal cannot return an already-resolved substitute. Normal `spawnChild` completion already awaits its
-scoped release. Owners must call `dispose`/`close` on run/session shutdown and must
-not keep using invalidated parent runtime/auth bindings.
+scoped release. The workflow-owned manager opts into strict retirement reporting:
+a backend shutdown failure rejects child completion and remains visible to run-level
+close, instead of being swallowed by legacy best-effort disposal. Invocation/callback
+and cleanup failures are preserved together when both occur. The ordinary upstream
+manager's default disposal behavior is unchanged. Owners must call `dispose`/`close`
+on run/session shutdown and must not keep using invalidated parent runtime/auth bindings.
 
 Known cleanup is awaited; an opaque backend promise that ignores cancellation or
 never publishes a handle is not made safe by waiting forever. Late handles remain
@@ -195,16 +201,16 @@ POSIX/Bash and the terminal backend's existing restrictions still apply.
 
 ## What this does not migrate
 
-No `/wf` registration, ambient resource discovery, full rpiv-args shell/runtime hooks,
-questionnaire/advisor/web extension loading, lane UI, interactive terminal handoff,
-cross-backend conversion, crash recovery or production configuration migration is
-included. Explicit approved skill preparation is not a replacement for those resources.
-The [consumer contract audit](./workflow-consumer-contract.md) records the remaining
-public cancellation, retry, ownership and awaited-retirement requirements. The reference runner
-also catches some validation-retry send errors as extraction failures, so the host
-alone cannot guarantee that every cancellation path is classified identically.
-Host-level failures can lose session provenance in that runner's generic entry-throw
-rows. Those consumer issues must be resolved before claiming a seamless migration.
+The host itself registers no `/wf`; that surface belongs to independent `pi-workflow`.
+Ambient resource discovery, full rpiv-args shell/runtime hooks, questionnaire/advisor/web
+extension loading, lane UI, interactive terminal handoff, cross-backend conversion, crash
+recovery and production subagent configuration migration remain outside this profile.
+Explicit approved skill preparation is not a replacement for those resources.
+The [consumer contract audit](./workflow-consumer-contract.md) distinguishes the local
+consumer integration from the unmodified upstream package. Upstream catches some retry
+cancellations as extraction failures and can lose session provenance on host-entry errors;
+a host wrapper alone cannot repair those consumer semantics. No drop-in compatibility
+with an unmodified upstream consumer or its full resource ecosystem is claimed.
 
 Package typecheck also compiles a version-pinned structural consumer fixture; this
 checks assignability, not full runtime/feature compatibility. Tests use injected

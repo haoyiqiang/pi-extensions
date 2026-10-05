@@ -3,7 +3,8 @@
 This is a private refactoring boundary, **not** the final dual-backend API. The
 workspace remains inactive and unpublished. An opt-in [terminal backend](./terminal-backend.md)
 now implements this port for isolated autonomous invocations. Default construction
-remains embedded; backend configuration and workflow-provider registration are deferred.
+remains embedded. The isolated `workflow-executor.ts` entry offers managed execution to
+private `pi-workflow`; top-level subagent routing and product replacement remain deferred.
 
 ## Implementation map
 
@@ -173,8 +174,9 @@ changes. Explicit `off` is accepted by the private spawn/runner thinking option.
 
 See [workflow execution](./workflow-execution.md) for cancellation-error interoperability,
 synchronous provider disposal plus an awaited close barrier, managed storage versus
-consumer pruning, and remaining resource/consumer work. This adds no registration,
-public configuration, automatic routing or root-profile change.
+consumer pruning, and remaining resource/consumer work. The low-level host factory has
+no registration side effect. Explicit Pi composition uses `workflow-executor.ts` and
+the versioned event-bus protocol; no root-profile change is made.
 
 Prompt preparation is now optional and explicit. Fresh/send inputs can use an approved
 skill snapshot or another owner-supplied preparer; idle reattach/fork never prepares the
@@ -184,7 +186,9 @@ before fresh environment/session effects or resumed writer reservation. Missing 
 never grant permissions or change saved policy, and legacy embedded rejects nonempty
 requirements. Instruction files, not supporting asset trees, are snapshotted. See
 [workflow resources](./workflow-resources.md) for format/budget/trust limits and
-[consumer contract](./workflow-consumer-contract.md) for the still-blocked registration step.
+[consumer contract](./workflow-consumer-contract.md) for the local integration and upstream limits.
+Explicit resolver/resource identity can also be bound to saved managed policy; mismatched
+restoration is rejected before writer acquisition. Supporting assets remain live.
 
 ## Observation semantics
 

@@ -299,3 +299,24 @@ The default remains plain-prompt-only; resources require explicit preparation in
 No production configuration, root profile, public export, workflow registration or release
 metadata changes are included. See `docs/workflow-resources.md` and
 `docs/workflow-consumer-contract.md`.
+
+## Bound resources and independent workflow executor
+
+- Added explicit `PromptBinding` snapshots to manager admission and managed policy.
+  Reattach/fork compare the resolver/resource identity before acquiring a writer;
+  absence is part of identity. Existing unbound programmatic clients stay compatible.
+- Approved skill preparers expose immutable canonical resource snapshots and a
+  versioned whole-set digest. Supporting assets remain live, explicitly represented
+  by `assetMode: "live"`; generic preparation metadata is not automatically trusted
+  as a recovery binding.
+- Added an isolated `workflow-executor.ts` opt-in entry and versioned Pi event-bus
+  offer. It does not activate the legacy Agent UI or `SubagentWorkflow` engine.
+  The separate private `pi-workflow` owns the imported DSL/runner, commands/config,
+  journal, cancellation classification and registration ownership.
+- Executor requests bind skills/global minimum tool requirements, preserve recorded
+  backend identity on resume, combine consumer/observer/lifecycle cancellation and
+  await idempotent retirement across session changes. Cleanup failures remain errors.
+- Neither product imports the other's runtime implementation. Added deterministic
+  registration/admission/lifecycle tests and cross-package real-consumer coverage.
+  Root activation, the existing interactive-subagents product and release metadata
+  remain unchanged; long-lived interactive parity is not supplied by this entry.

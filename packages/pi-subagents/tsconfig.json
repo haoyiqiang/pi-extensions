@@ -9,5 +9,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["index.ts", "src/**/*.ts"]
+  "include": ["index.ts", "workflow-executor.ts", "src/**/*.ts"]
 }

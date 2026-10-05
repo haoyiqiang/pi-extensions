@@ -3,11 +3,11 @@ import { isAbsolute, relative, sep } from "node:path";
 import type { Model } from "@earendil-works/pi-ai";
 import { clampThinkingLevel } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { NOTICE_TAG_COLOR, notifyWithSource, type NoticeContext } from "pi-extensions-i18n";
 import { AgentManager } from "../agent-manager.js";
 import type { ExecutionSession } from "../backends/session.js";
 import type { PersistentSessionReference } from "../backends/session-reference.js";
 import type { AgentExecutionBackend, ExecutionSessionSnapshot } from "../backends/types.js";
+import { assertPromptBindingMatches, snapshotPromptBinding, type PromptBinding } from "../backends/prompt-binding.js";
 import { i18n } from "../i18n.js";
 import { checkModelScope } from "../model-scope.js";
 import type { AgentRecord, EffectiveThinkingLevel } from "../types.js";
@@ -34,6 +34,8 @@ export interface WorkflowExecutionHostOptions {
   structuredOutput?: CompiledSchema;
   /** Explicit trusted-owner preparation; absent means the original plain-prompt-only profile. */
   preparePrompt?: WorkflowPromptPreparer;
+  /** Bind fresh policy and require the same identity on restore; preparation alone stays unbound. */
+  promptBinding?: PromptBinding;
   signal?: AbortSignal;
   /** Return the consumer's ACTUAL nominal cancellation error, not a similarly named local class. */
   cancellationError?: (signal: AbortSignal) => Error;
@@ -63,6 +65,7 @@ interface ChildScope {
 /** No registration, UI ownership, global model mutation, or public backend routing. */
 export class SubagentWorkflowExecutionHost implements ManagedWorkflowHost {
   readonly capabilities: WorkflowExecutionCapabilities;
+  readonly promptBinding?: PromptBinding;
   readonly cwd: string;
   readonly hasUI: boolean;
   readonly maxConcurrency: number;
@@ -81,6 +84,7 @@ export class SubagentWorkflowExecutionHost implements ManagedWorkflowHost {
   private readonly options: WorkflowExecutionHostOptions;
 
   constructor(options: WorkflowExecutionHostOptions) {
+    const promptBinding = snapshotPromptBinding(options.promptBinding);
     if (!options.runId?.trim() || !isAbsolute(options.sessionDir) || !isAbsolute(options.ctx.cwd)
       || !validSignal(options.signal) || !validSignal(options.observer.signal)
       || !Number.isSafeInteger(options.maxConcurrency ?? 4) || (options.maxConcurrency ?? 4) < 1
@@ -111,18 +115,17 @@ export class SubagentWorkflowExecutionHost implements ManagedWorkflowHost {
     const file = options.observer.sessionManager.getSessionFile();
     const branch = structuredClone(options.observer.sessionManager.getBranch());
     this.sessionManager = { getSessionId: () => id, getSessionFile: () => file, getBranch: () => structuredClone(branch) };
-    const notice: NoticeContext = { mode: options.ctx.mode, ui: options.observer.ui };
-    this.ui = { notify: (message, level = "info") => notifyWithSource({
-      ctx: notice, source: { tag: "agents", color: NOTICE_TAG_COLOR }, level, message,
-    }) };
+    // This is the consumer's abstract notice port, not a second package-owned outlet.
+    this.ui = options.observer.ui;
     const systemPrompt = options.ctx.getSystemPrompt();
     const ctx = Object.create(options.ctx, {
-      cwd: { value: this.cwd }, model: { value: options.ctx.model },
+      cwd: { value: this.cwd }, mode: { value: options.ctx.mode }, model: { value: options.ctx.model },
       modelRegistry: { value: options.ctx.modelRegistry }, getSystemPrompt: { value: () => systemPrompt },
     }) as ExtensionContext;
-    this.options = Object.freeze({ ...options, ctx });
+    this.promptBinding = promptBinding;
+    this.options = Object.freeze({ ...options, ctx, promptBinding });
     // Allocate resources only after all fallible context reads have succeeded.
-    this.manager = new AgentManager(undefined, this.maxConcurrency, undefined, undefined, undefined, options.backend);
+    this.manager = new AgentManager(undefined, this.maxConcurrency, undefined, undefined, undefined, options.backend, true);
     this.detach = linkSignals(this.controller, [options.signal, options.observer.signal]);
   }
 
@@ -174,6 +177,7 @@ export class SubagentWorkflowExecutionHost implements ManagedWorkflowHost {
   }
 
   private async runChild<T>(scope: ChildScope, options: ManagedWorkflowChildOptions<T>): Promise<T> {
+    let primaryFailure: { error: unknown } | undefined;
     try {
       // Stop awaiting cancelled work, but retain capacity until the actual invocation settles.
       await raceAbort(this.invoke(scope, async () => {
@@ -186,7 +190,7 @@ export class SubagentWorkflowExecutionHost implements ManagedWorkflowHost {
             mode: options.fork ? "fork" : "reattach", ctx: this.options.ctx,
             type: snapshot.policy.type, description: i18n.t("workflowExecution.child", { runId: this.options.runId }),
             workflowId: this.options.runId, signal: scope.controller.signal,
-            structuredOutput: this.options.structuredOutput,
+            structuredOutput: this.options.structuredOutput, promptBinding: this.options.promptBinding,
           });
           this.own(scope, adopted.record);
           // Check the actual acquired destination as well as the preflight source.
@@ -201,6 +205,7 @@ export class SubagentWorkflowExecutionHost implements ManagedWorkflowHost {
               cwd: this.cwd, model: selection.model, thinkingLevel: selection.thinking,
               maxTurns: this.options.maxTurns, structuredOutput: this.options.structuredOutput,
               requiredTools: prepared.requiredTools, signal: scope.controller.signal,
+              promptBinding: this.options.promptBinding,
             });
           const record = this.manager.getRecord(id)!;
           this.own(scope, record);
@@ -220,12 +225,24 @@ export class SubagentWorkflowExecutionHost implements ManagedWorkflowHost {
       await scope.lastInvocation;
       this.assertScope(scope);
       return result;
+    } catch (error) {
+      primaryFailure = { error };
+      throw error;
     } finally {
       scope.closing = true;
       // Cancel queued sends before detaching their parent signal; running calls keep their permit until settlement.
       scope.cancelPending?.();
-      await this.release(scope);
-      scope.unpin?.();
+      let cleanupFailure: { error: unknown } | undefined;
+      try { await this.release(scope); }
+      catch (error) { cleanupFailure = { error }; }
+      finally { scope.unpin?.(); }
+      if (cleanupFailure) {
+        if (primaryFailure) throw new AggregateError(
+          [primaryFailure.error, cleanupFailure.error],
+          i18n.t("workflowExecution.cleanupFailed"),
+        );
+        throw cleanupFailure.error;
+      }
     }
   }
 
@@ -379,6 +396,7 @@ export class SubagentWorkflowExecutionHost implements ManagedWorkflowHost {
 
   private validateRestore(snapshot: ExecutionSessionSnapshot, selection?: WorkflowModelSelection, model?: Model<any>): void {
     if (snapshot.reference.backend !== this.options.backend.kind) throw failure("invalidSession");
+    assertPromptBindingMatches(snapshot.policy.promptBinding, this.options.promptBinding);
     if (realpathSync(snapshot.policy.cwd) !== this.cwd) throw failure("cwdMismatch");
     if (model && (model.provider !== snapshot.policy.model.provider || model.id !== snapshot.policy.model.id)) throw failure("policyOverride");
     if (selection?.thinking !== undefined) {

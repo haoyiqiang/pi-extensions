@@ -1,4 +1,13 @@
 {
+  "manager.retirementFailed": "多个受管会话未能正常退役。",
+  "workflowExecution.cleanupFailed": "工作流子会话执行与退役均失败。",
+  "workflowExecutor.closed": "此工作流执行器注册已关闭，或属于之前的 Pi 会话。",
+  "workflowExecutor.identity": "保存的工作流执行器身份无效或不兼容。",
+  "workflowExecutor.request": "工作流执行器请求无效。",
+  "workflowExecutor.context": "工作流执行需要当前 Pi 上下文中的模型注册表和系统提示。",
+  "workflowExecutor.cleanup": "多个工作流执行未能正常关闭。",
+  "promptBinding.invalid": "受管提示绑定无效。",
+  "promptBinding.mismatch": "受管会话的提示绑定与当前解析器及资源集不匹配。",
   "toolRequirements.invalid": "requiredTools 必须是最多包含 {maxTools} 项的数组；每项为非空的精确工具名，长度不超过 {maxNameLength} 个字符，且不含通配符、空白或控制字符。",
   "toolRequirements.missing": "本次调用未启用所需工具：{tools}。",
   "toolRequirements.unsupportedLegacy": "requiredTools 仅受管执行后端支持。",

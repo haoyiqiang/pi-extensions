@@ -68,7 +68,7 @@ npm run check
 
 `check` 会执行 workspace 类型检查、测试，以及可移植性和 i18n 门禁。
 
-[`packages/pi-subagents`](./packages/pi-subagents/README.zh-CN.md) 是从 `tintinweb/pi-subagents` 导入的私有迁移基线，参与开发检查，但不发布、也不加入根 Pi profile；现有 interactive-subagents 包仍保持启用。
+[`packages/pi-subagents`](./packages/pi-subagents/README.zh-CN.md) 与 [`packages/pi-workflow`](./packages/pi-workflow/README.zh-CN.md) 是私有迁移工作区：前者提供受管 embedded/terminal 执行，后者保留从 `rpiv-workflow` 导入的独立 DSL、编排引擎、运行日志及 `/wf` 前端。两者通过显式事件总线执行协议协作，不跨产品导入内部实现。它们参与开发检查，但不发布、也不加入根 Pi profile；现有 interactive-subagents 包仍保持启用。
 
 仓库根 `.npmrc` 固定 `https://registry.npmjs.org/`，保证 lockfile 里的 tarball 地址可移植。用镜像 registry 安装会把地址改写成镜像域名，导致 npm 12+ 的 `npm ci` 报 `EALLOWREMOTE`；`node scripts/check-lockfile-registry.mjs`（已纳入 `npm run check`）在合并前拦下这类改动。
 

@@ -1,0 +1,625 @@
+/**
+ * State reconstruction for resuming a run. ONE async fold over the JSONL
+ * trail: rows with `parent` set are loop-unit rows (the structured machine
+ * channel — the decorated `stage` string is never parsed); everything else
+ * folds as a normal stage.
+ *
+ * THE REPLAY CONTRACT: a loop's unit source must be deterministic w.r.t. the
+ * fold-replayed `RunState` at the unit boundary + this generation's
+ * accumulated outputs. Because the fold replays rows in trail order, at row
+ * *i* the state is byte-identical to what the live driver saw — so the fold
+ * verifies EVERY unit row against the recomputed expectation. Drift (or a
+ * generator
+ * throw) does not refuse outright: the fold finishes applying so state is
+ * complete, and returns `drift` — `resumeWorkflow`'s entry thunk records the
+ * terminal failure with full lifecycle bracketing and zero dispatch.
+ *
+ * Generations: contiguous unit rows sharing a `parent`. A generation opens by
+ * freezing the entry pair from the replayed state (and, for fanout,
+ * recomputing the unit list ONCE against it); it closes when a non-unit row
+ * (or a different parent) appears — `projectResult` (the driver's own
+ * function) lands the declared result, exactly like the live loop advance.
+ * The TRAILING open generation is returned un-projected as a
+ * `LoopResumePoint` whose `cursor` is the driver's own `LoopCursor` —
+ * re-entry hands it straight back to `runLoop`.
+ */
+
+import type { LoopDef, StageDef, Unit, Workflow } from "../api.js";
+import { applyStageSuccess, rollLastSession } from "../audit-rows.js";
+import { stageEntryArgs } from "../chain-state.js";
+import { pushFailureMemo } from "../failure-memos.js";
+import type { Artifact } from "../handle.js";
+import { formatError, isAbortError } from "../internal-utils.js";
+import { panelMembers } from "../judge.js";
+import { projectResult, publishPanelVerdict } from "../loop.js";
+import { effectiveLoopOf, freezesEntryArgsOf } from "../loop-constructors.js";
+import {
+	advanceCursor,
+	foldFanoutCompletion,
+	freshCursor,
+	judgeStageDef,
+	type LoopCursor,
+	sequentialStrategyOf,
+	unitTagOf,
+} from "../loop-kinds.js";
+import { ERR_RESUME_LOOP_MISMATCH } from "../messages.js";
+import { failedOutput, type Output, outputMeta } from "../output.js";
+import {
+	type RoutingDecision,
+	readAllStagesForResume,
+	STATE_SCHEMA_VERSION,
+	type WorkflowHeader,
+	type WorkflowStage,
+} from "../state/index.js";
+import type { RunState } from "../types.js";
+import { freshRunState } from "./run-context.js";
+
+/** Trailing open generation — everything `resume-loop.ts` needs to re-enter `runLoop`. */
+export interface LoopResumePoint {
+	parent: string;
+	entryArtifact: Artifact | undefined;
+	entryPair: { output: Output | undefined; primaryArtifact: Artifact | undefined };
+	/**
+	 * Round-0 producer arg, FROZEN at generation open (assess-kind loops only;
+	 * `""` otherwise). `undefined` = the trail no longer carries the rows that
+	 * published this stage's inputs (truncated/corrupted) — re-entry records a
+	 * refusal instead of dispatching with a wrong arg.
+	 */
+	entryArgs: string | undefined;
+	/** The driver's own cursor, reconstructed: next (role, index), accumulated, lastProduce, lastVerdict. */
+	cursor: LoopCursor;
+	/** Fanout: the recomputed-and-verified unit list (re-entry reuses it — no second compute). */
+	units?: readonly Unit[];
+}
+
+export type ReconstructResult =
+	| {
+			ok: true;
+			state: RunState;
+			lastStageNumber: number;
+			/**
+			 * 0-based chain index of the trail's LAST activation — the fold's
+			 * reconstruction of the `idx` the live chain was at (one activation per
+			 * top-level stage row or loop generation; a resume re-run of a failed
+			 * stage keeps its index). NOT `stageNumber - 1`: the allocator counts
+			 * every row including loop units, so the two diverge past any loop.
+			 */
+			lastChainIndex: number;
+			visited: Set<string>;
+			rows: WorkflowStage[];
+			/** Open generation at trail end, un-projected (the driver projects at its advance). */
+			trailing?: LoopResumePoint;
+			/** Guard tripped mid-fold — the resume entry records this as a terminal failure. */
+			drift?: { parent: string; errMsg: string };
+			/**
+			 * The trail's terminal failed row is a GATE-STOP HALT: it sits
+			 * immediately behind a routed-stop `RoutingDecision` from the same
+			 * stage (the [stop row, `FAIL_GATE_STOP` row] pair chain-advance
+			 * writes for a noted decision stop). The entry selector uses it to
+			 * pick the re-measure path for a side-effect gate stage — an ordinary
+			 * stage failure (no stop row behind it) never sets this.
+			 */
+			gateStop?: RoutingDecision;
+	  }
+	| { ok: false; reason: "no-rows" | "stage-gone" | "malformed-row" | "version-mismatch"; detail: string };
+
+export async function reconstructState(
+	cwd: string,
+	workflow: Workflow,
+	header: WorkflowHeader,
+): Promise<ReconstructResult> {
+	// Version gate first: the fold replays rows under the CURRENT shapes, so a
+	// file written under a different schema version must refuse cleanly rather
+	// than mis-replay. Absent `v` = version 1 (pre-field files) — see
+	// STATE_SCHEMA_VERSION's back-compat rule.
+	const v = header.v ?? 1;
+	if (v !== STATE_SCHEMA_VERSION) {
+		return { ok: false, reason: "version-mismatch", detail: `run ${header.runId} was written under schema v${v}` };
+	}
+	// Strict reader: a stage-shaped row failing the deep guard REFUSES here —
+	// the fold replays the trail as its system of record, so a silently
+	// skipped row would replay a hole and route onward past it.
+	const read = readAllStagesForResume(cwd, header.runId);
+	if (!read.ok) return { ok: false, reason: "malformed-row", detail: read.detail };
+	const rows = read.rows;
+	if (rows.length === 0) return { ok: false, reason: "no-rows", detail: header.runId };
+
+	const acc: FoldAcc = {
+		cwd,
+		runId: header.runId,
+		state: freshRunState(header.input),
+		visited: new Set<string>(),
+		lastStageNumber: 0,
+		chainIndex: -1,
+		prevNode: undefined,
+		gen: undefined,
+		drift: undefined,
+		rowIndex: -1,
+		recordedGens: scanClosedFanoutGenerations(rows),
+	};
+
+	for (const [i, row] of rows.entries()) {
+		acc.rowIndex = i;
+		// A routed-stop separator closes (and projects) the open generation
+		// BEFORE this row folds — the live driver had already projected the loop
+		// when its route fired, so the replayed state at a post-stop re-dispatch
+		// stays byte-identical to what the live resume saw (THE REPLAY
+		// CONTRACT). This also stops a gate-stop halt row from masquerading as a
+		// mid-flight abort marker below, and splits the halted generation from
+		// the fresh one a stop-resume re-dispatch appends for the same parent.
+		if (read.stopBefore.has(i)) closeGeneration(acc);
+		if (isUnitRow(row)) {
+			const refusal = await foldUnitRow(acc, workflow, row);
+			if (refusal) return refusal;
+			continue;
+		}
+		if (isOpenFanoutHaltMarker(acc, row)) {
+			acc.visited.add(row.stage);
+			acc.lastStageNumber = Math.max(acc.lastStageNumber, row.stageNumber);
+			continue;
+		}
+		closeGeneration(acc);
+		const def = workflow.stages[row.stage];
+		// Unknown key refuses — including LEGACY decorated rows (older
+		// runs carry no `parent`, so their unit rows land here): stage-gone.
+		if (!def) return { ok: false, reason: "stage-gone", detail: row.stage };
+		noteChainNode(acc, row.stage, !isCompletedRow(row));
+		foldKnownStage(acc, def, row);
+	}
+
+	acc.state.lastAllocatedStageNumber = acc.lastStageNumber; // allocator continues monotonically
+
+	// Gate-stop halt trailer: the last row is the failed `FAIL_GATE_STOP` row
+	// chain-advance appended right behind its routed-stop routing row (same
+	// stage by construction — both are written from `currentName`; the equality
+	// check is the shape guard against a foreign interleaving).
+	const last = rows[rows.length - 1]!;
+	const stopAtLast = read.stopBefore.get(rows.length - 1);
+	const gateStop = last.status === "failed" && stopAtLast?.fromStage === last.stage ? stopAtLast : undefined;
+
+	return {
+		ok: true,
+		state: acc.state,
+		lastStageNumber: acc.lastStageNumber,
+		lastChainIndex: acc.chainIndex,
+		visited: acc.visited,
+		rows,
+		trailing: acc.gen ? toPoint(acc.gen) : undefined,
+		drift: acc.drift,
+		gateStop,
+	};
+}
+
+// ---------------------------------------------------------------------------
+// Fold internals
+// ---------------------------------------------------------------------------
+
+interface OpenGeneration {
+	parent: string;
+	loop: LoopDef;
+	/** Parent stage def — produce-row apply (judge rows apply via judgeStageDef). */
+	def: StageDef;
+	entryArtifact: Artifact | undefined;
+	entryPair: { output: Output | undefined; primaryArtifact: Artifact | undefined };
+	/** Frozen at generation open — see LoopResumePoint.entryArgs. */
+	entryArgs: string | undefined;
+	cursor: LoopCursor;
+	units?: readonly Unit[];
+	/**
+	 * Cached expected unit for the cursor's CURRENT index (iterate pulls once
+	 * per index — a failed row followed by its resumed re-run row re-checks
+	 * the same expectation without double-pulling the generator).
+	 */
+	expected?: { index: number; tag: string | undefined };
+}
+
+interface FoldAcc {
+	cwd: string;
+	/** Header runId — the rebuilt `failedOutput` sentinel's meta.runId,
+	 *  byte-identical to the live `outputMetaFor`'s `s.runId`. RunState carries no id. */
+	runId: string;
+	state: RunState;
+	visited: Set<string>;
+	lastStageNumber: number;
+	/** 0-based index of the current activation — see `ReconstructResult.lastChainIndex`. */
+	chainIndex: number;
+	/**
+	 * Last chain-node activation. `reentrant` = a following row of the SAME
+	 * stage continues this activation instead of opening a new one: a
+	 * failed/aborted/skipped row (resume re-runs it at the same index) or a
+	 * loop generation (its halt row and any resume re-entry belong to it).
+	 */
+	prevNode: { stage: string; reentrant: boolean } | undefined;
+	gen: OpenGeneration | undefined;
+	drift: { parent: string; errMsg: string } | undefined;
+	/** Index of the row being folded — `openGeneration` keys `recordedGens` by it. */
+	rowIndex: number;
+	/**
+	 * Fanout generations the trail already CLOSED with every unit done, keyed by
+	 * the index of their first unit row: the recorded unit tags in `unitIndex`
+	 * order. A closed, fully-done generation dispatches nothing on resume, so its
+	 * recorded rows are the authority over a unit source that reads state the
+	 * run has since moved past (a basename-keyed snapshot overwritten by a later
+	 * round). Only the trailing open generation still needs the live recompute.
+	 */
+	recordedGens: Map<number, readonly string[]>;
+}
+
+// --- Fold predicates — single canonical spellings of the row-kind tests ---
+
+/** Unit rows carry a `parent` (the structured machine channel) — the top-of-loop routing split. */
+const isUnitRow = (row: WorkflowStage): boolean => row.parent !== undefined;
+
+/** The ONE canonical "this row's stage ran to completion" test — every fold site routes through here. */
+const isCompletedRow = (row: WorkflowStage): boolean => row.status === "completed";
+
+/** A collected soft-halt (`status:"failed"` + `collected:true` + defined `errMsg`) — rebuilds the failedOutput sentinel and places it via `foldFanoutCompletion` ONLY. */
+const isCollectedSoftHalt = (row: WorkflowStage): boolean => row.collected === true && row.errMsg !== undefined;
+
+/** A panel/verify verdict row — the judge/verify arm guard. */
+const isVerdictRow = (row: WorkflowStage): boolean => row.role === "judge" || row.role === "verify";
+
+/**
+ * A non-completed, parent-unset row for the SAME stage as the open FANOUT
+ * generation is that generation's own halt marker: a mid-flight abort
+ * writes a stage-level `aborted` row (recordAbortedAtSeam) AFTER the
+ * completed unit rows. Closing the generation on it would discard the
+ * reconstructed cursor whose completed-unit slots are already filled,
+ * forcing resume to cold-re-enter the loop and re-dispatch EVERY unit
+ * (finding 7: the aborted-mid-flight fanout re-ran completed units,
+ * duplicating the channel and collapsing the downstream fan-in). Keep the
+ * generation open — `trailing` then carries the filled slots and
+ * `pendingFanoutIndices` dispatches only the genuinely-pending units. A
+ * COMPLETED parent row still closes+advances; a stage with no completed
+ * units never opened a generation, so it falls through and re-runs whole.
+ */
+const isOpenFanoutHaltMarker = (acc: FoldAcc, row: WorkflowStage): boolean =>
+	acc.gen?.parent === row.stage && acc.gen.loop.kind === "fanout" && !isCompletedRow(row);
+
+/**
+ * Rebuild the `failedOutput` sentinel from a collected soft-halt row's
+ * `errMsg` — byte-identical to the live `outputMetaFor` sentinel (decorated
+ * `row.stage`, `row.skill`, `row.stageNumber`). The live `softHaltUnit` runs
+ * no `applyStageSuccess`; the fold owns the single channel write.
+ */
+function rebuildCollectedSentinel(row: WorkflowStage, runId: string): Output {
+	return failedOutput(
+		outputMeta({
+			stage: row.stage,
+			skill: row.skill,
+			stageNumber: row.stageNumber,
+			ts: row.ts,
+			runId,
+		}),
+		row.errMsg!, // defined: the single caller gates on isCollectedSoftHalt(row)
+		row.unitLabel, // the live sentinel's dimension — recordUnitHalt persisted it
+	);
+}
+
+/** Advance the chain index for one activation — unless the row continues the previous one. */
+function noteChainNode(acc: FoldAcc, stage: string, reentrant: boolean): void {
+	if (!(acc.prevNode?.stage === stage && acc.prevNode.reentrant)) acc.chainIndex++;
+	acc.prevNode = { stage, reentrant };
+}
+
+/**
+ * Normal-stage fold. A completed row replays through `applyStageSuccess` —
+ * the same apply the live success persistence runs, minus the I/O (the row
+ * is already on disk).
+ */
+function foldKnownStage(acc: FoldAcc, def: StageDef, row: WorkflowStage): void {
+	acc.visited.add(row.stage);
+	acc.lastStageNumber = Math.max(acc.lastStageNumber, row.stageNumber);
+	if (!isCompletedRow(row)) return;
+	applyStageSuccess(acc.state, def, row.stage, row.output);
+	// Roll the predecessor session forward through the SAME authority the live
+	// `recordStageSuccess` single-stage branch uses (`rollLastSession`) — so a
+	// post-resume cold dispatch of a `continue` stage forks the same predecessor
+	// the live run would have, and the null-handling can't drift. Single-stage
+	// rows only (unit rows fold via `foldUnitRow`, which never touches this slot).
+	rollLastSession(acc.state, row.session);
+}
+
+/** Close the open generation: project the declared result — the live loop-advance, replayed. */
+function closeGeneration(acc: FoldAcc): void {
+	if (!acc.gen) return;
+	projectResult(acc.gen.loop, acc.gen.entryPair, acc.gen.cursor, acc.state);
+	acc.gen = undefined;
+}
+
+/**
+ * Open a generation for `row.parent` if none is active for it (first unit row,
+ * or a different parent / after a non-unit row). Returns a `stage-gone` refusal
+ * WITHOUT mutating `acc.gen` when the parent stage or its loop is missing;
+ * otherwise assigns `acc.gen` and returns `undefined`.
+ *
+ * Frozen HERE: replayed state at generation open is byte-identical to what the
+ * live driver saw at loop entry (THE REPLAY CONTRACT) — the only safe place to
+ * derive the round-0 arg. `reads` projections in particular must NOT be
+ * re-derived post-fold, where the generation's own appends have moved the
+ * `.at(-1)` cursors.
+ */
+/**
+ * Pre-scan: every maximal run of consecutive unit rows sharing a `parent` that
+ * is followed by a non-unit row (closed) and whose rows are all completed or
+ * collected soft-halts (done). Keyed by the first row's index; value = unit
+ * tags in `unitIndex` order. A generation still at the trail's tail, or one
+ * with a pending / hard-failed slot, or one followed by its parent's own
+ * halt/abort marker, is NOT listed — resume must re-dispatch into it, so the
+ * live unit source stays authoritative there.
+ */
+function scanClosedFanoutGenerations(rows: readonly WorkflowStage[]): Map<number, readonly string[]> {
+	const out = new Map<number, readonly string[]>();
+	let start = -1;
+	let parent: string | undefined;
+	let tags: (string | undefined)[] = [];
+	let allDone = true;
+	const flush = (closed: boolean): void => {
+		if (start >= 0 && closed && allDone && tags.length > 0 && tags.every((t) => t !== undefined)) {
+			out.set(start, tags as string[]);
+		}
+		start = -1;
+		parent = undefined;
+		tags = [];
+		allDone = true;
+	};
+	for (const [i, row] of rows.entries()) {
+		const unit = isUnitRow(row);
+		if (unit && row.parent === parent) {
+			if (row.unitIndex !== undefined) tags[row.unitIndex] = row.unitId;
+			allDone &&= isCompletedRow(row) || isCollectedSoftHalt(row);
+			continue;
+		}
+		// A non-unit row closes the generation UNLESS it is the parent's own
+		// halt/abort marker (same stage, not completed): that row means the
+		// generation stopped mid-flight and its unfilled slots must re-dispatch.
+		flush(!(row.stage === parent && !isCompletedRow(row)));
+		if (unit) {
+			start = i;
+			parent = row.parent;
+			if (row.unitIndex !== undefined) tags[row.unitIndex] = row.unitId;
+			allDone = isCompletedRow(row) || isCollectedSoftHalt(row);
+		}
+	}
+	flush(false); // a generation at the trail's tail is never closed
+	return out;
+}
+
+async function openGeneration(
+	acc: FoldAcc,
+	workflow: Workflow,
+	row: WorkflowStage,
+): Promise<Extract<ReconstructResult, { ok: false }> | undefined> {
+	// Same generation as the active one — nothing to open.
+	if (acc.gen && acc.gen.parent === row.parent) return undefined;
+	closeGeneration(acc);
+	const def = workflow.stages[row.parent!];
+	// `effectiveLoopOf` — a verify stage's unit rows recover their synthesized
+	// loop here; without it every verify-stage trailer would refuse stage-gone.
+	const loop = def ? effectiveLoopOf(def) : undefined;
+	if (!def || !loop) return { ok: false, reason: "stage-gone", detail: row.stage };
+	// One generation = one chain-node activation. Always reentrant: a halt
+	// row for the parent or a resumed re-entry continues this activation.
+	noteChainNode(acc, row.parent!, true);
+	acc.gen = {
+		parent: row.parent!,
+		loop,
+		def,
+		entryArtifact: acc.state.primaryArtifact,
+		entryPair: { output: acc.state.output, primaryArtifact: acc.state.primaryArtifact },
+		entryArgs: freezesEntryArgsOf(loop) ? stageEntryArgs(def, row.parent!, workflow.start, acc.state) : "",
+		cursor: freshCursor(),
+		units: undefined,
+	};
+	if (loop.kind === "fanout") {
+		const recorded = acc.recordedGens.get(acc.rowIndex);
+		if (recorded) {
+			// Closed and fully done on the trail: nothing to dispatch, so the
+			// recorded tags ARE the generation. Skips the live recompute, whose
+			// inputs may no longer match this round's.
+			acc.gen.units = recorded.map((tag) => ({ prompt: "", label: tag, id: tag }));
+		} else {
+			acc.gen.units = await guarded(acc, acc.gen.parent, () =>
+				(loop as Extract<LoopDef, { kind: "fanout" }>).units({
+					cwd: acc.cwd,
+					artifact: acc.state.primaryArtifact,
+					state: acc.state,
+				}),
+			);
+		}
+	}
+	return undefined;
+}
+
+/**
+ * Fanout index-placement arm: place-by-`unitIndex` (NOT trail order) so
+ * declared order survives a completion-ordered / out-of-order trail. A slot is
+ * FILLED — and so NOT re-dispatched on resume — only when the row is a
+ * COMPLETED unit or a COLLECTED soft-halt:
+ *   • completed → `applyStageSuccess` (bookkeeping + state.output, mirroring the
+ *     live `recordStageSuccess`) THEN the channel-owning `foldFanoutCompletion`;
+ *   • collected (`status:"failed"` + `collected:true`) → rebuild the
+ *     `failedOutput` sentinel from `errMsg` and place it via
+ *     `foldFanoutCompletion` ONLY (the live `softHaltUnit` runs no
+ *     `applyStageSuccess` — the fold owns the single channel write). The rebuilt
+ *     meta is byte-identical to the live sentinel's (see `outputMetaFor`):
+ *     decorated `row.stage`, `row.skill`, `row.stageNumber`.
+ * A hard `status:"failed"` row (no `collected`) or a genuinely pending row — and
+ * an aborted in-flight unit, which wrote NO row at all — leaves the slot
+ * unfilled so resume re-dispatches that unit. Resets `gen.expected` (consumed)
+ * on every fanout row.
+ *
+ * RETRY TRAILS: a unit dispatched under `retryHaltedUnits` writes ONE
+ * collected row per FAILED attempt (plus its completed row when the final
+ * attempt succeeds) — all at the same `unitIndex`, each stamped with its
+ * 1-based `attemptOrdinal` (the v3 trail contract). Under-budget rows are
+ * SKIPPED, not overwritten: the budget predicate below leaves their slot
+ * unfilled, so the unit re-dispatches while budget remains. Only the FINAL
+ * attempt's collected row (ordinal beyond budget, or absent — pre-ordinal
+ * trails / non-retrying loops) folds its sentinel, converging with the live
+ * path, which folds only the unit's final captured output.
+ */
+function foldFanoutRow(acc: FoldAcc, gen: OpenGeneration, row: WorkflowStage): void {
+	const units = gen.units!; // dispatcher gates this arm on gen.loop.kind === "fanout" && gen.units
+	if (isCompletedRow(row) && row.output) {
+		applyStageSuccess(acc.state, gen.def, row.stage, row.output);
+		foldFanoutCompletion(acc.state, gen.cursor, gen.def, gen.parent, row.unitIndex!, units.length, row.output);
+	} else if (isCollectedSoftHalt(row)) {
+		// Budget-aware fold (the v3 trail contract): a collected row written by
+		// an attempt whose ordinal still has `retryHaltedUnits` budget remaining
+		// leaves its slot UNFILLED — `pendingFanoutIndices` re-dispatches it
+		// exactly like a pending unit. No isFailFast mirror needed: under
+		// failFast the live driver never writes a collected row (collect-all is
+		// fanout-non-failFast only — `shouldCollectAll`), so this arm cannot see
+		// a fail-fast trail.
+		// Every collected halt re-enters the memo ledger (live: recordUnitHalt), so
+		// later prompts — the re-dispatch's included — carry it as the live run's do.
+		pushFailureMemo(acc.state, { stage: gen.parent, unitId: row.unitId }, row.errMsg ?? "");
+		const budget = gen.loop.kind === "fanout" ? (gen.loop.retryHaltedUnits ?? 0) : 0;
+		if (!(row.attemptOrdinal !== undefined && row.attemptOrdinal <= budget)) {
+			const sentinel = rebuildCollectedSentinel(row, acc.runId);
+			foldFanoutCompletion(acc.state, gen.cursor, gen.def, gen.parent, row.unitIndex!, units.length, sentinel);
+		}
+	}
+	gen.expected = undefined; // consumed
+}
+
+/**
+ * Judge/verify arm — apply-then-project: each member verdict rolls the pair
+ * TRANSIENTLY (exactly like the live judge unit); projection at generation
+ * close restores. The member this row graded is the one the rebuilt sub-state
+ * currently points at — `cursor.panel.memberIndex` BEFORE `advanceCursor` bumps
+ * it (0 for a single judge, the panel of one). Using that member's own def
+ * publishes the verdict to the member's OWN channel, matching the live session
+ * path (`judgeStageDef(member)`) per member — `[0]` for every member would have
+ * mis-filed members 1..N-1 onto member 0's channel.
+ *
+ * `guardRow` already verified `row.unitIndex === cursor.index` (drift
+ * otherwise), so the shared transition lands the same cursor the live driver
+ * had — and, on the last member, the same folded verdict. `advanceCursor` runs
+ * the author fold on the LAST member (`panel.fold`, which a sugar fold's
+ * per-member `pred` reaches too), and `publishPanelVerdict` lands it — BOTH
+ * behind `guarded()`. A fold/pred throw must become drift (a recorded terminal
+ * failure), NOT an unguarded rejection: this fold runs in `reconstructState`,
+ * which `resumeWorkflow` awaits BEFORE `executeRun` brackets the lifecycle — an
+ * escape here yields no JSONL failure row and no `onWorkflowEnd`. The live
+ * driver's same `advanceCursor`+`publishPanelVerdict` pair runs under
+ * `dispatchStageOrRecordFailure`'s catch (loop.ts `dispatchUnit`); this is its
+ * resume-side error boundary. Does NOT reset `gen.expected` (current behavior —
+ * the judge arm never consumed it).
+ */
+async function foldJudgeRow(acc: FoldAcc, gen: OpenGeneration, row: WorkflowStage): Promise<void> {
+	const judgeSlot = (gen.loop as Extract<LoopDef, { kind: "assess" }>).judge;
+	const memberIndex = gen.cursor.panel?.memberIndex ?? 0;
+	applyStageSuccess(acc.state, judgeStageDef(panelMembers(judgeSlot)[memberIndex]!), row.stage, row.output);
+	const role = row.role!; // dispatcher gates this arm on isVerdictRow(row) — "judge" | "verify"
+	const verdict = row.output;
+	if (!verdict) return; // defensive — completed unit rows always carry output
+	await guarded(acc, gen.parent, () => {
+		advanceCursor(gen.cursor, role, verdict, gen.loop);
+		// Panel-close publish — the SAME call the live driver makes after the
+		// last member's advance, so the folded verdict lands byte-identically.
+		publishPanelVerdict(gen.loop, gen.parent, gen.cursor, acc.state);
+	});
+}
+
+/**
+ * Produce arm — iterate units and assess producers (fanout is placed by index
+ * above; a fanout row only reaches here when `gen.units` is absent because the
+ * units generator threw at open — already drift — so `advanceCursor` keeps the
+ * refused fold applying bookkeeping without a `length`-of-undefined). Resets
+ * `gen.expected` (consumed).
+ */
+function foldProduceRow(acc: FoldAcc, gen: OpenGeneration, row: WorkflowStage): void {
+	applyStageSuccess(acc.state, gen.def, row.stage, row.output);
+	if (!row.output) return; // defensive — completed unit rows always carry output
+	advanceCursor(gen.cursor, "produce", row.output, gen.loop);
+	gen.expected = undefined; // consumed
+}
+
+async function foldUnitRow(
+	acc: FoldAcc,
+	workflow: Workflow,
+	row: WorkflowStage,
+): Promise<Extract<ReconstructResult, { ok: false }> | undefined> {
+	const refusal = await openGeneration(acc, workflow, row);
+	if (refusal) return refusal;
+	const gen = acc.gen!;
+
+	acc.visited.add(gen.parent);
+	acc.lastStageNumber = Math.max(acc.lastStageNumber, row.stageNumber);
+
+	if (!acc.drift) await guardRow(acc, gen, row);
+
+	// Four-way dispatch over the unit row's kind. Fanout rows are placed by
+	// `unitIndex` (foldFanoutRow); everything else is cursor-ordered — a pending
+	// unit short-circuits, a verdict row rolls the panel, a produce row advances.
+	if (gen.loop.kind === "fanout" && gen.units) {
+		foldFanoutRow(acc, gen, row);
+		return undefined; // pending / hard-failed slots stay unfilled — resume re-dispatches them
+	}
+	if (!isCompletedRow(row)) return undefined; // pending unit — cursor stays (resume re-runs it)
+	if (isVerdictRow(row)) {
+		await foldJudgeRow(acc, gen, row);
+		return undefined;
+	}
+	foldProduceRow(acc, gen, row);
+	return undefined;
+}
+
+/**
+ * The full-row determinism guard — every unit row is checked against the
+ * recomputed expectation at its boundary (the replayed state IS what the live
+ * driver saw). The kind-agnostic (role, unitIndex) arithmetic lives here; the
+ * per-kind re-check delegates to the strategy table (loop-kinds.ts). Drift
+ * marks `acc.drift` and stops guarding; applying continues so the failure can
+ * be recorded against complete state.
+ */
+async function guardRow(acc: FoldAcc, gen: OpenGeneration, row: WorkflowStage): Promise<void> {
+	// Fanout no longer asserts trail order: parallel completion + resume re-dispatch
+	// produce out-of-order trails, and the fanout cursor tracks `filledCount` (a
+	// count, not a trail position), so a sequential `unitIndex === cursor.index`
+	// check would falsely drift. The `unitId` is a PLACEMENT key — verify it
+	// identifies the unit declared at `row.unitIndex`.
+	if (gen.loop.kind === "fanout") {
+		const i = row.unitIndex ?? -1;
+		const ok = i >= 0 && i < (gen.units?.length ?? 0) && unitTagOf(gen.units![i]!) === row.unitId;
+		if (!ok) setDrift(acc, gen.parent);
+		return;
+	}
+	const judgeRole = gen.def.verify ? "verify" : "judge";
+	const expectRole = gen.loop.kind === "assess" ? (gen.cursor.phase === "judge" ? judgeRole : "produce") : "produce";
+	if (row.role !== expectRole || row.unitIndex !== gen.cursor.index) return setDrift(acc, gen.parent);
+
+	const matches = await guarded(acc, gen.parent, () =>
+		sequentialStrategyOf(gen.loop.kind).guardExpectation(gen, row, acc.cwd, acc.state),
+	);
+	if (acc.drift) return;
+	if (!matches) setDrift(acc, gen.parent);
+}
+
+function setDrift(acc: FoldAcc, parent: string): void {
+	acc.drift = { parent, errMsg: ERR_RESUME_LOOP_MISMATCH(parent) };
+}
+
+/** Run a user fn during the fold; a throw becomes drift with the thrown reason. */
+async function guarded<T>(acc: FoldAcc, parent: string, fn: () => T | Promise<T>): Promise<T | undefined> {
+	try {
+		return await fn();
+	} catch (e) {
+		if (isAbortError(e)) throw e;
+		acc.drift = { parent, errMsg: formatError(e) };
+		return undefined;
+	}
+}
+
+function toPoint(gen: OpenGeneration): LoopResumePoint {
+	return {
+		parent: gen.parent,
+		entryArtifact: gen.entryArtifact,
+		entryPair: gen.entryPair,
+		entryArgs: gen.entryArgs,
+		cursor: gen.cursor,
+		units: gen.units,
+	};
+}

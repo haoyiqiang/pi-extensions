@@ -1,6 +1,7 @@
 import type { EffectiveThinkingLevel } from "../types.js";
 import type { PersistentSessionReference } from "../backends/session-reference.js";
 import type { PreparedWorkflowPrompt } from "./prompt-preparation.js";
+import type { PromptBinding } from "../backends/prompt-binding.js";
 
 /** Private, structurally compatible with the rpiv-workflow host seam; see docs/workflow-execution.md. */
 export interface WorkflowModelSelection {
@@ -90,6 +91,8 @@ export interface ManagedWorkflowExecution extends WorkflowExecution {
 }
 
 export interface ManagedWorkflowHost extends WorkflowHostContext {
+  /** Explicit factory-bound identity; generic preparation never implies a binding. */
+  readonly promptBinding?: PromptBinding;
   spawnChild<T>(options: ManagedWorkflowChildOptions<T>): Promise<T>;
   readonly capabilities: WorkflowExecutionCapabilities;
   dispose(): Promise<void>;

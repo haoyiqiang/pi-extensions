@@ -13,8 +13,9 @@ v0.19.0 的实现，固定上游提交为 `e955e29c51b7a6cce37e1108cd2d6c57a77e1
 - 现有 `@maplezzk/pi-interactive-subagents` 保持不变，仍是正式使用的扩展。
 - 入口只导出上游扩展工厂，不调用它；迁移期间不要在生产会话同时加载两套产品。
 - 真实 terminal backend 已可通过私有工厂显式注入用于开发验证；AgentManager 默认仍为
-  embedded。配置路由与产品替换继续延后；私有受管 workflow host/provider 支持纯文本，
-  并可显式启用已批准技能的提示准备，但没有注册或迁移 `/wf`。
+  embedded。顶层 subagent 配置路由与产品替换继续延后。独立的 `workflow-executor.ts`
+  入口向私有 `pi-workflow` 包提供受管双后端执行，不加载旧工具/UI；`/wf` 及其执行配置
+  由该独立消费者负责，而不是本包。
 
 ## 导入范围
 
@@ -50,7 +51,7 @@ Manager 的会话句柄以及 UI/输出观察接口已与原生 `AgentSession` �
 重放历史结果/用量，或在开始新调用前占用并发槽位。
 
 请求准备仍使用 Pi context，terminal 需要显式私有工厂注入。私有回调契约变化、兼容约定
-及剩余工作见 [执行边界](./docs/execution-backend.md)。此步没有新增用户配置。
+及剩余工作见 [执行边界](./docs/execution-backend.md)。顶层 subagent 配置保持不变。
 
 ## Terminal 执行（私有显式启用）
 
@@ -73,7 +74,8 @@ Manager 的会话句柄以及 UI/输出观察接口已与原生 `AgentSession` �
 策略、校验器要求与租约限制见 [受管会话恢复](./docs/managed-sessions.md)。
 完整执行契约与限制见 [terminal 后端](./docs/terminal-backend.md) 和
 [terminal 生命周期](./docs/terminal-lifecycle.md)。新增诊断已有中英文 catalog；上游
-embedded 文案仍待迁移，目前没有用户配置开关。
+embedded 文案仍待迁移。workflow 后端选择属于私有 `pi-workflow` 的配置；顶层 subagent
+仍没有后端切换开关。
 
 ## 受管 workflow 执行（私有）
 
@@ -88,15 +90,21 @@ embedded 文案仍待迁移，目前没有用户配置开关。
 按实际受管策略校验，不会因此启用工具或加载扩展；缺失要求不会污染已恢复会话。
 `pi` 模式保留正文及原始参数；`positional-v1` 做单遍参数替换，不再次解释插入值，并拒绝
 shell 预执行与 SESSION_ID 替换。配套脚本、引用和素材仍是实时文件，不包含在指令快照中。
-完整限制见 [workflow 资源](./docs/workflow-resources.md)。
+显式 prompt binding 把解析器和资源集合身份保存到受管策略，原地恢复/分叉会在获取写租约
+之前拒绝不匹配；配套素材仍是实时文件。完整限制见 [workflow 资源](./docs/workflow-resources.md)。
 
 这不代表 rpiv-workflow 已完整迁移。恢复保留已存策略；不兼容的模型/思考等级/工作目录、
 未展开的斜杠命令及不支持的嵌套启动均明确拒绝。同步 `dispose` 之外另有
-可等待的 `close`；受管文件放在子目录中避开消费者的裸 JSONL 清理。取消还需要消费者提供其真实
-错误类型的转换接口。没有新增注册、公开导出、配置开关、DSL 或 UI。完整约定与消费者待接入项见
-[workflow 执行](./docs/workflow-execution.md)。真实消费者已公开 provider 注册入口，但还缺少公开的
-取消错误工厂、注册所有权与可等待关闭协议；部分重试路径会吞掉取消异常，必须在消费者侧修复，
-不能通过私有导入或全局状态修改绕过。详见 [消费者接入约定](./docs/workflow-consumer-contract.md)。
+可等待的 `close`；受管文件放在子目录中避开消费者的裸 JSONL 清理。取消使用真正执行的
+消费者传入的错误工厂。
+
+开发组合可显式加载 `workflow-executor.ts`（也导出为
+`@maplezzk/pi-subagents/workflow-executor`），与 `pi-workflow/extension.ts` 及 i18n
+通知入口一起使用。通过 `pi-workflow:executor:discover:v1` 发现执行器，不引入跨产品运行时
+依赖或私有全局注册槽。执行器绑定批准技能/全局工具需求，恢复时保留已存后端，并在 Pi
+会话/运行时变化时退役旧执行。此入口不注册 Agent UI、旧 `SubagentWorkflow` 或 `/wf`，
+仍为私有且不加入根 profile。见 [消费者 README](../pi-workflow/README.zh-CN.md)、
+[workflow 执行](./docs/workflow-execution.md) 与[消费者接入约定](./docs/workflow-consumer-contract.md)。
 
 ## 配置
 
@@ -132,4 +140,4 @@ npm run check
 - [上游 RPC 协议参考](./docs/rpc.md)
 - [上游脚本 workflow 参考](./docs/workflows.md)
 
-下一步：接通 workflow 消费者的取消、资源与清理语义，补齐 terminal 能力，再加入后端路由、本地化和统一 UI/配置。完成整合后才切换根 profile 与发布元数据。
+下一步：补齐长驻交互 terminal 能力，再加入顶层 subagent 后端路由、本地化和统一 UI/配置。完成整合后才切换根 profile 与发布元数据。

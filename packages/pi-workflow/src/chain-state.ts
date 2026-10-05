@@ -1,0 +1,261 @@
+/**
+ * Chain-state authorities — the ONLY exported way to read or advance the
+ * rolling artifact/output slots a run carries from stage to stage, plus the
+ * shared stage-identity derivations the runtime and the load-time validators
+ * must agree on.
+ *
+ * Every helper here is consumed by BOTH the live chain and the resume fold
+ * (or by both the runtime and load-time validation), so each is a
+ * single-construction-site guard: live and resume can't drift, runtime and
+ * load can't disagree. Generic, domain-free utilities live in
+ * `internal-utils.ts`; anything in this file is workflow-chain domain logic.
+ */
+
+import type { PromptFn, StageDef } from "./api.js";
+import { type Artifact, handleToString } from "./handle.js";
+import { isFailedOutput, type Output } from "./output.js";
+import { readName, readsAll } from "./stage-def.js";
+import { actsPublishName, resolvePublishName } from "./stage-identity.js";
+import type { RunState } from "./types.js";
+
+// Stage-identity projections live in the dependency-free `stage-identity.ts`
+// leaf so the load-time validators can consume them without importing this
+// runtime-state module. Re-exported here so this module's own runtime callers
+// (runner/*, registration) keep a single chain-state import.
+export { isDispatchingStage, resolvePublishName, resolveSkill } from "./stage-identity.js";
+
+/**
+ * Canonical accessor for "the primary artifact the chain is currently
+ * carrying." Reads the rolling slot maintained by the runner —
+ * produces stages update it on success; side-effect stages leave it
+ * alone. Replaces the load-bearing single-string artifact_path mirror
+ * from the pre-collector shape.
+ */
+export function currentPrimaryArtifact(state: RunState): Artifact | undefined {
+	return state.primaryArtifact;
+}
+
+/**
+ * Resolve a stage's `prompt` dispatch text — the COMPLETE user message a
+ * prompt stage sends (no `/skill:` prefix, no implicit arg). The dynamic form
+ * receives the same `ScriptContext` script stages get. The ONE resolver for
+ * every prompt-dispatch site: the single-shot path (run-stage) and the
+ * loop driver's round-0 producer (loop.ts) — resolved at dispatch time, never
+ * persisted, so a `PromptFn` on a loop stage joins the loop determinism
+ * contract (deterministic w.r.t. the fold-replayed state). Lives here (not
+ * runner/) so loop.ts consumes it cycle-free — same posture as
+ * `stageEntryArgs` below.
+ */
+export async function resolveStagePrompt(prompt: string | PromptFn, cwd: string, state: RunState): Promise<string> {
+	if (typeof prompt === "string") return prompt;
+	return prompt({ cwd, input: state.output, state });
+}
+
+const isPromptStage = (def: StageDef): boolean => def.prompt !== undefined;
+
+const usesOriginalInput = (def: StageDef, stageName: string, startStage: string): boolean =>
+	stageName === startStage || def.inheritsArtifacts === false;
+
+const hasReads = (def: StageDef): def is StageDef & { reads: NonNullable<StageDef["reads"]> } =>
+	def.reads !== undefined && def.reads.length > 0;
+
+/**
+ * Separator between the channel `name` and the `handle` in the stageEntryArgs
+ * dedup key (`${name}${DEDUP_KEY_SEPARATOR}${handle}`). The NUL byte cannot
+ * occur in either half — handles are inline-artifact strings or file paths,
+ * and names are channel identifiers — so two distinct (name, handle) pairs
+ * ("ab"+"cd" vs "a"+"bcd") can never concatenate into the same key; carrying
+ * `name` additionally preserves a cross-name fan-in repeat whose entries
+ * share a handle.
+ */
+const DEDUP_KEY_SEPARATOR = "\0";
+
+/**
+ * The single arg-projection authority: the string a stage's
+ * `/skill:<name> <args>` prompt carries, derived purely from
+ * (def, stageName, startStage, state).
+ *
+ * Returns `undefined` (instead of non-null-asserting) when a required
+ * projection input is missing — the rolling primary is unset, or a `reads`
+ * name has no published entry. The LIVE path never sees `undefined`: the
+ * preflights (`ensureUpstreamArtifact` / `ensureNamedReads`) guarantee the
+ * inputs before `inputForStage` delegates here. The RESUME fold freezes this
+ * value at loop-generation open, where replayed state is byte-identical to
+ * live loop entry (THE REPLAY CONTRACT); `undefined` there means a
+ * truncated/corrupted trail and becomes a recorded refusal.
+ */
+export function stageEntryArgs(
+	def: StageDef,
+	stageName: string,
+	startStage: string,
+	state: RunState,
+): string | undefined {
+	if (isPromptStage(def)) return "";
+	if (usesOriginalInput(def, stageName, startStage)) return state.originalInput;
+	if (hasReads(def)) {
+		const parts: string[] = [];
+		// Duplicate-flag dedup: collapse two entries on the SAME channel whose
+		// handles stringify identically (the a777 cite-check symptom — a re-run
+		// fanout channel re-published the same fs path, emitting a duplicate
+		// `--code-cite-check <path>` flag). The key is `${name}${DEDUP_KEY_SEPARATOR}${handle}`:
+		// the DEDUP_KEY_SEPARATOR (NUL byte) avoids a concatenation collision (name "ab" + handle
+		// "cd" vs "a" + "bcd"), and carrying the channel `name` preserves a fanin
+		// repeat whose entries carry DISTINCT paths (e.g. per-cluster subplans) and
+		// a multi-artifact entry whose artifacts differ. The set spans every read
+		// of the call so two reads of the same name+handle also collapse.
+		const seen = new Set<string>();
+		for (const read of def.reads) {
+			const name = readName(read);
+			const slot = state.named[name];
+			if (!slot?.length) return undefined;
+			// `all` → every accumulated entry (fan-in); bare string → latest-wins.
+			// A produces-fanout channel is PRE-SIZED (length === total) and
+			// positionally filled, so a slot can carry `undefined` (pending) or a
+			// failed sentinel. The latest-wins branch must NOT `slot[length-1]!`
+			// blindly: scan backward for the last REAL entry, and the per-entry loop
+			// skips unfilled/failed slots so a `fanin(...)` read contributes no args
+			// for them (the `.filter(Boolean)` convention needs no widening).
+			//
+			// ALL-FAILED FANIN CONTRACT: pre-sizing means the channel is
+			// always present once the fold ran, so the `!slot?.length` bail no longer
+			// fires for a fanout channel; when EVERY unit failed/unfilled this read
+			// contributes ZERO `--name` args and `stageEntryArgs` returns the
+			// assembled (possibly empty) string — NEVER `undefined`. Collect-all
+			// fanout runs synthesis even when all units failed.
+			const entries = readsAll(read) ? slot : [lastReal(slot)];
+			for (const entry of entries) {
+				if (!entry || isFailedOutput(entry)) continue; // unfilled (pending) or failed → no args
+				for (const artifact of entry.artifacts) {
+					const handle = handleToString(artifact.handle);
+					const key = `${name}${DEDUP_KEY_SEPARATOR}${handle}`;
+					if (seen.has(key)) continue;
+					seen.add(key);
+					parts.push(`--${name}`, handle);
+				}
+			}
+		}
+		return parts.join(" ");
+	}
+	const primary = currentPrimaryArtifact(state);
+	return primary === undefined ? undefined : handleToString(primary.handle);
+}
+
+/** The last REAL (filled, non-failed) entry of a channel slot — the latest-wins
+ *  source. A produces-fanout channel is pre-sized + positionally filled, so its
+ *  tail can be `undefined` (pending) or a failed sentinel; scan backward instead
+ *  of asserting `slot[length-1]`. Returns `undefined` for an all-failed/empty slot. */
+function lastReal(slot: readonly (Output | undefined)[]): Output | undefined {
+	for (let i = slot.length - 1; i >= 0; i--) {
+		const o = slot[i];
+		if (o && !isFailedOutput(o)) return o;
+	}
+	return undefined;
+}
+
+/**
+ * The single authority for "a completed produces stage mutates the rolling
+ * artifact state." Called by the live skill path (sessions/sessions.ts), the
+ * live script path (runner/script-stage.ts), and state reconstruction
+ * (runner/resume.ts) — keeping all three in lockstep (parity-tested).
+ *
+ * Scope: primary slot + named-publish registry ONLY. `state.output` and
+ * `state.stagesCompleted` advance through `applyStageSuccess`
+ * (audit-rows.ts), which delegates here for the artifact slots.
+ *
+ *   - kind "produces"            → first artifact wins the rolling slot; the
+ *                                  full Output appends onto state.named[key].
+ *   - inheritsArtifacts === false → clear the slot (terminal()).
+ *   - other side-effect          → leave the slot untouched.
+ */
+export function applyCompletedStage(state: RunState, def: StageDef, stageName: string, output: Output): void {
+	// Fanout owns its channel through the index-addressed `placeFanoutOutput`
+	// fold (foldFanoutCompletion), so the produces-channel push here would
+	// double-write. Early-return for fanout. But the acts/side-effect
+	// PRIMARY-CLEAR (`inheritsArtifacts === false`) is IDEMPOTENT (it only sets
+	// primary = undefined), so run it here for fanout TOO: the SEQUENTIAL path (a
+	// resumed/non-pristine acts-fanout that routes through `step` → `dispatchUnit`
+	// → `recordStageSuccess` → here, not through foldFanoutCompletion until parallel
+	// resume is wired) would otherwise lose the primary-clear the only
+	// shipped fanout kind (acts) relies on. Live acts-fanout calls BOTH this and
+	// placeFanoutOutput — both set primary = undefined, harmless. Produces-fanout's
+	// channel push stays fold-only (non-idempotent → must not double-write).
+	if (def.loop?.kind === "fanout") {
+		clearPrimaryForActs(state, def);
+		return;
+	}
+	if (def.kind === "produces") {
+		const next = output.artifacts[0];
+		if (next) state.primaryArtifact = next;
+		const key = resolvePublishName(def, stageName);
+		let slot = state.named[key];
+		if (!slot) {
+			slot = [];
+			state.named[key] = slot;
+		}
+		slot.push(output);
+		return;
+	}
+	// A side-effect stage with an EXPLICITLY NAMED outcome publishes onto that
+	// channel too (`actsPublishName` — explicit name only, never the record-key
+	// fallback), honoring the `Outcome.name` contract for acts stages. Without
+	// this, a gate folding an acts outcome's channel (validate-fix's
+	// `remediation` digest — the fix-round count AND the unchanged-tree stop)
+	// read a channel no code path ever wrote. The rolling primary stays
+	// governed by the acts rules below — a side-effect outcome never rolls it.
+	const actsKey = actsPublishName(def);
+	if (actsKey !== undefined) {
+		let slot = state.named[actsKey];
+		if (!slot) {
+			slot = [];
+			state.named[actsKey] = slot;
+		}
+		slot.push(output);
+	}
+	clearPrimaryForActs(state, def);
+}
+
+/**
+ * The acts/side-effect primary-clear rule, in ONE place: a `terminal()` stage
+ * (`inheritsArtifacts === false`) drops the rolling primary; every other
+ * side-effect leaves it. Idempotent and produces-safe (the `kind` guard makes it
+ * a no-op for produces stages, whose channel arm owns the primary). Shared by
+ * `applyCompletedStage` (the fanout early-return AND the sequential acts arm) and
+ * `placeFanoutOutput`, so the rule can't drift across the three sites.
+ */
+function clearPrimaryForActs(state: RunState, def: StageDef): void {
+	if (def.kind !== "produces" && def.inheritsArtifacts === false) state.primaryArtifact = undefined;
+}
+
+// The fanout fold's SINGLE state-effect site. It subsumes BOTH
+// arms of applyCompletedStage (which early-returns for fanout),
+// index-addressed:
+//   • produces-fanout (collecting): pre-size the channel slot to `total`, assign
+//     the unit's output at its declared `index`; set primaryArtifact from
+//     artifacts[0] unless this is a failed sentinel (no artifacts).
+//   • acts-fanout (side-effect, def.kind !== "produces"): no channel; mirror the
+//     applyCompletedStage `inheritsArtifacts === false ⇒ clear primary` rule so
+//     today's acts-fanout semantics are preserved.
+// Called ONLY by foldFanoutCompletion (live + resume).
+export function placeFanoutOutput(
+	state: RunState,
+	def: StageDef,
+	stageName: string,
+	index: number,
+	total: number,
+	output: Output,
+): void {
+	if (def.kind === "produces") {
+		const key = resolvePublishName(def, stageName);
+		let slot = state.named[key];
+		if (!slot || slot.length !== total) {
+			slot = new Array<Output | undefined>(total) as Output[];
+			state.named[key] = slot;
+		}
+		slot[index] = output;
+		const next = output.artifacts[0];
+		if (next && !isFailedOutput(output)) state.primaryArtifact = next;
+		return;
+	}
+	// acts/side-effect fanout — same primary-clear rule as the sequential path.
+	clearPrimaryForActs(state, def);
+}

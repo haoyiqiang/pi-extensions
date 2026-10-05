@@ -29,7 +29,9 @@ export interface WorkflowPromptPreparationContext {
   readonly session?: PersistentSessionReference;
 }
 
-/** Explicit owner-supplied preparation; no discovery, extension hooks, shell or network is implied. */
+/** Explicit owner-supplied preparation; no discovery, extension hooks, shell or network is implied.
+ * Callable metadata never binds a host implicitly: the owner must also pass promptBinding.
+ */
 export type WorkflowPromptPreparer = (
   input: string,
   context: WorkflowPromptPreparationContext,

@@ -35,6 +35,10 @@ Foundations must not depend on product or capability packages. A new foundation 
 - `@maplezzk/pi-test-utils` provides deterministic temp-directory and extension-registration fixtures.
 - `@maplezzk/pi-subagents` is a private upstream migration baseline. It retains the embedded engine, backend-neutral session views, and an opt-in isolated terminal backend using the public i18n/mux foundations, but is not activated; `@maplezzk/pi-interactive-subagents` remains the active product. Backend integration, shared config/localization, and the eventual product-layer promotion are separate changes.
 
+- `@maplezzk/pi-workflow` is the private workflow product migration: the imported `rpiv-workflow` engine owns DSL/routing, run journals, retries/recovery, `/wf` and its UI. It does not absorb subagent lifecycle or terminal operations. The explicit `pi-subagents/workflow-executor` entry provides managed execution without enabling the retained upstream `SubagentWorkflow` engine or Agent UI.
+
+The two private products collaborate through the versioned Pi event-bus protocol `pi-workflow:executor:discover:v1`, not runtime imports of one another. The workflow consumer owns execution configuration and registration/teardown; the executor owns backend construction and managed policy/resource admission. Backend/resource identity travels in the run journal. No new shared request library or process-global executor slot is introduced.
+
 Internal packages are `private: true`. They are part of workspace type checks and tests but never enter release-please, npm tarball checks, or the root Pi profile.
 
 ### Distribution profile
@@ -53,6 +57,7 @@ pi-terminal-mux ────────────────→ pi-extension
 pi-spark ───────────────────────→ pi-terminal-mux
 @maplezzk/pi-interactive-subagents → pi-terminal-mux
 @maplezzk/pi-subagents (private) ─→ pi-extensions-i18n / pi-terminal-mux
+@maplezzk/pi-workflow (private) ──→ pi-extensions-config / pi-extensions-i18n
 ```
 
 Runtime code imports sibling packages by their public npm name. It must not import another package through `../other-package/src/...` or any other private path.

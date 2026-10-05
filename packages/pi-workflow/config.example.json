@@ -1,0 +1,20 @@
+{
+  "execution": {
+    "executor": "pi-subagents",
+    "backend": "embedded",
+    "agentType": "general-purpose",
+    "maxConcurrency": 4,
+    "maxTurns": 24
+  },
+  "skills": [
+    {
+      "name": "example-skill",
+      "filePath": "./skills/example-skill/SKILL.md",
+      "baseDir": "./skills/example-skill",
+      "format": "pi",
+      "requiredTools": ["read", "bash"],
+      "expectedSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    }
+  ],
+  "requiredTools": ["read", "bash"]
+}

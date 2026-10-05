@@ -17,9 +17,10 @@ unified embedded/terminal subagent package, **not an installable replacement yet
   invoke it. Do not load both products into a production session during migration.
 - A real terminal backend is available through explicit factory injection for
   isolated development. Default AgentManager construction remains embedded; config
-  routing and product migration remain deferred. A private managed workflow execution
-  host/provider covers plain prompts and optional explicit approved-skill preparation;
-  it does not register or migrate `/wf`.
+  routing for top-level subagents and product migration remain deferred. The separate
+  `workflow-executor.ts` entry offers managed embedded/terminal execution to the
+  independent private `pi-workflow` package without loading the legacy tools/UI.
+  `/wf` and its execution configuration belong to that consumer, not this package.
 
 ## Imported scope
 
@@ -62,7 +63,7 @@ no prompt, result replay, usage replay or concurrency slot until an invocation s
 
 Request preparation still uses Pi context; terminal execution is an explicit private opt-in.
 See [execution boundary](./docs/execution-backend.md) for the private callback-contract
-change, preserved behavior, and remaining work. No new user configuration is added.
+change, preserved behavior, and remaining work. Top-level subagent configuration is unchanged.
 
 ## Terminal execution (private opt-in)
 
@@ -89,7 +90,8 @@ See [managed session recovery](./docs/managed-sessions.md) for validator require
 checkpoint/lease behavior and recovery limits; [terminal backend](./docs/terminal-backend.md) for the supported contract and
 [terminal lifecycle](./docs/terminal-lifecycle.md) for the underlying primitive.
 New diagnostics have English/Chinese catalogs; imported embedded strings remain a
-separate migration. There is no user-facing configuration switch yet.
+separate migration. Workflow execution configuration is owned by the private `pi-workflow` consumer;
+there is no top-level subagent backend switch yet.
 
 ## Managed workflow execution (private)
 
@@ -104,17 +106,26 @@ and resumed inputs; `createWorkflowSkillPreparer` snapshots approved instruction
 with canonical paths, hashes and a declared `pi` or `positional-v1` format. It does not
 discover resources or execute preprocessing shell commands. Required tool names are
 validated against actual managed policy before model execution, never used as grants;
-missing requirements leave restored sessions clean. See [workflow resources](./docs/workflow-resources.md).
+missing requirements leave restored sessions clean. An explicit prompt binding records resolver/resource
+identity in managed policy and rejects mismatched reattach/fork before writer acquisition.
+Supporting assets remain live. See [workflow resources](./docs/workflow-resources.md).
 
 This is not a completed rpiv-workflow migration. Saved policies are preserved;
 incompatible restored model/thinking/CWD, unresolved slash commands and unsupported
 nesting reject explicitly. The provider's synchronous `dispose`
 is complemented by an awaited `close`. Managed files live below the consumer's raw-JSONL
-sweep, and cancellation needs the consumer's nominal error bridge. No registration,
-public export, configuration switch, DSL or UI is added. See
-[workflow execution](./docs/workflow-execution.md) for the host contract and
-[consumer integration requirements](./docs/workflow-consumer-contract.md) for the public
-cancellation, retry, registration ownership and awaited-close gaps that remain.
+sweep, and cancellation uses the factory supplied by the executing consumer.
+
+For explicit development composition, load `workflow-executor.ts` (also exposed as
+`@maplezzk/pi-subagents/workflow-executor`) alongside `pi-workflow/extension.ts` and
+the i18n notice outlet. Discovery uses `pi-workflow:executor:discover:v1`, without a
+cross-product runtime import or hidden global registration slot. The executor binds
+approved skills/global minimum tools, pins saved backend identity on resume, and
+retires old executions when the Pi session/runtime changes. It registers no Agent
+UI, legacy `SubagentWorkflow` or `/wf` command itself. This entry remains private and
+outside the root profile. See the [consumer README](../pi-workflow/README.md),
+[workflow execution](./docs/workflow-execution.md) and
+[consumer contract](./docs/workflow-consumer-contract.md).
 
 ## Configuration
 
@@ -154,7 +165,6 @@ terminal multiplexer, or local Pi daemon are needed. Test fixtures under
 - [Upstream RPC reference](./docs/rpc.md)
 - [Upstream scripted workflow reference](./docs/workflows.md)
 
-Next: connect the workflow consumer's cancellation/resource/cleanup semantics and finish
-terminal capability parity, then add backend
+Next: finish long-lived interactive terminal parity, then add top-level subagent backend
 routing and unified UI/config/localization. Switch the root profile and
 release metadata only after that integration is complete.

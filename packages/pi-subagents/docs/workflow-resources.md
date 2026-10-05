@@ -123,6 +123,35 @@ uses legacy sequential replacements and has display consumers tied to its litera
 `Skill input:` label. We neither activate those hooks nor silently emulate them.
 `/template` prompt-template registration/dispatch is also outside this profile.
 
+## Binding resources to managed recovery
+
+`createWorkflowSkillPreparer()` is still callable as before, and also exposes frozen
+`resources` and `promptBinding`. The binding contains `resolverId`, a SHA-256
+`resourceSetDigest`, and `assetMode: "live"`. Its versioned canonical input includes
+the entire approved instruction set, canonical file/base paths, raw file hashes,
+formats and sorted/deduplicated minimum tool requirements. Approval order does not
+change identity; adding/removing a skill, changing its instructions or its requirements
+does. The resolver identity is `pi-subagents/workflow-skills@1`.
+
+A direct host/provider owner opts in by passing **both** `preparePrompt` and
+`promptBinding: preparePrompt.promptBinding`. Arbitrary preparer provenance does not
+automatically bind policy. Existing unbound programmatic clients remain unbound.
+The Pi executor entry always binds its approved set (including an empty set), and
+also binds global minimum tool requirements under `pi-subagents/workflow-executor@1`.
+
+The host, manager and managed policy sidecar snapshot and carry this identity.
+Reattach and fork require an exact presence/value match before acquiring a writer,
+opening an SDK session or making a model call, and the host checks the acquired
+session again. A bound session cannot silently become unbound, nor can an unbound
+legacy session silently adopt the current resource set. The supplied current model
+runtime/auth still remains separate and is never stored in this binding.
+
+This protects **instruction-set and resolver identity**, not all filesystem inputs.
+Supporting scripts/assets remain live and are not included in the digest; `assetMode`
+records that limitation explicitly. Locale-specific wrapper text is presentation,
+not part of the instruction-file digest. It is not a hermetic resource bundle or a
+security sandbox.
+
 ## Tool admission
 
 `requiredTools` is a per-invocation precondition, not a tool allowlist or grant. It
@@ -165,6 +194,7 @@ const preparePrompt = createWorkflowSkillPreparer([{
 const provider = createWorkflowExecutionProvider({
   ...managedProviderOptions,
   preparePrompt,
+  promptBinding: preparePrompt.promptBinding,
 });
 const execution = provider.createHost(observer, runOptions);
 try {
@@ -184,6 +214,7 @@ try {
 
 The same preparation contract is used by managed embedded and terminal. Terminal
 provider/auth visibility, POSIX/Bash restrictions, saved-policy validation and lease
-quarantine are unchanged. Actual consumer registration remains blocked on the
-[cancellation/lifecycle contract](./workflow-consumer-contract.md), not on a hidden
-local package import or global registration-slot workaround.
+quarantine are unchanged. The explicit `workflow-executor.ts` entry offers this
+profile to the independent private `pi-workflow` consumer through a versioned Pi
+event-bus protocol. It does not activate the legacy subagent tools/UI or register
+`/wf` itself; see the [consumer contract](./workflow-consumer-contract.md).

@@ -397,6 +397,8 @@ export interface ToolActivity {
 }
 
 export interface RunOptions {
+  /** Explicit resolver/resource identity for managed sessions; never inferred from prompt text. */
+  promptBinding?: import("./prompt-binding.js").PromptBinding;
   /** Minimum active tool names for this invocation; a managed-only precondition, never grants. */
   requiredTools?: readonly string[];
   /** ExtensionAPI instance — used for pi.exec() instead of execSync. */

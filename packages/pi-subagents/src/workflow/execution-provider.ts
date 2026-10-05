@@ -2,6 +2,7 @@ import { lstatSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AgentExecutionBackend, ExecutionSessionSnapshot } from "../backends/types.js";
+import { snapshotPromptBinding, type PromptBinding } from "../backends/prompt-binding.js";
 import { i18n } from "../i18n.js";
 import type { CompiledSchema } from "./json-schema.js";
 import type {
@@ -24,6 +25,8 @@ export interface WorkflowExecutionProviderOptions {
   maxTurns?: number;
   structuredOutput?: CompiledSchema;
   preparePrompt?: WorkflowPromptPreparer;
+  /** Explicit immutable expectation for every fresh/restored child; never inferred from preparePrompt. */
+  promptBinding?: PromptBinding;
   cancellationError?: (signal: AbortSignal) => Error;
   resolveModel?: (id: { workflow: string; stage: string; skill: string }) => WorkflowModelSelection | undefined;
 }
@@ -34,7 +37,7 @@ export interface ManagedWorkflowExecutionProvider extends WorkflowExecutionProvi
 
 /** Private factory only: deliberately no rpiv import, global registration or activation side effects. */
 export function createWorkflowExecutionProvider(options: WorkflowExecutionProviderOptions): ManagedWorkflowExecutionProvider {
-  options = Object.freeze({ ...options });
+  options = Object.freeze({ ...options, promptBinding: snapshotPromptBinding(options.promptBinding) });
   return {
     createHost(observer, input) {
       if (!input?.runId?.trim() || typeof input.childSessionsDir !== "string" || !isAbsolute(input.childSessionsDir)) {
@@ -51,7 +54,7 @@ export function createWorkflowExecutionProvider(options: WorkflowExecutionProvid
         pi: options.pi, ctx, observer, backend, runId: run.runId, sessionDir,
         agentType: options.agentType, maxConcurrency: options.maxConcurrency,
         maxTurns: options.maxTurns, structuredOutput: options.structuredOutput,
-        preparePrompt: options.preparePrompt,
+        preparePrompt: options.preparePrompt, promptBinding: options.promptBinding,
         cancellationError: options.cancellationError,
       });
       return { host, signal: host.signal, dispose: () => { void host.dispose(); }, close: () => host.dispose() };

@@ -20,6 +20,7 @@ const PACKAGE_LAYERS = new Map([
   ["pi-context-view", "capability"],
   ["@maplezzk/pi-test-utils", "internal"],
   ["@maplezzk/pi-subagents", "internal"],
+  ["@maplezzk/pi-workflow", "internal"],
 ]);
 
 const ALLOWED_WORKSPACE_EDGES = new Set([
@@ -39,6 +40,8 @@ const ALLOWED_WORKSPACE_EDGES = new Set([
   "pi-context-view -> pi-extensions-i18n",
   "@maplezzk/pi-subagents -> pi-extensions-i18n",
   "@maplezzk/pi-subagents -> pi-terminal-mux",
+  "@maplezzk/pi-workflow -> pi-extensions-config",
+  "@maplezzk/pi-workflow -> pi-extensions-i18n",
 ]);
 
 const errors = [];

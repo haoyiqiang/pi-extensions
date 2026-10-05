@@ -1,4 +1,13 @@
 {
+  "manager.retirementFailed": "Multiple managed sessions failed to retire cleanly.",
+  "workflowExecution.cleanupFailed": "Workflow child execution and retirement both failed.",
+  "workflowExecutor.closed": "This workflow executor registration has closed or belongs to an earlier Pi session.",
+  "workflowExecutor.identity": "The saved workflow executor identity is invalid or incompatible.",
+  "workflowExecutor.request": "Invalid workflow executor request.",
+  "workflowExecutor.context": "Workflow execution requires the current Pi context with its model registry and system prompt.",
+  "workflowExecutor.cleanup": "Multiple workflow executions failed to close cleanly.",
+  "promptBinding.invalid": "Invalid managed prompt binding.",
+  "promptBinding.mismatch": "The managed session prompt binding does not match this resolver and resource set.",
   "toolRequirements.invalid": "requiredTools must be an array of at most {maxTools} nonempty exact tool names, each at most {maxNameLength} characters, with no wildcards, whitespace, or control characters.",
   "toolRequirements.missing": "Required tools are not active for this invocation: {tools}.",
   "toolRequirements.unsupportedLegacy": "requiredTools is supported only by managed execution backends.",

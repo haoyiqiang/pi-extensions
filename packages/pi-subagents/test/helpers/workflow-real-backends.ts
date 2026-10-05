@@ -192,6 +192,12 @@ export function workflowRealBackend(kind: ExecutionBackendKind) {
       executions.push(execution);
       return { ...execution, childSessionsDir };
     },
+    scriptText(text: string) {
+      if (!faux) return;
+      const gate = nextModelGate;
+      nextModelGate = undefined;
+      faux.setResponses([async () => { await gate?.(); return fauxAssistantMessage(text); }]);
+    },
     script(name: string) {
       if (!faux) return;
       const gate = nextModelGate;

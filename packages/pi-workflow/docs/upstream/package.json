@@ -1,0 +1,123 @@
+{
+	"name": "@juicesharp/rpiv-workflow",
+	"version": "2.12.0",
+	"description": "Pi extension. Chain skills into typed multi-stage workflows with audited JSONL state, predicate routing, and per-stage output validation. Skill-agnostic — bring your own skills.",
+	"keywords": [
+		"pi-package",
+		"pi-extension",
+		"rpiv",
+		"workflow",
+		"skills",
+		"orchestration",
+		"dag",
+		"pipeline"
+	],
+	"type": "module",
+	"license": "MIT",
+	"author": "juicesharp",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/juicesharp/rpiv-mono.git",
+		"directory": "packages/rpiv-workflow"
+	},
+	"homepage": "https://github.com/juicesharp/rpiv-mono/tree/main/packages/rpiv-workflow#readme",
+	"bugs": {
+		"url": "https://github.com/juicesharp/rpiv-mono/issues"
+	},
+	"publishConfig": {
+		"access": "public"
+	},
+	"scripts": {
+		"test": "vitest run"
+	},
+	"files": [
+		"index.ts",
+		"internal.ts",
+		"api.ts",
+		"stage-def.ts",
+		"stage-identity.ts",
+		"stage-errors.ts",
+		"loop-def.ts",
+		"routing-dsl.ts",
+		"audit.ts",
+		"audit-ctx.ts",
+		"audit-rows.ts",
+		"built-ins.ts",
+		"chain-state.ts",
+		"command.ts",
+		"command-run.ts",
+		"death-scene.ts",
+		"execution-host.ts",
+		"failure-memos.ts",
+		"loop-constructors.ts",
+		"loops/",
+		"extension.ts",
+		"registration.ts",
+		"handle.ts",
+		"host.ts",
+		"judge.ts",
+		"json-schema.ts",
+		"schema-compat.ts",
+		"internal-utils.ts",
+		"layers.ts",
+		"events.ts",
+		"loop.ts",
+		"loop-kinds.ts",
+		"loop-parallel.ts",
+		"loop-waves.ts",
+		"load/",
+		"output.ts",
+		"messages.ts",
+		"output-spec.ts",
+		"outcomes/",
+		"predicates.ts",
+		"preview.ts",
+		"skill-contract.ts",
+		"skill-contracts/",
+		"routing.ts",
+		"runner/",
+		"semaphore.ts",
+		"startup.ts",
+		"sessions/",
+		"state/",
+		"transcript.ts",
+		"triggers.ts",
+		"typebox-adapter.ts",
+		"types.ts",
+		"validate-output.ts",
+		"validation-bounds.ts",
+		"validate-workflow.ts",
+		"validate/",
+		"worktree-digest.ts",
+		"docs-protocol.ts",
+		"docs/",
+		"!docs/*.png",
+		"!docs/*.jpg",
+		"!docs/*.svg",
+		"README.md",
+		"LICENSE",
+		"!**/*.test.ts"
+	],
+	"exports": {
+		".": "./index.ts",
+		"./startup": "./startup.ts",
+		"./registration": "./registration.ts",
+		"./runner": "./runner/index.ts",
+		"./internal": "./internal.ts"
+	},
+	"pi": {
+		"image": "https://raw.githubusercontent.com/juicesharp/rpiv-mono/main/packages/rpiv-workflow/docs/cover.png",
+		"extensions": [
+			"./extension.ts"
+		]
+	},
+	"dependencies": {
+		"@juicesharp/rpiv-config": "^2.12.0",
+		"jiti": "^2.7.0"
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": "*",
+		"@standard-schema/spec": "*",
+		"typebox": "*"
+	}
+}

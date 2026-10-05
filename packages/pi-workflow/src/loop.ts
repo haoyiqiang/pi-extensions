@@ -1,0 +1,364 @@
+/**
+ * loop.ts — THE unit-loop driver. One continuation loop runs every loop
+ * stage: `fanout` (push: units precomputed), `iterate` (pull: one unit per
+ * generator call, accumulating), `assess` (producer→judge rounds until the
+ * judge's verdict satisfies `done`). The only per-kind code is the strategy
+ * table in loop-kinds.ts (`pull` / `guardExpectation` / `hasPending`) —
+ * dispatch, persistence, cap policy, result projection, and completion are
+ * shared and kind-agnostic here.
+ *
+ * A `verify`-bearing stage runs here too — `effectiveLoopOf` desugars it into
+ * a degenerate assess loop; verify-aware code is presentation only
+ * (role/label flavoring keyed on `e.def.verify` inside the assess strategy).
+ *
+ * Every unit runs `executeStageSession` with a pre-decorated session: `stageName`
+ * carries the DISPLAY decoration (`decorateStage`), `unit` carries the
+ * machine identity that lands in the row's `parent`/`role`/`unitId`/`unitIndex`
+ * fields and the `onUnitStart`/`onUnitEnd` payloads.
+ *
+ * Continuation-style: each unit's `onSuccess` advances the cursor and
+ * re-enters `step`. Everything is awaited up the stack, so a throw from a
+ * user fn (`units`/`next`/`feedForward`/`done`/judge prompt) propagates to
+ * `dispatchStageOrRecordFailure`'s single catch — a thrown `StagePreflightError`
+ * (the `haltPreflight` consumer contract) keeps its own attribution.
+ *
+ * Capture semantics (the post-refactor bug class — pinned):
+ *   - `entryArtifact` + `entryPair` frozen by the CALLER before unit 1;
+ *   - snapshot captured per unit, immediately before its session;
+ *   - the skill registry was snapshotted once at run start (RunContext).
+ *
+ * `runner/run-stage.ts` injects primitives through `LoopDeps` so this
+ * module never imports the engine back (cycle-free).
+ *
+ * Resume re-enters `runLoop` with a fold-reconstructed cursor (see
+ * `runner/resume-loop.ts`); the silence rule — banner only when this
+ * invocation dispatched ≥1 unit — keeps a finished-loop resume a silent
+ * no-op (pinned behavior).
+ */
+
+import type { AssessLoop, LoopDef } from "./api.js";
+import { applyCompletedStage } from "./chain-state.js";
+import { lifecycleCtxFor, skillStageRef } from "./events.js";
+import { nowIso } from "./internal-utils.js";
+import { type AnyJudge, isPanel, type PanelJudge } from "./judge.js";
+import { panelVerdictChannel, panelVerdictDef } from "./loop-constructors.js";
+import {
+	advanceCursor,
+	allFanoutSlotsFailed,
+	buildUnitSession,
+	foldFanoutCompletion,
+	isHaltWhenAllFailed,
+	type LoopCursor,
+	type LoopDeps,
+	type LoopEntry,
+	loopStrategyOf,
+	type NextStep,
+	presentedKindOf,
+	sequentialStrategyOf,
+} from "./loop-kinds.js";
+import { runFanoutGeneration } from "./loop-parallel.js";
+import { MSG_LOOP_CAP_ADVANCE, MSG_LOOP_ZERO_UNITS } from "./messages.js";
+import { appendLoopCap } from "./state/index.js";
+import type { RunContext, WorkflowHostContext } from "./types.js";
+
+/**
+ * The loop-entry announcement — `onStageStart` then `onLoopStart` with the
+ * presented kind (+ the precomputed unit list when the loop has one). ONE
+ * helper for the live entry (`runLoopStage`) and the resume re-entry
+ * (`resumeLoopStage`) — the pair and the presented-kind expression stay
+ * aligned by sharing this one helper.
+ */
+export async function announceLoopStart(
+	hostCtx: WorkflowHostContext,
+	run: RunContext,
+	e: Pick<LoopEntry, "stageIdx" | "name" | "skill" | "def" | "loop" | "units">,
+): Promise<void> {
+	const ref = skillStageRef(e.name, e.stageIdx + 1, e.skill);
+	await run.lifecycle.fire(hostCtx, "onStageStart", ref, lifecycleCtxFor(run));
+	await run.lifecycle.fire(
+		hostCtx,
+		"onLoopStart",
+		ref,
+		{ kind: presentedKindOf(e.def, e.loop), ...(e.units ? { units: e.units } : {}) },
+		lifecycleCtxFor(run),
+	);
+}
+
+/** A pristine cursor ⇒ a live first entry. A resumed cursor (index advanced or
+ *  any units folded) routes to the sequential path; resume instead
+ *  re-dispatches only the still-pending children. */
+const isPristine = (cursor: LoopCursor): boolean =>
+	cursor.index === 0 && cursor.accumulated.length === 0 && cursor.slots === undefined;
+
+/** Narrows `loop` to AssessLoop — the one bearing a `judge` field; the first
+ *  publishPanelVerdict guard routes through this so `loop.judge` type-checks
+ *  without a cast. */
+const isAssessLoop = (loop: LoopDef): loop is AssessLoop => loop.kind === "assess";
+
+/** The panel-closing transition — fires exactly once per round: the LAST member's
+ *  judge advance clears `cursor.panel` and flips to `produce` with the folded
+ *  verdict already on `lastVerdict`. The positive conjunction of the De Morgan
+ *  dual of the original guard. */
+const isPanelClosingTransition = (judge: AnyJudge, cursor: LoopCursor): judge is PanelJudge =>
+	isPanel(judge) && cursor.panel === undefined && cursor.phase === "produce";
+
+/** A live empty pull (iterate) loop — no units ran this invocation and none
+ *  accumulated — the one shape that earns the zero-unit warning. */
+const isZeroUnitPullLoop = (cursor: LoopCursor, loop: LoopDef): boolean =>
+	cursor.ranThisInvocation === 0 && cursor.accumulated.length === 0 && loop.kind === "iterate";
+
+/** Run (or resume) one loop generation. The caller fired onStageStart/onLoopStart. */
+export async function runLoop(
+	hostCtx: WorkflowHostContext,
+	e: LoopEntry,
+	cursor: LoopCursor,
+	run: RunContext,
+	deps: LoopDeps,
+): Promise<void> {
+	const cap = Math.min(e.loop.max ?? Number.POSITIVE_INFINITY, run.maxIterations);
+	// ALL fanout goes through the index-addressed parallel path (Semaphore(1)
+	// just serializes when maxConcurrency === 1) — so the named-channel + cursor
+	// representation is identical at every concurrency AND matches the resume
+	// fold. iterate/assess keep the sequential step()/advanceCursor.
+	// (Live entry is always pristine; resume routes to runFanoutResume directly.)
+	if (e.loop.kind === "fanout" && loopStrategyOf(e.loop.kind).parallelizable && isPristine(cursor)) {
+		return runFanoutParallel(hostCtx, e, cursor, cap, run, deps);
+	}
+	await step(hostCtx, e, cursor, cap, run, deps);
+}
+
+/**
+ * Live bounded-parallel fanout entry — thin wrapper over `runFanoutGeneration`
+ * (loop-parallel.ts). Dispatches the first `cap` units (`0..dispatchCount-1`), each
+ * gated on its own deps; on completion picks the cap policy: over-cap units trip
+ * `hitCap`, otherwise the loop finishes. iterate/assess never reach here (not
+ * parallelizable).
+ */
+function runFanoutParallel(
+	hostCtx: WorkflowHostContext,
+	e: LoopEntry,
+	cursor: LoopCursor,
+	cap: number,
+	run: RunContext,
+	deps: LoopDeps,
+): Promise<void> {
+	const active = Array.from({ length: Math.min(e.units!.length, cap) }, (_u, i) => i);
+	return runFanoutGeneration(hostCtx, e, cursor, run, deps, active, () =>
+		e.units!.length > cap
+			? hitCap(hostCtx, e, cursor, cap, cap, run, deps)
+			: finishLoop(hostCtx, e, cursor, run, deps),
+	);
+}
+
+/** Indices whose slot is still unfilled after the fold — the units to re-run. */
+export function pendingFanoutIndices(cursor: LoopCursor, total: number): number[] {
+	const out: number[] = [];
+	for (let i = 0; i < total; i++) if (cursor.slots?.[i] === undefined) out.push(i);
+	return out;
+}
+
+/** Resume re-dispatch — thin wrapper over `runFanoutGeneration`. Runs the still-pending
+ *  fanout units, each gated on its own deps, folding each at its declared index (so
+ *  completed slots keep their position), and always finishes (the live run already
+ *  settled the cap policy). A ≥3-level DAG where the roots completed but their
+ *  dependents aborted re-dispatches correctly: already-filled slots are skipped (not in
+ *  `pending`) and so carry no readiness latch — a pending unit whose dep is outside
+ *  `pending` treats it as satisfied and reads its filled slot, while a pending unit
+ *  whose dep is ALSO pending still waits for it.
+ *  Pending fanout units COLD re-dispatch (a fresh child each) — fanout units are
+ *  idempotent (each writes its own distinct artifact at its declared index), so a
+ *  partial in-flight session is discarded rather than reattached; this matches
+ *  what the live loop does. The run-scoped `childSessionsDir` + the id-first
+ *  `locateSessionFile` serve the SINGLE-STAGE session-backed reattach path
+ *  (run-stage.ts), not this fanout re-dispatch. */
+export function runFanoutResume(
+	hostCtx: WorkflowHostContext,
+	e: LoopEntry,
+	cursor: LoopCursor,
+	run: RunContext,
+	deps: LoopDeps,
+	pending: readonly number[],
+): Promise<void> {
+	return runFanoutGeneration(hostCtx, e, cursor, run, deps, pending, () => finishLoop(hostCtx, e, cursor, run, deps));
+}
+
+// ---------------------------------------------------------------------------
+// The step cycle
+// ---------------------------------------------------------------------------
+
+async function step(
+	hostCtx: WorkflowHostContext,
+	e: LoopEntry,
+	cursor: LoopCursor,
+	cap: number,
+	run: RunContext,
+	deps: LoopDeps,
+): Promise<void> {
+	const next = await sequentialStrategyOf(e.loop.kind).pull(e, cursor, cap, run);
+	if (next.kind === "complete") return finishLoop(hostCtx, e, cursor, run, deps);
+	if (next.kind === "cap") return hitCap(hostCtx, e, cursor, next.count, cap, run, deps);
+	return dispatchUnit(hostCtx, e, cursor, next, cap, run, deps);
+}
+
+/** Dispatch one unit session; the onSuccess continuation advances the cursor and re-enters step. */
+async function dispatchUnit(
+	hostCtx: WorkflowHostContext,
+	e: LoopEntry,
+	cursor: LoopCursor,
+	u: Extract<NextStep, { kind: "unit" }>,
+	cap: number,
+	run: RunContext,
+	deps: LoopDeps,
+): Promise<void> {
+	await run.lifecycle.fire(
+		hostCtx,
+		"onUnitStart",
+		skillStageRef(e.name, e.stageIdx + 1, u.skill),
+		{ role: u.role, index: cursor.index, unitId: u.id, label: u.label, skill: u.skill },
+		lifecycleCtxFor(run),
+	);
+
+	const snapshot = await deps.captureSnapshot(hostCtx, e.name, u.def, e.stageIdx, run);
+
+	await deps.executeStageSession(
+		hostCtx,
+		buildUnitSession(e, u, cursor.index, run, snapshot, run.signal, (freshCtx, output) => {
+			cursor.ranThisInvocation++;
+			// Fanout owns its channel + cursor through the index-addressed
+			// `foldFanoutCompletion` (→ placeFanoutOutput) — `applyCompletedStage`
+			// early-returns for fanout, so this sequential single-dispatch fallback
+			// must fold here too, not lean on the removed `applyCompletedStage`
+			// channel push. `cursor.index` is the dispatched unit's index; the fold
+			// updates `filledCount` (not `index`), so advance the pointer explicitly.
+			// (Currently unreached for fanout: live → runFanoutParallel, resume →
+			// runFanoutResume; kept consistent so "index = pointer" holds everywhere.)
+			// iterate/assess keep the sequential cursor advance + panel publish.
+			if (e.loop.kind === "fanout") {
+				foldFanoutCompletion(run.state, cursor, e.def, e.name, cursor.index, e.units!.length, output);
+				cursor.index++;
+			} else {
+				advanceCursor(cursor, u.role, output, e.loop);
+				publishPanelVerdict(e.loop, e.name, cursor, run.state);
+			}
+			return step(freshCtx, e, cursor, cap, run, deps);
+		}),
+	);
+}
+
+/**
+ * Panel-close publish — lands a panel's FOLDED verdict on its named channel,
+ * run by BOTH the live driver (`dispatchUnit.onSuccess`) and the resume fold
+ * (`runner/resume.ts` `foldUnitRow`) immediately after the SAME `advanceCursor`,
+ * so the two paths publish byte-identically (THE REPLAY CONTRACT). Fires exactly
+ * once per round — only on the transition that closes a panel: the LAST member's
+ * judge advance is the one that clears `cursor.panel` AND flips back to `produce`
+ * with the folded verdict already on `lastVerdict`. A single judge (non-panel),
+ * a mid-panel member advance (`cursor.panel` still set), and every produce
+ * advance (`phase` left at `judge`) all fall through untouched. `advanceCursor`
+ * already manufactured the verdict (pure); this only appends it — the fold
+ * carries no artifact, so `applyCompletedStage` leaves the rolling primary alone
+ * and writes only the named channel. It lives BESIDE `advanceCursor`, not inside
+ * it: publishing mutates `RunState`, and `advanceCursor` must stay pure for the
+ * live + resume folds to agree.
+ */
+export function publishPanelVerdict(
+	loop: LoopDef,
+	stageName: string,
+	cursor: LoopCursor,
+	state: RunContext["state"],
+): void {
+	if (!isAssessLoop(loop)) return;
+	const judge = loop.judge;
+	if (!isPanelClosingTransition(judge, cursor)) return;
+	if (cursor.lastVerdict === undefined) return; // defensive — the fold always set it
+	applyCompletedStage(
+		state,
+		panelVerdictDef(judge, stageName),
+		panelVerdictChannel(judge, stageName),
+		cursor.lastVerdict,
+	);
+}
+
+// ---------------------------------------------------------------------------
+// Loop end — projection, notification, cap policy
+// ---------------------------------------------------------------------------
+
+/**
+ * The declared `result` projection — the ONE place the loop's outcome lands
+ * in `{state.output, state.primaryArtifact}` (the pair is governed as one;
+ * mid-loop transient rolls are accepted by design). The resume fold applies
+ * this same function at generation close.
+ */
+export function projectResult(
+	loop: LoopDef,
+	entryPair: LoopEntry["entryPair"],
+	cursor: LoopCursor,
+	state: RunContext["state"],
+): void {
+	if (loop.result === "last" && cursor.lastProduce) {
+		state.output = cursor.lastProduce.output;
+		// `artifact` is undefined only for acts-stage units (produces units are
+		// guaranteed ≥1 artifact by enforceCompletionContract) — the entry
+		// primary carries through, mirroring how a single acts stage behaves.
+		state.primaryArtifact = cursor.lastProduce.artifact ?? entryPair.primaryArtifact;
+		return;
+	}
+	// "entry" — or "last" with zero produce units (degrades to entry: the
+	// zero-unit pull loop leaves the chain exactly as it found it).
+	state.output = entryPair.output;
+	state.primaryArtifact = entryPair.primaryArtifact;
+}
+
+/**
+ * Notification rules: the only toast is the zero-unit warning for a live empty
+ * pull loop. Loop completion itself is silent (the status line is the live
+ * progress channel); a resumed finished loop stays silent too.
+ */
+async function finishLoop(
+	hostCtx: WorkflowHostContext,
+	e: LoopEntry,
+	cursor: LoopCursor,
+	run: RunContext,
+	deps: LoopDeps,
+): Promise<void> {
+	// haltWhenAllFailed — the SINGLE spelling of the all-failed generation-close
+	// halt. It lives here (never a loop-parallel gate twin) because finishLoop is
+	// the one funnel every closing path reaches: the live under-cap finalTail, the
+	// live over-cap `onCap: "advance"` tail (hitCap → finishLoop), the resume
+	// re-dispatch tail (runFanoutResume), and the resume all-filled early tail
+	// (runFanoutGeneration's order.length === 0 shortcut bypasses the
+	// post-dispatch gates). Strict predicate: an over-cap-advancing generation
+	// never qualifies (beyond-cap slots stay unfilled).
+	if (isHaltWhenAllFailed(e.loop) && allFanoutSlotsFailed(cursor)) {
+		await deps.haltLoopWhenAllFailed(hostCtx, run, e, cursor.filledCount ?? 0, cursor.slots?.length ?? 0);
+		return;
+	}
+	projectResult(e.loop, e.entryPair, cursor, run.state);
+	if (isZeroUnitPullLoop(cursor, e.loop)) {
+		hostCtx.ui.notify(MSG_LOOP_ZERO_UNITS(e.skill), "warning");
+	}
+	await deps.advanceAfter(hostCtx, e.name, e.stageIdx, run);
+}
+
+/** Cap trip: "halt" → terminal failure; "advance" → durable telemetry + event + projected advance. */
+async function hitCap(
+	hostCtx: WorkflowHostContext,
+	e: LoopEntry,
+	cursor: LoopCursor,
+	count: number,
+	cap: number,
+	run: RunContext,
+	deps: LoopDeps,
+): Promise<void> {
+	if (e.loop.onCap === "halt") return deps.haltLoop(hostCtx, run, e, count, cap);
+	appendLoopCap(run.cwd, run.runId, { type: "loop-cap", stage: e.name, count, max: cap, ts: nowIso() });
+	hostCtx.ui.notify(MSG_LOOP_CAP_ADVANCE(e.skill, cap), "warning");
+	await run.lifecycle.fire(
+		hostCtx,
+		"onLoopCap",
+		skillStageRef(e.name, e.stageIdx + 1, e.skill),
+		{ kind: e.loop.kind, count, max: cap, policy: "advance" as const },
+		lifecycleCtxFor(run),
+	);
+	return finishLoop(hostCtx, e, cursor, run, deps);
+}
