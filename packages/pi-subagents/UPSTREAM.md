@@ -272,3 +272,30 @@ This is not full `/wf` migration: consumer cancellation/resource/cleanup integra
 interactive capability parity and product/configuration/UI activation remain separate.
 The imported scripted workflow host and the active interactive-subagents package are
 unchanged. See `docs/workflow-execution.md` for the private contract and limits.
+
+## Explicit workflow resource preparation and tool admission
+
+- Added an optional owner-supplied prompt preparation boundary, shared by fresh and
+  resumed invocations without replay on idle restoration. Synchronous results are
+  snapshotted before yielding; asynchronous results cannot dispatch after scope closure.
+- Added explicit approved skill snapshots with canonical paths, stable bounded UTF-8
+  reads, raw-file hashes and immutable provenance. No discovery, implicit trust decision,
+  extension loading, filesystem-wide scan or preprocessing subprocess is introduced.
+- Defined two explicit formats: literal Pi-style skill input and a local positional-v1
+  format using Pi 0.87.1-style quoting/defaults/slices with one-pass substitution.
+  This is not a copy of the rpiv-args extension or its shell/runtime behavior; unsupported
+  shell/session-ID substitutions reject in positional-v1. Supporting assets remain live.
+- Added managed per-invocation requiredTools admission before fresh environment/session
+  effects or resume writer/capture mutation. Requirements do not enable tools, alter
+  saved policy or reinterpret skill allowed-tools metadata. Legacy embedded explicitly
+  rejects nonempty requirements. Manager queues snapshot requirements before yielding.
+- Added offline SDK/CLI resource and tool-admission coverage, including reused preparer
+  objects, late cancellation, byte-amplification bounds and canonical source provenance.
+- Audited the actual workflow consumer's public registration, nominal cancellation,
+  retry propagation and teardown ownership. Those remaining consumer changes are
+  documented rather than bypassed with private imports or global registration hacks.
+
+The default remains plain-prompt-only; resources require explicit preparation injection.
+No production configuration, root profile, public export, workflow registration or release
+metadata changes are included. See `docs/workflow-resources.md` and
+`docs/workflow-consumer-contract.md`.

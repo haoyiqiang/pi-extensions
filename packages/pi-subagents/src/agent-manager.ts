@@ -21,6 +21,7 @@ import type { Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ToolActivity } from "./agent-runner.js";
 import { createEmbeddedExecutionBackend } from "./backends/embedded-adapter.js";
+import { snapshotRequiredTools } from "./backends/tool-requirements.js";
 import type { ExecutionSession } from "./backends/session.js";
 import type { PersistentSessionReference, SessionReference } from "./backends/session-reference.js";
 import type { AgentExecutionBackend, ExecutionResumeResult, ExecutionRunOptions, ExecutionRunResult } from "./backends/types.js";
@@ -173,6 +174,8 @@ interface SpawnArgs {
 
 interface SpawnOptions {
   description: string;
+  /** Minimum active tool names for this invocation, not permission grants. */
+  requiredTools?: readonly string[];
   /**
    * Optional memorable name for this instance, becoming a second handle
    * (`@auth-audit`) alongside the type-derived one. Slugged, not validated —
@@ -343,6 +346,8 @@ function isPersistentReference(reference: unknown): reference is PersistentSessi
 }
 
 interface ResumeOptions {
+  /** Minimum active tool names for this invocation, checked against the saved policy. */
+  requiredTools?: readonly string[];
   /**
    * Run the resumed turn detached in the background: return immediately with
    * the record still "running" (or "queued" at the concurrency limit) and
@@ -544,6 +549,7 @@ export class AgentManager {
     prompt: string,
     options: SpawnOptions,
   ): string {
+    options = { ...options, requiredTools: snapshotRequiredTools(options.requiredTools) };
     if (this.disposed) throw new Error(i18n.t("managerRestore.disposed"));
     // Validate before the queue branch — a queued spawn should fail at the
     // call, not minutes later at drain. Throw (not warn): programmatic callers
@@ -992,6 +998,7 @@ export class AgentManager {
       inheritContext: options.inheritContext,
       thinkingLevel: options.thinkingLevel,
       structuredOutput: options.structuredOutput,
+      requiredTools: options.requiredTools,
       resumeSessionFile: options.resumeSessionFile,
       nested: options.parentAgentId !== undefined,
       workflow: options.workflowId !== undefined,
@@ -1358,6 +1365,7 @@ export class AgentManager {
     signal?: AbortSignal,
     options?: ResumeOptions,
   ): Promise<AgentRecord | undefined> {
+    options = { ...options, requiredTools: snapshotRequiredTools(options?.requiredTools) };
     const record = this.agents.get(id);
     if (this.disposed || !record?.session) return undefined;
     // Abort changes the visible status immediately, not backend/settlement ownership.
@@ -1436,6 +1444,7 @@ export class AgentManager {
       try {
         if (this.disposed || this.agents.get(id) !== record) return "";
         const result = await this.execution.resume(session, prompt, {
+          requiredTools: options?.requiredTools,
           onToolActivity: (activity) => {
             if (activity.type === "end") record.toolUses++;
             options?.onToolActivity?.(activity);
@@ -1532,6 +1541,7 @@ export class AgentManager {
         try { options.onStarted?.(); } catch { /* ignore caller wiring errors */ }
         if (this.disposed || this.agents.get(id) !== record) return "";
         const result = await this.execution.resume(session, prompt, {
+          requiredTools: options.requiredTools,
           onToolActivity: (activity) => {
             if (activity.type === "end") record.toolUses++;
             options.onToolActivity?.(activity);

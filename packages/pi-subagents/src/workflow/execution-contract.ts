@@ -1,5 +1,6 @@
 import type { EffectiveThinkingLevel } from "../types.js";
 import type { PersistentSessionReference } from "../backends/session-reference.js";
+import type { PreparedWorkflowPrompt } from "./prompt-preparation.js";
 
 /** Private, structurally compatible with the rpiv-workflow host seam; see docs/workflow-execution.md. */
 export interface WorkflowModelSelection {
@@ -60,6 +61,8 @@ export type ManagedWorkflowChildOptions<T> = Omit<WorkflowChildOptions<T>, "with
 /** Local additions are not required of an external workflow consumer. */
 export interface ManagedWorkflowSessionContext extends WorkflowSessionContext {
   readonly reference: PersistentSessionReference;
+  /** Latest prepared input, not a completion/authorization receipt. Undefined on idle restoration. */
+  readonly preparation?: PreparedWorkflowPrompt;
   abort(): Promise<void>;
 }
 
@@ -88,7 +91,7 @@ export interface ManagedWorkflowExecution extends WorkflowExecution {
 
 export interface ManagedWorkflowHost extends WorkflowHostContext {
   spawnChild<T>(options: ManagedWorkflowChildOptions<T>): Promise<T>;
-  readonly capabilities: typeof WORKFLOW_EXECUTION_CAPABILITIES;
+  readonly capabilities: WorkflowExecutionCapabilities;
   dispose(): Promise<void>;
 }
 
@@ -107,9 +110,15 @@ export const WORKFLOW_EXECUTION_CAPABILITIES = Object.freeze({
   fork: true,
   rawBranch: true,
   plainPromptsOnly: true,
+  promptPreparation: false,
   restoredPolicyOverrides: false,
   nestedChildren: false,
   toolTimeoutRecovery: false,
   crashRecovery: false,
   consumerAbortBridgeRequired: true,
 } as const);
+
+export type WorkflowExecutionCapabilities = Omit<typeof WORKFLOW_EXECUTION_CAPABILITIES, "plainPromptsOnly" | "promptPreparation"> & {
+  readonly plainPromptsOnly: boolean;
+  readonly promptPreparation: boolean;
+};

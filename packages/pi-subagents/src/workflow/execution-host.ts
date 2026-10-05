@@ -15,9 +15,10 @@ import type { CompiledSchema } from "./json-schema.js";
 import {
   WORKFLOW_EXECUTION_CAPABILITIES,
   type ManagedWorkflowHost, type ManagedWorkflowSessionContext, type ManagedWorkflowChildOptions,
-  type WorkflowModelSelection, type WorkflowObserverContext,
+  type WorkflowModelSelection, type WorkflowObserverContext, type WorkflowExecutionCapabilities,
 } from "./execution-contract.js";
 import { ExecutionSemaphore } from "./execution-semaphore.js";
+import { snapshotPreparedPrompt, type PreparedWorkflowPrompt, type WorkflowPromptPreparer } from "./prompt-preparation.js";
 
 export interface WorkflowExecutionHostOptions {
   pi: ExtensionAPI;
@@ -31,6 +32,8 @@ export interface WorkflowExecutionHostOptions {
   maxConcurrency?: number;
   maxTurns?: number;
   structuredOutput?: CompiledSchema;
+  /** Explicit trusted-owner preparation; absent means the original plain-prompt-only profile. */
+  preparePrompt?: WorkflowPromptPreparer;
   signal?: AbortSignal;
   /** Return the consumer's ACTUAL nominal cancellation error, not a similarly named local class. */
   cancellationError?: (signal: AbortSignal) => Error;
@@ -53,12 +56,13 @@ interface ChildScope {
   pending?: Promise<void>;
   cancelPending?: () => void;
   lastInvocation: Promise<void>;
+  preparation?: PreparedWorkflowPrompt;
   release?: Promise<void>;
 }
 
 /** No registration, UI ownership, global model mutation, or public backend routing. */
 export class SubagentWorkflowExecutionHost implements ManagedWorkflowHost {
-  readonly capabilities = WORKFLOW_EXECUTION_CAPABILITIES;
+  readonly capabilities: WorkflowExecutionCapabilities;
   readonly cwd: string;
   readonly hasUI: boolean;
   readonly maxConcurrency: number;
@@ -81,10 +85,14 @@ export class SubagentWorkflowExecutionHost implements ManagedWorkflowHost {
       || !validSignal(options.signal) || !validSignal(options.observer.signal)
       || !Number.isSafeInteger(options.maxConcurrency ?? 4) || (options.maxConcurrency ?? 4) < 1
       || (options.agentType !== undefined && !options.agentType.trim())
+      || (options.preparePrompt !== undefined && typeof options.preparePrompt !== "function")
       || (options.maxTurns !== undefined && (!Number.isSafeInteger(options.maxTurns) || options.maxTurns < 0))) {
       throw failure("invalidOptions");
     }
     if (![options.backend.inspect, options.backend.reattach, options.backend.fork].every(port => typeof port === "function")) throw failure("managedRequired");
+    this.capabilities = options.preparePrompt
+      ? Object.freeze({ ...WORKFLOW_EXECUTION_CAPABILITIES, plainPromptsOnly: false, promptPreparation: true })
+      : WORKFLOW_EXECUTION_CAPABILITIES;
     this.cwd = realpathSync(options.ctx.cwd);
     if (realpathSync(options.observer.cwd) !== this.cwd) throw failure("cwdMismatch");
     this.hasUI = options.observer.hasUI;
@@ -129,7 +137,7 @@ export class SubagentWorkflowExecutionHost implements ManagedWorkflowHost {
       reattach: input.reattach && { ...input.reattach }, fork: input.fork && { ...input.fork } };
     if (options.reattach || options.fork) {
       if (!isAbsolute((options.reattach ?? options.fork)!.sessionFile)) throw failure("invalidOptions");
-    } else assertPlainPrompt(options.prompt);
+    } else this.assertInputPrompt(options.prompt);
     const scope: ChildScope = { controller: new AbortController(), detach: () => {}, closing: false, lastInvocation: Promise.resolve() };
     scope.detach = linkSignals(scope.controller, [this.signal, options.signal]);
     this.scopes.add(scope);
@@ -184,13 +192,15 @@ export class SubagentWorkflowExecutionHost implements ManagedWorkflowHost {
           // Check the actual acquired destination as well as the preflight source.
           this.validateRestore(this.options.backend.inspect!(adopted.record.session!.reference.sessionFile!), options.model, selection.model);
         } else {
+          const prepared = await this.prepare(scope, options.prompt);
+          this.assertScope(scope);
           const id = this.manager.spawn(this.options.pi, this.options.ctx,
-            this.options.agentType ?? "general-purpose", options.prompt, {
+            this.options.agentType ?? "general-purpose", prepared.text, {
               description: i18n.t("workflowExecution.child", { runId: this.options.runId }),
               workflowId: this.options.runId, isolated: true, inheritContext: false, isolation: "off", isBackground: false,
               cwd: this.cwd, model: selection.model, thinkingLevel: selection.thinking,
               maxTurns: this.options.maxTurns, structuredOutput: this.options.structuredOutput,
-              signal: scope.controller.signal,
+              requiredTools: prepared.requiredTools, signal: scope.controller.signal,
             });
           const record = this.manager.getRecord(id)!;
           this.own(scope, record);
@@ -224,6 +234,7 @@ export class SubagentWorkflowExecutionHost implements ManagedWorkflowHost {
     return {
       cwd: this.cwd, hasUI: this.hasUI, ui: this.ui, maxConcurrency: this.maxConcurrency,
       signal: scope.controller.signal, reference,
+      get preparation() { return scope.preparation; },
       sessionManager: {
         getSessionId: () => reference.sessionId,
         getSessionFile: () => reference.sessionFile,
@@ -236,10 +247,14 @@ export class SubagentWorkflowExecutionHost implements ManagedWorkflowHost {
       sendUserMessage: content => {
         try {
           this.assertScope(scope);
-          assertPlainPrompt(content);
+          this.assertInputPrompt(content);
           if (scope.pending) throw failure("busy");
           return this.invoke(scope, async () => {
-            const record = await this.manager.resume(scope.record!.id, content, scope.controller.signal);
+            const prepared = await this.prepare(scope, content);
+            this.assertScope(scope);
+            const record = await this.manager.resume(scope.record!.id, prepared.text, scope.controller.signal, {
+              requiredTools: prepared.requiredTools,
+            });
             if (!record) throw failure("resumeRefused");
             this.checkResult(scope, record);
           });
@@ -252,6 +267,33 @@ export class SubagentWorkflowExecutionHost implements ManagedWorkflowHost {
       spawnChild: () => Promise.reject(failure("nestedUnsupported")),
       abort: () => { scope.controller.abort(); return this.release(scope); },
     };
+  }
+
+  private async prepare(scope: ChildScope, input: string): Promise<PreparedWorkflowPrompt> {
+    this.assertScope(scope);
+    const prepare = this.options.preparePrompt;
+    const session = scope.record?.session?.reference;
+    const context = Object.freeze({ cwd: this.cwd, signal: scope.controller.signal,
+      ...(session?.sessionFile ? { session: Object.freeze({ ...session }) as PersistentSessionReference } : {}),
+    });
+    let prepared: PreparedWorkflowPrompt;
+    if (prepare) {
+      const result = prepare(input, context);
+      // A synchronous preparer may reuse a result object across siblings: snapshot before yielding.
+      prepared = result && typeof (result as PromiseLike<PreparedWorkflowPrompt>).then === "function"
+        ? snapshotPreparedPrompt(await result)
+        : snapshotPreparedPrompt(result as PreparedWorkflowPrompt);
+    } else prepared = Object.freeze({ text: input });
+    // A slow or cancellation-ignoring preparer must never dispatch into a retired scope.
+    this.assertScope(scope);
+    assertPlainPrompt(prepared.text);
+    scope.preparation = prepared;
+    return prepared;
+  }
+
+  private assertInputPrompt(prompt: string): void {
+    if (typeof prompt !== "string" || !prompt.trim()) throw failure("invalidPrompt");
+    if (!this.options.preparePrompt) assertPlainPrompt(prompt);
   }
 
   private invoke(scope: ChildScope, work: () => Promise<void>): Promise<void> {

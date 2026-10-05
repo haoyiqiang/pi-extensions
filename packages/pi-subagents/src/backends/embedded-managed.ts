@@ -9,6 +9,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { runInChildSessionContext } from "../child-context.js";
 import { i18n } from "../i18n.js";
+import { STRUCTURED_OUTPUT_TOOL_NAME } from "../structured-output.js";
 import type { CompiledSchema } from "../workflow/json-schema.js";
 import { createEmbeddedExecutionBackend } from "./embedded-adapter.js";
 import {
@@ -22,6 +23,7 @@ import { modelFingerprint } from "./model-identity.js";
 import type { PersistentSessionReference } from "./session-reference.js";
 import { sessionWitness } from "./session-witness.js";
 import type { AgentExecutionBackend, ExecutionRestoreOptions } from "./types.js";
+import { assertRequiredTools, snapshotRequiredTools } from "./tool-requirements.js";
 
 export interface ManagedEmbeddedConfig {
   agentDir?: string;
@@ -244,10 +246,16 @@ export function createManagedEmbeddedExecutionBackend(
     }
   };
 
-  const invoke = (state: State, prompt: string, options: EmbeddedInvocationOptions = {}, onStarted?: () => void): Promise<EmbeddedInvocationResult> => {
+  const invoke = (state: State, prompt: string, options: EmbeddedInvocationOptions & { requiredTools?: readonly string[] } = {}, onStarted?: () => void): Promise<EmbeddedInvocationResult> => {
     if (state.closed) return Promise.reject(error("backend.closedSession"));
     if (state.running) return Promise.reject(error("invocation.busy"));
     if (state.poisoned) return Promise.reject(error("managedEmbedded.quarantined"));
+    // Admission failures are not writer failures: leave checkpoint and capture untouched.
+    try {
+      const policy = state.managed.policy;
+      assertRequiredTools(options.requiredTools, policy.structuredSchema === undefined
+        ? policy.tools : [...policy.tools, STRUCTURED_OUTPUT_TOOL_NAME]);
+    } catch (failure) { return Promise.reject(failure); }
     state.running = true;
     state.controls = [];
     state.acceptingSteer = false;
@@ -321,6 +329,7 @@ export function createManagedEmbeddedExecutionBackend(
   return createEmbeddedExecutionBackend({
     inspectSession: (file) => inspectManagedSession(file, "embedded"),
     async runAgent(ctx, type, prompt, options: RunOptions) {
+      options = { ...options, requiredTools: snapshotRequiredTools(options.requiredTools) };
       options.signal?.throwIfAborted();
       runtimeFor(ctx);
       // Capture both wire data and validator binding before environment preparation can yield.

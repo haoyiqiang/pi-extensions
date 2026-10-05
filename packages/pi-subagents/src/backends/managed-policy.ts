@@ -5,11 +5,13 @@ import { DEFAULT_AGENTS } from "../default-agents.js";
 import { detectEnv } from "../env.js";
 import { i18n } from "../i18n.js";
 import { buildAgentPrompt, type PromptExtras } from "../prompts.js";
+import { STRUCTURED_OUTPUT_TOOL_NAME } from "../structured-output.js";
 import type { AgentConfig, EffectiveThinkingLevel, SubagentType } from "../types.js";
 import { getGraceTurns, resolveDefaultModel, resolveEffectiveMaxTurns } from "./embedded.js";
 import { compileInvocationSchema, validTurnBudget } from "./invocation-policy.js";
 import { modelFingerprint } from "./model-identity.js";
 import type { ExecutionRunOptions } from "./types.js";
+import { assertRequiredTools, snapshotRequiredTools } from "./tool-requirements.js";
 
 /** Fully resolved, credential-free policy for one isolated managed conversation. */
 export interface ManagedPolicy {
@@ -33,6 +35,7 @@ export async function prepareManagedPolicy(
   options: ExecutionRunOptions,
   diagnosticPrefix: "terminalBackend" | "managedEmbedded" = "terminalBackend",
 ): Promise<ManagedPolicy> {
+  const requiredTools = snapshotRequiredTools(options.requiredTools);
   const invalidConfig = (): never => { throw new Error(i18n.t(`${diagnosticPrefix}.invalidConfig`)); };
   const unsupported = (feature: string): never => { throw new Error(i18n.t(`${diagnosticPrefix}.unsupported`, { feature })); };
   const agent = resolveAgent(type, invalidConfig);
@@ -48,6 +51,7 @@ export async function prepareManagedPolicy(
   if (!validTurnBudget(maxTurns, graceTurns)) invalidConfig();
 
   const tools = resolveTools(type, agent, unsupported);
+  assertRequiredTools(requiredTools, structuredSchema === undefined ? tools : [...tools, STRUCTURED_OUTPUT_TOOL_NAME]);
   const selectedModel = options.model ?? resolveDefaultModel(ctx.model, ctx.modelRegistry, agent.model);
   if (!selectedModel || !nonEmpty(selectedModel.provider) || !nonEmpty(selectedModel.id)) {
     throw new Error(i18n.t(`${diagnosticPrefix}.noModel`));

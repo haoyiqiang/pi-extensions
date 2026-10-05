@@ -42,7 +42,7 @@ ports. The host refuses legacy backends missing those ports.
 
 | Operation | Behavior |
 | --- | --- |
-| Fresh | Isolated persistent child, exactly one initial plain prompt; await the complete invocation before `withSession`. |
+| Fresh | Isolated persistent child, exactly one initial prepared/plain prompt; await the complete invocation before `withSession`. |
 | Reattach | Managed clean source, same identity/file, **no initial prompt**, idle callback with existing history. |
 | Fork | New identity/file with raw active history and saved policy; **no initial prompt**, source unchanged. |
 | `sendUserMessage` | One new manager-owned resume invocation, never steering. Concurrent sends reject. |
@@ -57,12 +57,19 @@ session ID/file, **not** the manager record ID. The local callback type also exp
 `reference` and `abort()`; an external consumer needs only the smaller structural
 host/session interface.
 
-The supported prompts are already composed **plain text**. Leading slash commands
-(including `/skill:`), prompt-template expansion, interactive extension tools,
-nested `child.spawnChild()`, and tool-timeout recovery are not provided. Use the
-root host for workflow routing/fan-out. A leading absolute path should be described
-in prose rather than supplied as a slash-command-shaped prompt. Managed backends
-still enforce their builtin-only tool policy and isolated resource loading.
+The default profile accepts already composed **plain text**. An explicit optional
+`preparePrompt` can prepare fresh/send inputs; `createWorkflowSkillPreparer` provides
+approved, bounded instruction snapshots and `/skill:name` expansion with a declared
+format. Prepared tool requirements are checked against actual managed policy before
+model execution, never used to enable tools. Idle reattach/fork still does not prepare
+or dispatch the ignored prompt. See [workflow resources](./workflow-resources.md).
+
+Ambient prompt-template/extension-command dispatch, interactive extension tools,
+nested `child.spawnChild()` and tool-timeout recovery are not provided. Use the root
+host for workflow routing/fan-out. Without explicit preparation, leading slash
+commands remain rejected. A leading absolute path should be described in prose
+rather than supplied as a slash-command-shaped prompt. Managed backends still enforce
+their builtin-only tool policy and isolated resource loading.
 
 Saved model, effective thinking, tools, prompt, schema and budgets stay with a
 restored session. Explicit restored model/thinking selections must match that
@@ -104,8 +111,8 @@ sends are cancelled, and active work is retired without prematurely releasing ca
 `cancellationError(signal)` must return the consumer's **actual cancellation error**
 when that consumer uses nominal `instanceof` checks. The local default
 `WorkflowExecutionAbortError` is not rpiv-workflow's class. The inspected reference
-runner does not expose a public cancellation-factory registration; wiring that
-bridge remains consumer integration work. Similarly named local or DOM errors do
+runner exposes provider registration but does not expose a public cancellation
+constructor/factory; wiring that bridge remains consumer integration work. Similarly named local or DOM errors do
 not silently solve it.
 
 An aborted spawn/wait rejects promptly. Invocations retain execution capacity
@@ -188,9 +195,12 @@ POSIX/Bash and the terminal backend's existing restrictions still apply.
 
 ## What this does not migrate
 
-No `/wf` registration, skill/argument expansion, questionnaire/advisor/web extension
-loading, lane UI, interactive terminal handoff, cross-backend conversion, crash
-recovery or production configuration migration is included. The reference runner
+No `/wf` registration, ambient resource discovery, full rpiv-args shell/runtime hooks,
+questionnaire/advisor/web extension loading, lane UI, interactive terminal handoff,
+cross-backend conversion, crash recovery or production configuration migration is
+included. Explicit approved skill preparation is not a replacement for those resources.
+The [consumer contract audit](./workflow-consumer-contract.md) records the remaining
+public cancellation, retry, ownership and awaited-retirement requirements. The reference runner
 also catches some validation-retry send errors as extraction failures, so the host
 alone cannot guarantee that every cancellation path is classified identically.
 Host-level failures can lose session provenance in that runner's generic entry-throw

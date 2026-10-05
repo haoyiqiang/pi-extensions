@@ -176,6 +176,16 @@ synchronous provider disposal plus an awaited close barrier, managed storage ver
 consumer pruning, and remaining resource/consumer work. This adds no registration,
 public configuration, automatic routing or root-profile change.
 
+Prompt preparation is now optional and explicit. Fresh/send inputs can use an approved
+skill snapshot or another owner-supplied preparer; idle reattach/fork never prepares the
+ignored prompt. The prepared `requiredTools` array is snapshotted across manager queues
+and checked against actual managed tools (including StructuredOutput only when installed)
+before fresh environment/session effects or resumed writer reservation. Missing tools
+never grant permissions or change saved policy, and legacy embedded rejects nonempty
+requirements. Instruction files, not supporting asset trees, are snapshotted. See
+[workflow resources](./workflow-resources.md) for format/budget/trust limits and
+[consumer contract](./workflow-consumer-contract.md) for the still-blocked registration step.
+
 ## Observation semantics
 
 The manager, nested tools, output writer, conversation viewer, and result formatter

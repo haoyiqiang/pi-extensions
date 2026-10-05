@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { i18n } from "../../i18n.js";
+import { STRUCTURED_OUTPUT_TOOL_NAME } from "../../structured-output.js";
+import { assertRequiredTools, snapshotRequiredTools } from "../tool-requirements.js";
 import type { ExecutionSession, SessionViewEvent, TranscriptMessage } from "../session.js";
 import type { AgentExecutionBackend, ExecutionResumeOptions, ExecutionRunOptions, ExecutionRunResult } from "../types.js";
 import type { ChildFeedback, TerminalSnapshot } from "./bridge-protocol.js";
@@ -317,7 +319,11 @@ export function createTerminalExecutionBackend(
       return adopt(forked, options.structuredOutput).handle;
     },
     async resume(handle, prompt, options) {
+      const requiredTools = snapshotRequiredTools(options?.requiredTools);
       const state = getState(handle);
+      const policy = state.managed.policy;
+      assertRequiredTools(requiredTools, policy.structuredSchema === undefined
+        ? policy.tools : [...policy.tools, STRUCTURED_OUTPUT_TOOL_NAME]);
       const result = await invoke(state, prompt, options);
       return {
         text: result.responseText, failure: result.failure ?? (result.aborted ? i18n.t("terminal.cancelled") : undefined),

@@ -23,6 +23,7 @@ import { runInChildSessionContext } from "../child-context.js";
 import { buildParentContext } from "../context.js";
 import { DEFAULT_AGENTS } from "../default-agents.js";
 import { detectEnv } from "../env.js";
+import { i18n } from "../i18n.js";
 import { buildMemoryBlock, buildReadOnlyMemoryBlock } from "../memory.js";
 import { createNestedSubagentTools, getMaxSubagentDepth, type NestedAgentManager } from "../nested-tools.js";
 import { buildAgentPrompt, type PromptExtras } from "../prompts.js";
@@ -32,6 +33,7 @@ import { createEmbeddedInvocationPolicy, embeddedStructuredTools, invokeEmbedded
 import type { SubagentType, EffectiveThinkingLevel } from "../types.js";
 import type { LifetimeUsage } from "../usage.js";
 import type { CompiledSchema } from "../workflow/json-schema.js";
+import { snapshotRequiredTools } from "./tool-requirements.js";
 
 export { steerEmbeddedSession as steerAgent } from "./embedded-lifecycle.js";
 
@@ -395,6 +397,8 @@ export interface ToolActivity {
 }
 
 export interface RunOptions {
+  /** Minimum active tool names for this invocation; a managed-only precondition, never grants. */
+  requiredTools?: readonly string[];
   /** ExtensionAPI instance — used for pi.exec() instead of execSync. */
   pi: ExtensionAPI;
   /** Manager-assigned id; suffixes session name to disambiguate parallel spawns (e.g. `Explore#a1b2c3d4`). */
@@ -536,6 +540,7 @@ export async function runAgent(
   prompt: string,
   options: RunOptions,
 ): Promise<RunResult> {
+  if (snapshotRequiredTools(options.requiredTools)?.length) throw new Error(i18n.t("toolRequirements.unsupportedLegacy"));
   options.signal?.throwIfAborted();
   const config = getConfig(type);
   const agentConfig = getAgentConfig(type);
@@ -995,8 +1000,9 @@ export async function runAgent(
 
 /** Owned sessions retain launch policy; foreign native sessions keep plain facade behavior. */
 export async function resumeAgent(
-  session: AgentSession, prompt: string, options: EmbeddedInvocationOptions = {},
+  session: AgentSession, prompt: string, options: EmbeddedInvocationOptions & { requiredTools?: readonly string[] } = {},
 ): Promise<Omit<EmbeddedInvocationResult, "aborted" | "steered"> & { aborted?: boolean; steered?: boolean }> {
+  if (snapshotRequiredTools(options.requiredTools)?.length) throw new Error(i18n.t("toolRequirements.unsupportedLegacy"));
   const { aborted, steered, ...result } = await invokeEmbeddedSession(session, prompt, options);
   return { ...result, ...(aborted ? { aborted: true } : {}), ...(steered ? { steered: true } : {}) };
 }

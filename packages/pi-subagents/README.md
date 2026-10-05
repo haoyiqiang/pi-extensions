@@ -18,7 +18,8 @@ unified embedded/terminal subagent package, **not an installable replacement yet
 - A real terminal backend is available through explicit factory injection for
   isolated development. Default AgentManager construction remains embedded; config
   routing and product migration remain deferred. A private managed workflow execution
-  host/provider now covers the plain-prompt profile; it does not register or migrate `/wf`.
+  host/provider covers plain prompts and optional explicit approved-skill preparation;
+  it does not register or migrate `/wf`.
 
 ## Imported scope
 
@@ -98,13 +99,22 @@ It uses one run-scoped manager/backend, raw active-branch snapshots and per-invo
 concurrency. Callback lifetimes retain sessions without consuming execution capacity,
 so recursive stage routing and forks of still-owned predecessors work at concurrency one.
 
-This is a restricted **plain-prompt** interface, not a completed rpiv-workflow migration.
-Saved policies are preserved; incompatible restored model/thinking/CWD, unresolved slash
-commands and unsupported nesting reject explicitly. The provider's synchronous `dispose`
+The default remains **plain-prompt-only**. An explicit `preparePrompt` can prepare fresh
+and resumed inputs; `createWorkflowSkillPreparer` snapshots approved instruction files
+with canonical paths, hashes and a declared `pi` or `positional-v1` format. It does not
+discover resources or execute preprocessing shell commands. Required tool names are
+validated against actual managed policy before model execution, never used as grants;
+missing requirements leave restored sessions clean. See [workflow resources](./docs/workflow-resources.md).
+
+This is not a completed rpiv-workflow migration. Saved policies are preserved;
+incompatible restored model/thinking/CWD, unresolved slash commands and unsupported
+nesting reject explicitly. The provider's synchronous `dispose`
 is complemented by an awaited `close`. Managed files live below the consumer's raw-JSONL
 sweep, and cancellation needs the consumer's nominal error bridge. No registration,
 public export, configuration switch, DSL or UI is added. See
-[workflow execution](./docs/workflow-execution.md) for contracts and remaining consumer work.
+[workflow execution](./docs/workflow-execution.md) for the host contract and
+[consumer integration requirements](./docs/workflow-consumer-contract.md) for the public
+cancellation, retry, registration ownership and awaited-close gaps that remain.
 
 ## Configuration
 

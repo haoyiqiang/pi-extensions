@@ -9,6 +9,7 @@ import type {
   WorkflowModelSelection, WorkflowObserverContext, WorkflowRunOptions,
 } from "./execution-contract.js";
 import { SubagentWorkflowExecutionHost } from "./execution-host.js";
+import type { WorkflowPromptPreparer } from "./prompt-preparation.js";
 
 export interface WorkflowExecutionProviderOptions {
   pi: ExtensionAPI;
@@ -22,6 +23,7 @@ export interface WorkflowExecutionProviderOptions {
   maxConcurrency?: number;
   maxTurns?: number;
   structuredOutput?: CompiledSchema;
+  preparePrompt?: WorkflowPromptPreparer;
   cancellationError?: (signal: AbortSignal) => Error;
   resolveModel?: (id: { workflow: string; stage: string; skill: string }) => WorkflowModelSelection | undefined;
 }
@@ -49,6 +51,7 @@ export function createWorkflowExecutionProvider(options: WorkflowExecutionProvid
         pi: options.pi, ctx, observer, backend, runId: run.runId, sessionDir,
         agentType: options.agentType, maxConcurrency: options.maxConcurrency,
         maxTurns: options.maxTurns, structuredOutput: options.structuredOutput,
+        preparePrompt: options.preparePrompt,
         cancellationError: options.cancellationError,
       });
       return { host, signal: host.signal, dispose: () => { void host.dispose(); }, close: () => host.dispose() };
