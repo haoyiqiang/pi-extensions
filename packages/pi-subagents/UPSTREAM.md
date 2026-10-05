@@ -243,3 +243,32 @@ cleanup are preserved, not an
 unbounded wait for an arbitrary run promise. Full readiness/cancellation signaling,
 unrestricted resource restoration, dirty-session recovery and tombstone migration are
 still future work.
+
+## Private managed workflow execution provider
+
+- Added locally owned structural host/provider types based on the inspected
+  `@juicesharp/rpiv-workflow` 2.12.0 contract in `juicesharp/rpiv-mono` at
+  `68d9a0014b70006d7b04b57933752338a2716db7`; its MIT attribution is retained in
+  `docs/LICENSE.rpiv-workflow`. No runtime or local-checkout dependency is introduced.
+- Implemented the restricted managed/plain-prompt profile through AgentManager,
+  preserving fresh versus no-prompt reattach/fork semantics and callback results.
+  All children share a backend so an idle, still-owned predecessor can fork.
+- Bound active invocations, not callback lifetimes, to support recursive root-stage
+  routing at concurrency one. Added scoped manager retain/release and retained
+  simultaneous abort/failure reasons without changing status precedence. Embedded
+  cancellation no longer synthesizes a missing/invalid structured-output failure;
+  genuine control, provider and hard-limit failures remain available.
+- Added raw active-branch observations and bounded read-only managed inspection,
+  reusing strict ready-policy/checkpoint validation without leases or SDK open repair.
+  Workflow reads preserve every raw entry and clone instead of exposing mutable native data.
+- Reject unsupported commands/nesting, unknown models, restored model/thinking policy
+  overrides and foreign CWD rather than silently degrading. Fresh thinking accepts
+  explicit off. Consumer-owned cancellation error factories remain explicit.
+- Kept synchronous provider disposal and an extra awaited close barrier. Managed
+  files are nested below the reference consumer's top-level raw-session orphan sweep.
+  No dirty-session reclamation or automatic managed-file deletion is introduced.
+
+This is not full `/wf` migration: consumer cancellation/resource/cleanup integration,
+interactive capability parity and product/configuration/UI activation remain separate.
+The imported scripted workflow host and the active interactive-subagents package are
+unchanged. See `docs/workflow-execution.md` for the private contract and limits.

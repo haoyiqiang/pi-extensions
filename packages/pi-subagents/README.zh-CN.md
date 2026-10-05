@@ -13,7 +13,8 @@ v0.19.0 的实现，固定上游提交为 `e955e29c51b7a6cce37e1108cd2d6c57a77e1
 - 现有 `@maplezzk/pi-interactive-subagents` 保持不变，仍是正式使用的扩展。
 - 入口只导出上游扩展工厂，不调用它；迁移期间不要在生产会话同时加载两套产品。
 - 真实 terminal backend 已可通过私有工厂显式注入用于开发验证；AgentManager 默认仍为
-  embedded。配置路由、迁移与 rpiv-workflow 适配器尚未实现。
+  embedded。配置路由与产品替换继续延后；现已加入面向纯文本任务的私有受管 workflow
+  host/provider，但没有注册或迁移 `/wf`。
 
 ## 导入范围
 
@@ -74,6 +75,19 @@ Manager 的会话句柄以及 UI/输出观察接口已与原生 `AgentSession` �
 [terminal 生命周期](./docs/terminal-lifecycle.md)。新增诊断已有中英文 catalog；上游
 embedded 文案仍待迁移，目前没有用户配置开关。
 
+## 受管 workflow 执行（私有）
+
+`src/workflow/execution-provider.ts` 为两种受管后端提供同一套 host：新建执行、不重放提示的
+原地恢复/分叉、同会话续发消息、按子任务等待及取消。每次 workflow 运行共用一个 manager/backend，
+历史读取使用原始有效分支；并发按单次调用计数，而不是按回调持有期计数。回调期间固定会话的
+生命周期，但不占用执行额度，因此并发为 1 时仍可递归编排下一阶段、分叉仍被前一回调持有的会话。
+
+这仍是受限的**纯文本提示**接口，不代表 rpiv-workflow 已完整迁移。恢复保留已存策略；不兼容的
+模型/思考等级/工作目录、未展开的斜杠命令及不支持的嵌套启动均明确拒绝。同步 `dispose` 之外另有
+可等待的 `close`；受管文件放在子目录中避开消费者的裸 JSONL 清理。取消还需要消费者提供其真实
+错误类型的转换接口。没有新增注册、公开导出、配置开关、DSL 或 UI。完整约定与消费者待接入项见
+[workflow 执行](./docs/workflow-execution.md)。
+
 ## 配置
 
 本批次没有新增生产配置，因此有意不添加 `config.example.json`。隔离开发仍使用上游的
@@ -108,4 +122,4 @@ npm run check
 - [上游 RPC 协议参考](./docs/rpc.md)
 - [上游脚本 workflow 参考](./docs/workflows.md)
 
-下一步：完善 workflow host 接入和 terminal 能力对齐，再加入后端路由、本地化和统一 UI/配置。完成整合后才切换根 profile 与发布元数据。
+下一步：接通 workflow 消费者的取消、资源与清理语义，补齐 terminal 能力，再加入后端路由、本地化和统一 UI/配置。完成整合后才切换根 profile 与发布元数据。

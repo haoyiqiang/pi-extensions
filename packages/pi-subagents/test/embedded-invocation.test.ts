@@ -64,8 +64,48 @@ describe("embedded invocation executor", () => {
     const result = await invokeEmbeddedSession(f.session, "task");
     expect(f.native.prompt).toHaveBeenCalledTimes(1);
     expect(result.structuredRetried).toBeUndefined();
-    if (reason === "aborted") expect(result.aborted).toBe(true);
+    if (reason === "aborted") expect(result).toMatchObject({ aborted: true, failure: undefined });
     else expect(result.failure).toBeTruthy();
+  });
+
+  it.each(["missing", "invalid"])("does not synthesize a structured-output failure on cancellation (%s capture)", async (output) => {
+    const f = fixture({ structured: true });
+    const controller = new AbortController();
+    f.native.prompt.mockImplementation(async () => {
+      if (output === "invalid") await expect(f.capture({ value: "wrong type" })).rejects.toThrow();
+      f.complete("partial answer");
+      controller.abort();
+    });
+    const result = await invokeEmbeddedSession(f.session, "cancel", { signal: controller.signal });
+    expect(result).toMatchObject({ text: "partial answer", aborted: true, failure: undefined });
+    expect(result.structuredJson).toBeUndefined();
+    expect(result.structuredRetried).toBeUndefined();
+    expect(f.native.prompt).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["error", "length"])("preserves a final provider %s alongside cancellation", async (reason) => {
+    const f = fixture({ structured: true });
+    const controller = new AbortController();
+    f.native.prompt.mockImplementation(async () => {
+      f.complete("", reason);
+      controller.abort();
+    });
+    const result = await invokeEmbeddedSession(f.session, "cancel", { signal: controller.signal });
+    expect(result).toMatchObject({ aborted: true,
+      failure: reason === "error" ? "provider failed" : i18n.t("invocation.outputLimit") });
+    expect(result.structuredRetried).toBeUndefined();
+    expect(f.native.prompt).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves a failed wrap-up control alongside cancellation with missing structured output", async () => {
+    const f = fixture({ structured: true, maxTurns: 1, graceTurns: 2 });
+    f.native.sendCustomMessage.mockImplementation(() => { throw new Error("delivery"); });
+    f.native.prompt.mockImplementation(async () => { f.complete("partial answer"); });
+    const result = await invokeEmbeddedSession(f.session, "task");
+    expect(result).toMatchObject({ aborted: true, failure: i18n.t("invocation.wrapUpFailed") });
+    expect(result.structuredRetried).toBeUndefined();
+    expect(f.native.abort).toHaveBeenCalledOnce();
+    expect(f.native.prompt).toHaveBeenCalledTimes(1);
   });
 
   it("counts the schema retry in the same hard budget and resets only on a new invocation", async () => {
@@ -121,7 +161,7 @@ describe("embedded invocation executor", () => {
     await started.promise;
     controller.abort();
     preflight.resolve();
-    expect(await pending).toMatchObject({ aborted: true });
+    expect(await pending).toMatchObject({ aborted: true, failure: undefined });
     expect(requests).toBe(0);
     expect(f.native.abort).toHaveBeenCalledTimes(2);
     expect(f.native.prompt).toHaveBeenCalledTimes(1);
@@ -139,7 +179,7 @@ describe("embedded invocation executor", () => {
       native.abort();
     });
     const result = await invokeEmbeddedSession(f.session, "cancel natively");
-    expect(result.aborted).toBe(true);
+    expect(result).toMatchObject({ aborted: true, failure: undefined });
     expect(result.structuredRetried).toBeUndefined();
     expect(f.native.prompt).toHaveBeenCalledTimes(1);
     expect(remove).toHaveBeenCalledWith("abort", expect.any(Function));
@@ -163,7 +203,7 @@ describe("embedded invocation executor", () => {
     expect(settled).toBe(false);
     await expect(invokeEmbeddedSession(f.session, "too early")).rejects.toThrow(i18n.t("invocation.busy"));
     drain.resolve();
-    expect(await pending).toMatchObject({ failure: i18n.t("invocation.wrapUpFailed") });
+    expect(await pending).toMatchObject({ aborted: true, failure: i18n.t("invocation.wrapUpFailed") });
   });
 
   it("sends session-lifetime extension errors only to the current guarded observer", async () => {
@@ -184,7 +224,8 @@ describe("embedded invocation executor", () => {
     const f = fixture({ structured: true });
     const controller = new AbortController();
     controller.abort();
-    expect(await invokeEmbeddedSession(f.session, "skip", { signal: controller.signal })).toMatchObject({ aborted: true });
+    expect(await invokeEmbeddedSession(f.session, "skip", { signal: controller.signal }))
+      .toMatchObject({ aborted: true, failure: undefined });
     expect(f.native.prompt).not.toHaveBeenCalled();
     expect(f.listeners.size).toBe(0);
   });

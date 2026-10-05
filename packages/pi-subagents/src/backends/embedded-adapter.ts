@@ -12,6 +12,7 @@ import type {
   ExecutionRunOptions,
   ExecutionRestoreOptions,
   ExecutionRunResult,
+  ExecutionSessionSnapshot,
 } from "./types.js";
 
 import type { PersistentSessionReference } from "./session-reference.js";
@@ -23,6 +24,7 @@ export interface EmbeddedExecutionBackendPorts {
   shutdownEmbeddedSession?: typeof shutdownEmbeddedSession;
   reattachSession?: (reference: PersistentSessionReference, options?: ExecutionRestoreOptions) => Promise<AgentSession>;
   forkSession?: (reference: PersistentSessionReference, options?: ExecutionRestoreOptions) => Promise<AgentSession>;
+  inspectSession?: (sessionFile: string) => ExecutionSessionSnapshot;
 }
 
 const EMPTY_MESSAGES: readonly TranscriptMessage[] = Object.freeze([]);
@@ -114,9 +116,17 @@ export function createEmbeddedExecutionBackend(
       ...(sessionFile !== undefined ? { sessionFile } : {}),
     });
 
+    let getBranch: ExecutionSession["getBranch"];
+    try {
+      const manager = native.sessionManager;
+      if (typeof manager?.getBranch === "function") getBranch = () => manager.getBranch();
+    } catch {
+      // Partial test doubles may not expose native branch observations.
+    }
     let handle!: ExecutionSession;
     handle = Object.freeze({
       reference,
+      ...(getBranch ? { getBranch } : {}),
       get model() {
         const model = native.model;
         if (!model || typeof model.provider !== "string" || typeof model.id !== "string") {
@@ -209,6 +219,7 @@ export function createEmbeddedExecutionBackend(
 
   return {
     kind: "embedded",
+    ...(ports.inspectSession ? { inspect: ports.inspectSession } : {}),
     ...(reattachSession ? { reattach: async (reference: PersistentSessionReference, options?: ExecutionRestoreOptions) =>
       wrapSession(await reattachSession(reference, options)) } : {}),
     ...(forkSession ? { fork: async (reference: PersistentSessionReference, options?: ExecutionRestoreOptions) =>

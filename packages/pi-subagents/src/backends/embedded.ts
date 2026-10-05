@@ -29,7 +29,7 @@ import { buildAgentPrompt, type PromptExtras } from "../prompts.js";
 import { preloadSkills } from "../skill-loader.js";
 import { createEmbeddedInvocationPolicy, embeddedStructuredTools, invokeEmbeddedSession, observeEmbeddedActivity, rememberEmbeddedPolicy,
   type EmbeddedInvocationOptions, type EmbeddedInvocationResult } from "./embedded-invocation.js";
-import type { SubagentType, ThinkingLevel } from "../types.js";
+import type { SubagentType, EffectiveThinkingLevel } from "../types.js";
 import type { LifetimeUsage } from "../usage.js";
 import type { CompiledSchema } from "../workflow/json-schema.js";
 
@@ -404,7 +404,7 @@ export interface RunOptions {
   signal?: AbortSignal;
   isolated?: boolean;
   inheritContext?: boolean;
-  thinkingLevel?: ThinkingLevel;
+  thinkingLevel?: EffectiveThinkingLevel;
   /**
    * Reopen this pi session file rather than starting an empty conversation.
    * `createAgentSession` seeds itself from whatever its SessionManager holds,

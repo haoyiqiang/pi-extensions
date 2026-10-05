@@ -16,7 +16,7 @@ import {
   type EmbeddedInvocationOptions, type EmbeddedInvocationResult, type EmbeddedInvocationPolicy,
 } from "./embedded-invocation.js";
 import type { RunOptions } from "./embedded.js";
-import { ManagedSession } from "./managed-session.js";
+import { inspectManagedSession, ManagedSession } from "./managed-session.js";
 import { prepareManagedPolicy, type ManagedPolicy } from "./managed-policy.js";
 import { modelFingerprint } from "./model-identity.js";
 import type { PersistentSessionReference } from "./session-reference.js";
@@ -319,6 +319,7 @@ export function createManagedEmbeddedExecutionBackend(
   };
 
   return createEmbeddedExecutionBackend({
+    inspectSession: (file) => inspectManagedSession(file, "embedded"),
     async runAgent(ctx, type, prompt, options: RunOptions) {
       options.signal?.throwIfAborted();
       runtimeFor(ctx);

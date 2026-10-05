@@ -27,7 +27,7 @@ import type { AgentExecutionBackend, ExecutionResumeResult, ExecutionRunOptions,
 import { i18n } from "./i18n.js";
 import { assignHandle, handleBase } from "./mention.js";
 import { describeModel } from "./model-resolver.js";
-import type { AgentInvocation, AgentRecord, AgentTombstone, IsolationMode, MentionResolution, SubagentType, ThinkingLevel } from "./types.js";
+import type { AgentInvocation, AgentRecord, AgentTombstone, IsolationMode, MentionResolution, SubagentType, EffectiveThinkingLevel } from "./types.js";
 import { addUsage, type LifetimeUsage } from "./usage.js";
 import type { CompiledSchema } from "./workflow/json-schema.js";
 import { cleanupWorktree, createWorktree, isWorktreeIsolationEnabled, pruneWorktrees, } from "./worktree.js";
@@ -202,7 +202,7 @@ interface SpawnOptions {
   maxTurns?: number;
   isolated?: boolean;
   inheritContext?: boolean;
-  thinkingLevel?: ThinkingLevel;
+  thinkingLevel?: EffectiveThinkingLevel;
   isBackground?: boolean;
   /**
    * Skip whichever pool's queue check applies to this spawn — start immediately
@@ -370,6 +370,7 @@ interface ResumeOptions {
 
 /** Match fresh-run precedence, including an external stop during the await. */
 function applyResumeResult(record: AgentRecord, result: ExecutionResumeResult): void {
+  if (result.aborted && result.failure !== undefined) record.error = result.failure;
   if (record.status !== "stopped") {
     if (result.aborted) {
       record.status = "aborted";
@@ -415,6 +416,12 @@ export class AgentManager {
   private closedSessions = new WeakMap<ExecutionSession, Promise<void>>();
   /** Status may already be stopped/completed while backend or manager cleanup still owns the run. */
   private invocations = new Map<string, Promise<void>>();
+  /** Pins affect timed GC only; explicit owner boundaries always win. */
+  private retained = new WeakMap<AgentRecord, Set<symbol>>();
+  private releases = new Map<string, Promise<void>>();
+  /** Backend completion has arrived; only manager-owned settlement remains. */
+  private settling = new WeakSet<AgentRecord>();
+  private recordShutdowns = new WeakMap<AgentRecord, Set<Promise<void>>>();
 
   /**
    * Startup phases, keyed by agent id. `spawn()` still returns synchronously,
@@ -821,7 +828,8 @@ export class AgentManager {
             record.completedAt = Date.now();
             this.onComplete?.(record);
           } else {
-            this.agents.delete(id);
+            this.retained.delete(record);
+            if (this.agents.get(id) === record) this.agents.delete(id);
           }
           this.drainQueue();
           throw err;
@@ -851,6 +859,8 @@ export class AgentManager {
 
   /** Reserve before any caller/backend callback, and release only after manager settlement. */
   private beginInvocation(id: string): () => void {
+    const record = this.agents.get(id);
+    if (record) this.settling.delete(record);
     let resolve!: () => void;
     const settled = new Promise<void>(done => { resolve = done; });
     this.invocations.set(id, settled);
@@ -954,6 +964,7 @@ export class AgentManager {
     if (this.disposed || this.agents.get(id) !== record) {
       releaseSlot();
       if (record.worktree) record.worktreeResult = await cleanupWorktree(pi, baseCwd, record.worktree, options.description);
+      this.drainQueue();
       return;
     }
 
@@ -1019,7 +1030,7 @@ export class AgentManager {
       },
       onSessionCreated: (session) => {
         if (this.disposed || this.agents.get(id) !== record) {
-          void this.shutdownSession(session);
+          void this.shutdownRecordSession(record, session);
           return;
         }
         record.session = session;
@@ -1066,7 +1077,7 @@ export class AgentManager {
     catch (error) {
       detach();
       releaseSlot();
-      if (record.session) await this.shutdownSession(record.session);
+      if (record.session) await this.shutdownRecordSession(record, record.session);
       if (record.worktree) {
         try { record.worktreeResult = await cleanupWorktree(pi, baseCwd, record.worktree, options.description); } catch { /* best effort */ }
       }
@@ -1074,6 +1085,8 @@ export class AgentManager {
     }
     const promise = running
       .then(async ({ responseText, session, aborted, steered, failure, structuredJson, structuredRetried }) => {
+        this.settling.add(record);
+        if (aborted && failure !== undefined) record.error = failure;
         // Don't overwrite status if externally stopped via abort()
         if (record.status !== "stopped") {
           // Precedence: a hard abort keeps "aborted"; then a failed final turn
@@ -1094,7 +1107,7 @@ export class AgentManager {
         // this is a machine-readable payload one caller asked for by schema.
         record.structuredJson = structuredJson;
         record.structuredRetried = structuredRetried;
-        if (this.disposed || this.agents.get(id) !== record) await this.shutdownSession(session);
+        if (this.disposed || this.agents.get(id) !== record) await this.shutdownRecordSession(record, session);
         else record.session = session;
         record.completedAt ??= Date.now();
 
@@ -1136,6 +1149,7 @@ export class AgentManager {
         return responseText;
       })
       .catch(async (err) => {
+        this.settling.add(record);
         // Don't overwrite status if externally stopped via abort()
         if (record.status !== "stopped") {
           record.status = "error";
@@ -1201,11 +1215,12 @@ export class AgentManager {
     if (pool === "background") this.runningBackground--;
     else if (pool === "foreground") this.runningForeground--;
 
-    if (this.disposed || this.agents.get(record.id) !== record) return;
-    if (guardCallback) {
-      try { this.onComplete?.(record); } catch { /* ignore completion side-effect errors */ }
-    } else {
-      this.onComplete?.(record);
+    if (!this.disposed && this.agents.get(record.id) === record) {
+      if (guardCallback) {
+        try { this.onComplete?.(record); } catch { /* ignore completion side-effect errors */ }
+      } else {
+        this.onComplete?.(record);
+      }
     }
 
     // The isBackground half reproduces the pre-pool condition exactly — a
@@ -1672,21 +1687,85 @@ export class AgentManager {
     return true;
   }
 
+  /** Pin this record against timed GC, not explicit release/reset/disposal. */
+  retain(id: string): () => void {
+    const record = this.agents.get(id);
+    if (!record) throw new Error(i18n.t("manager.unknownRecord", { id }));
+    let pins = this.retained.get(record);
+    if (!pins) this.retained.set(record, pins = new Set());
+    const token = Symbol();
+    pins.add(token);
+    return () => {
+      if (this.retained.get(record) !== pins || !pins.delete(token)) return;
+      if (pins.size === 0) this.retained.delete(record);
+    };
+  }
+
+  /**
+   * Relinquish one record, closing admission synchronously. Unknown IDs are a noop;
+   * concurrent callers share cleanup. No sibling or backend-wide shutdown occurs.
+   *
+   * Await known handles, worktree startup and settlement already owned by the manager,
+   * never an opaque backend invocation. Late handles/results retain their detached
+   * cleanup paths. Completion does not certify backend retirement or release a lease:
+   * uncertain retirement remains the backend's quarantine responsibility.
+   */
+  release(id: string): Promise<void> {
+    const pending = this.releases.get(id);
+    if (pending) return pending;
+    const record = this.agents.get(id);
+    if (!record) return Promise.resolve();
+    let resolve!: () => void;
+    const released = new Promise<void>(done => { resolve = done; });
+    // Publish before abort/shutdown callbacks can reenter release().
+    this.releases.set(id, released);
+    const startup = this.startups.get(id);
+    const invocation = this.invocations.get(id);
+    const session = record.session;
+    this.agents.delete(id);
+    this.retained.delete(record);
+    record.session = undefined;
+    record.pendingSteers = undefined;
+    const active = record.status === "running" || record.status === "queued";
+    if (active) {
+      record.status = "stopped";
+      record.completedAt ??= Date.now();
+    }
+    if (active || invocation) record.abortController?.abort();
+    this.dequeue(entry => entry.id === id);
+    this.abortOwnedChildren(id);
+    if (!invocation) this.startups.delete(id);
+    // Unlike manager disposal, scoped release must never call shutdown(undefined).
+    if (session) void this.shutdownRecordSession(record, session);
+    this.drainQueue();
+    void (async () => {
+      await Promise.allSettled(startup ? [startup] : []);
+      // Include handles published during startup or another shutdown callback, but
+      // never wait for unrelated records' cleanup or for unpublished backend work.
+      while (this.recordShutdowns.get(record)?.size) {
+        await Promise.allSettled([...this.recordShutdowns.get(record)!]);
+      }
+      if (invocation && this.settling.has(record)) await invocation;
+    })().finally(() => {
+      this.releases.delete(id);
+      resolve();
+    }).catch(() => {});
+    return released;
+  }
+
   /** Dispose a record's session and remove it from the map. */
   private removeRecord(id: string, record: AgentRecord): void {
     this.tombstone(record);
-    const session = record.session;
-    // Detached before the shutdown starts, so the record leaves the map at once and
-    // nothing can observe a session that is half torn down.
-    record.session = undefined;
-    this.agents.delete(id);
-    // Evicting an immediately stopped record must not erase an in-flight worktree
-    // startup from disposal tracking. Its launch settlement removes the entry.
-    if (!this.invocations.has(id)) this.startups.delete(id);
-    // Fire-and-forget is right here and only here: this runs from the 60s cleanup timer
-    // and from `clearCompleted()` on session boundaries, with the process staying alive,
-    // so handlers get their full window. The quit path awaits instead — see dispose().
-    void this.shutdownSession(session);
+    void this.release(id);
+  }
+
+  private shutdownRecordSession(record: AgentRecord, session: ExecutionSession): Promise<void> {
+    const pending = this.shutdownSession(session);
+    let shutdowns = this.recordShutdowns.get(record);
+    if (!shutdowns) this.recordShutdowns.set(record, shutdowns = new Set());
+    shutdowns.add(pending);
+    void pending.then(() => shutdowns.delete(pending));
+    return pending;
   }
 
   /** Observe all rejections, including a backend that throws before returning a promise. */
@@ -1739,6 +1818,7 @@ export class AgentManager {
     const cutoff = Date.now() - 10 * 60_000;
     for (const [id, record] of this.agents) {
       if (record.status === "running" || record.status === "queued") continue;
+      if (this.retained.has(record)) continue;
       if ((record.status === "idle" ? record.startedAt : record.completedAt ?? 0) >= cutoff) continue;
       this.removeRecord(id, record);
     }
@@ -1751,6 +1831,7 @@ export class AgentManager {
    * (resultConsumed=false) — they will be evicted by the 10-minute cleanup timer instead.
    */
   clearCompleted(skipUnconsumed = false): void {
+    this.retained = new WeakMap();
     // A session boundary also invalidates restorations that have not returned a
     // handle yet. Their late handles are closed, never inserted into the new session.
     for (const controller of this.restorations.keys()) controller.abort();
@@ -1833,6 +1914,7 @@ export class AgentManager {
     });
     const startups = [...this.startups.values()];
     this.agents.clear();
+    this.retained = new WeakMap();
     if (pi) {
       // Prune any orphaned git worktrees (crash recovery). Detached: dispose runs
       // on the shutdown path, which cannot wait for git. Started before the awaited
@@ -1848,7 +1930,7 @@ export class AgentManager {
     // separate readiness promise: opaque backend preflight is cancelled by its signal;
     // late handle callbacks/results are closed above, without awaiting an unbounded run.
     const closing = sessions.map(session => this.shutdownSession(session));
-    await Promise.allSettled([...closing, ...this.shutdowns.values(), ...this.restorations.values(), ...startups]);
+    await Promise.allSettled([...closing, ...this.shutdowns.values(), ...this.restorations.values(), ...this.releases.values(), ...startups]);
     // Startup may finish a worktree copy or hand back a late session while we wait.
     await Promise.allSettled([...this.shutdowns.values()]);
   }

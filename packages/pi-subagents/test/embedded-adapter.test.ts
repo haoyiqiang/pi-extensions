@@ -135,6 +135,44 @@ async function open(
 }
 
 describe("embedded execution backend adapter", () => {
+  it("projects optional native raw branches with identities and extra envelope fields intact", async () => {
+    const raw = [{ type: "message", id: "entry", parentId: null,
+      message: { role: "user", content: "raw before context edit" }, extra: { preserve: true } },
+    { type: "compaction", id: "compact", parentId: "entry", summary: "raw summary" }];
+    const manager = { branch: raw, getBranch() { return this.branch; } };
+    const harness = nativeSession({ sessionManager: manager, messages: [{ role: "user", content: "projected replacement" }] });
+    const handle = await open(backendReturning(harness).backend);
+    expect(handle.getBranch!()).toBe(raw);
+    expect(handle.getBranch!()[0]).toBe(raw[0]);
+    expect(handle.getBranch!()[0]).toMatchObject({ extra: { preserve: true } });
+    manager.branch = raw.slice(0, 1);
+    expect(handle.getBranch!()).toBe(manager.branch);
+    expect(handle.getBranch!()).not.toEqual(handle.messages);
+    const legacy = await open(backendReturning(nativeSession()).backend);
+    expect(legacy.getBranch).toBeUndefined();
+    const partial = await open(backendReturning(nativeSession({ sessionManager: undefined })).backend);
+    expect(partial.getBranch).toBeUndefined();
+    const throwing = nativeSession();
+    Object.defineProperty(throwing.value, "sessionManager", { get() { throw new Error("no native manager"); } });
+    expect((await open(backendReturning(throwing).backend)).getBranch).toBeUndefined();
+  });
+
+  it("forwards optional file-only inspection without constructing or wrapping a native session", () => {
+    const snapshot = { reference: { backend: "embedded" as const, sessionId: "saved", sessionFile: "/sessions/saved.jsonl" },
+      policy: { type: "general-purpose", name: "saved", cwd: "/workspace", model: { provider: "faux", id: "model" }, tools: [], systemPrompt: "saved" },
+      branch: [{ type: "custom", id: "opaque", data: { offset: 3 } }] };
+    const inspectSession = vi.fn(() => snapshot);
+    const runAgent = vi.fn<RunPort>(() => { throw new Error("must not run"); });
+    const backend = createEmbeddedExecutionBackend({ inspectSession, runAgent });
+    expect(backend.inspect!(snapshot.reference.sessionFile)).toBe(snapshot);
+    expect(inspectSession).toHaveBeenCalledWith(snapshot.reference.sessionFile);
+    expect(runAgent).not.toHaveBeenCalled();
+    expect(createEmbeddedExecutionBackend().inspect).toBeUndefined();
+    const failure = new Error("invalid managed source");
+    inspectSession.mockImplementationOnce(() => { throw failure; });
+    expect(() => backend.inspect!(snapshot.reference.sessionFile)).toThrow(failure);
+  });
+
   it("preserves synchronous startup failures instead of acknowledging a failed launch", () => {
     const error = new Error("failed before session creation");
     const backend = createEmbeddedExecutionBackend({ runAgent: () => { throw error; } });

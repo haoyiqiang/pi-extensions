@@ -17,7 +17,8 @@ unified embedded/terminal subagent package, **not an installable replacement yet
   invoke it. Do not load both products into a production session during migration.
 - A real terminal backend is available through explicit factory injection for
   isolated development. Default AgentManager construction remains embedded; config
-  routing, migration, and the rpiv-workflow adapter remain unimplemented.
+  routing and product migration remain deferred. A private managed workflow execution
+  host/provider now covers the plain-prompt profile; it does not register or migrate `/wf`.
 
 ## Imported scope
 
@@ -89,6 +90,22 @@ checkpoint/lease behavior and recovery limits; [terminal backend](./docs/termina
 New diagnostics have English/Chinese catalogs; imported embedded strings remain a
 separate migration. There is no user-facing configuration switch yet.
 
+## Managed workflow execution (private)
+
+`src/workflow/execution-provider.ts` supplies a common host over either managed backend:
+fresh prompts, no-replay reattach/fork, same-session sends, per-child waiting and cancellation.
+It uses one run-scoped manager/backend, raw active-branch snapshots and per-invocation
+concurrency. Callback lifetimes retain sessions without consuming execution capacity,
+so recursive stage routing and forks of still-owned predecessors work at concurrency one.
+
+This is a restricted **plain-prompt** interface, not a completed rpiv-workflow migration.
+Saved policies are preserved; incompatible restored model/thinking/CWD, unresolved slash
+commands and unsupported nesting reject explicitly. The provider's synchronous `dispose`
+is complemented by an awaited `close`. Managed files live below the consumer's raw-JSONL
+sweep, and cancellation needs the consumer's nominal error bridge. No registration,
+public export, configuration switch, DSL or UI is added. See
+[workflow execution](./docs/workflow-execution.md) for contracts and remaining consumer work.
+
 ## Configuration
 
 No new production configuration is introduced, so this workspace intentionally has
@@ -127,6 +144,7 @@ terminal multiplexer, or local Pi daemon are needed. Test fixtures under
 - [Upstream RPC reference](./docs/rpc.md)
 - [Upstream scripted workflow reference](./docs/workflows.md)
 
-Next: complete workflow-host integration and terminal capability parity, then add backend
+Next: connect the workflow consumer's cancellation/resource/cleanup semantics and finish
+terminal capability parity, then add backend
 routing and unified UI/config/localization. Switch the root profile and
 release metadata only after that integration is complete.

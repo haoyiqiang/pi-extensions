@@ -1,11 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
-import { closeSync, fstatSync, lstatSync, openSync, readSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, fstatSync, lstatSync, openSync, readSync, realpathSync, renameSync, rmSync, writeFileSync, type Stats } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { SessionManager, type FileEntry } from "@earendil-works/pi-coding-agent";
 import { i18n } from "../i18n.js";
 import type { EffectiveThinkingLevel } from "../types.js";
-import type { ExecutionRestoreOptions } from "./types.js";
+import type { ExecutionRestoreOptions, ExecutionSessionSnapshot } from "./types.js";
 import type { ExecutionBackendKind, PersistentSessionReference } from "./session-reference.js";
 import { acquireSessionLease, type SessionLease } from "./session-lease.js";
 import { compileInvocationSchema } from "./invocation-policy.js";
@@ -32,6 +32,11 @@ interface PolicyRecord<K extends ExecutionBackendKind> {
 /** The backend exclusively creates a private v3 seed; the store then owns its lease and metadata. */
 export type ManagedSessionSeed<K extends ExecutionBackendKind> = (policy: ManagedPolicy) => PersistentSessionReference<K>;
 
+function sameFile(actual: Stats, expected: Stats): boolean {
+  return actual.isFile() && actual.nlink === 1 && actual.dev === expected.dev && actual.ino === expected.ino
+    && actual.size === expected.size && actual.mtimeMs === expected.mtimeMs && actual.ctimeMs === expected.ctimeMs;
+}
+
 function privateRead(path: string, max: number, key: string): Buffer {
   let fd: number | undefined;
   try {
@@ -39,7 +44,7 @@ function privateRead(path: string, max: number, key: string): Buffer {
     if (!stat.isFile() || stat.nlink !== 1 || stat.size > max) fail(key);
     fd = openSync(path, "r");
     const opened = fstatSync(fd);
-    if (opened.dev !== stat.dev || opened.ino !== stat.ino || opened.size !== stat.size) fail(key);
+    if (!sameFile(opened, stat)) fail(key);
     const raw = Buffer.alloc(stat.size + 1);
     let length = 0;
     while (length < raw.length) {
@@ -47,7 +52,7 @@ function privateRead(path: string, max: number, key: string): Buffer {
       if (!read) break;
       length += read;
     }
-    if (length !== stat.size || fstatSync(fd).size !== stat.size) fail(key);
+    if (length !== stat.size || !sameFile(fstatSync(fd), stat) || !sameFile(lstatSync(path), stat)) fail(key);
     return raw.subarray(0, length);
   } catch { return fail(key); }
   finally { if (fd !== undefined) closeSync(fd); }
@@ -97,6 +102,46 @@ function validateReference(reference: PersistentSessionReference, expectedBacken
   if (!reference || (expectedBackend !== "terminal" && expectedBackend !== "embedded")
     || reference.backend !== expectedBackend || !text(reference.sessionId)
     || !text(reference.sessionFile) || !isAbsolute(reference.sessionFile)) fail("sessionStore.invalidRecord");
+}
+
+function parseRecord<K extends ExecutionBackendKind>(raw: Buffer, file: string, expectedBackend: K, sessionId?: string): PolicyRecord<K> {
+  let record: unknown;
+  try { record = JSON.parse(raw.toString("utf8")); } catch { fail("sessionStore.invalidRecord"); }
+  if (!object(record) || record.version !== 1 || !object(record.reference)) fail("sessionStore.invalidRecord");
+  validateReference(record.reference as PersistentSessionReference, expectedBackend);
+  if ((sessionId !== undefined && record.reference.sessionId !== sessionId)
+    || record.reference.sessionFile !== file || !object(record.checkpoint)
+    || (record.checkpoint.leafId !== null && typeof record.checkpoint.leafId !== "string")
+    || !Number.isSafeInteger(record.checkpoint.entries) || record.checkpoint.entries < 0
+    || !Number.isSafeInteger(record.checkpoint.bytes) || record.checkpoint.bytes < 0
+    || typeof record.checkpoint.digest !== "string" || !/^[a-f0-9]{64}$/.test(record.checkpoint.digest)) fail("sessionStore.invalidRecord");
+  if (record.state !== "ready") fail("sessionStore.unsafe");
+  return { ...record, policy: snapshotPolicy(record.policy) } as PolicyRecord<K>;
+}
+
+function readyTranscript(record: PolicyRecord<ExecutionBackendKind>) {
+  const current = transcript(record.reference, record.policy);
+  if (!isDeepStrictEqual(current.checkpoint, record.checkpoint)) fail("sessionStore.invalidFile");
+  return current;
+}
+
+/** Inspect a bounded, ready managed snapshot without leases, SDK open/repair or source writes. */
+export function inspectManagedSession(file: string, expectedBackend: ExecutionBackendKind): ExecutionSessionSnapshot {
+  let canonical: string;
+  try {
+    if (!text(file) || !isAbsolute(file)) fail("sessionStore.invalidFile");
+    canonical = realpathSync(file);
+  } catch { return fail("sessionStore.invalidFile"); }
+  const raw = privateRead(recordPath(canonical), MAX_POLICY_BYTES, "sessionStore.invalidRecord");
+  const record = parseRecord(raw, canonical, expectedBackend);
+  const current = readyTranscript(record);
+  // A cooperating writer must reserve running state before changing the transcript.
+  if (!privateRead(recordPath(canonical), MAX_POLICY_BYTES, "sessionStore.invalidRecord").equals(raw)) fail("sessionStore.invalidRecord");
+  return Object.freeze({
+    reference: Object.freeze({ backend: record.reference.backend, sessionId: record.reference.sessionId, sessionFile: canonical }),
+    policy: record.policy,
+    branch: Object.freeze(current.manager.getBranch()),
+  });
 }
 
 function validateRestore(policy: ManagedPolicy, options: ExecutionRestoreOptions): void {
@@ -159,19 +204,9 @@ export class ManagedSession<K extends ExecutionBackendKind> {
     const lease = acquireSessionLease(reference.sessionFile);
     try {
       const raw = privateRead(recordPath(lease.sessionFile), MAX_POLICY_BYTES, "sessionStore.invalidRecord");
-      let record: unknown;
-      try { record = JSON.parse(raw.toString("utf8")); } catch { fail("sessionStore.invalidRecord"); }
-      if (!object(record) || record.version !== 1 || !object(record.reference)
-        || record.reference.backend !== expectedBackend || record.reference.sessionId !== reference.sessionId
-        || record.reference.sessionFile !== lease.sessionFile || !object(record.checkpoint)
-        || (record.checkpoint.leafId !== null && typeof record.checkpoint.leafId !== "string")
-        || !Number.isSafeInteger(record.checkpoint.entries) || record.checkpoint.entries < 0
-        || !Number.isSafeInteger(record.checkpoint.bytes) || record.checkpoint.bytes < 0
-        || typeof record.checkpoint.digest !== "string" || !/^[a-f0-9]{64}$/.test(record.checkpoint.digest)) fail("sessionStore.invalidRecord");
-      if (record.state !== "ready") fail("sessionStore.unsafe");
-      const policy = snapshotPolicy(record.policy);
-      validateRestore(policy, options);
-      const managed = new ManagedSession<K>(lease, { ...record, policy } as PolicyRecord<K>, raw);
+      const record = parseRecord(raw, lease.sessionFile, expectedBackend, reference.sessionId);
+      validateRestore(record.policy, options);
+      const managed = new ManagedSession<K>(lease, record, raw);
       managed.readReady();
       return managed;
     } catch (error) {
@@ -188,9 +223,7 @@ export class ManagedSession<K extends ExecutionBackendKind> {
   readReady() {
     this.assertRecord();
     if (this.record.state !== "ready") fail("sessionStore.unsafe");
-    const current = transcript(this.reference, this.policy);
-    if (!isDeepStrictEqual(current.checkpoint, this.record.checkpoint)) fail("sessionStore.invalidFile");
-    return current;
+    return readyTranscript(this.record);
   }
   private save(record: PolicyRecord<K>): void {
     this.assertRecord();

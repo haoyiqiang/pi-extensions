@@ -18,6 +18,7 @@ import { compileTerminalSchema } from "./run-policy.js";
 import type { CompiledSchema } from "../../workflow/json-schema.js";
 import type { PersistentSessionReference } from "../session-reference.js";
 import { ManagedTerminalSession } from "./session-store.js";
+import { inspectManagedSession } from "../managed-session.js";
 
 export type { TerminalBackendConfig } from "./prepare.js";
 export const TERMINAL_BACKEND_CAPABILITIES = Object.freeze({
@@ -251,6 +252,11 @@ export function createTerminalExecutionBackend(
         get thinkingLevel() { return state.snapshot.thinkingLevel; },
         get messages() { return state.snapshot.messages; },
         getSessionStats: () => state.snapshot.stats,
+        getBranch() {
+          getState(handle);
+          if (state.running) throw new Error(i18n.t("sessionStore.unsafe"));
+          return managed.readReady().manager.getBranch();
+        },
         subscribe(listener: (event: SessionViewEvent) => void) {
           if (!state.closed) listeners.add(listener);
           return () => { listeners.delete(listener); };
@@ -277,6 +283,7 @@ export function createTerminalExecutionBackend(
 
   return {
     kind: "terminal",
+    inspect: (file) => inspectManagedSession(file, "terminal"),
     async run(ctx, type, prompt, options) {
       options.signal?.throwIfAborted();
       const policy = await prepareTerminalPolicy(ctx, type, options);

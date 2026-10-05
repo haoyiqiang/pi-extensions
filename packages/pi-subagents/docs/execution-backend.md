@@ -154,6 +154,28 @@ is cancelled and late handles are retired, not awaited indefinitely at quit.
 These are private APIs, not new commands, RPC operations or tombstone revival. See [managed sessions](./managed-sessions.md)
 for the canonical path lease, strict v3 snapshot/fork semantics and fail-closed limits.
 
+## Private workflow consumer boundary
+
+`src/workflow/execution-provider.ts` and `execution-host.ts` expose an unregistered
+managed/plain-prompt host profile over this same manager/backend. Fresh callbacks
+start after settlement; reattach/fork callbacks receive idle history without a prompt.
+A FIFO invocation limiter releases before routing callbacks, preventing sequential
+recursive workflows from deadlocking at concurrency one. Manager `retain` protects
+callback-owned records from timed GC; scoped `release` retires just that record.
+Simultaneous abort/failure diagnostics now survive manager result assignment.
+
+`ExecutionSession.getBranch()` optionally observes authentic raw active-branch entries.
+Managed backends additionally expose `inspect(file)`, sharing strict bounded ready-state
+policy/checkpoint validation without acquiring leases or repairing source files. This
+is separate from projected UI/model messages. The workflow adapter clones raw reads,
+checks outcomes beyond transcript stop reasons and rejects incompatible policy/CWD
+changes. Explicit `off` is accepted by the private spawn/runner thinking option.
+
+See [workflow execution](./workflow-execution.md) for cancellation-error interoperability,
+synchronous provider disposal plus an awaited close barrier, managed storage versus
+consumer pruning, and remaining resource/consumer work. This adds no registration,
+public configuration, automatic routing or root-profile change.
+
 ## Observation semantics
 
 The manager, nested tools, output writer, conversation viewer, and result formatter

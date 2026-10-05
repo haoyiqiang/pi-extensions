@@ -224,7 +224,7 @@ describe.each([
       structuredJson: '{"partial":true}',
       structuredRetried: true,
     });
-    expect(record.error).toBe(expected === "error" ? flags.failure : undefined);
+    expect(record.error).toBe(flags.failure);
   });
 
   it.each([
@@ -245,7 +245,7 @@ describe.each([
       structuredJson: '{"current":true}',
       structuredRetried: false,
     });
-    expect(record.error).toBeUndefined();
+    expect(record.error).toBe("failure" in result ? result.failure : undefined);
   });
 
   it("preserves external stopped status after a rejection without reviving old metadata", async () => {

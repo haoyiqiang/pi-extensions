@@ -16,6 +16,14 @@ export interface TranscriptMessage {
   readonly toolName?: string;
 }
 
+/** Raw active-branch envelope. Extra entry/message fields are retained at runtime. */
+export interface SessionBranchEntry {
+  readonly type: string;
+  readonly id?: string;
+  readonly parentId?: string | null;
+  readonly message?: TranscriptMessage;
+}
+
 /** Only observation semantics needed by the viewer and append-only output writer. */
 export type SessionViewEvent =
   | { readonly type: "changed" | "turn_end" | "compaction_start" }
@@ -31,6 +39,8 @@ export interface SessionView {
 /** Opaque execution identity plus observations. No prompt, steer, abort, dispose or SDK manager. */
 export interface ExecutionSession extends SessionView {
   readonly reference: SessionReference;
+  /** Raw active branch, including compaction and metadata; never projected context messages. */
+  getBranch?(): readonly SessionBranchEntry[];
   readonly model?: { readonly provider: string; readonly id: string; readonly name?: string };
   readonly thinkingLevel?: EffectiveThinkingLevel;
 }

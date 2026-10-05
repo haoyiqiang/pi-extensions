@@ -225,11 +225,12 @@ export async function invokeEmbeddedSession(
 
   // Event tracking survives compaction; an index fallback exists only for legacy partial session doubles.
   const resultText = text.trim() || lastNonempty || (!sawAssistant ? lastAssistantText(session, start) : "");
+  const wasAborted = aborted();
   return {
     text: resultText,
-    aborted: aborted(), steered,
+    aborted: wasAborted, steered,
     failure: controlFailure ?? (active.hardLimit ? i18n.t("terminalPolicy.turnLimit") : failureOf(finalMessage()))
-      ?? (capture ? structuredFailure(capture) : undefined),
+      ?? (!wasAborted && capture ? structuredFailure(capture) : undefined),
     ...(capture?.json !== undefined ? { structuredJson: capture.json } : {}),
     ...(retried ? { structuredRetried: true } : {}),
   };

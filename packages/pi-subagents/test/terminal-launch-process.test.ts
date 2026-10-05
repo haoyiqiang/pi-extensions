@@ -195,8 +195,10 @@ describe.skipIf(process.platform === "win32")("terminal launch process superviso
     writeFileSync(configFile, JSON.stringify(config));
     const supervisor = spawn(process.execPath, [SUPERVISOR, configFile], { stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
+    let stderr = "";
     supervisor.stdout.on("data", (data) => { stdout += data; });
-    supervisor.stderr.resume();
+    supervisor.stderr.setEncoding("utf8");
+    supervisor.stderr.on("data", (data: string) => { stderr += data; });
     const closed = new Promise<number | null>((resolve, reject) => {
       supervisor.once("error", reject);
       supervisor.once("close", resolve);
@@ -209,7 +211,7 @@ describe.skipIf(process.platform === "win32")("terminal launch process superviso
       grandPid = Number(readFileSync(grandReady, "utf8"));
       expect(existsSync(receiptPath)).toBe(false);
       supervisor.kill("SIGTERM");
-      expect(await closed).toBe(137);
+      expect(await closed, `Supervisor stderr: ${stderr || "(empty)"}`).toBe(137);
       expect(stdout).toContain("__SUBAGENT_DONE_0__");
       expect(JSON.parse(readFileSync(receiptPath, "utf8"))).toEqual({
         version: 1, runId: "run-tree", token: "private-receipt-token", exitCode: 137,

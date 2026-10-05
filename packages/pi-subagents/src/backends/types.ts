@@ -3,7 +3,8 @@ import type { SubagentType } from "../types.js";
 import type { RunOptions, RunResult, resumeAgent } from "./embedded.js";
 import type { ExecutionBackendKind, PersistentSessionReference } from "./session-reference.js";
 import type { CompiledSchema } from "../workflow/json-schema.js";
-import type { ExecutionSession } from "./session.js";
+import type { ExecutionSession, SessionBranchEntry } from "./session.js";
+import type { ManagedPolicy } from "./managed-policy.js";
 
 export type ExecutionRunOptions = Omit<RunOptions, "onSessionCreated"> & {
   onSessionCreated?: (session: ExecutionSession) => void;
@@ -16,6 +17,12 @@ export interface ExecutionRestoreOptions {
   signal?: AbortSignal;
   /** Re-supply non-serializable caller validation for structured managed sessions. */
   structuredOutput?: CompiledSchema;
+}
+/** Validated read-only managed source; inspection never acquires writer ownership. */
+export interface ExecutionSessionSnapshot {
+  readonly reference: PersistentSessionReference;
+  readonly policy: ManagedPolicy;
+  readonly branch: readonly SessionBranchEntry[];
 }
 export interface ExecutionResumeResult {
   text: string;
@@ -35,6 +42,8 @@ export interface AgentExecutionBackend {
   /** Completes when this invocation settles. signal cancels execution, not just waiting. */
   run(ctx: ExtensionContext, type: SubagentType, prompt: string, options: ExecutionRunOptions): Promise<ExecutionRunResult>;
   resume(session: ExecutionSession, prompt: string, options?: ExecutionResumeOptions): Promise<ExecutionResumeResult>;
+  /** Resolve a managed source file without opening, repairing or acquiring its lease. */
+  inspect?(sessionFile: string): ExecutionSessionSnapshot;
   /** Optional private managed-session restoration. These operations return idle handles. */
   reattach?(reference: PersistentSessionReference, options?: ExecutionRestoreOptions): Promise<ExecutionSession>;
   fork?(reference: PersistentSessionReference, options?: ExecutionRestoreOptions): Promise<ExecutionSession>;

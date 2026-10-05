@@ -341,6 +341,19 @@ describe("embedded owned-session resume policy (offline real SDK)", () => {
     }
   });
 
+  it("returns no synthetic structured failure for a natively aborted backend resume", async () => {
+    const record = await seed();
+    const run = script(
+      fauxAssistantMessage([], { stopReason: "aborted" }),
+      structured({ answer: "must not retry" }), text("unexpected retry"),
+    );
+    const result = await track(backend.resume(record.session!, "Direct cancelled resume"));
+    expect(result).toMatchObject({ text: "", aborted: true, failure: undefined });
+    expect(result.structuredJson).toBeUndefined();
+    expect(result.structuredRetried).not.toBe(true);
+    expect(run.calls()).toBe(1);
+  });
+
   it("exposes fresh invocation metadata and keeps callbacks live through an owned-session retry", async () => {
     const record = await seed();
     const activity: string[] = [];
@@ -365,6 +378,7 @@ describe("embedded owned-session resume policy (offline real SDK)", () => {
     const skipped = script(structured({ answer: "must not run" }));
     const cancelled = await track(backend.resume(record.session!, "Already cancelled", { signal: preAborted.signal }));
     expect(cancelled.aborted).toBe(true);
+    expect(cancelled.failure).toBeUndefined();
     expect(cancelled.text).toBe("");
     expect(cancelled.structuredJson).toBeUndefined();
     expect(cancelled.structuredRetried).not.toBe(true);
@@ -383,6 +397,7 @@ describe("embedded owned-session resume policy (offline real SDK)", () => {
     }
     const aborted = await running;
     expect(aborted.aborted).toBe(true);
+    expect(aborted.failure).toBeUndefined();
     expect(aborted.structuredRetried).toBe(true);
     expect(aborted.structuredJson).toBeUndefined();
     // Invocation callbacks must have been detached; old subscribers must not
@@ -425,6 +440,7 @@ describe("embedded owned-session resume policy (offline real SDK)", () => {
       .filter((message) => message.role === "assistant")
       .map((message) => message.stopReason)).toEqual(["stop"]);
     expect(result.aborted).toBe(true);
+    expect(result.failure).toBeUndefined();
     expect(result.text).toBe("normal final without structured output");
     expect(result.structuredJson).toBeUndefined();
     expect(result.structuredRetried).not.toBe(true);
@@ -448,6 +464,8 @@ describe("embedded owned-session resume policy (offline real SDK)", () => {
     const record = await spawn({ structuredOutput: ANSWER_SCHEMA });
     expect(run.calls()).toBe(1);
     expect(record.status).toBe(stopReason === "aborted" ? "aborted" : "error");
+    expect(record.error).toBe(stopReason === "aborted" ? undefined
+      : stopReason === "error" ? FATAL : i18n.t("invocation.outputLimit"));
     expect(record.structuredJson).toBeUndefined();
     expect(record.structuredRetried).not.toBe(true);
   });
@@ -533,6 +551,7 @@ describe("embedded owned-session resume policy (offline real SDK)", () => {
       ? await resume(record, operation as Mode)
       : await spawn({ structuredOutput: ANSWER_SCHEMA });
     expect(result.status).toBe("aborted");
+    expect(result.error).toBe(i18n.t("terminalPolicy.turnLimit"));
     expect(result.structuredRetried).toBe(true);
     expect(result.structuredJson).toBeUndefined();
     expect(run.nonAbortedCalls()).toBe(4); // one original turn + three retry turns
