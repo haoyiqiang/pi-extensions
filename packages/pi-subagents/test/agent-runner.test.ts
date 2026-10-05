@@ -186,6 +186,7 @@ function createSession(finalText: string) {
     }),
     abort: vi.fn(),
     steer: vi.fn(),
+    sendCustomMessage: vi.fn(),
     // Stateful, so the active set reflects what the scope installer actually did
     // and `renarrow`'s no-op guard behaves as it does against real pi.
     getActiveToolNames: vi.fn(() => activeToolNames),
@@ -271,6 +272,29 @@ describe("agent-runner final output capture", () => {
     const result = await runAgent(ctx, "Explore", "Say LOCKED", { pi });
 
     expect(result.responseText).toBe("LOCKED");
+  });
+
+  it("routes the persistent extension error hook to the current invocation only", async () => {
+    const { session } = createSession("OK");
+    createAgentSession.mockResolvedValue({ session });
+    const first = vi.fn();
+    const second = vi.fn(() => { throw new Error("observer"); });
+    let onError!: (error: { extensionPath: string }) => void;
+    session.bindExtensions.mockImplementation(async (bindings: any) => {
+      onError = bindings.onError;
+      onError({ extensionPath: "startup" });
+    });
+    session.prompt.mockImplementation(async () => { onError({ extensionPath: "active" }); });
+    await runAgent(ctx, "Explore", "first", { pi, onToolActivity: first });
+    expect(first).toHaveBeenCalledWith({ type: "end", toolName: "extension-error:startup" });
+    expect(first).toHaveBeenCalledWith({ type: "end", toolName: "extension-error:active" });
+    first.mockClear();
+    onError({ extensionPath: "idle" });
+    await resumeAgent(session as any, "second", { onToolActivity: second });
+    onError({ extensionPath: "idle again" });
+    expect(first).not.toHaveBeenCalled();
+    expect(second).toHaveBeenCalledOnce();
+    expect(second).toHaveBeenCalledWith({ type: "end", toolName: "extension-error:active" });
   });
 
   it("binds extensions before prompting", async () => {
@@ -492,7 +516,7 @@ describe("agent-runner failed-final-turn detection (#144)", () => {
 
     const result = await runAgent(ctx, "Explore", "go", { pi });
 
-    expect(result.failure).toBe("run hit the output token limit before producing any text");
+    expect(result.failure).toBe(i18n.t("invocation.outputLimit"));
   });
 
   it("does NOT flag a length stop that produced text (truncated answer completes)", async () => {
@@ -2597,7 +2621,7 @@ describe("agent-runner turn limits", () => {
 
   it("does not steer or abort below the limit", async () => {
     const { session, result } = await runWithTurns(3, { maxTurns: 5 });
-    expect(session.steer).not.toHaveBeenCalled();
+    expect(session.sendCustomMessage).not.toHaveBeenCalled();
     expect(session.abort).not.toHaveBeenCalled();
     expect(result.steered).toBe(false);
   });
@@ -2605,8 +2629,9 @@ describe("agent-runner turn limits", () => {
   it("steers exactly once on reaching the limit, and does not abort", async () => {
     setGraceTurns(5);
     const { session, result } = await runWithTurns(5, { maxTurns: 5 });
-    expect(session.steer).toHaveBeenCalledTimes(1);
-    expect(session.steer.mock.calls[0][0]).toBe(i18n.t("terminalPolicy.wrapUp"));
+    expect(session.sendCustomMessage).toHaveBeenCalledTimes(1);
+    expect(session.sendCustomMessage).toHaveBeenCalledWith({ customType: "pi-subagents-policy", content: i18n.t("terminalPolicy.wrapUp"), display: false }, { deliverAs: "steer" });
+    expect(session.steer).not.toHaveBeenCalled();
     expect(session.abort).not.toHaveBeenCalled();
     expect(result.steered).toBe(true);
   });
@@ -2616,14 +2641,14 @@ describe("agent-runner turn limits", () => {
     // which both burns tokens and drowns out its actual task.
     setGraceTurns(5);
     const { session } = await runWithTurns(8, { maxTurns: 5 });
-    expect(session.steer).toHaveBeenCalledTimes(1);
+    expect(session.sendCustomMessage).toHaveBeenCalledTimes(1);
     expect(session.abort).not.toHaveBeenCalled();
   });
 
   it("hard-aborts once the grace turns are used up", async () => {
     setGraceTurns(2);
     const { session, result } = await runWithTurns(7, { maxTurns: 5 });
-    expect(session.steer).toHaveBeenCalledTimes(1);
+    expect(session.sendCustomMessage).toHaveBeenCalledTimes(1);
     expect(session.abort).toHaveBeenCalled();
     expect(result.aborted).toBe(true);
   });
@@ -2638,14 +2663,14 @@ describe("agent-runner turn limits", () => {
 
   it("treats maxTurns 0 as unlimited", async () => {
     const { session } = await runWithTurns(30, { maxTurns: 0 });
-    expect(session.steer).not.toHaveBeenCalled();
+    expect(session.sendCustomMessage).not.toHaveBeenCalled();
     expect(session.abort).not.toHaveBeenCalled();
   });
 
   it("is unlimited when nothing configures a limit", async () => {
     setDefaultMaxTurns(undefined);
     const { session } = await runWithTurns(30);
-    expect(session.steer).not.toHaveBeenCalled();
+    expect(session.sendCustomMessage).not.toHaveBeenCalled();
     expect(session.abort).not.toHaveBeenCalled();
   });
 
@@ -2653,14 +2678,14 @@ describe("agent-runner turn limits", () => {
     setDefaultMaxTurns(4);
     setGraceTurns(5);
     const { session } = await runWithTurns(4);
-    expect(session.steer).toHaveBeenCalledTimes(1);
+    expect(session.sendCustomMessage).toHaveBeenCalledTimes(1);
   });
 
   it("an explicit maxTurns beats the global default", async () => {
     setDefaultMaxTurns(2);
     setGraceTurns(5);
     const { session } = await runWithTurns(4, { maxTurns: 10 });
-    expect(session.steer).not.toHaveBeenCalled();
+    expect(session.sendCustomMessage).not.toHaveBeenCalled();
   });
 
   it("reports each turn to the caller's counter", async () => {

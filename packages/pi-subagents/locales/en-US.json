@@ -1,4 +1,12 @@
 {
+  "invocation.invalidSchema": "Invalid structured-output schema: {error}",
+  "invocation.invalidValidator": "Structured output requires a compiled schema validator.",
+  "invocation.invalidBudget": "Invalid subagent turn-limit policy.",
+  "invocation.busy": "This embedded session already has an active invocation.",
+  "invocation.notRunning": "The embedded invocation is not accepting structured output.",
+  "invocation.wrapUpFailed": "The embedded invocation could not deliver its wrap-up instruction.",
+  "invocation.providerError": "Provider error with no output.",
+  "invocation.outputLimit": "The invocation hit the output token limit before producing any text.",
   "structuredOutput.label": "Structured Output",
   "structuredOutput.description": "Report your final answer. Call this exactly once, with the complete result, and put everything the caller needs inside the arguments — text written outside this call is discarded. If a call is rejected for not matching the schema, fix the reported fields and call it again.",
   "structuredOutput.snippet": "Report your final answer as structured data",

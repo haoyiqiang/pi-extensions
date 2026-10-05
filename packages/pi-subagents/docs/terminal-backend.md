@@ -112,10 +112,11 @@ retry allowance and turn counter. It never reconstructs output from old tool cal
 The manager carries `structuredJson`, `structuredRetried`, `aborted` and `steered`
 through both resume paths and clears prior structured metadata when accepting a
 resume. Status precedence is stopped > aborted > error > steered > completed.
-Embedded resume still has its upstream invocation-policy behavior; porting its
-fresh-run enforcement onto resume is a remaining parity task, not implied by the
-additive result fields. Normal retired policy failures may resume; uncertain process
-retirement still quarantines the handle.
+Embedded owned-session resume now retains the same resolved schema/turn/grace policy
+and refreshes per-invocation state. Its executor performs one sequential post-prompt
+retry; terminal uses the actionable settlement boundary. The backend promise is the
+completion authority for both. Normal retired policy failures may resume; uncertain
+terminal process retirement still quarantines the handle.
 
 ## Feedback and control
 

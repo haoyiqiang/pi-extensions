@@ -20,15 +20,15 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { BUILTIN_TOOL_NAMES, getAgentConfig, getConfig, getMemoryToolNames, getReadOnlyMemoryToolNames, getToolNamesForType } from "../agent-types.js";
 import { runInChildSessionContext } from "../child-context.js";
-import { buildParentContext, extractText } from "../context.js";
+import { buildParentContext } from "../context.js";
 import { DEFAULT_AGENTS } from "../default-agents.js";
 import { detectEnv } from "../env.js";
 import { buildMemoryBlock, buildReadOnlyMemoryBlock } from "../memory.js";
 import { createNestedSubagentTools, getMaxSubagentDepth, type NestedAgentManager } from "../nested-tools.js";
 import { buildAgentPrompt, type PromptExtras } from "../prompts.js";
 import { preloadSkills } from "../skill-loader.js";
-import { createStructuredCapture, createStructuredOutputTool, structuredFailure, structuredRetryPrompt } from "../structured-output.js";
-import { i18n } from "../i18n.js";
+import { createEmbeddedInvocationPolicy, embeddedStructuredTools, invokeEmbeddedSession, observeEmbeddedActivity, rememberEmbeddedPolicy,
+  type EmbeddedInvocationOptions, type EmbeddedInvocationResult } from "./embedded-invocation.js";
 import type { SubagentType, ThinkingLevel } from "../types.js";
 import type { LifetimeUsage } from "../usage.js";
 import type { CompiledSchema } from "../workflow/json-schema.js";
@@ -495,7 +495,7 @@ export interface RunOptions {
 export interface RunResult {
   responseText: string;
   session: AgentSession;
-  /** True if the agent was hard-aborted (max_turns + grace exceeded). */
+  /** True if the invocation was cancelled or exhausted its turn-limit grace. */
   aborted: boolean;
   /** True if the agent was steered to wrap up (hit soft turn limit) but finished in time. */
   steered: boolean;
@@ -523,83 +523,6 @@ export interface RunResult {
   structuredRetried?: boolean;
 }
 
-/**
- * Subscribe to a session and collect the last assistant message text.
- * Returns an object with a `getText()` getter and an `unsubscribe` function.
- */
-function collectResponseText(session: AgentSession) {
-  let text = "";
-  const unsubscribe = session.subscribe((event: AgentSessionEvent) => {
-    // message_start also fires for user and toolResult messages — resetting on
-    // those would wipe assistant text already collected. Reset only when a new
-    // ASSISTANT message begins, so getText() is the last assistant message's text.
-    if (event.type === "message_start" && event.message.role === "assistant") {
-      text = "";
-    }
-    if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
-      text += event.assistantMessageEvent.delta;
-    }
-  });
-  return { getText: () => text, unsubscribe };
-}
-
-/**
- * Get the last non-empty assistant text produced during THIS invocation.
- * `startIndex` is the message count captured before the prompt, so the walk-back
- * never crosses into a previous turn: on a resume whose new turn failed empty,
- * this returns "" instead of the prior turn's answer (#144). Defaults to 0 (a
- * fresh spawn, where the whole history belongs to this run).
- */
-function getLastAssistantText(session: AgentSession, startIndex = 0): string {
-  for (let i = session.messages.length - 1; i >= startIndex; i--) {
-    const msg = session.messages[i];
-    if (msg.role !== "assistant") continue;
-    const text = extractText(msg.content).trim();
-    if (text) return text;
-  }
-  return "";
-}
-
-/**
- * Error message of THIS invocation's final assistant message, when that turn
- * failed. Two failure shapes, both keyed off how the final turn STOPPED:
- *   - stopReason "error": a provider failure pi resolved instead of rejecting
- *     (any text; partial output is surfaced separately).
- *   - stopReason "length" with NO text: a silent max-token death — the run hit
- *     the output-token ceiling before writing anything, which would otherwise
- *     land as a "completed" run with an empty result (the #144 symptom).
- * Everything else completes: a clean "stop"/"toolUse" final, and — crucially — a
- * "length" stop that DID produce text (a legitimate truncated-but-useful answer).
- * "aborted" is handled by the manager's abort flag / "stopped" guard, not here.
- * Bounded by `startIndex` (like the text fallback) so a resume that produced no
- * assistant message of its own never inherits a PRIOR turn's stop reason.
- */
-function finalTurnError(session: AgentSession, startIndex = 0): string | undefined {
-  for (let i = session.messages.length - 1; i >= startIndex; i--) {
-    const msg = session.messages[i];
-    if (msg.role !== "assistant") continue;
-    if (msg.stopReason === "error") {
-      return (msg as { errorMessage?: string }).errorMessage?.trim() || "provider error with no output";
-    }
-    if (msg.stopReason === "length" && !extractText(msg.content).trim()) {
-      return "run hit the output token limit before producing any text";
-    }
-    return undefined;
-  }
-  return undefined;
-}
-
-/**
- * Wire an AbortSignal to abort a session.
- * Returns a cleanup function to remove the listener.
- */
-function forwardAbortSignal(session: AgentSession, signal?: AbortSignal): () => void {
-  if (!signal) return () => {};
-  const onAbort = () => session.abort();
-  signal.addEventListener("abort", onAbort, { once: true });
-  return () => signal.removeEventListener("abort", onAbort);
-}
-
 function resolveConfiguredSessionDir(sessionDir: string | undefined, cwd: string): string | undefined {
   if (!sessionDir) return undefined;
   if (sessionDir === "~" || sessionDir.startsWith("~/")) return resolve(homedir(), sessionDir.slice(2));
@@ -613,8 +536,13 @@ export async function runAgent(
   prompt: string,
   options: RunOptions,
 ): Promise<RunResult> {
+  options.signal?.throwIfAborted();
   const config = getConfig(type);
   const agentConfig = getAgentConfig(type);
+  const maxTurns = resolveEffectiveMaxTurns(type, options.maxTurns);
+  const invocationPolicy = createEmbeddedInvocationPolicy({
+    maxTurns, graceTurns: maxTurns === undefined ? undefined : getGraceTurns(), structuredOutput: options.structuredOutput,
+  });
 
   // Resolve working directory: worktree override > parent cwd
   const effectiveCwd = options.cwd ?? ctx.cwd;
@@ -887,10 +815,7 @@ export async function runAgent(
   // StructuredOutput, and `structuredJson` below is what the caller reads. The
   // schema was already compiled by whoever asked for it, so a bad one failed
   // before any of this ran.
-  const structuredCapture = options.structuredOutput ? createStructuredCapture() : undefined;
-  const structuredTools = options.structuredOutput && structuredCapture
-    ? [createStructuredOutputTool(options.structuredOutput, structuredCapture)]
-    : [];
+  const structuredTools = embeddedStructuredTools(invocationPolicy);
   const structuredToolNames = new Set(structuredTools.map(tool => tool.name));
   // Re-admitted together at every gate below. Kept as one set so a new injected
   // tool cannot be added to some of the three gates and forgotten at the rest.
@@ -1018,6 +943,7 @@ export async function runAgent(
   }
 
   const { session } = await runInChildSessionContext(() => createAgentSession(sessionOpts));
+  rememberEmbeddedPolicy(session, invocationPolicy);
 
   const baseSessionName = agentConfig?.name ?? type;
   session.setSessionName(
@@ -1028,14 +954,17 @@ export async function runAgent(
   // (e.g. loading credentials, setting up state). Tool gating already happened
   // at session construction via the `tools:` allowlist above — no separate
   // post-bind filter is needed. All ExtensionBindings fields are optional.
-  await session.bindExtensions({
-    onError: (err) => {
-      options.onToolActivity?.({
-        type: "end",
-        toolName: `extension-error:${err.extensionPath}`,
-      });
-    },
-  });
+  let startupObserver = options.onToolActivity;
+  try {
+    await session.bindExtensions({
+      onError: (err) => observeEmbeddedActivity(invocationPolicy, {
+        type: "end", toolName: `extension-error:${err.extensionPath}`,
+      }, startupObserver),
+    });
+  } finally {
+    // The session-lifetime callback must not keep notifying a completed invocation.
+    startupObserver = undefined;
+  }
 
   // With `allowedToolNames` unset, the registry is scoped by `excludeTools` but
   // the ACTIVE set still needs managing: pi activates only its four default
@@ -1054,160 +983,22 @@ export async function runAgent(
     });
   }
 
-  options.onSessionCreated?.(session);
-
-  // Track turns for graceful max_turns enforcement
-  let turnCount = 0;
-  const maxTurns = resolveEffectiveMaxTurns(type, options.maxTurns);
-  let softLimitReached = false;
-  let aborted = false;
-
-  let currentMessageText = "";
-  const unsubTurns = session.subscribe((event: AgentSessionEvent) => {
-    if (event.type === "turn_end") {
-      turnCount++;
-      options.onTurnEnd?.(turnCount);
-      if (maxTurns != null) {
-        if (!softLimitReached && turnCount >= maxTurns) {
-          softLimitReached = true;
-          session.steer(i18n.t("terminalPolicy.wrapUp"));
-        } else if (softLimitReached && turnCount >= maxTurns + graceTurns) {
-          aborted = true;
-          session.abort();
-        }
-      }
-    }
-    if (event.type === "message_start") {
-      currentMessageText = "";
-    }
-    if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
-      currentMessageText += event.assistantMessageEvent.delta;
-      options.onTextDelta?.(event.assistantMessageEvent.delta, currentMessageText);
-    }
-    if (event.type === "tool_execution_start") {
-      options.onToolActivity?.({ type: "start", toolName: event.toolName });
-    }
-    if (event.type === "tool_execution_end") {
-      options.onToolActivity?.({ type: "end", toolName: event.toolName });
-    }
-    if (event.type === "message_end" && event.message.role === "assistant") {
-      const u = (event.message as any).usage;
-      if (u) options.onAssistantUsage?.({
-        input: u.input ?? 0,
-        output: u.output ?? 0,
-        cacheWrite: u.cacheWrite ?? 0,
-        cacheRead: u.cacheRead ?? 0,
-        cost: u.cost?.total ?? 0,
-      });
-    }
-    if (event.type === "compaction_end" && !event.aborted && event.result) {
-      options.onCompaction?.({ reason: event.reason, tokensBefore: event.result.tokensBefore });
-    }
-  });
-
-  const collector = collectResponseText(session);
-  const cleanupAbort = forwardAbortSignal(session, options.signal);
-
-  // Build the effective prompt: optionally prepend parent context
   let effectivePrompt = prompt;
   if (options.inheritContext) {
     const parentContext = buildParentContext(ctx);
-    if (parentContext) {
-      effectivePrompt = parentContext + prompt;
-    }
+    if (parentContext) effectivePrompt = parentContext + prompt;
   }
-
-  // Boundary for the history fallback: only assistant text produced from here
-  // on counts as this run's output (a fresh session, so usually 0).
-  const startLen = session.messages.length;
-  let structuredRetried = false;
-  try {
-    await session.prompt(effectivePrompt);
-
-    // One more prompt when a schema was asked for and nothing usable came back
-    // — the model answered in prose, or only ever called the tool invalidly.
-    // Inside this `try`, so the turn tracking, the text collector and above all
-    // the abort forwarding are still live: torn down first, a retry would be
-    // unkillable.
-    if (structuredCapture !== undefined && structuredCapture.json === undefined
-      && !aborted && options.signal?.aborted !== true) {
-      structuredRetried = true;
-      await session.prompt(structuredRetryPrompt(structuredCapture));
-    }
-  } finally {
-    unsubTurns();
-    collector.unsubscribe();
-    cleanupAbort();
-  }
-
-  const responseText = collector.getText().trim() || getLastAssistantText(session, startLen);
-  // A child asked for structured output that never gave any has failed, however
-  // articulate its prose was. Reported through `failure` so it travels the same
-  // path as a provider error rather than arriving as a successful empty answer.
-  const schemaFailure = structuredCapture !== undefined ? structuredFailure(structuredCapture) : undefined;
-  return {
-    responseText,
-    session,
-    aborted,
-    steered: softLimitReached,
-    failure: finalTurnError(session, startLen) ?? schemaFailure,
-    ...(structuredCapture?.json !== undefined ? { structuredJson: structuredCapture.json } : {}),
-    ...(structuredRetried ? { structuredRetried } : {}),
-  };
+  const { text, ...result } = await invokeEmbeddedSession(session, effectivePrompt, options,
+    () => options.onSessionCreated?.(session));
+  return { responseText: text, session, ...result };
 }
 
-/**
- * Send a new prompt to an existing session (resume).
- */
+/** Owned sessions retain launch policy; foreign native sessions keep plain facade behavior. */
 export async function resumeAgent(
-  session: AgentSession,
-  prompt: string,
-  options: {
-    onToolActivity?: (activity: ToolActivity) => void;
-    onAssistantUsage?: (usage: LifetimeUsage) => void;
-    onCompaction?: (info: { reason: "manual" | "threshold" | "overflow"; tokensBefore: number }) => void;
-    signal?: AbortSignal;
-  } = {},
-): Promise<{ text: string; failure?: string }> {
-  // Boundary for the history fallback: the session already holds prior turns,
-  // so only assistant text produced by THIS resume prompt counts as its output
-  // — a failed resume must not surface the previous turn's answer (#144).
-  const startLen = session.messages.length;
-  const collector = collectResponseText(session);
-  const cleanupAbort = forwardAbortSignal(session, options.signal);
-
-  const unsubEvents = (options.onToolActivity || options.onAssistantUsage || options.onCompaction)
-    ? session.subscribe((event: AgentSessionEvent) => {
-        if (event.type === "tool_execution_start") options.onToolActivity?.({ type: "start", toolName: event.toolName });
-        if (event.type === "tool_execution_end") options.onToolActivity?.({ type: "end", toolName: event.toolName });
-        if (event.type === "message_end" && event.message.role === "assistant") {
-          const u = (event.message as any).usage;
-          if (u) options.onAssistantUsage?.({
-            input: u.input ?? 0,
-            output: u.output ?? 0,
-            cacheWrite: u.cacheWrite ?? 0,
-            cacheRead: u.cacheRead ?? 0,
-            cost: u.cost?.total ?? 0,
-          });
-        }
-        if (event.type === "compaction_end" && !event.aborted && event.result) {
-          options.onCompaction?.({ reason: event.reason, tokensBefore: event.result.tokensBefore });
-        }
-      })
-    : () => {};
-
-  try {
-    await session.prompt(prompt);
-  } finally {
-    collector.unsubscribe();
-    unsubEvents();
-    cleanupAbort();
-  }
-
-  return {
-    text: collector.getText().trim() || getLastAssistantText(session, startLen),
-    failure: finalTurnError(session, startLen),
-  };
+  session: AgentSession, prompt: string, options: EmbeddedInvocationOptions = {},
+): Promise<Omit<EmbeddedInvocationResult, "aborted" | "steered"> & { aborted?: boolean; steered?: boolean }> {
+  const { aborted, steered, ...result } = await invokeEmbeddedSession(session, prompt, options);
+  return { ...result, ...(aborted ? { aborted: true } : {}), ...(steered ? { steered: true } : {}) };
 }
 
 // Preserve the upstream runner export while observation consumers import the neutral formatter.

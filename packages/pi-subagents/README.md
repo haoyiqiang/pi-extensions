@@ -43,7 +43,11 @@ Manager session handles and UI/output observations are now backend-neutral.
 `embedded-adapter.ts` keeps native sessions behind per-backend lookups; controls reject
 foreign or closed handles. Live read-only views preserve transcript identity,
 compaction behavior, stats, and metadata without exposing SDK controls or model headers.
-The raw runner facade remains compatible.
+The raw runner facade remains compatible. Fresh embedded runs and owned-session
+resumes now share `embedded-invocation.ts`: resolved schema/turn/grace policy stays
+with the native session, while capture, counters, retry allowance and listeners are
+fresh per invocation. Cancellation and final provider errors suppress the one
+structured-output retry; concurrent invocations are rejected before capture changes.
 
 Request preparation still uses Pi context; terminal execution is an explicit private opt-in.
 See [execution boundary](./docs/execution-backend.md) for the private callback-contract

@@ -30,9 +30,14 @@ Agent tool / nested tools / workflow host / UI
   and session-identity contracts. It imports no native session class or event type.
 - `src/backends/embedded-adapter.ts` owns per-backend handle/native lookup and SDK
   observation adaptation. Every default manager gets its own backend instance.
-- `src/backends/embedded.ts` owns the original SDK runner: resource loading,
-  model/tool/skill resolution, session creation, turn limits, event forwarding,
-  structured-output retry, signal handling, and per-invocation result extraction.
+- `src/backends/embedded.ts` owns resource loading, model/tool/skill resolution and
+  native session creation. It snapshots resolved invocation policy before preparation.
+- `src/backends/embedded-invocation.ts` executes both fresh and resumed prompts with
+  per-session policy ownership, per-invocation capture/turn/retry state, event forwarding,
+  cancellation and result extraction.
+- `src/backends/invocation-policy.ts` shares immutable JSON schema snapshots and
+  finite budget validation with terminal. `terminal/run-policy.ts` retains private
+  compatibility names, not a separate policy implementation.
 - `src/backends/embedded-lifecycle.ts` owns awaitable steer delivery and bounded,
   idempotent session shutdown.
 - `src/agent-runner.ts` re-exports the embedded module, preserving all upstream
@@ -70,9 +75,9 @@ low-level `agent-runner` facade still returns native sessions for compatibility.
 Streaming and usage contracts are unchanged. `ExecutionResumeResult` now adds optional
 structured JSON/retry metadata and abort/steer flags to the existing text/failure
 result. Both manager resume paths clear stale structured fields and apply fresh-run
-status precedence without overwriting an external stop. Existing embedded adapters
-remain structurally compatible; this does not install new enforcement subscriptions
-on the upstream embedded resume implementation.
+status precedence without overwriting an external stop. Embedded resume now installs
+fresh enforcement/usage subscriptions and returns the new structured/abort/steer
+metadata. Existing plain text/failure callers remain structurally compatible.
 
 The embedded adapter accepts only its own handles for control operations. It rejects
 foreign handles and resume/steer after shutdown; repeated valid shutdown stays
@@ -84,6 +89,44 @@ prevents a hanging handler from blocking quit. Concurrent/repeated cleanup of th
 same session shares one promise; failed handlers still reach disposal, and the
 shutdown timer is cleared when cleanup finishes early. Eviction remains detached,
 while manager disposal awaits child shutdown.
+
+## Embedded invocation policy
+
+A WeakMap keyed by the native session retains the schema data and resolved max/grace
+budget established at creation. Editing global defaults or agent definitions does not
+retune an owned session mid-run or on resume. Each invocation has fresh structured
+capture, retry allowance, counters and listeners. The stable synthetic tool dispatches
+only to that invocation and rejects idle, cancelled or cleanup-time calls. Its JSON
+schema is snapshotted; any additional caller validator remains a caller-owned function,
+so closure state is not made immutable or serializable.
+
+The invocation reserves its policy before `onSessionCreated`, rejecting reentrant or
+concurrent resumes before they can reset capture. That reservation lasts through
+prompt settlement and abort draining. An already-aborted invocation never prompts;
+cancellation during asynchronous SDK preflight is latched and reasserted at
+`agent_start` because Pi can replace its operation signal after preflight. The public
+native agent signal is tracked too: native UI/extension cancellation must suppress
+retry even if the last assistant message stopped normally.
+
+The embedded schema retry remains one sequential SDK `prompt()` after the initial
+prompt settles. Both prompts share one turn budget and live abort/usage wiring. The
+terminal child instead requests its bounded continuation at `agent_before_settle`.
+Consumers must await the backend completion promise, not the first native
+`agent_end`/`agent_settled` notification. Neither backend retries a cancelled invocation
+or a final provider/empty-output-limit failure. Hard limits keep their abort outcome
+even if the final turn produced valid data.
+
+Finalized assistant event tracking survives compaction/history replacement and
+retains this invocation's partial progress without reading a previous invocation's
+answer. Internal wrap-up uses `sendCustomMessage` rather than asynchronous interactive
+input expansion, so an input hook cannot enqueue a stale warning for a later resume.
+Session-lifetime extension errors reach only the current invocation (or the temporary
+startup observer); no completed caller keeps receiving them. Observational callback
+failures cannot disable limits or cleanup. The legacy
+raw `resumeAgent` facade can still accept an unowned native session; it does not infer
+schema or current global budgets for a session whose policy it never created.
+Reopening a file through `runAgent({ resumeSessionFile })` remains a new creation
+under current agent settings, not restoration of this in-memory policy map.
 
 ## Observation semantics
 

@@ -1,4 +1,12 @@
 {
+  "invocation.invalidSchema": "无效的结构化输出 schema：{error}",
+  "invocation.invalidValidator": "结构化输出必须提供已编译的校验器。",
+  "invocation.invalidBudget": "无效的子代理轮次限制策略。",
+  "invocation.busy": "此 embedded 会话已有正在执行的调用。",
+  "invocation.notRunning": "当前 embedded 调用不接受结构化输出。",
+  "invocation.wrapUpFailed": "无法向 embedded 调用传递收尾指令。",
+  "invocation.providerError": "提供方发生错误，未返回内容。",
+  "invocation.outputLimit": "本次调用在生成文本前已达到输出 token 上限。",
   "structuredOutput.label": "结构化输出",
   "structuredOutput.description": "提交最终答案。请仅调用一次，将完整结果及调用方所需的全部内容放在参数中——此调用之外的文本会被丢弃。如果调用因不符合 schema 而被拒绝，请修正指出的字段后再次调用。",
   "structuredOutput.snippet": "以结构化数据提交最终答案",

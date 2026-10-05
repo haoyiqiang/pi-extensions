@@ -167,3 +167,25 @@ This step supersedes the initial slice's schema/finite-turn-limit rejection:
 No configuration switch, root-profile activation, public export or release metadata
 is added. External reattach/fork and the remaining backend parity work are still
 required before production routing.
+
+## Embedded owned-session resume policy
+
+- Extracted one embedded invocation executor for both `runAgent` and `resumeAgent`.
+  A native-session WeakMap keeps resolved schema/soft/grace policy; each invocation
+  owns fresh capture, retry allowance, counters and subscriptions. The existing
+  synthetic tool delegates only to the active capture rather than a first-run box.
+- Added per-session invocation exclusion before the creation callback, guardrails
+  for inactive/cancelled captures, preflight cancellation latching and abort draining.
+  Provider/empty-length/native-abort outcomes suppress schema retry, which remains
+  within the same listener and turn-budget lifetime.
+- Finalized event tracking survives compaction and preserves current-invocation
+  partial progress. Observer errors cannot skip limit enforcement. Plain unowned
+  native-session resumes keep the legacy facade rather than acquiring global policy.
+- Moved JSON snapshot/budget helpers to a backend-neutral module, preserving the
+  private terminal compatibility exports. Session-lifetime tool-scope enforcement,
+  manager scheduling, root profile and release metadata remain unchanged.
+- Added offline real-SDK and deterministic invocation tests for policy retention,
+  fresh result capture, retries, hard caps, cancellation and callback lifetime.
+
+This supersedes the prior embedded-resume parity deferral. It does not persist policy
+for external reattach/fork, add backend routing, or activate the private package.

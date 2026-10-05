@@ -36,7 +36,9 @@ SDK 执行实现已移至 `src/backends/embedded.ts`，steer 与 session 清理�
 Manager 的会话句柄以及 UI/输出观察接口已与原生 `AgentSession` 脱钩。
 `embedded-adapter.ts` 在每个 backend 内部保管原生会话，拒绝跨实例或已关闭句柄的控制请求。
 只读视图保留消息对象、压缩、统计和模型元数据，但不暴露 SDK 控制方法或模型鉴权头。
-原始 runner 兼容入口保持不变。
+原始 runner 兼容入口保持不变。首次 embedded 执行与 owned-session resume 现共用
+`embedded-invocation.ts`：schema 数据、turn limit 与宽限值在创建时保存，捕获、计数、
+补救次数和监听则每次调用重建。取消或最终错误后不再补救；并发调用在修改捕获状态前被拒绝。
 
 请求准备仍使用 Pi context，terminal 需要显式私有工厂注入。私有回调契约变化、兼容约定
 及剩余工作见 [执行边界](./docs/execution-backend.md)。此步没有新增用户配置。
@@ -54,7 +56,7 @@ Manager 的会话句柄以及 UI/输出观察接口已与原生 `AgentSession` �
 （缺失时最多补救一次）及 turn limit 的软上限、宽限和硬中止。owned-session resume 保留策略，
 但每次重置捕获、补救次数和 turn 计数；manager 传回新的结构化结果与中止/收尾状态，不复用旧结果。
 继承上下文、外部 reattach/fork、memory 和原生 Windows 等未接通能力仍明确报错，不静默降级。
-embedded resume 的上游策略行为暂未改写，完整双后端语义对齐仍是后续工作。
+embedded 已对齐 owned-session resume 的结构化输出与轮次策略；外部会话恢复和完整双后端整合仍未完成。
 完成判断使用独立的进程退出回执，不信任屏幕文本中的结束标记。
 
 完整契约与限制见 [terminal 后端](./docs/terminal-backend.md) 和
