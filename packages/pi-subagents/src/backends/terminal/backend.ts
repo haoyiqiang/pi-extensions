@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { realpathSync } from "node:fs";
+import { isAbsolute } from "node:path";
 import { i18n } from "../../i18n.js";
 import type { ExecutionSession, SessionViewEvent, TranscriptMessage } from "../session.js";
 import type { AgentExecutionBackend, ExecutionResumeOptions, ExecutionRunOptions, ExecutionRunResult } from "../types.js";
@@ -7,24 +9,28 @@ import { openTerminalBridge, type TerminalBridge } from "./bridge-server.js";
 import { launchTerminalRun } from "./lifecycle.js";
 import { createTerminalDependencies } from "./mux-adapter.js";
 import {
-  createTerminalSession, prepareTerminalLaunch, prepareTerminalPolicy,
+  prepareTerminalLaunch, prepareTerminalPolicy,
   type TerminalBackendConfig, type TerminalPolicy,
 } from "./prepare.js";
 import type { TerminalDependencies, TerminalRun } from "./types.js";
 import { waitForProcessExit } from "./process-exit.js";
 import { compileTerminalSchema } from "./run-policy.js";
 import type { CompiledSchema } from "../../workflow/json-schema.js";
+import type { PersistentSessionReference } from "../session-reference.js";
+import { ManagedTerminalSession } from "./session-store.js";
 
 export type { TerminalBackendConfig } from "./prepare.js";
 export const TERMINAL_BACKEND_CAPABILITIES = Object.freeze({
   isolated: true, fresh: true, resumeOwnedSession: true, steer: true,
-  inheritContext: false, reattach: false, fork: false, structuredOutput: true, maxTurns: true,
+  inheritContext: false, reattach: true, fork: true, structuredOutput: true, maxTurns: true,
+  managedSessionsOnly: true, crashRecovery: false,
   nativeWindows: false, powershellRuntime: false,
 });
 
 interface SessionState {
   handle: ExecutionSession;
   policy: TerminalPolicy;
+  managed: ManagedTerminalSession;
   structuredCheck?: (value: unknown) => true | string;
   wireSchema?: CompiledSchema;
   snapshot: TerminalSnapshot;
@@ -88,6 +94,7 @@ export function createTerminalExecutionBackend(
   if (!Number.isFinite(exitTimeout) || exitTimeout <= 0) throw new Error(i18n.t("terminalBackend.invalidConfig"));
   if (!Number.isFinite(timeout) || timeout <= 0) throw new Error(i18n.t("terminalBackend.invalidConfig"));
   const states = new WeakMap<ExecutionSession, SessionState>();
+  const files = new Map<string, SessionState>();
   const dependencies = ports.dependencies ?? createTerminalDependencies();
 
   const getState = (handle: ExecutionSession): SessionState => {
@@ -131,8 +138,10 @@ export function createTerminalExecutionBackend(
       let bridge: TerminalBridge | undefined;
       let terminal: TerminalRun | undefined;
       let ready = false;
+      let retired = false;
       try {
         signal.throwIfAborted();
+        state.managed.beginRun(run.runId);
         bridge = await (ports.bridge ?? openTerminalBridge)(run, (event: ChildFeedback) => {
           if (state.closed || signal.aborted) return;
           switch (event.type) {
@@ -154,7 +163,11 @@ export function createTerminalExecutionBackend(
           ...dependencies,
           transport: {
             ...dependencies.transport,
-            waitForExit: (_surface, transportSignal) => (ports.waitForExit ?? waitForProcessExit)(launch.processExit, transportSignal),
+            waitForExit: async (_surface, transportSignal) => {
+              const exit = await (ports.waitForExit ?? waitForProcessExit)(launch.processExit, transportSignal);
+              retired = !transportSignal.aborted;
+              return exit;
+            },
           },
         });
         state.terminal = terminal;
@@ -170,7 +183,11 @@ export function createTerminalExecutionBackend(
         const final = await abortable(bridge.settled, signal);
         text = final.text;
         const result = await withExitDeadline(terminal.completion, exitTimeout);
-        if (result.cleanupError || result.status === "cancelled") state.poisoned = true;
+        if (!retired || result.cleanupError || result.status === "cancelled") state.poisoned = true;
+        if (!state.poisoned) {
+          state.managed.checkpoint(state.snapshot.thinkingLevel, final.witness);
+          state.policy = state.managed.policy;
+        }
         const structured = validateStructuredResult(state, final);
         return {
           session: state.handle,
@@ -200,6 +217,7 @@ export function createTerminalExecutionBackend(
         state.terminal = undefined;
         state.controller = undefined;
         state.running = false;
+        if (state.poisoned) state.managed.quarantine();
       }
     };
     const operation = execute();
@@ -207,22 +225,28 @@ export function createTerminalExecutionBackend(
     return operation;
   };
 
-  return {
-    kind: "terminal",
-    async run(ctx, type, prompt, options) {
-      options.signal?.throwIfAborted();
-      const policy = await prepareTerminalPolicy(ctx, type, options);
-      options.signal?.throwIfAborted();
-      const reference = Object.freeze(createTerminalSession(policy, config));
+  const adopt = (managed: ManagedTerminalSession, validator?: CompiledSchema): SessionState => {
+    try {
+      const messages = managed.readReady().manager.buildSessionProjection().messages as readonly TranscriptMessage[];
+      const tokens = { input: 0, output: 0, cacheWrite: 0 };
+      for (const message of messages) {
+        if (message.role !== "assistant") continue;
+        const usage = (message as { usage?: Record<string, unknown> }).usage;
+        for (const key of ["input", "output", "cacheWrite"] as const) {
+          const value = usage?.[key];
+          if (typeof value === "number" && Number.isFinite(value) && value >= 0) tokens[key] += value;
+        }
+      }
+      const policy = managed.policy;
       const listeners = new Set<(event: SessionViewEvent) => void>();
       const state = {
-        policy, listeners, closed: false, poisoned: false, running: false,
+        managed, policy, listeners, closed: false, poisoned: false, running: false,
         wireSchema: policy.structuredSchema ? compileTerminalSchema(policy.structuredSchema) : undefined,
-        structuredCheck: options.structuredOutput?.check.bind(options.structuredOutput),
-        snapshot: { messages: [] as readonly TranscriptMessage[], stats: { tokens: { input: 0, output: 0, cacheWrite: 0 }, contextUsage: { percent: null } } },
+        structuredCheck: validator?.check.bind(validator),
+        snapshot: { messages, model: policy.model, thinkingLevel: policy.thinkingLevel, stats: { tokens, contextUsage: { percent: null } } },
       } as SessionState;
       const handle: ExecutionSession = Object.freeze({
-        reference,
+        reference: managed.reference,
         get model() { return state.snapshot.model; },
         get thinkingLevel() { return state.snapshot.thinkingLevel; },
         get messages() { return state.snapshot.messages; },
@@ -234,7 +258,54 @@ export function createTerminalExecutionBackend(
       });
       state.handle = handle;
       states.set(handle, state);
-      return invoke(state, prompt, options);
+      files.set(managed.reference.sessionFile, state);
+      return state;
+    } catch (error) {
+      try { managed.release(); } catch { managed.quarantine(); }
+      throw error;
+    }
+  };
+  const ownedReference = (reference: PersistentSessionReference): SessionState | undefined => {
+    if (!reference || reference.backend !== "terminal" || typeof reference.sessionFile !== "string" || !isAbsolute(reference.sessionFile)
+      || typeof reference.sessionId !== "string" || !reference.sessionId.trim()) throw new Error(i18n.t("sessionStore.invalidRecord"));
+    let path: string;
+    try { path = realpathSync(reference.sessionFile); } catch { throw new Error(i18n.t("sessionStore.invalidFile")); }
+    const state = files.get(path);
+    if (state && reference.sessionId !== state.handle.reference.sessionId) throw new Error(i18n.t("sessionStore.invalidRecord"));
+    return state;
+  };
+
+  return {
+    kind: "terminal",
+    async run(ctx, type, prompt, options) {
+      options.signal?.throwIfAborted();
+      const policy = await prepareTerminalPolicy(ctx, type, options);
+      options.signal?.throwIfAborted();
+      const state = adopt(ManagedTerminalSession.create(policy, config), options.structuredOutput);
+      try { return await invoke(state, prompt, options); }
+      catch (error) { files.delete(state.managed.reference.sessionFile); throw error; }
+    },
+    async reattach(reference, options = {}) {
+      if (ownedReference(reference)) throw new Error(i18n.t("sessionStore.alreadyOwned"));
+      return adopt(ManagedTerminalSession.open(reference, options), options.structuredOutput).handle;
+    },
+    async fork(reference, options = {}) {
+      const owned = ownedReference(reference);
+      if (owned?.running) throw new Error(i18n.t("terminalBackend.busy"));
+      if (owned?.poisoned || owned?.closed) throw new Error(i18n.t("terminalBackend.quarantined"));
+      const source = owned?.managed ?? ManagedTerminalSession.open(reference, options);
+      let forked: ManagedTerminalSession | undefined;
+      try { forked = source.fork(config, options); }
+      finally {
+        if (!owned) {
+          try { source.release(); }
+          catch (error) {
+            try { forked?.release(); } catch { forked?.quarantine(); }
+            throw error;
+          }
+        }
+      }
+      return adopt(forked, options.structuredOutput).handle;
     },
     async resume(handle, prompt, options) {
       const state = getState(handle);
@@ -261,7 +332,13 @@ export function createTerminalExecutionBackend(
       state.listeners.clear();
       state.bridge?.abort();
       state.controller?.abort();
-      state.shutdown = state.operation?.then(() => {}, () => {}) ?? Promise.resolve();
+      const settled = state.operation?.then(() => {}, () => {}) ?? Promise.resolve();
+      state.shutdown = settled.then(() => {
+        try {
+          if (state.poisoned) state.managed.quarantine();
+          else state.managed.release();
+        } finally { files.delete(state.managed.reference.sessionFile); }
+      });
       return state.shutdown;
     },
   };

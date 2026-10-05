@@ -1,4 +1,12 @@
 {
+  "sessionStore.busy": "此受管会话已有所有者或尚未回收的租约。",
+  "sessionStore.invalidFile": "受管会话记录无效、已被改动或无法读取。",
+  "sessionStore.leaseLost": "受管会话租约已不属于当前所有者。",
+  "sessionStore.invalidRecord": "受管会话策略记录缺失、无效或与会话不匹配。",
+  "sessionStore.unsafe": "此受管会话没有干净检查点，不允许自动恢复。",
+  "sessionStore.validatorRequired": "恢复此结构化会话必须重新提供匹配的已编译 schema 校验器。",
+  "sessionStore.schemaMismatch": "提供的 schema 与受管会话策略不匹配。",
+  "sessionStore.alreadyOwned": "当前 backend 已持有此会话，请使用现有句柄。",
   "invocation.invalidSchema": "无效的结构化输出 schema：{error}",
   "invocation.invalidValidator": "结构化输出必须提供已编译的校验器。",
   "invocation.invalidBudget": "无效的子代理轮次限制策略。",

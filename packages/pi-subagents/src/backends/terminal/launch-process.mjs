@@ -40,12 +40,20 @@ child.once("close", (code, signal) => {
 // ps is only needed to include detached descendant groups (Pi bash tools can use them).
 // Without it, the owned group is still killed; no receipt is issued if retirement is uncertain.
 function processTable() {
-  const result = spawnSync("ps", ["-eo", "pid=,ppid=,pgid=,stat="], { encoding: "utf8", timeout: 250, windowsHide: true });
-  if (result.error || result.status !== 0) return undefined;
-  return result.stdout.trim().split("\n").map((line) => {
-    const [pid, parent, group, state] = line.trim().split(/\s+/);
-    return { pid: Number(pid), parent: Number(parent), group: Number(group), state: state ?? "" };
-  }).filter((row) => Number.isSafeInteger(row.pid) && row.pid > 0);
+  // A changing process table can make ps fail transiently. Retry only within the same time budget.
+  const deadline = Date.now() + 250;
+  for (let attempt = 0; attempt < 3 && Date.now() < deadline; attempt++) {
+    const result = spawnSync("ps", ["-eo", "pid=,ppid=,pgid=,stat="], {
+      encoding: "utf8", timeout: Math.max(1, deadline - Date.now()), windowsHide: true,
+    });
+    if (result.error?.code === "ENOENT") return undefined;
+    if (result.error || result.status !== 0) continue;
+    return result.stdout.trim().split("\n").map((line) => {
+      const [pid, parent, group, state] = line.trim().split(/\s+/);
+      return { pid: Number(pid), parent: Number(parent), group: Number(group), state: state ?? "" };
+    }).filter((row) => Number.isSafeInteger(row.pid) && row.pid > 0);
+  }
+  return undefined;
 }
 function captureGroups() {
   if (!child.pid) return;

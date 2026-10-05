@@ -128,6 +128,15 @@ schema or current global budgets for a session whose policy it never created.
 Reopening a file through `runAgent({ resumeSessionFile })` remains a new creation
 under current agent settings, not restoration of this in-memory policy map.
 
+## Managed restoration (optional port)
+
+`reattach(reference, options?)` and `fork(reference, options?)` are optional methods
+returning an idle `ExecutionSession`. The terminal backend now implements them for
+its own checkpointed policy records; embedded does not yet implement this port.
+They are not manager-record adoption or model-facing commands. The caller still owns
+scheduling and must shut down handles. See [managed sessions](./managed-sessions.md)
+for the canonical path lease, strict v3 snapshot/fork semantics and fail-closed limits.
+
 ## Observation semantics
 
 The manager, nested tools, output writer, conversation viewer, and result formatter
@@ -153,8 +162,9 @@ runner (`ExecutionRunOptions` replaces the native callback). This is not yet a
 serialized cross-process protocol or public workflow API. A native-free fake backend
 exercises the manager, UI, output, and resume path independently of the SDK. The real
 terminal implementation adds CLI/child policy and authenticated remote observations
-for a restricted first slice. External reattach/fork, interrupted-process recovery,
-full policy parity and configuration routing remain separate integration steps. There is no public package subpath for this interface.
+for a restricted private slice, including clean managed-session reattach/fork.
+Cross-backend managed recovery, interrupted-process recovery, full policy parity and
+configuration routing remain separate integration steps. There is no public package subpath for this interface.
 
 The mention clone remains a separate throwaway launcher. The agent it starts flows
 through the manager normally; its off-screen prompt is not a new backend or registry.

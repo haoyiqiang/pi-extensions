@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { getCurrentTools, type Message, type Model } from "@earendil-works/pi-ai";
+import { getCurrentSystemPrompt, getCurrentTools, type Message, type Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   cleanupHeadlessProcesses,
@@ -27,8 +27,10 @@ import { createTerminalArtifacts } from "../src/backends/terminal/artifacts.js";
 import { createTerminalExecutionBackend } from "../src/backends/terminal/backend.js";
 import type { TerminalDependencies } from "../src/backends/terminal/types.js";
 import type { ExecutionSession } from "../src/backends/session.js";
+import type { PersistentSessionReference } from "../src/backends/session-reference.js";
+import type { AgentExecutionBackend } from "../src/backends/types.js";
 import { i18n } from "../src/i18n.js";
-import { compileJsonSchema } from "../src/workflow/json-schema.js";
+import { compileJsonSchema, type CompiledSchema } from "../src/workflow/json-schema.js";
 import {
   TERMINAL_FAUX_JSON_PREFIX,
   TERMINAL_FAUX_MARKERS,
@@ -62,8 +64,8 @@ const OUTPUT_SCHEMA = {
   additionalProperties: false,
 };
 
-function outputSchema() {
-  const result = compileJsonSchema(OUTPUT_SCHEMA);
+function outputSchema(schema: Record<string, unknown> = OUTPUT_SCHEMA) {
+  const result = compileJsonSchema(schema);
   if (!result.ok) throw new Error(result.message);
   return result.compiled;
 }
@@ -291,8 +293,36 @@ function customMessageTurns(session: ExecutionSession): number[] {
 }
 
 const managers: AgentManager[] = [];
+const restoredSessions: Array<{ backend: AgentExecutionBackend; session: ExecutionSession }> = [];
 const harnesses: ProcessHarness[] = [];
 const roots: string[] = [];
+
+type RestoreMethod = "reattach" | "fork";
+
+function persistentReference(session: ExecutionSession): PersistentSessionReference {
+  const { sessionFile } = session.reference;
+  if (!sessionFile) throw new Error("terminal session has no persisted file");
+  return { ...session.reference, sessionFile };
+}
+
+function expectOpaqueSession(session: ExecutionSession): void {
+  for (const key of ["prompt", "abort", "dispose", "steer", "sessionManager", "agent", "modelRuntime"]) {
+    expect(session).not.toHaveProperty(key);
+  }
+}
+
+async function restoreSession(
+  backend: AgentExecutionBackend,
+  method: RestoreMethod,
+  reference: PersistentSessionReference,
+  options?: { structuredOutput?: CompiledSchema },
+): Promise<ExecutionSession> {
+  expect(backend[method]).toBeTypeOf("function");
+  const session = await backend[method]!(reference, options);
+  restoredSessions.push({ backend, session });
+  expectOpaqueSession(session);
+  return session;
+}
 
 beforeEach(() => {
   process.env.PI_OFFLINE = "1";
@@ -306,6 +336,7 @@ afterEach(async () => {
   for (const manager of managers) manager.abortAll();
   await Promise.all(managers.map((manager) => manager.waitForAll()));
   await Promise.all(managers.splice(0).map((manager) => manager.dispose()));
+  await Promise.all(restoredSessions.splice(0).map(({ backend, session }) => backend.shutdown(session)));
   await Promise.all(harnesses.splice(0).map((harness) => harness.assertRetired()));
   cleanupHeadlessProcesses();
   setDefaultMaxTurns(originalMaxTurns);
@@ -323,7 +354,7 @@ function createFixture() {
   roots.push(environment.root);
   const harness = createProcessHarness();
   harnesses.push(harness);
-  const backend = createTerminalExecutionBackend({
+  const newBackend = (): AgentExecutionBackend => createTerminalExecutionBackend({
     sessionDir: environment.sessionDir,
     artifactDir: environment.artifactDir,
     agentDir: environment.agentDir,
@@ -331,9 +362,10 @@ function createFixture() {
     mode: "json",
     startupTimeoutMs: 30_000,
   }, { dependencies: harness.dependencies });
+  const backend = newBackend();
   const manager = new AgentManager(undefined, undefined, undefined, undefined, undefined, backend);
   managers.push(manager);
-  return { ...environment, harness, backend, manager };
+  return { ...environment, harness, backend, newBackend, manager };
 }
 
 describe.skipIf(process.platform === "win32")("terminal backend real Pi child process", () => {
@@ -377,9 +409,7 @@ describe.skipIf(process.platform === "win32")("terminal backend real Pi child pr
 
     expect(session.messages, harness.screenReport()).toEqual([]);
     expect(deltas, "ready must precede model streaming").toEqual([]);
-    for (const key of ["prompt", "abort", "dispose", "steer", "sessionManager", "agent", "modelRuntime"]) {
-      expect(session).not.toHaveProperty(key);
-    }
+    expectOpaqueSession(session);
 
     await record.promise;
     expect(record.status, harness.screenReport()).toBe("completed");
@@ -432,6 +462,256 @@ describe.skipIf(process.platform === "win32")("terminal backend real Pi child pr
     expect(entries.filter((entry) => entry.type === "message").length).toBeGreaterThanOrEqual(4);
     unsubscribe();
     await harness.assertRetired();
+  });
+
+  it("reattaches across fresh factories only after lifetime ownership is released", async () => {
+    const { ctx, pi, manager, backend, newBackend, harness } = createFixture();
+    const firstPrompt = `REOPEN_SOURCE_BEGIN\n${"complete-history-".repeat(256)}\nREOPEN_SOURCE_TAIL`;
+    const secondPrompt = "REOPEN_SECOND_TURN";
+    const { id, record } = await manager.spawnAndWait(pi, ctx, "general-purpose", firstPrompt, {
+      description: "persistent ownership across factories", isolated: true,
+    });
+    expect(record.status, record.error ?? harness.screenReport()).toBe("completed");
+    await manager.resume(id, secondPrompt);
+    expect(record.status, record.error ?? harness.screenReport()).toBe("completed");
+    const original = record.session!;
+    const reference = persistentReference(original);
+    const history = structuredClone(original.messages);
+    const savedFile = readFileSync(reference.sessionFile, "utf8");
+    const reopenedBackend = newBackend();
+
+    // Retirement of an invocation does not release ownership of its file.
+    await expect(backend.reattach!(reference)).rejects.toThrow();
+    await expect(reopenedBackend.reattach!(reference)).rejects.toThrow();
+    await expect(reopenedBackend.fork!(reference)).rejects.toThrow();
+    await expect(reopenedBackend.resume(original, "foreign handle")).rejects.toThrow();
+    expect(readFileSync(reference.sessionFile, "utf8")).toBe(savedFile);
+    expect(harness.created).toHaveLength(2);
+
+    await backend.shutdown(original);
+    const reopened = await restoreSession(reopenedBackend, "reattach", reference);
+    expect(reopened).not.toBe(original);
+    expect(reopened.reference).toEqual(reference);
+    expect(reopened.messages).toEqual(history);
+    expect(reopened.model).toMatchObject({ provider: TERMINAL_FAUX_PROVIDER, id: TERMINAL_FAUX_MODEL_ID });
+    expect(reopened.thinkingLevel).toBe("off");
+    expect(reopened.getSessionStats().tokens).toEqual(original.getSessionStats().tokens);
+    expect(readFileSync(reference.sessionFile, "utf8")).toBe(savedFile);
+    expect(harness.created, "reattach returns an idle view without launching a child").toHaveLength(2);
+    await expect(backend.resume(original, "closed handle")).rejects.toThrow();
+
+    const competitor = newBackend();
+    await expect(reopenedBackend.reattach!(reference)).rejects.toThrow();
+    await expect(competitor.reattach!(reference)).rejects.toThrow();
+    await expect(competitor.fork!(reference)).rejects.toThrow();
+    const events: string[] = [];
+    const unsubscribe = reopened.subscribe((event) => events.push(event.type));
+    const resumed = await reopenedBackend.resume(reopened, "REOPEN_NEW_TURN");
+    expect(resumed.failure, harness.screenReport()).toBeUndefined();
+    expect(resumed.text).toContain("terminal-faux turn 3");
+    expect(resumed.text).toContain(JSON.stringify(firstPrompt).slice(1, -1));
+    expect(resumed.text).toContain(secondPrompt);
+    expect(resumed.text).toContain("REOPEN_NEW_TURN");
+    expect(resumed.text).toContain('assistant_history=["terminal-faux turn 1');
+    expect(reopened.reference).toEqual(reference);
+    expect(reopened.messages.slice(0, history.length)).toEqual(history);
+    expect(persistedEntries(reopened)[0]).toMatchObject({ type: "session", id: reference.sessionId });
+    expect(events).toContain("turn_end");
+    expect(harness.created).toHaveLength(3);
+    await expect(competitor.reattach!(reference)).rejects.toThrow();
+    unsubscribe();
+
+    await reopenedBackend.shutdown(reopened);
+    const reopenedAgain = await restoreSession(competitor, "reattach", reference);
+    expect(reopenedAgain.reference).toEqual(reference);
+    expect(reopenedAgain.messages).toEqual(reopened.messages);
+    expect(harness.created).toHaveLength(3);
+  });
+
+  it("forks an idle owned reference into independent full history without modifying the source", async () => {
+    const { ctx, pi, manager, backend, harness } = createFixture();
+    const firstPrompt = `FORK_SOURCE_BEGIN\n${"unabridged-source-".repeat(256)}\nFORK_SOURCE_TAIL`;
+    const secondPrompt = "FORK_SOURCE_SECOND_TURN";
+    const { id, record } = await manager.spawnAndWait(pi, ctx, "general-purpose", firstPrompt, {
+      description: "independent fork from an idle owned source", isolated: true,
+    });
+    expect(record.status, record.error ?? harness.screenReport()).toBe("completed");
+    await manager.resume(id, secondPrompt);
+    expect(record.status, record.error ?? harness.screenReport()).toBe("completed");
+    const source = record.session!;
+    const reference = persistentReference(source);
+    const sourceFile = readFileSync(reference.sessionFile, "utf8");
+    const sourceHistory = structuredClone(source.messages);
+    const sourceStats = source.getSessionStats().tokens;
+
+    // The source remains owned: a fork is a separate lease, not a transfer.
+    const fork = await restoreSession(backend, "fork", reference);
+    const forkReference = persistentReference(fork);
+    expect(forkReference.backend).toBe("terminal");
+    expect(forkReference.sessionId).not.toBe(reference.sessionId);
+    expect(forkReference.sessionFile).not.toBe(reference.sessionFile);
+    expect(persistedEntries(fork)[0]).toMatchObject({
+      type: "session", version: 3, id: forkReference.sessionId, parentSession: reference.sessionFile, cwd: ctx.cwd,
+    });
+    expect(persistedMessages(fork)).toEqual(persistedMessages(source));
+    expect(fork.messages).toEqual(sourceHistory);
+    expect(fork.model).toMatchObject({ provider: TERMINAL_FAUX_PROVIDER, id: TERMINAL_FAUX_MODEL_ID });
+    expect(fork.thinkingLevel).toBe(source.thinkingLevel);
+    expect(fork.getSessionStats().tokens).toEqual(sourceStats);
+    expect(readFileSync(reference.sessionFile, "utf8")).toBe(sourceFile);
+    expect(harness.created, "fork returns an idle view without launching a child").toHaveLength(2);
+
+    const forkResult = await backend.resume(fork, "FORK_ONLY_CONTINUATION");
+    expect(forkResult.failure, harness.screenReport()).toBeUndefined();
+    expect(forkResult.text).toContain("terminal-faux turn 3");
+    expect(forkResult.text).toContain(JSON.stringify(firstPrompt).slice(1, -1));
+    expect(forkResult.text).toContain(secondPrompt);
+    expect(forkResult.text).toContain('assistant_history=["terminal-faux turn 1');
+    expect(forkResult.text).toContain("FORK_ONLY_CONTINUATION");
+    expect(fork.reference).toEqual(forkReference);
+    expect(readFileSync(reference.sessionFile, "utf8")).toBe(sourceFile);
+    expect(source.messages).toEqual(sourceHistory);
+    expect(source.getSessionStats().tokens).toEqual(sourceStats);
+    const completedForkFile = readFileSync(forkReference.sessionFile, "utf8");
+    const completedForkHistory = structuredClone(fork.messages);
+
+    await manager.resume(id, "SOURCE_ONLY_CONTINUATION");
+    expect(record.status, record.error ?? harness.screenReport()).toBe("completed");
+    expect(record.session).toBe(source);
+    expect(record.result).toContain("terminal-faux turn 3");
+    expect(record.result).toContain("SOURCE_ONLY_CONTINUATION");
+    expect(record.result).not.toContain("FORK_ONLY_CONTINUATION");
+    expect(transcriptText(source)).not.toContain("FORK_ONLY_CONTINUATION");
+    expect(transcriptText(fork)).not.toContain("SOURCE_ONLY_CONTINUATION");
+    expect(readFileSync(forkReference.sessionFile, "utf8")).toBe(completedForkFile);
+    expect(fork.messages).toEqual(completedForkHistory);
+    expect(harness.created).toHaveLength(4);
+  });
+
+  it.each(["reattach", "fork"] as const)("%s keeps saved model, tools, prompt and soft/grace/hard policy despite changed defaults", async (method) => {
+    const { ctx, pi, manager, backend, newBackend, harness } = createFixture();
+    setDefaultMaxTurns(2);
+    setGraceTurns(3);
+    const agent = {
+      ...getAgentConfig("general-purpose")!, builtinToolNames: ["ls"],
+      promptMode: "replace" as const, systemPrompt: "ORIGINAL_SAVED_SYSTEM_PROMPT",
+    };
+    registerAgents(new Map([["general-purpose", agent]]));
+    const { record } = await manager.spawnAndWait(pi, ctx, "general-purpose", TERMINAL_FAUX_MARKERS.wrapUp, {
+      description: "sticky policy across factory replacement", isolated: true, thinkingLevel: "off",
+    });
+    expect(record.status, record.error ?? harness.screenReport()).toBe("steered");
+    const source = record.session!;
+    const reference = persistentReference(source);
+    const history = structuredClone(source.messages);
+    const systemPrompt = getCurrentSystemPrompt(source.messages);
+    expect(systemPrompt).toContain("ORIGINAL_SAVED_SYSTEM_PROMPT");
+    expect(customMessageTurns(source)).toEqual([2]);
+    const sourceFile = readFileSync(reference.sessionFile, "utf8");
+    await backend.shutdown(source);
+
+    setDefaultMaxTurns(20);
+    setGraceTurns(1);
+    registerAgents(new Map([["general-purpose", {
+      ...agent, builtinToolNames: ["read"], systemPrompt: "REPLACEMENT_AGENT_SYSTEM_PROMPT",
+      model: "unavailable-fixture-provider/changed-model", maxTurns: 1,
+    }]]));
+    const restoredBackend = newBackend();
+    const restored = await restoreSession(restoredBackend, method, reference);
+    expect(restored.messages).toEqual(history);
+    expect(getCurrentSystemPrompt(restored.messages)).toBe(systemPrompt);
+    expect(restored.model).toMatchObject({ provider: TERMINAL_FAUX_PROVIDER, id: TERMINAL_FAUX_MODEL_ID });
+    expect(restored.thinkingLevel).toBe("off");
+    expect(harness.created).toHaveLength(1);
+
+    const wrapped = await restoredBackend.resume(restored, TERMINAL_FAUX_MARKERS.wrapUp);
+    expect(wrapped.failure, harness.screenReport()).toBeUndefined();
+    expect(wrapped.steered).toBe(true);
+    expect(wrapped.aborted).not.toBe(true);
+    expect(wrapped.text).toContain('tools=["ls"]');
+    expect(customMessageTurns(restored)).toEqual([2, 5]);
+    expect(completedAssistants(restored)).toHaveLength(6);
+    expect(getCurrentSystemPrompt(restored.messages)).toBe(systemPrompt);
+    expect(getCurrentTools(restored.messages).map((tool) => tool.name)).toEqual(["ls"]);
+
+    const hardLimited = await restoredBackend.resume(restored, TERMINAL_FAUX_MARKERS.endless);
+    expect(hardLimited.aborted, harness.screenReport()).toBe(true);
+    expect(customMessageTurns(restored)).toEqual([2, 5, 8]);
+    expect(completedAssistants(restored)).toHaveLength(11);
+    expect(toolResults(restored, "ls")).toHaveLength(9);
+    expect(toolResults(restored, "ls").every((message) => !message.isError)).toBe(true);
+    expect(completedAssistants(restored).every((message) =>
+      message.role === "assistant" && message.model === TERMINAL_FAUX_MODEL_ID && message.provider === TERMINAL_FAUX_PROVIDER,
+    )).toBe(true);
+    expect(getCurrentSystemPrompt(restored.messages)).toBe(systemPrompt);
+    if (method === "fork") expect(readFileSync(reference.sessionFile, "utf8")).toBe(sourceFile);
+    expect(harness.created).toHaveLength(3);
+  });
+
+  it.each(["reattach", "fork"] as const)("%s requires matching schema and preserves the explicitly supplied caller validator", async (method) => {
+    const { ctx, pi, manager, backend, newBackend, harness } = createFixture();
+    const first = { file: "before-restore.ts", line: 3 };
+    const second = { file: "after-restore.ts", line: 8 };
+    const callerRejected = { file: "caller-rejected.ts", line: 99 };
+    const schema = outputSchema();
+    registerAgents(new Map([["general-purpose", { ...getAgentConfig("general-purpose")!, builtinToolNames: ["ls"] }]]));
+    const { record } = await manager.spawnAndWait(pi, ctx, "general-purpose",
+      scriptedPrompt(TERMINAL_FAUX_MARKERS.recover, first), {
+        description: "structured restore with a caller-owned validator", isolated: true, structuredOutput: schema,
+      });
+    expect(record.status, record.error ?? harness.screenReport()).toBe("completed");
+    expect(JSON.parse(record.structuredJson!)).toEqual(first);
+    expect(record.structuredRetried).toBe(true);
+    const source = record.session!;
+    const reference = persistentReference(source);
+    const history = structuredClone(source.messages);
+    expect(history.some((message) => message.role === "custom")).toBe(true);
+    const sourceFile = readFileSync(reference.sessionFile, "utf8");
+    await backend.shutdown(source);
+
+    const restoredBackend = newBackend();
+    expect(restoredBackend[method]).toBeTypeOf("function");
+    await expect(restoredBackend[method]!(reference)).rejects.toThrow();
+    await expect(restoredBackend[method]!(reference, {
+      structuredOutput: { schema: schema.schema } as CompiledSchema,
+    })).rejects.toThrow();
+    const mismatched = outputSchema({
+      ...OUTPUT_SCHEMA, properties: { ...OUTPUT_SCHEMA.properties, line: { type: "integer", minimum: 2 } },
+    });
+    await expect(restoredBackend[method]!(reference, { structuredOutput: mismatched })).rejects.toThrow();
+    expect(readFileSync(reference.sessionFile, "utf8")).toBe(sourceFile);
+    expect(harness.created).toHaveLength(1);
+
+    const check = vi.fn((value: unknown): true | string => {
+      const checked = schema.check(value);
+      if (checked !== true) return checked;
+      return (value as { line: number }).line === 99 ? "caller-only line constraint" : true;
+    });
+    const structuredOutput: CompiledSchema = { schema: schema.schema, check };
+    const restored = await restoreSession(restoredBackend, method, reference, { structuredOutput });
+    expect(restored.messages, "restore must use the canonical projection, including custom continuation messages").toEqual(history);
+    expect(harness.created).toHaveLength(1);
+    check.mockClear();
+    const resumed = await restoredBackend.resume(restored, scriptedPrompt(TERMINAL_FAUX_MARKERS.structured, second));
+    expect(resumed.failure, harness.screenReport()).toBeUndefined();
+    expect(JSON.parse(resumed.structuredJson!)).toEqual(second);
+    expect(resumed.structuredRetried).not.toBe(true);
+    expect(check).toHaveBeenCalledWith(second);
+    expect(getCurrentTools(restored.messages).map((tool) => tool.name).sort()).toEqual(["StructuredOutput", "ls"]);
+    expect(getCurrentTools(restored.messages).find((tool) => tool.name === "StructuredOutput")?.parameters).toEqual(OUTPUT_SCHEMA);
+    expect(customMessageTurns(restored)).toEqual([1]);
+
+    check.mockClear();
+    const rejected = await restoredBackend.resume(restored, scriptedPrompt(TERMINAL_FAUX_MARKERS.structured, callerRejected));
+    expect(schema.check(callerRejected)).toBe(true);
+    expect(check).toHaveBeenCalledWith(callerRejected);
+    expect(rejected.failure).toBe(i18n.t("terminalPolicy.invalidResult"));
+    expect(rejected.structuredJson).toBeUndefined();
+    expect(rejected.structuredRetried).not.toBe(true);
+    expect(toolResults(restored, "StructuredOutput").map((message) => message.isError)).toEqual([false, false, false]);
+    expect(customMessageTurns(restored)).toEqual([1]);
+    if (method === "fork") expect(readFileSync(reference.sessionFile, "utf8")).toBe(sourceFile);
+    expect(harness.created).toHaveLength(3);
   });
 
   it("delivers steering queued before the child is ready without racing the initial prompt", async () => {
@@ -632,7 +912,7 @@ describe.skipIf(process.platform === "win32")("terminal backend real Pi child pr
   });
 
   it("cancels a slow child, retires its CLI process, and quarantines the session", async () => {
-    const { ctx, pi, manager, backend, harness } = createFixture();
+    const { ctx, pi, manager, backend, newBackend, harness } = createFixture();
     const ready = deferred<ExecutionSession>();
     const deltas: string[] = [];
     const active = deferred<void>();
@@ -664,6 +944,13 @@ describe.skipIf(process.platform === "win32")("terminal backend real Pi child pr
     ]), 10_000, "slow Pi child did not start its model request");
     expect(deltas.join("")).toBe(TERMINAL_FAUX_REQUEST_ACTIVE);
     expect(record.status).toBe("running");
+    const reference = persistentReference(session);
+    const otherBackend = newBackend();
+    await expect(backend.fork!(reference)).rejects.toThrow();
+    await expect(backend.reattach!(reference)).rejects.toThrow();
+    await expect(otherBackend.fork!(reference)).rejects.toThrow();
+    await expect(otherBackend.reattach!(reference)).rejects.toThrow();
+    expect(harness.created).toHaveLength(1);
     expect(manager.abort(id)).toBe(true);
     await within(record.promise!, 5_000, "cancellation did not interrupt the active model request");
 
@@ -673,6 +960,11 @@ describe.skipIf(process.platform === "win32")("terminal backend real Pi child pr
     await expect(backend.resume(session, "resume must be rejected")).rejects.toThrow(
       i18n.t("terminalBackend.quarantined"),
     );
+    await expect(backend.fork!(reference)).rejects.toThrow();
+    await backend.shutdown(session);
+    // Releasing the lease cannot erase cancellation uncertainty from saved state.
+    await expect(otherBackend.reattach!(reference)).rejects.toThrow();
+    await expect(otherBackend.fork!(reference)).rejects.toThrow();
     expect(harness.created).toHaveLength(1);
     await harness.assertRetired();
   });

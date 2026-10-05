@@ -224,6 +224,57 @@ describe.skipIf(process.platform === "win32")("terminal launch process superviso
     }
   }, 10_000);
 
+  it.each([false, true])("handles a failed ps census conservatively (persistent=%s)", async (persistent) => {
+    const root = directory();
+    const ready = join(root, "ready");
+    const receipt = join(root, "process-exit.json");
+    const observed = join(root, "failed-census");
+    const preload = fixture(root, "ps-fault.mjs", `
+      import childProcess from 'node:child_process';
+      import { syncBuiltinESMExports } from 'node:module';
+      import { writeFileSync } from 'node:fs';
+      const original = childProcess.spawnSync;
+      let failed = false;
+      childProcess.spawnSync = (command, ...args) => {
+        if (command === 'ps' && (${persistent} || !failed)) {
+          failed = true;
+          writeFileSync(${JSON.stringify(observed)}, 'injected');
+          return { status: 1, stdout: '', stderr: 'transient fixture failure' };
+        }
+        return original(command, ...args);
+      };
+      syncBuiltinESMExports();
+    `);
+    const child = fixture(root, "graceful.mjs", `
+      import { writeFileSync } from 'node:fs';
+      process.on('SIGTERM', () => process.exit(0));
+      writeFileSync(${JSON.stringify(ready)}, String(process.pid));
+      setInterval(() => {}, 1000);
+    `);
+    const config = launchConfig(root, [child]);
+    const data = JSON.parse(readFileSync(config, "utf8"));
+    data.processExit = { path: receipt, runId: "census", token: "private-token" };
+    writeFileSync(config, JSON.stringify(data));
+    const processHandle = spawn(process.execPath, ["--import", preload, SUPERVISOR, config], { stdio: "ignore" });
+    const closed = new Promise<number | null>((resolve, reject) => {
+      processHandle.once("error", reject);
+      processHandle.once("close", resolve);
+    });
+    try {
+      await waitForFile(ready);
+      processHandle.kill("SIGTERM");
+      expect(await closed).toBe(persistent ? 1 : 0);
+      expect(existsSync(observed)).toBe(true);
+      expect(existsSync(receipt)).toBe(!persistent);
+    } finally {
+      if (processHandle.exitCode === null && existsSync(ready)) {
+        const pid = Number(readFileSync(ready, "utf8"));
+        if (Number.isSafeInteger(pid) && pid > 0) { try { process.kill(-pid, "SIGKILL"); } catch {} }
+      }
+      processHandle.kill("SIGKILL");
+    }
+  }, 10_000);
+
   it("accepts the generated config shape as plain JSON rather than executable code", async () => {
     const root = directory();
     const outputFile = join(root, "observed.json");

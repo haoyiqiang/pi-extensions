@@ -15,6 +15,7 @@ import type { LifetimeUsage } from "../../usage.js";
 import { createStructuredCapture, createStructuredOutputTool, structuredFailure, structuredRetryPrompt,
   STRUCTURED_OUTPUT_TOOL_NAME, type StructuredCapture } from "../../structured-output.js";
 import { compileTerminalSchema, policyContinuation, validTurnBudget } from "./run-policy.js";
+import { sessionWitness, type SessionWitness } from "./session-witness.js";
 import type { SessionViewEvent, TranscriptMessage } from "../session.js";
 import {
   BRIDGE_VERSION,
@@ -588,8 +589,10 @@ export function registerTerminalChild(
     state = "settling";
 
     let finalSnapshot: TerminalSnapshot;
+    let witness: SessionWitness;
     try {
       finalSnapshot = snapshot(ctx);
+      witness = sessionWitness(ctx.sessionManager);
     } catch {
       failClosed(i18n.t("bridge.protocol"), ctx);
       return;
@@ -599,6 +602,7 @@ export function registerTerminalChild(
     const feedback: ChildFeedback = {
       type: "settled",
       snapshot: finalSnapshot,
+      witness,
       text: finalAssistant ? assistantText(finalAssistant).trim() : "",
       aborted,
       failure: (hardLimitReached ? i18n.t("terminalPolicy.turnLimit") : policyFailure)

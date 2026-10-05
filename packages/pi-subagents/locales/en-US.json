@@ -1,4 +1,12 @@
 {
+  "sessionStore.busy": "This managed session already has an owner or an unreclaimed lease.",
+  "sessionStore.invalidFile": "The managed session transcript is invalid, changed, or unavailable.",
+  "sessionStore.leaseLost": "The managed session lease no longer belongs to this owner.",
+  "sessionStore.invalidRecord": "The managed session policy record is missing, invalid, or does not match the session.",
+  "sessionStore.unsafe": "This managed session has no clean checkpoint; automatic recovery is not allowed.",
+  "sessionStore.validatorRequired": "Restoring this structured session requires its matching compiled schema validator.",
+  "sessionStore.schemaMismatch": "The supplied schema does not match the managed session policy.",
+  "sessionStore.alreadyOwned": "This backend already owns the session; use its existing handle.",
   "invocation.invalidSchema": "Invalid structured-output schema: {error}",
   "invocation.invalidValidator": "Structured output requires a compiled schema validator.",
   "invocation.invalidBudget": "Invalid subagent turn-limit policy.",

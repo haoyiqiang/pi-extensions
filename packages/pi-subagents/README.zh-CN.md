@@ -55,11 +55,14 @@ Manager 的会话句柄以及 UI/输出观察接口已与原生 `AgentSession` �
 目前支持 POSIX/Bash、`isolated: true` 的自主完成型任务。已接通 JSON Schema 结构化输出
 （缺失时最多补救一次）及 turn limit 的软上限、宽限和硬中止。owned-session resume 保留策略，
 但每次重置捕获、补救次数和 turn 计数；manager 传回新的结构化结果与中止/收尾状态，不复用旧结果。
-继承上下文、外部 reattach/fork、memory 和原生 Windows 等未接通能力仍明确报错，不静默降级。
-embedded 已对齐 owned-session resume 的结构化输出与轮次策略；外部会话恢复和完整双后端整合仍未完成。
+已有干净检查点的 terminal 受管会话现在可跨 backend 实例 reattach，或 fork 为新身份并保留有效分支历史。
+保存的执行策略随会话恢复；文件租约覆盖句柄整个持有期，阻止协作方并发写入同一记录。
+裸 JSONL 导入、崩溃/不确定退出后的恢复、继承上下文、memory 和原生 Windows 仍明确拒绝。
+embedded 已对齐 owned-session resume 的结构化输出与轮次策略；恢复端口的双后端整合仍未完成。
 完成判断使用独立的进程退出回执，不信任屏幕文本中的结束标记。
 
-完整契约与限制见 [terminal 后端](./docs/terminal-backend.md) 和
+策略、校验器要求与租约限制见 [受管会话恢复](./docs/managed-sessions.md)。
+完整执行契约与限制见 [terminal 后端](./docs/terminal-backend.md) 和
 [terminal 生命周期](./docs/terminal-lifecycle.md)。新增诊断已有中英文 catalog；上游
 embedded 文案仍待迁移，目前没有用户配置开关。
 

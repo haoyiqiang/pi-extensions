@@ -1,8 +1,9 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { SessionManager, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { sessionWitness } from "../src/backends/terminal/session-witness.js";
 import { createTerminalExecutionBackend } from "../src/backends/terminal/backend.js";
 import type { TerminalBridge } from "../src/backends/terminal/bridge-server.js";
 import type { ChildFeedback, TerminalSnapshot } from "../src/backends/terminal/bridge-protocol.js";
@@ -65,7 +66,9 @@ function fixture(exitTimeoutMs?: number) {
   const pi = { exec: vi.fn(async () => ({ code: 1, stdout: "", stderr: "" })) } as any;
   function finish(index: number, text = "wire result", extra: Partial<Extract<ChildFeedback, { type: "settled" }>> = {}) {
     const call = calls[index];
-    const final = { type: "settled" as const, snapshot: { ...snapshot, messages: [{ role: "assistant", content: [{ type: "text", text }] }] }, text, aborted: false, ...extra };
+    const final = { type: "settled" as const, snapshot: { ...snapshot, messages: [{ role: "assistant", content: [{ type: "text", text }] }] }, text, aborted: false,
+      witness: sessionWitness(SessionManager.inMemory(dir, undefined, readFileSync(call.run.session.sessionFile, "utf8").trim().split("\n").map(line => JSON.parse(line)))),
+      ...extra };
     call.feedback(final);
     call.settled.resolve(final);
     call.exit.resolve({ reason: "sentinel", exitCode: 0 });
@@ -132,6 +135,20 @@ describe("real terminal backend coordinator port", () => {
       Object.defineProperty(process, "platform", { value: "win32" });
       expect(() => createTerminalExecutionBackend()).toThrow(i18n.t("terminalBackend.unsupported", { feature: "win32/process-tree" }));
     } finally { Object.defineProperty(process, "platform", descriptor); }
+  });
+
+  it("never publishes a clean checkpoint when exit observation fails after settled", async () => {
+    const f = fixture();
+    const run = await f.running();
+    const final = { type: "settled" as const, snapshot, text: "done", aborted: false };
+    f.calls[0].feedback(final);
+    f.calls[0].settled.resolve(final);
+    f.calls[0].exit.reject(new Error("invalid receipt"));
+    await expect(run.promise).resolves.toMatchObject({ failure: "invalid receipt" });
+    const record = JSON.parse(readFileSync(`${run.handle.reference.sessionFile}.pi-subagents.json`, "utf8"));
+    expect(record.state).toBe("quarantined");
+    await f.backend.shutdown(run.handle);
+    await expect(f.backend.reattach!(run.handle.reference as any)).rejects.toThrow(i18n.t("sessionStore.busy"));
   });
 
   it("bounds retirement after settled and quarantines a process that will not exit", async () => {

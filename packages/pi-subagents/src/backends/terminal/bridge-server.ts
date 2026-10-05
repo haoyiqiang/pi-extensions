@@ -58,7 +58,11 @@ function feedback(value: unknown): value is ChildPacket {
       && (value.failure === undefined || typeof value.failure === "string")
       && (value.structuredJson === undefined || typeof value.structuredJson === "string")
       && (value.structuredRetried === undefined || typeof value.structuredRetried === "boolean")
-      && (value.steered === undefined || typeof value.steered === "boolean");
+      && (value.steered === undefined || typeof value.steered === "boolean")
+      && (value.witness === undefined || (object(value.witness)
+        && (value.witness.leafId === null || typeof value.witness.leafId === "string")
+        && Number.isSafeInteger(value.witness.entries) && value.witness.entries >= 0
+        && typeof value.witness.digest === "string" && /^[a-f0-9]{64}$/.test(value.witness.digest)));
     case "ack": return typeof value.id === "string" && (value.error === undefined || typeof value.error === "string");
     case "failure": return typeof value.error === "string";
     default: return false;

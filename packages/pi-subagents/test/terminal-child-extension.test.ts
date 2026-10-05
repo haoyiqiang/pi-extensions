@@ -156,6 +156,9 @@ function createHarness(options: HarnessOptions = {}) {
     },
     sessionManager: {
       getSessionId: vi.fn(() => options.sessionId ?? targetManifest.run.session.sessionId),
+      getHeader: vi.fn(() => ({ type: "session", version: 3, id: targetManifest.run.session.sessionId, cwd: "/tmp", timestamp: "now" })),
+      getEntries: vi.fn(() => []),
+      getLeafId: vi.fn(() => null),
       getSessionFile: vi.fn(() => options.sessionFile ?? targetManifest.run.session.sessionFile),
       buildSessionProjection: vi.fn(() => ({
         entries: [],

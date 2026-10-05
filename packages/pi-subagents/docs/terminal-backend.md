@@ -13,6 +13,8 @@ configuration switch, or workflow-provider registration for this backend yet.
 - Fresh persisted session and subsequent invocations of an **owned** session handle.
   Resume retains its session ID/file/view and starts a fresh process, surface, run ID,
   feedback channel and artifact directory.
+- Optional managed-session reattach/fork with persisted policy, clean checkpoints and
+  handle-lifetime file leases; see [managed sessions](./managed-sessions.md).
 - JSON Schema structured output, one bounded missing-output recovery, and resolved
   soft/grace/hard turn limits; these policies survive owned-session resume.
 - Completion after the child reports `agent_settled` **and** its process exits.
@@ -20,7 +22,8 @@ configuration switch, or workflow-provider registration for this backend yet.
   turn/usage/compaction feedback, and acknowledged model steering.
 - Cancellation and idempotent shutdown. Startup/bridge failures, cancellation and
   uncertain retirement quarantine the session: the backend will not reopen its file
-  while another writer may remain. Read-only history remains available; external recovery is a later step.
+  while another writer may remain. Read-only history remains available; uncertain/crashed
+  writer recovery remains a later step.
 
 Unsupported requests fail before launch rather than silently selecting embedded or
 losing semantics: non-isolated execution, `inheritContext`, `resumeSessionFile`,
@@ -30,7 +33,7 @@ skills, and discovered extensions, matching the embedded isolated policy.
 
 This is not the long-running interactive handoff mode: a visible Pi terminal may be
 used while the task is running, but the process exits automatically after settlement.
-Claude CLI, cross-session reattach/fork, and automatic backend routing remain deferred.
+Claude CLI, raw/imported-session recovery, crash takeover and automatic backend routing remain deferred.
 
 ## Launch and configuration
 
@@ -154,7 +157,7 @@ uses the actual Pi CLI, a scripted in-process provider, temporary agent director
 and explicit headless surfaces. It must not use API keys or a live mux daemon.
 
 This backend is not a claim of full embedded parity. Before activation, add remaining
-session-store and child-policy capabilities, safe recovery of interrupted sessions,
+cross-backend session-store integration and child-policy capabilities, safe recovery of interrupted sessions,
 configuration routing with sticky backend ownership, full localization, composition
 checks and real terminal/Windows job-object support and smoke validation. Forced
 cancellation can lose feedback/usage not yet flushed by the child. Existing package privacy and

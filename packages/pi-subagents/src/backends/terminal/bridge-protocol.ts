@@ -3,6 +3,7 @@ import { i18n } from "../../i18n.js";
 import type { ExecutionSession, SessionViewEvent, TranscriptMessage } from "../session.js";
 import type { RunReference } from "../session-reference.js";
 import type { SessionStatsLike, LifetimeUsage } from "../../usage.js";
+import type { SessionWitness } from "./session-witness.js";
 
 export const BRIDGE_VERSION = 1;
 export const MAX_BRIDGE_FRAME_BYTES = 16 * 1024 * 1024;
@@ -39,7 +40,7 @@ export type ChildFeedback =
   | { type: "turn"; count: number }
   | { type: "compaction"; info: { reason: "manual" | "threshold" | "overflow"; tokensBefore: number } }
   | { type: "settled"; snapshot: TerminalSnapshot; text: string; aborted: boolean; failure?: string;
-      structuredJson?: string; structuredRetried?: boolean; steered?: boolean }
+      structuredJson?: string; structuredRetried?: boolean; steered?: boolean; witness?: SessionWitness }
   | { type: "ack"; id: string; error?: string }
   | { type: "failure"; error: string };
 

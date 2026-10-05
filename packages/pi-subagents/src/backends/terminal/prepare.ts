@@ -9,7 +9,7 @@ import { detectEnv } from "../../env.js";
 import { i18n } from "../../i18n.js";
 import { STRUCTURED_OUTPUT_TOOL_NAME } from "../../structured-output.js";
 import { buildAgentPrompt, type PromptExtras } from "../../prompts.js";
-import type { AgentConfig, SubagentType, ThinkingLevel } from "../../types.js";
+import type { AgentConfig, EffectiveThinkingLevel, SubagentType } from "../../types.js";
 import { getGraceTurns, resolveDefaultModel, resolveEffectiveMaxTurns } from "../embedded.js";
 import type { PersistentSessionReference } from "../session-reference.js";
 import type { ExecutionRunOptions } from "../types.js";
@@ -46,7 +46,7 @@ export interface TerminalPolicy {
   readonly cwd: string;
   readonly model: Readonly<{ provider: string; id: string }>;
   readonly modelFingerprint?: string;
-  readonly thinkingLevel?: ThinkingLevel;
+  readonly thinkingLevel?: EffectiveThinkingLevel;
   readonly tools: readonly string[];
   readonly systemPrompt: string;
   readonly structuredSchema?: Record<string, unknown>;
@@ -341,11 +341,16 @@ function resolveConfig(config: TerminalBackendConfig): ResolvedTerminalBackendCo
   };
 }
 
-function validatePolicy(policy: TerminalPolicy): void {
-  if (!policy || !nonEmpty(policy.type) || !nonEmpty(policy.name) || !nonEmpty(policy.cwd)
+export function validatePolicy(value: unknown): asserts value is TerminalPolicy {
+  if (!value || typeof value !== "object" || Array.isArray(value)) invalidConfig();
+  const policy = value as TerminalPolicy;
+  if (!nonEmpty(policy.type) || !nonEmpty(policy.name) || !nonEmpty(policy.cwd)
     || !isAbsolute(policy.cwd) || !policy.model || !nonEmpty(policy.model.provider)
     || !nonEmpty(policy.model.id) || typeof policy.systemPrompt !== "string" || !Array.isArray(policy.tools)
-    || policy.tools.some((tool) => !nonEmpty(tool)) || !validTurnBudget(policy.maxTurns, policy.graceTurns)) invalidConfig();
+    || policy.tools.some((tool) => !BUILTIN_TOOL_NAMES.includes(tool)) || new Set(policy.tools).size !== policy.tools.length
+    || (policy.modelFingerprint !== undefined && !/^[a-f0-9]{64}$/.test(policy.modelFingerprint))
+    || (policy.thinkingLevel !== undefined && !["off", "minimal", "low", "medium", "high", "xhigh", "max"].includes(policy.thinkingLevel))
+    || !validTurnBudget(policy.maxTurns, policy.graceTurns)) invalidConfig();
   if (policy.structuredSchema !== undefined) compileTerminalSchema(policy.structuredSchema);
 }
 

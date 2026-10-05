@@ -68,10 +68,14 @@ slice requires POSIX/Bash, `isolated: true` and autonomous completion. JSON Sche
 structured output and soft/grace/hard turn limits now work across fresh and owned-session
 resume runs; each invocation resets capture, retry and turn counters. Resume results
 propagate structured data and abort/steer flags without reusing the previous result.
-Unsupported inheritance, reattach/fork, memory and native Windows fail explicitly.
+Managed clean sessions can now be reattached across backend instances or forked into
+a new identity with canonical branch history and saved policy. A handle-lifetime file
+lease prevents cooperating owners from writing the same transcript. Raw JSONL import,
+crash/uncertain-exit recovery, inheritance, memory and native Windows remain unsupported.
 Completion uses a per-run supervisor receipt rather than spoofable screen text.
 
-See [terminal backend](./docs/terminal-backend.md) for the supported contract and
+See [managed session recovery](./docs/managed-sessions.md) for validator requirements,
+checkpoint/lease behavior and recovery limits; [terminal backend](./docs/terminal-backend.md) for the supported contract and
 [terminal lifecycle](./docs/terminal-lifecycle.md) for the underlying primitive.
 New diagnostics have English/Chinese catalogs; imported embedded strings remain a
 separate migration. There is no user-facing configuration switch yet.

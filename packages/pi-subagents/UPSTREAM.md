@@ -189,3 +189,25 @@ required before production routing.
 
 This supersedes the prior embedded-resume parity deferral. It does not persist policy
 for external reattach/fork, add backend routing, or activate the private package.
+
+## Managed terminal reattach/fork
+
+- Added an optional private restoration port returning idle handles, implemented by
+  terminal for its own clean managed records. Fresh sessions persist portable launch
+  policy and checksum checkpoints; structured restore requires caller validation again.
+- Added canonical file leases with exclusive private owner directories. Ownership
+  spans the handle lifetime, not just a run. Uncertain exits retain quarantine/lease;
+  no PID-based reclamation or bare JSONL adoption is attempted.
+- Strictly validate v3 transcript framing/identity/tree links before public in-memory
+  SDK projection. Fork selects the raw active branch, preserves compaction/context
+  edits and generates a new identity/header without opening or rewriting the source.
+- Checkpoints require both settled feedback and supervised retirement, with immutable
+  prior prefixes. Restored/forked views expose existing canonical history immediately;
+  new invocations retain policy but not prior invocation results.
+- Added deterministic filesystem and real offline CLI restoration tests. Process
+  census retries transient failures within the existing time budget; injected
+  persistent failures still withhold retirement receipts. No public routing switch,
+  root-profile change, legacy product change or release activation.
+
+Embedded restoration-port integration and recovery of dirty/crashed sessions remain
+separate work; see managed-sessions.md for the exact limited recovery contract.
