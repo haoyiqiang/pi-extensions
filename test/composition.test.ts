@@ -34,6 +34,9 @@ test("full profile extensions register together without command, tool, or render
       assert.equal(harness.tools.get("subagent")?.owner, "pi-interactive-subagents");
       assert.equal(harness.commands.get("rewind")?.owner, "pi-rewind");
       assert.equal(harness.commands.get("config:distill")?.owner, "pi-distill");
+      for (const command of ["rename", "config:naming", "naming-config", "pi-naming-config"]) {
+        assert.equal(harness.commands.get(command)?.owner, "pi-spark");
+      }
       assert.ok(harness.events.length > 0);
     } finally {
       resetNoticeRenderer();

@@ -1,20 +1,11 @@
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import { extensionConfigPath, readJsonObject, writeJsonAtomic } from "pi-extensions-config";
+import * as z from "zod";
 import { i18n } from "./i18n.ts";
 
-const PACKAGE_NAME = "pi-naming";
-const CONFIG_FILENAME = "config.json";
 const MAX_TIMER_MS = 2_147_483_647;
 
-/** 思考档位：与 pi-ai 的 ThinkingLevel 一致，优先级由低到高。 */
 export const TITLE_EFFORT_LEVELS = ["minimal", "low", "medium", "high", "xhigh", "max"] as const;
-
 export type TitleEffort = typeof TITLE_EFFORT_LEVELS[number];
 
-/** 标题请求的默认输出预算；推理模型的思考与标题共享该额度。 */
-const DEFAULT_TITLE_MAX_TOKENS = 2048;
-/** 标题请求的默认思考档位；命名不需要高强度推理。 */
-const DEFAULT_TITLE_EFFORT: TitleEffort = "low";
 const NAMING_SWITCHES = ["automaticNaming", "manualNaming"] as const;
 const TARGET_KEYS = ["session", "workspace", "tab"] as const;
 
@@ -34,8 +25,8 @@ export const DEFAULT_TITLE_CONFIG: Readonly<TitleConfig> = Object.freeze({
   language: "auto",
   instructions: "",
   timeoutMs: 10_000,
-  maxTokens: DEFAULT_TITLE_MAX_TOKENS,
-  effort: DEFAULT_TITLE_EFFORT,
+  maxTokens: 2048,
+  effort: "low",
 });
 
 export interface NamingConfig {
@@ -45,29 +36,25 @@ export interface NamingConfig {
   title: TitleConfig;
 }
 
-/** 配置字段错误直接报告，不忽略拼写错误或非法值。 */
 function invalid(field: string): never {
   throw new Error(i18n.t("namingConfigInvalidField", { field }));
 }
 
-/** 验证非空普通配置对象，拒绝数组和基础类型。 */
 function object(value: unknown, field: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) invalid(field);
   return value as Record<string, unknown>;
 }
 
-/** 只允许正安全整数，避免小数、无穷大和隐式类型转换。 */
 function positiveInteger(value: unknown, field: string): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) invalid(field);
   return value;
 }
 
-/** 判断配置值是否为受支持的思考档位。 */
 export function isTitleEffort(value: unknown): value is TitleEffort {
   return TITLE_EFFORT_LEVELS.some((level) => level === value);
 }
 
-/** 校验配置字段与取值，为省略的字段补齐默认值。 */
+/** Strict validation; only omitted fields receive defaults. No file I/O lives here. */
 export function parseConfig(value: unknown): NamingConfig {
   const raw = object(value, "config");
   const allowed = new Set<string>([...NAMING_SWITCHES, "targets", "title"]);
@@ -111,24 +98,12 @@ export function parseConfig(value: unknown): NamingConfig {
   };
 }
 
-/** 返回当前 Pi agent 目录下的命名配置路径。 */
-export function configPath(
-  agentDir = getAgentDir(),
-): string {
-  return extensionConfigPath(PACKAGE_NAME, CONFIG_FILENAME, agentDir);
-}
-
-/** 将经过校验的配置完整写入配置文件，供配置斜杠命令使用。 */
-export function saveConfig(
-  config: NamingConfig,
-  path = configPath(),
-): void {
-  writeJsonAtomic(path, config);
-}
-
-/** 仅缺少配置文件时采用默认值，读取和解析错误交给入口报告。 */
-export function loadConfig(
-  path = configPath(),
-): NamingConfig {
-  return parseConfig(readJsonObject(path) ?? {});
-}
+/** Keep Spark's safeParse contract without replacing invalid naming fields with defaults. */
+export const namingConfigSchema = z.unknown().transform((value, ctx): NamingConfig => {
+  try {
+    return parseConfig(value);
+  } catch (error) {
+    ctx.addIssue({ code: "custom", message: error instanceof Error ? error.message : String(error) });
+    return z.NEVER;
+  }
+});

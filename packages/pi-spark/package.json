@@ -1,7 +1,7 @@
 {
   "name": "pi-spark",
   "version": "0.28.0",
-  "description": "Pi package for a compact TUI, clean transcript, credits, presets, recap, metrics, and session resources",
+  "description": "Pi package for a compact TUI, clean transcript, credits, presets, recap, metrics, naming, and session resources",
   "type": "module",
   "main": "./index.ts",
   "exports": {
@@ -16,6 +16,7 @@
     "docs",
     "README.md",
     "README.zh-CN.md",
+    "config.example.json",
     "CHANGELOG.md",
     "LICENSE.md"
   ],
@@ -66,6 +67,7 @@
     "clean-mode",
     "transcript",
     "resources",
+    "naming",
     "autocomplete",
     "theme"
   ],
@@ -78,7 +80,8 @@
     "pretty-ms": "^9.3.0",
     "zod": "^4.4.3",
     "pi-extensions-config": "^0.1.0",
-    "pi-extensions-i18n": "^0.8.0"
+    "pi-extensions-i18n": "^0.8.0",
+    "pi-terminal-mux": "^0.6.5"
   },
   "peerDependencies": {
     "@earendil-works/pi-agent-core": ">=0.87.0 <1.0.0",

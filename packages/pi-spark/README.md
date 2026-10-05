@@ -96,6 +96,33 @@ Typing `#` at a token boundary opens a tabbed picker above the spark editor. It 
 - Set `resources` to `false` to disable it. An old `extensions/pi-session-resources/config.json` with `"enabled": false` is used only when `spark.json` does not set `resources`.
 - Remove `npm:pi-session-resources` if it is still installed, or the command names conflict.
 
+### Session and terminal naming
+
+Naming is now a Spark feature, migrated from `pi-naming`.
+
+- The first real user input in a new, unnamed session generates a title in the background. Automatic naming attempts once, never overwrites an existing title, and ignores extension-injected input.
+- `/rename [name]` applies an explicit name or generates one from **all user messages on the current branch**. Later corrections take precedence; procedural follow-ups such as “continue” do not replace the main topic.
+- `/config:naming` opens the settings menu; `/config:naming reset` restores defaults. `/naming-config` and `/pi-naming-config` remain aliases.
+- `naming.targets` independently controls the Pi session, workspace and tab. Set both terminal targets to `false` for session-only naming without loading the terminal adapter. Set `naming: false` to disable automatic and manual naming.
+- Naming uses the current Pi model/authentication and makes a separate background request. OpenAI Codex requests use isolated UUIDv7 sessions and clean them up afterwards. Generated names obey the length limit; explicit names are not truncated.
+- Manual requests supersede pending automatic requests. Session changes invalidate pending results and errors. Failed or unsupported terminal targets do not prevent the other targets from being named.
+
+`pi-terminal-mux` stays an independent, automatically installed library. It executes terminal operations; Spark owns title generation and naming policy. Child terminal ownership comes from `PI_TERMINAL_RENAME_CONTEXT`: shared or unidentified targets are skipped, never replaced with the current focus. Restricted children cannot rename a shared workspace. Spark requires a mux version exporting `resolveTerminalRenameTargets` and `renameTerminalTarget`; release CI publishes terminal-mux before Spark and verifies the dependency range is available on npm.
+
+#### Migrating from pi-naming
+
+Remove the old extension to avoid duplicate commands and automatic requests:
+
+```bash
+pi remove npm:pi-naming
+```
+
+Also remove any explicit old entrypoint from extension lists, then `/reload`. If installed in project scope, remove the corresponding local package declaration too. This repository no longer loads or publishes the standalone package; previously published npm versions are not changed.
+
+When **neither** global nor project `spark.json` defines `naming`, Spark reads `<agent-dir>/extensions/pi-naming/config.json` as a read-only fallback. Any canonical section, including `{}` or `false`, takes precedence over the entire legacy config. The config menu writes only `spark.json`, preserves other features, and writes the project file when that file explicitly owns `naming`; otherwise it writes the global file. Invalid naming settings or unreadable configuration disable naming rather than unexpectedly starting model requests.
+
+To enable naming in isolated Pi subagents, explicitly load the installed Spark entrypoint in their extension allowlist. This also loads Spark's other features: disable unwanted features in the applicable `spark.json`. Installing Spark only in the parent does not bypass child isolation.
+
 ### Recap
 
 pi-spark generates a short recap of the current session after it goes idle, or on demand, inspired by [Claude Code's session recap](https://code.claude.com/docs/en/interactive-mode#session-recap).
@@ -108,7 +135,7 @@ pi-spark generates a short recap of the current session after it goes idle, or o
 
 ## Configuration
 
-pi-spark reads config from `~/.pi/agent/spark.json` and from the current project's `.pi/spark.json`. Project config overrides matching global fields.
+pi-spark reads config from `~/.pi/agent/spark.json` and from the current project's `.pi/spark.json`. Project config overrides matching global fields. The agent directory respects `PI_CODING_AGENT_DIR`. See [config.example.json](./config.example.json) for naming defaults.
 
 For example:
 
@@ -150,6 +177,7 @@ All fields are optional. Each top-level feature runs with the defaults below unl
 | `editor` | `EditorConfig` | Shows a working indicator and the current model on the editor's top border. |
 | `footer` | `FooterConfig` | Shows session info, extension statuses, cost, and context usage. |
 | `metrics` | `MetricsConfig` | Shows elapsed time and records TPS, TTFT, token, and cost telemetry. |
+| `naming` | `NamingConfig` | Automatic titles and `/rename` for sessions and owned terminal targets. |
 | `resources` | `{}` | Enables the `#` session resource picker. Set it to `false` to disable the picker. |
 | `presets` | `{ [name]: Preset }` | Defines named model presets, keyed by name. |
 | `recap` | `RecapConfig` | Generates a session recap when idle or on demand. |
@@ -219,6 +247,22 @@ The `statusPosition` field is optional and defaults to `inline`.
 |  | `live` | Emits one line at the end of each turn. |
 
 Set `metrics` to `false` to disable both the elapsed label and telemetry.
+
+#### `NamingConfig`
+
+All fields are optional. `automaticNaming` and `manualNaming` default to `true`; `targets.session`, `targets.workspace` and `targets.tab` also default to `true`.
+
+| `title` field | Default | Meaning |
+| --- | --- | --- |
+| `maxLength` | `15` | Maximum generated Unicode code points. |
+| `preferredLength` | `10` | Requested preferred length; must not exceed `maxLength`. |
+| `language` | `"auto"` | Dominant message language, or a language such as `"English"`. Independent of UI locale. |
+| `instructions` | `""` | Additional naming style instructions, not a template or executable code. |
+| `timeoutMs` | `10000` | Request timeout; positive safe integer no greater than `2147483647`. |
+| `maxTokens` | `2048` | Output budget, capped by the model limit; reasoning and title share it. |
+| `effort` | `"low"` | `minimal`, `low`, `medium`, `high`, `xhigh` or `max`. |
+
+Length and token limits are independent positive safe integers. For longer English titles, use `maxLength: 60`, `preferredLength: 40`, `language: "English"`. Unknown naming fields and invalid values are rejected. Run `/reload` after configuration changes.
 
 #### `Preset`
 

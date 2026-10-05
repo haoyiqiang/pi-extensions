@@ -5,6 +5,7 @@ import { creditsConfigSchema } from "../features/credits/config";
 import { editorConfigSchema } from "../features/editor/config";
 import { footerConfigSchema } from "../features/footer/config";
 import { metricsConfigSchema } from "../features/metrics/config";
+import { namingConfigSchema } from "../features/naming/config";
 import { presetsConfigSchema } from "../features/presets/config";
 import { recapConfigSchema } from "../features/recap/config";
 import { resourcesConfigSchema } from "../features/session-resources/config";
@@ -20,6 +21,7 @@ export const featureSchemas = {
   editor: editorConfigSchema,
   footer: footerConfigSchema,
   metrics: metricsConfigSchema,
+  naming: namingConfigSchema,
   presets: presetsConfigSchema,
   recap: recapConfigSchema,
   resources: resourcesConfigSchema,

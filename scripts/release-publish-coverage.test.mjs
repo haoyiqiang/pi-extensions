@@ -20,9 +20,8 @@ test("真实发布工作流覆盖分波 matrix 与专用自动发布 job，并�
     "packages/pi-blackhole",
     "packages/pi-context-view",
     "packages/pi-rewind",
-    "packages/pi-spark",
     "packages/pi-terminal-mux",
-    "packages/pi-naming",
+    "packages/pi-spark",
     "packages/pi-interactive-subagents",
   ]);
 });
@@ -31,18 +30,18 @@ test("registry 验证 step 不是发布覆盖", () => {
   const source = workflow(`
   verify-only:
     steps:
-      - working-directory: packages/pi-naming
+      - working-directory: packages/pi-spark
         run: npm view pi-terminal-mux version
 `);
   assert.deepEqual(collectPublishedPackageDirectories(source), []);
 });
 
-test("删除专用 mux publish step 或 naming matrix 项后不再报告对应覆盖", () => {
+test("删除专用 mux publish step 或 spark matrix 项后不再报告对应覆盖", () => {
   const source = readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
   const withoutMux = source.replace(/\n      - name: Publish to npm\n        working-directory: packages\/pi-terminal-mux\n        run: \|[\s\S]*?\n          fi\n/, "\n");
   assert.ok(!collectPublishedPackageDirectories(withoutMux).includes("packages/pi-terminal-mux"));
-  const withoutNaming = source.replace("\n          - dir: packages/pi-naming", "");
-  assert.ok(!collectPublishedPackageDirectories(withoutNaming).includes("packages/pi-naming"));
+  const withoutSpark = source.replace("\n          - dir: packages/pi-spark", "");
+  assert.ok(!collectPublishedPackageDirectories(withoutSpark).includes("packages/pi-spark"));
 });
 
 test("只有 matrix 而没有 publish step 不算发布覆盖", () => {

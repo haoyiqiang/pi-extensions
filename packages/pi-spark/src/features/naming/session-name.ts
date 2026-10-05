@@ -1,5 +1,4 @@
-import { cleanupSessionResources, uuidv7, type Api, type Context, type Model } from "@earendil-works/pi-ai";
-import { completeSimple } from "@earendil-works/pi-ai/compat";
+import { cleanupSessionResources, uuidv7, type Api, type AssistantMessage, type Context, type Model } from "@earendil-works/pi-ai";
 import type {
   ExtensionContext,
   SessionEntry,
@@ -11,9 +10,13 @@ import { DEFAULT_TITLE_CONFIG, type TitleConfig } from "./config.ts";
 export type SessionNameContext = Pick<ExtensionContext, "model" | "modelRegistry" | "sessionManager">;
 
 /** 可注入的标题 completion，便于终端消费者和测试复用同一套请求逻辑。 */
-export type SessionNameCompletion = (...args: Parameters<typeof completeSimple>) => ReturnType<typeof completeSimple>;
+export type SessionNameCompletion = (
+  model: Model<Api>,
+  context: Context,
+  options?: Parameters<ExtensionContext["modelRegistry"]["streamSimple"]>[2],
+) => Promise<AssistantMessage>;
 
-type SessionNameModel = Parameters<SessionNameCompletion>[0];
+type SessionNameModel = Model<Api>;
 
 /** 计算标题请求的输出预算：取配置的预算与模型输出上限的较小值。 */
 export function resolveTitleMaxTokens(

@@ -1,9 +1,11 @@
 import { autoCollectEvents } from "./src/events";
+import { clearConfigCache } from "./src/config";
 import registerCleanMode from "./src/features/clean-mode";
 import { registerCredits } from "./src/features/credits";
 import { registerEditor } from "./src/features/editor";
 import { registerFooter } from "./src/features/footer";
 import { registerMetrics } from "./src/features/metrics";
+import { registerNamingFeature } from "./src/features/naming";
 import { registerPresets } from "./src/features/presets";
 import { registerRecap } from "./src/features/recap";
 import { registerSessionResources } from "./src/features/session-resources";
@@ -19,6 +21,7 @@ export default function (pi: ExtensionAPI) {
   // Own the event-bus subscription lifecycle here so features never manage cleanup themselves;
   // the collector disposes every subscription on session_shutdown.
   const events = autoCollectEvents(pi);
+  pi.on("session_start", () => { clearConfigCache(); });
 
   registerCleanMode(pi);
   registerCredits(pi);
@@ -26,6 +29,7 @@ export default function (pi: ExtensionAPI) {
   registerEditor(pi, events);
   registerFooter(pi);
   registerMetrics(pi);
+  registerNamingFeature(pi);
   registerPresets(pi);
   registerRecap(pi);
 }

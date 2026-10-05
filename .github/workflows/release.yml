@@ -141,7 +141,6 @@ jobs:
           - dir: packages/pi-blackhole
           - dir: packages/pi-context-view
           - dir: packages/pi-rewind
-          - dir: packages/pi-spark
     steps:
       - uses: actions/checkout@v4
 
@@ -221,7 +220,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - dir: packages/pi-naming
+          - dir: packages/pi-spark
           - dir: packages/pi-interactive-subagents
     steps:
       - uses: actions/checkout@v4

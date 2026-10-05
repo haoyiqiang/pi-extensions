@@ -2,7 +2,7 @@
 
 > This document was generated with the [Pi](https://pi.dev/) coding agent.
 >
-> Session title generation has been removed from this package. `pi-naming` owns session and terminal naming. The investigation below records the July 2026 behavior, when title generation still existed.
+> Session and terminal naming now live in Spark's `naming` feature, migrated from `pi-naming`. Current naming and recap requests use `ctx.modelRegistry.streamSimple(...).result()` with isolated Codex sessions. The investigation below records the historical July 2026 behavior and its older `completeSimple()` call sites, not the current request API.
 
 In pi-spark, recap calls the model outside Pi's main agent loop. It sends a small, independent conversation through `completeSimple()` and persists only the resulting text and usage.
 

@@ -6,7 +6,7 @@ This repository publishes independently installable Pi extensions and a small se
 
 ### Product and experience packages
 
-- `pi-spark` owns the compact editor/footer, transcript folding, credits, presets, recap, metrics, and session resources.
+- `pi-spark` owns the compact editor/footer, transcript folding, credits, presets, recap, metrics, session resources, and automatic/manual session and terminal naming.
 - `pi-blackhole` owns deterministic compaction, observational memory, and raw-session recall.
 - `@maplezzk/pi-interactive-subagents` owns subagent processes, persistent child sessions, terminal surfaces, and the subagent widget.
 
@@ -17,7 +17,6 @@ These packages may depend on foundations but must not depend on one another.
 - `pi-distill` transforms verbose tool results before the next model turn.
 - `@maplezzk/pi-web-search` owns web search, URL Context, and bounded fetch tools.
 - `pi-models-discovery` owns dynamic provider model discovery.
-- `pi-naming` owns session and terminal naming.
 - `pi-rewind` owns Git-backed file and conversation restore.
 - `pi-context-view` passively inspects context composition.
 
@@ -27,7 +26,7 @@ Capability packages may depend on foundations but must not depend on product pac
 
 - `pi-extensions-config` owns portable agent-dir paths, JSON object reads, atomic writes, and preserving updates.
 - `pi-extensions-i18n` owns locale state, catalogs, and the shared notice outlet.
-- `pi-terminal-mux` exposes the terminal-surface abstraction used by naming and subagents.
+- `pi-terminal-mux` exposes the terminal-surface abstraction used by Spark naming and subagents. It executes terminal operations without title-generation or extension-registration policy.
 
 Foundations must not depend on product or capability packages. A new foundation belongs here only after at least three real consumers need the same stable mechanism.
 
@@ -51,7 +50,7 @@ selected feature packages ─────→ pi-extensions-config
 feature packages ───────────────→ pi-extensions-i18n
 pi-extensions-i18n ─────────────→ pi-extensions-config
 pi-terminal-mux ────────────────→ pi-extensions-i18n
-pi-naming ──────────────────────→ pi-terminal-mux
+pi-spark ───────────────────────→ pi-terminal-mux
 @maplezzk/pi-interactive-subagents → pi-terminal-mux
 @maplezzk/pi-subagents (private) ─→ pi-extensions-i18n / pi-terminal-mux
 ```
@@ -60,7 +59,7 @@ Runtime code imports sibling packages by their public npm name. It must not impo
 
 ## UI ownership
 
-- `pi-spark` is the only package that replaces the editor or footer and the only owner of core transcript folding.
+- `pi-spark` is the only package that replaces the editor or footer and the only owner of core transcript folding. It also owns `/rename`, automatic naming and `/config:naming`; do not restore the retired standalone `pi-naming` entry.
 - `@maplezzk/pi-interactive-subagents` owns the subagent widget and subagent result entries.
 - `pi-extensions-i18n` owns the shared notice entry renderer.
 - `pi-distill` owns its audit entry renderer.

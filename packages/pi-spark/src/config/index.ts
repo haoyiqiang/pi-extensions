@@ -1,10 +1,11 @@
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { defu } from "defu";
+import { readJsonObjectResult } from "pi-extensions-config";
 
 import { readLegacyCleanModeConfig } from "./legacy-clean-mode";
 import { readLegacyMetricsConfig } from "./legacy-metrics";
+import { readLegacyNamingConfig } from "./legacy-naming";
 import { readLegacySessionResourcesConfig } from "./legacy-resources";
 import { featureSchemas } from "./schema";
 import { i18n, NOTICE_SOURCE } from "../i18n";
@@ -30,8 +31,27 @@ export function loadConfig(ctx: ExtensionContext): SparkConfig {
   // Deep-merge the global file under the project file, so project settings win at scalar
   // leaves while deep objects (e.g., `recap.model`) combine across both.
   const [globalPath, projectPath] = getConfigPaths(ctx.cwd, CONFIG_FILE);
-  const raw = defu(readJson(projectPath) ?? {}, readJson(globalPath) ?? {});
+  const global = readJsonObjectResult(globalPath);
+  const project = readJsonObjectResult(projectPath);
+  const globalRaw = global.status === "loaded" ? global.value : {};
+  const projectRaw = project.status === "loaded" ? project.value : {};
+  const raw = defu(projectRaw, globalRaw);
   const errors: string[] = [];
+  const namingErrors: string[] = [];
+  for (const [path, result] of [[globalPath, global], [projectPath, project]] as const) {
+    if (result.status === "invalid") namingErrors.push(`${path}: ${result.error.message}`);
+  }
+  // Unlike defu, preserve null/invalid naming values so they fail validation, not enable defaults.
+  raw.naming = mergeNaming(globalRaw.naming, projectRaw.naming);
+  if (namingErrors.length === 0 && !Object.hasOwn(globalRaw, "naming") && !Object.hasOwn(projectRaw, "naming")) {
+    const legacy = readLegacyNamingConfig();
+    if (legacy.error) namingErrors.push(legacy.error);
+    else raw.naming = legacy.value ?? {};
+  }
+  if (namingErrors.length > 0) {
+    raw.naming = false;
+    errors.push(i18n.t("naming.namingConfigFailed", { error: namingErrors.join("; ") }));
+  }
   if (raw.cleanMode === undefined) {
     const legacy = readLegacyCleanModeConfig();
     if (legacy.error) errors.push(legacy.error);
@@ -48,8 +68,7 @@ export function loadConfig(ctx: ExtensionContext): SparkConfig {
     else if (legacy.value === false) raw.resources = false;
   }
 
-  // Validate each feature independently so a single invalid field disables only that feature
-  // (falling back to its enabled defaults) instead of taking down the whole config.
+  // Validate independently. Naming fails closed; other features retain their default fallback.
   const config = {} as Record<keyof SparkConfig, unknown>;
 
   for (const field of Object.keys(featureSchemas) as (keyof SparkConfig)[]) {
@@ -71,8 +90,9 @@ export function loadConfig(ctx: ExtensionContext): SparkConfig {
       continue;
     }
 
-    config[field] = {};
-    errors.push(result.error.issues.map((issue) => `${[field, ...issue.path].join(".")}: ${issue.message}`).join("; "));
+    config[field] = field === "naming" ? false : {};
+    const error = result.error.issues.map((issue) => `${[field, ...issue.path].join(".")}: ${issue.message}`).join("; ");
+    errors.push(field === "naming" ? i18n.t("naming.namingConfigFailed", { error }) : error);
   }
 
   if (errors.length > 0) {
@@ -87,10 +107,16 @@ function getConfigPaths(cwd: string, fileName: string): [globalPath: string, pro
   return [join(getAgentDir(), fileName), join(cwd, CONFIG_DIR_NAME, fileName)];
 }
 
-function readJson(path: string): Record<string, unknown> | undefined {
-  try {
-    return JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
-  } catch {
-    return undefined;
+/** Merge only known nested naming sections; never coerce invalid scalars or concatenate arrays. */
+function mergeNaming(global: unknown, project: unknown): unknown {
+  if (!isObject(global) || !isObject(project)) return project === undefined ? global : project;
+  const merged = { ...global, ...project };
+  for (const key of ["targets", "title"] as const) {
+    if (isObject(global[key]) && isObject(project[key])) merged[key] = { ...global[key], ...project[key] };
   }
+  return merged;
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }

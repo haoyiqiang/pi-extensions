@@ -12,9 +12,10 @@ import {
   type SessionNameCompletion,
   type SessionNameRequest,
   type SessionNameRequester,
-} from "../src/session-name.ts";
+} from "../src/features/naming/session-name.ts";
 
-import { parseConfig } from "../src/config.ts";
+import { parseConfig } from "../src/features/naming/config.ts";
+import { registerSessionResourceCleanup, type AssistantMessage } from "@earendil-works/pi-ai";
 
 /** 构造最小化的用户消息 session 条目，供提取逻辑测试使用。 */
 function userEntry(id: string, content: unknown): SessionEntry {
@@ -224,4 +225,119 @@ test("自定义标题长度支持较长英文标题与 Unicode", () => {
   const name = "Investigate session naming configuration";
   assert.equal(normalizeSessionName(name, 60), name);
   assert.equal(normalizeSessionName("😀".repeat(8), 4), "😀".repeat(4));
+});
+
+function response(stopReason: AssistantMessage["stopReason"] = "stop"): AssistantMessage {
+  return {
+    role: "assistant", content: [{ type: "text", text: '"Registry title"' }],
+    api: "openai-responses", provider: "test", model: "title-model", stopReason,
+    errorMessage: stopReason === "stop" ? undefined : "provider failure",
+    usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+    timestamp: 0,
+  };
+}
+
+test("production title requests use the active model registry and preserve request settings", async () => {
+  const calls: string[] = [];
+  const model = { api: "openai-responses", provider: "test", id: "title-model", baseUrl: "https://example.com/v1", maxTokens: 4096 };
+  const controller = new AbortController();
+  const ctx = {
+    model,
+    modelRegistry: {
+      getApiKeyAndHeaders: async (requestedModel: unknown) => {
+        assert.equal(requestedModel, model);
+        calls.push("auth");
+        return { ok: true, apiKey: "test-key", headers: { "x-test": "1" }, env: {} };
+      },
+      streamSimple: (requestedModel: unknown, context: Parameters<SessionNameCompletion>[1], options: Parameters<SessionNameCompletion>[2]) => {
+        calls.push("streamSimple");
+        assert.equal(requestedModel, model);
+        assert.equal(options?.sessionId, undefined);
+        assert.equal(options?.signal, controller.signal);
+        assert.equal(options?.maxTokens, 600);
+        assert.equal(options?.reasoning, "minimal");
+        assert.match(context.systemPrompt ?? "", /English/);
+        assert.match(context.systemPrompt ?? "", /Keep API names/);
+        return { result: async () => { calls.push("result"); return response(); } };
+      },
+    },
+  } as unknown as SessionNameRequest["ctx"];
+  const title = parseConfig({ title: { maxTokens: 600, effort: "minimal", language: "English", instructions: "Keep API names" } }).title;
+  assert.equal(await requestSessionName({ userMessages: ["Main task", "Actually fix API retries", "Continue"], ctx, title, signal: controller.signal }), "Registry title");
+  assert.deepEqual(calls, ["auth", "streamSimple", "result"]);
+});
+
+test("Codex title calls use unique uuidv7 sessions and always clean them up", async () => {
+  const used: string[] = [];
+  const cleaned: Array<string | undefined> = [];
+  const dispose = registerSessionResourceCleanup((sessionId) => { cleaned.push(sessionId); });
+  try {
+    for (const outcome of ["success", "error", "aborted", "throw", "stream-throw"] as const) {
+      const ctx = {
+        model: { api: "openai-codex-responses", provider: "openai-codex", id: "title-model", maxTokens: 4096 },
+        sessionManager: { getSessionId: () => "main-session" },
+        modelRegistry: {
+          getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "oauth-test-token" }),
+          streamSimple: (_model: unknown, _context: unknown, options: { sessionId: string }) => {
+            used.push(options.sessionId);
+            assert.notEqual(options.sessionId, "main-session");
+            assert.match(options.sessionId, /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+            if (outcome === "stream-throw") throw new Error("stream startup failed");
+            return { result: async () => {
+              if (outcome === "throw") throw new Error("transport failed");
+              return response(outcome === "success" ? "stop" : outcome);
+            } };
+          },
+        },
+      } as unknown as SessionNameRequest["ctx"];
+      const request = requestSessionName({ userMessages: ["Task"], ctx });
+      if (outcome === "success") assert.equal(await request, "Registry title");
+      else await assert.rejects(request, /provider failure|transport failed|stream startup failed/);
+      assert.deepEqual(cleaned, used);
+    }
+    assert.equal(new Set(used).size, used.length);
+  } finally {
+    dispose();
+  }
+});
+
+test("Codex timeout aborts the registry request and cleans its isolated session", async () => {
+  let session: string | undefined;
+  let signal: AbortSignal | undefined;
+  const cleaned: Array<string | undefined> = [];
+  const dispose = registerSessionResourceCleanup((id) => { cleaned.push(id); });
+  try {
+    const ctx = {
+      model: { api: "openai-codex-responses", provider: "openai-codex", id: "title-model", maxTokens: 4096 },
+      modelRegistry: {
+        getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "oauth-test-token" }),
+        streamSimple: (_model: unknown, _context: unknown, options: { sessionId: string; signal: AbortSignal }) => {
+          session = options.sessionId;
+          signal = options.signal;
+          return { result: () => new Promise<AssistantMessage>((resolve) => {
+            options.signal.addEventListener("abort", () => resolve(response("aborted")), { once: true });
+          }) };
+        },
+      },
+    } as unknown as SessionNameRequest["ctx"];
+    await assert.rejects(requestSessionNameWithTimeout({ userMessages: ["Task"], ctx, timeoutMs: 5 }), /timed out|超时/);
+    assert.equal(signal?.aborted, true);
+    assert.equal(typeof session, "string");
+    assert.deepEqual(cleaned, [session]);
+  } finally {
+    dispose();
+  }
+});
+
+test("auth failures and missing user messages never reach the registry transport", async () => {
+  const ctx = {
+    model: { api: "openai-responses", provider: "test", id: "title-model", maxTokens: 4096 },
+    modelRegistry: {
+      getApiKeyAndHeaders: async () => ({ ok: false, error: "missing key" }),
+      streamSimple: () => assert.fail("transport must not run"),
+    },
+  } as unknown as SessionNameRequest["ctx"];
+  await assert.rejects(requestSessionName({ userMessages: ["Task"], ctx }), /missing key/);
+  await assert.rejects(requestSessionName({ userMessages: [], ctx }), /no user messages|没有可用于/);
 });

@@ -1,15 +1,10 @@
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { TerminalRenameOutcome, TerminalRenameTarget, ResolveRenameOptions } from "pi-terminal-mux";
-import { configPath, isTitleEffort, loadConfig, parseConfig, saveConfig, TITLE_EFFORT_LEVELS, type NamingConfig } from "./config.ts";
+import { isTitleEffort, parseConfig, TITLE_EFFORT_LEVELS, type NamingConfig } from "./config.ts";
+import { loadNamingConfig, namingConfigPath, saveNamingConfig } from "../../config/naming-store.ts";
+import { NOTICE_SOURCE } from "../../i18n.ts";
 import { i18n } from "./i18n.ts";
-import { NOTICE_TAG_COLOR, installNoticeRenderer, notifyWithSource, type NoticeColor, type NoticeSource } from "pi-extensions-i18n";
-
-/** 本扩展的提示标签；短且唯一，便于在会话里定位来源。 */
-const NOTICE_TAG = "naming";
-/** 提示标签颜色：所有扩展统一用弱化色，来源靠 tag 文本区分，不靠颜色。 */
-const NOTICE_COLOR: NoticeColor = NOTICE_TAG_COLOR;
-/** 本扩展的提示来源。 */
-const NOTICE_SOURCE: NoticeSource = { tag: NOTICE_TAG, color: NOTICE_COLOR };
+import { notifyWithSource } from "pi-extensions-i18n";
 import { getCurrentSessionUserMessages, requestSessionNameWithTimeout, type SessionNameRequester } from "./session-name.ts";
 
 const RENAME_COMMAND = "rename";
@@ -34,7 +29,7 @@ const PREFERRED_LENGTH_PRESETS = ["10", "20", "40"] as const;
 const LANGUAGE_PRESETS = ["auto", "中文", "English", "日本語"] as const;
 const TIMEOUT_PRESETS = ["5000", "10000", "30000"] as const;
 const MAX_TOKENS_PRESETS = ["1024", "2048", "4096"] as const;
-const MESSAGE_TYPE = "pi-naming";
+const MESSAGE_TYPE = "pi-spark";
 
 export interface TerminalNamingAdapter {
   resolve(options: ResolveRenameOptions): TerminalRenameOutcome[];
@@ -55,20 +50,28 @@ function errorMessage(error: unknown): string {
 /** 无交互 UI 时仍通过 Pi 消息报告结果，不静默吞错。 */
 function report(pi: ExtensionAPI, ctx: ExtensionContext, notice: { message: string; level: "info" | "warning" | "error" }): void {
   const { message, level } = notice;
-  if (ctx.hasUI) notifyWithSource({ ctx, source: NOTICE_SOURCE, level, message });
-  else pi.sendMessage({ customType: MESSAGE_TYPE, content: message, display: true }, { triggerTurn: false });
+  const noticeContext = ctx.hasUI ? ctx : {
+    ...ctx,
+    ui: {
+      ...ctx.ui,
+      notify: (content: string) => pi.sendMessage(
+        { customType: MESSAGE_TYPE, content, display: true }, { triggerTurn: false },
+      ),
+    },
+  };
+  notifyWithSource({ ctx: noticeContext, source: NOTICE_SOURCE, level, message });
 }
 
 export interface NamingConfigStore {
-  load(): NamingConfig;
-  save(config: NamingConfig): void;
-  path(): string;
+  load(ctx: ExtensionContext): NamingConfig | false;
+  save(config: NamingConfig, ctx: ExtensionContext): string | void;
+  path(ctx: ExtensionContext): string;
 }
 
 /** 注册配置命令，通过 TUI 菜单和输入框修改命名配置。 */
 export function registerNamingConfigCommand(
   pi: ExtensionAPI,
-  store: NamingConfigStore = { load: loadConfig, save: saveConfig, path: configPath },
+  store: NamingConfigStore = { load: loadNamingConfig, save: saveNamingConfig, path: namingConfigPath },
 ): void {
   const command = {
     description: i18n.t("configCommandDescription"),
@@ -81,9 +84,9 @@ export function registerNamingConfigCommand(
       }
       if (argument === CONFIG_RESET_COMMAND) {
         try {
-          store.save(parseConfig({}));
+          const path = store.save(parseConfig({}), ctx) ?? store.path(ctx);
           report(pi, ctx, {
-            message: i18n.t("configCommandSaved", { path: store.path() }),
+            message: i18n.t("configCommandSaved", { path }),
             level: "info",
           });
         } catch (error) {
@@ -98,7 +101,12 @@ export function registerNamingConfigCommand(
 
       let config: NamingConfig;
       try {
-        config = store.load();
+        const loaded = store.load(ctx);
+        if (loaded === false) {
+          report(pi, ctx, { message: i18n.t("namingDisabled"), level: "info" });
+          return;
+        }
+        config = loaded;
       } catch (error) {
         report(pi, ctx, { message: i18n.t("configCommandInvalid", { error: errorMessage(error) }), level: "error" });
         return;
@@ -107,9 +115,9 @@ export function registerNamingConfigCommand(
       /** Saves one validated menu change and reports its result. */
       const save = (next: NamingConfig): boolean => {
         try {
-          store.save(next);
+          const path = store.save(next, ctx) ?? store.path(ctx);
           config = next;
-          report(pi, ctx, { message: i18n.t("configCommandSaved", { path: store.path() }), level: "info" });
+          report(pi, ctx, { message: i18n.t("configCommandSaved", { path }), level: "info" });
           return true;
         } catch (error) {
           report(pi, ctx, { message: i18n.t("configCommandInvalid", { error: errorMessage(error) }), level: "error" });
@@ -118,10 +126,6 @@ export function registerNamingConfigCommand(
       };
       /** Formats a boolean setting for the localized menu label. */
       const toggle = (value: boolean): string => value ? i18n.t("configOn") : i18n.t("configOff");
-      /** Opens one text input for a scalar title setting. */
-      const editText = async (title: string, current: string): Promise<string | undefined> =>
-        ctx.ui.input(title, current);
-
       /** Opens a choice list for common values and falls back to text only for custom values. */
       const chooseSettingValue = async (
         title: string,
@@ -235,60 +239,111 @@ export function registerNamingConfigCommand(
   for (const name of CONFIG_COMMAND_ALIASES) pi.registerCommand(name, command);
 }
 
-/** 按配置组合统一的自动/手动入口，可注入模型和终端替身做组合测试。 */
-export async function registerNaming(
+export type NamingConfigSelection = NamingConfig | false;
+export type NamingConfigGetter = (ctx: ExtensionContext) => NamingConfigSelection;
+
+interface SessionNamingState {
+  eligible: boolean;
+  attempted: boolean;
+}
+
+/** Register once; configuration and eligibility belong to the active session, not the factory. */
+export function registerNaming(
   pi: ExtensionAPI,
-  config: NamingConfig,
+  selection: NamingConfigSelection | NamingConfigGetter,
   dependencies: { requestName?: SessionNameRequester; loadTerminal?: () => Promise<TerminalNamingAdapter> } = {},
-): Promise<void> {
+): void {
   const { requestName, loadTerminal = loadTerminalAdapter } = dependencies;
-  if ((!config.automaticNaming && !config.manualNaming) || !Object.values(config.targets).some(Boolean)) return;
-  let terminal: TerminalNamingAdapter | undefined;
-  let terminalLoadError: unknown;
-  if (config.targets.workspace || config.targets.tab) {
-    try { terminal = await loadTerminal(); } catch (error) { terminalLoadError = error; }
-  }
+  const getConfig: NamingConfigGetter = typeof selection === "function" ? selection : () => selection;
+  const sessions = new Map<string, SessionNamingState>();
+  let activeSession: string | undefined;
+  let terminalPromise: Promise<TerminalNamingAdapter> | undefined;
   let generation = 0;
   let request = 0;
-  let eligible = false;
-  let attempted = false;
+  let lastConfigError: string | undefined;
 
-  pi.on("session_start", (_event, ctx) => {
-    generation++;
-    eligible = !pi.getSessionName() && getCurrentSessionUserMessages(ctx).length === 0;
-    attempted = false;
-    if (terminalLoadError !== undefined) {
-      report(pi, ctx, { message: i18n.t("terminalNamingFailed", { error: errorMessage(terminalLoadError) }), level: "warning" });
+  function readConfig(ctx: ExtensionContext): NamingConfigSelection {
+    try {
+      const config = getConfig(ctx);
+      lastConfigError = undefined;
+      return config;
+    } catch (error) {
+      const message = errorMessage(error);
+      if (message !== lastConfigError) {
+        lastConfigError = message;
+        report(pi, ctx, { message: i18n.t("namingConfigFailed", { error: message }), level: "warning" });
+      }
+      return false;
     }
-  });
-  pi.on("session_shutdown", () => { generation++; eligible = false; });
-  pi.on("session_tree", () => { generation++; eligible = false; });
+  }
 
-  /** 先捕获终端身份，再生成标题；任一新请求或会话切换都会使旧结果失效。 */
-  async function rename(args: string, ctx: ExtensionContext, automatic: boolean): Promise<void> {
+  function sessionState(ctx: ExtensionContext): SessionNamingState {
+    const id = ctx.sessionManager.getSessionId();
+    if (activeSession !== id) {
+      generation++;
+      activeSession = id;
+      lastConfigError = undefined;
+    }
+    let state = sessions.get(id);
+    if (!state) {
+      state = { eligible: !pi.getSessionName() && getCurrentSessionUserMessages(ctx).length === 0, attempted: false };
+      sessions.set(id, state);
+    }
+    return state;
+  }
+
+  function startSession(_event: unknown, ctx: ExtensionContext): void {
+    generation++;
+    const state = sessionState(ctx);
+    state.eligible &&= !pi.getSessionName() && getCurrentSessionUserMessages(ctx).length === 0;
+    readConfig(ctx);
+  }
+  pi.on("session_start", startSession);
+  // Invalidate before asynchronous navigation; session_start initializes the destination.
+  pi.on("session_before_switch", () => { generation++; });
+  pi.on("session_before_fork", () => { generation++; });
+  pi.on("session_before_tree", () => { generation++; });
+  pi.on("session_shutdown", () => { generation++; activeSession = undefined; });
+  pi.on("session_tree", (_event, ctx) => { generation++; sessionState(ctx).eligible = false; });
+
+  /** Capture owned terminal IDs before generation; invalidate every asynchronous boundary. */
+  async function rename(args: string, ctx: ExtensionContext, automatic: boolean, config: NamingConfig): Promise<void> {
     const currentGeneration = generation;
     const currentRequest = ++request;
-    // 新请求和 session 生命周期变化都会使当前请求失效。
-    const isCurrent = () => generation === currentGeneration && request === currentRequest;
+    const currentSession = ctx.sessionManager.getSessionId();
+    const configSnapshot = JSON.stringify(config);
+    const isCurrent = () => {
+      if (generation !== currentGeneration || request !== currentRequest || activeSession !== currentSession) return false;
+      // A settings command can disable naming or revoke terminal targets while a request is pending.
+      return JSON.stringify(readConfig(ctx)) === configSnapshot;
+    };
+    const canApply = () => isCurrent() && (!automatic || !pi.getSessionName());
+    const userMessages = automatic ? [args] : getCurrentSessionUserMessages(ctx);
+    let terminal: TerminalNamingAdapter | undefined;
     let targets: TerminalRenameOutcome[] = [];
     let resolutionError: unknown;
-    if (terminal) {
-      try { targets = terminal.resolve({ tab: config.targets.tab, workspace: config.targets.workspace }); }
-      catch (error) { resolutionError = error; }
+    if (config.targets.workspace || config.targets.tab) {
+      try {
+        terminalPromise ??= Promise.resolve().then(loadTerminal);
+        terminal = await terminalPromise;
+        if (!canApply()) return;
+        targets = terminal.resolve({ tab: config.targets.tab, workspace: config.targets.workspace });
+      } catch (error) {
+        terminalPromise = undefined;
+        resolutionError = error;
+      }
     }
+    if (!canApply()) return;
     let label = automatic ? "" : args.trim();
     if (!label) {
       try {
-        label = await requestSessionNameWithTimeout({
-          userMessages: automatic ? [args] : getCurrentSessionUserMessages(ctx),
-          ctx, requestName, title: config.title,
-        });
+        label = await requestSessionNameWithTimeout({ userMessages, ctx, requestName, title: config.title });
       } catch (error) {
-        if (isCurrent()) report(pi, ctx, { message: i18n.t("namingFailed", { error: errorMessage(error) }), level: "error" });
+        if (canApply()) report(pi, ctx, { message: i18n.t("namingFailed", { error: errorMessage(error) }), level: "error" });
         return;
       }
     }
-    if (!isCurrent() || (automatic && pi.getSessionName())) return;
+    if (!canApply()) return;
 
     const renamed: string[] = [];
     if (config.targets.session) {
@@ -320,39 +375,41 @@ export async function registerNaming(
     }
   }
 
-  if (config.manualNaming) {
-    pi.registerCommand(RENAME_COMMAND, {
-      description: i18n.t("renameDescription"),
-      getArgumentCompletions: () => null,
-      handler: async (args, ctx) => { await rename(args, ctx, false); },
+  pi.registerCommand(RENAME_COMMAND, {
+    description: i18n.t("renameDescription"),
+    getArgumentCompletions: () => null,
+    handler: async (args, ctx) => {
+      const state = sessionState(ctx);
+      request++; // Even a disabled manual command supersedes pending automatic work.
+      state.attempted = true;
+      const config = readConfig(ctx);
+      if (!config || !config.manualNaming || !Object.values(config.targets).some(Boolean)) {
+        report(pi, ctx, { message: i18n.t("namingDisabled"), level: "info" });
+        return;
+      }
+      await rename(args, ctx, false, config);
+    },
+  });
+  pi.on("input", (event, ctx) => {
+    const state = sessionState(ctx);
+    if (!state.eligible || state.attempted || event.source === "extension" || pi.getSessionName()) return;
+    const text = event.text.trim();
+    if (!text) return;
+    state.attempted = true;
+    const config = readConfig(ctx);
+    if (!config || !config.automaticNaming || !Object.values(config.targets).some(Boolean)) return;
+    const inputGeneration = generation;
+    const naming = rename(text, ctx, true, config);
+    const inputRequest = request;
+    void naming.catch((error: unknown) => {
+      if (generation !== inputGeneration || request !== inputRequest) return;
+      report(pi, ctx, { message: i18n.t("namingFailed", { error: errorMessage(error) }), level: "error" });
     });
-  }
-  if (config.automaticNaming) {
-    pi.on("input", (event, ctx) => {
-      if (!eligible || attempted || event.source === "extension" || pi.getSessionName()) return;
-      const text = event.text.trim();
-      if (!text) return;
-      attempted = true;
-      const inputGeneration = generation;
-      void rename(text, ctx, true).catch((error: unknown) => {
-        if (generation !== inputGeneration) return;
-        report(pi, ctx, { message: i18n.t("namingFailed", { error: errorMessage(error) }), level: "error" });
-      });
-    });
-  }
+  });
 }
 
-/** 配置错误在 session_start 报告，不注册不完整的命名功能。 */
-export default async function namingExtension(pi: ExtensionAPI): Promise<void> {
-  // 提示画成会话区里的带底色消息块；渲染器在本包这个模块实例里注册一次。
-  installNoticeRenderer(pi);
+/** Spark owns the runtime, catalog and notice renderer; no configuration I/O at registration. */
+export function registerNamingFeature(pi: ExtensionAPI): void {
   registerNamingConfigCommand(pi);
-  let config: NamingConfig;
-  try { config = loadConfig(); }
-  catch (error) {
-    pi.on("session_start", (_event, ctx) => report(pi, ctx, { message:
-      i18n.t("namingConfigFailed", { error: errorMessage(error) }), level: "warning" }));
-    return;
-  }
-  await registerNaming(pi, config);
+  registerNaming(pi, loadNamingConfig);
 }

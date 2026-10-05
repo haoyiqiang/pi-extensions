@@ -16,7 +16,7 @@ pi-extensions/
 │   ├── pi-blackhole/            # Deterministic compaction, observational memory, and recall
 │   ├── pi-context-view/         # Context usage and injection inspection
 │   ├── pi-rewind/               # Git-backed checkpoints and rewind
-│   ├── pi-spark/                # Compact TUI, clean transcript, credits, presets, recap, metrics, resources
+│   ├── pi-spark/                # Compact TUI, clean transcript, credits, presets, recap, metrics, resources, naming
 │   ├── test-utils/              # Private deterministic workspace test fixtures
 │   ├── pi-subagents/            # Private upstream migration baseline; not activated or published
 ├── scripts/                     # Repository checks and workspace helpers
@@ -33,7 +33,7 @@ The layer model, allowed workspace dependency edges, UI ownership, and root dist
 
 ## Package boundaries
 
-- `pi-naming` owns automatic Pi session titles and manual terminal naming; it uses pi-ai and terminal-mux. Automatic and manual naming share configurable session/workspace/tab targets.
+- `pi-spark` owns automatic Pi session titles and manual terminal naming under `spark.json`'s `naming` feature. It uses the Pi model registry and terminal-mux; automatic and manual naming share configurable session/workspace/tab targets. The retired `pi-naming` config is read-only fallback, not a second runtime or write target.
 
 - `pi-distill` discovers active tools with object parameter schemas and observes their results through Pi's native `tool_call` and `tool_result` events. It does not register duplicate tools and renders audit information through its own UI-only session entry.
 - `pi-extensions-config` owns only portable agent-dir resolution, JSON object reads, atomic writes, and preserving updates. Feature schemas, defaults, migrations, and UI remain in feature packages.
@@ -55,7 +55,7 @@ Keep packages composable and independently installable. Avoid coupling one exten
 - Do not commit user-specific paths, credentials, private domains, internal service names, or machine-specific defaults.
 - Resolve user directories with `os.homedir()` or Pi's standard configuration directory. Support `PI_CODING_AGENT_DIR` where the package already exposes that configuration point.
 - Optional external tools must be detected at runtime and have a graceful fallback or noop path.
-- `pi-spark` owns transcript folding, provider credit reporting, model presets, idle recap, session metrics, the `#` session resource picker, and the compact editor/footer TUI. It replaces Pi's editor and footer, so do not combine it with another extension that owns the same surfaces. Session and terminal naming belong to `pi-naming`.
+- `pi-spark` owns transcript folding, provider credit reporting, model presets, idle recap, session metrics, the `#` session resource picker, and the compact editor/footer TUI. It replaces Pi's editor and footer, so do not combine it with another extension that owns the same surfaces. Its naming feature also owns session and terminal titles; `pi-terminal-mux` remains the independent operation library.
 - Do not make network calls, model assumptions, or local daemon availability implicit in deterministic tests.
 - Shared test scaffolding belongs in the private `@maplezzk/pi-test-utils` workspace; keep domain-specific fixtures with their owning package.
 - Use configuration or injected adapters for environment-specific behavior.
@@ -107,5 +107,5 @@ Keep unrelated refactors out of a focused pull request. Run `npm run check` befo
 
 ## Releases
 
-Versions and changelogs are managed by release-please. Merging a release PR runs the repository gate once, then publishes changed packages to npm in workspace-dependency order: config first, i18n next, terminal-mux and other direct consumers after that, and terminal-mux consumers last. Publish jobs verify their own tarball plus the npm visibility of workspace dependency ranges. Do not publish manually from a local machine unless the release procedure explicitly requires it.
+Versions and changelogs are managed by release-please. Merging a release PR runs the repository gate once, then publishes changed packages to npm in workspace-dependency order: config first, i18n next, terminal-mux and other direct consumers after that, and terminal-mux consumers (Spark and interactive subagents) last. Publish jobs verify their own tarball plus the npm visibility of workspace dependency ranges. Do not publish manually from a local machine unless the release procedure explicitly requires it.
 ase procedure explicitly requires it.

@@ -13,11 +13,10 @@
 
 | 包 | 说明 | 文档 |
 | --- | --- | --- |
-| [`pi-naming`](./packages/pi-naming) | 统一自动和手动命名会话及允许修改的终端目标。 | [English](./packages/pi-naming/README.md) · [中文](./packages/pi-naming/README.zh-CN.md) |
 | [`pi-blackhole`](./packages/pi-blackhole) | 提供确定性压缩、会话观察记忆和原始历史 Recall。 | [English](./packages/pi-blackhole/README.md) · [中文](./packages/pi-blackhole/README.zh-CN.md) |
 | [`pi-context-view`](./packages/pi-context-view) | 可视化上下文用量，并检查系统提示、工具、技能和扩展注入。 | [English](./packages/pi-context-view/README.md) · [中文](./packages/pi-context-view/README.zh-CN.md) |
 | [`pi-rewind`](./packages/pi-rewind) | 创建 Git 检查点，并恢复文件、会话状态或两者。 | [English](./packages/pi-rewind/README.md) · [中文](./packages/pi-rewind/README.zh-CN.md) |
-| [`pi-spark`](./packages/pi-spark) | 统一管理紧凑 editor/footer、清爽对话折叠、provider 余额、模型预设、空闲回顾、指标和 `#` 资源选择器。 | [English](./packages/pi-spark/README.md) · [中文](./packages/pi-spark/README.zh-CN.md) |
+| [`pi-spark`](./packages/pi-spark) | 统一管理紧凑 editor/footer、清爽对话折叠、provider 余额、模型预设、空闲回顾、指标、会话/终端命名和 `#` 资源选择器。 | [English](./packages/pi-spark/README.md) · [中文](./packages/pi-spark/README.zh-CN.md) |
 | [`pi-distill`](./packages/pi-distill) | 在所有已启用 object-schema 工具的超长输出占满上下文前进行提炼。 | [English](./packages/pi-distill/README.md) · [中文](./packages/pi-distill/README.zh-CN.md) |
 | [`pi-models-discovery`](./packages/pi-models-discovery) | 自动发现 models.json 中标记 `discoverModels` 的 provider 的模型列表，启动走持久化缓存，并提供手动刷新命令。 | [English](./packages/pi-models-discovery/README.md) · [中文](./packages/pi-models-discovery/README.zh-CN.md) |
 | [`pi-extensions-i18n`](./packages/pi-extensions-i18n) | 提供共享的语言选择、catalog 加载、插值和 `/config:language` 命令。 | [English](./packages/pi-extensions-i18n/README.md) · [中文](./packages/pi-extensions-i18n/README.zh-CN.md) |
@@ -25,6 +24,8 @@
 | [`@maplezzk/pi-interactive-subagents`](./packages/pi-interactive-subagents) | 终端复用器分屏中的非阻塞交互式子 agent，带实时状态 widget、`/plan` 与 `/iterate` 工作流。Fork 自 HazAT/pi-interactive-subagents。 | [English](./packages/pi-interactive-subagents/README.md) · [中文](./packages/pi-interactive-subagents/README.zh-CN.md) |
 
 共享库会发布到 npm 供功能包依赖，但不会被当作扩展加载：[`pi-extensions-config`](./packages/pi-extensions-config) 提供可移植的 JSON 配置读写，[`pi-terminal-mux`](./packages/pi-terminal-mux) 提供终端 surface 操作。
+
+> `pi-naming` 已合并到 `pi-spark`。重新加载前请移除旧的独立扩展；只有 `spark.json` 没有 `naming` 时才兼容读取旧配置。详见 [迁移说明](./packages/pi-spark/README.zh-CN.md#从-pi-naming-迁移)。
 
 > `pi-session-tools` 已退役并从本仓库移除。对于历史会话中的 `session-squash` 条目，明确提供兼容逻辑的包仍可读取。
 
