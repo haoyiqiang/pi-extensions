@@ -156,6 +156,15 @@ describe("managed terminal session persistence", () => {
     expect(() => f.managed.checkpoint("off", sessionWitness(manager))).toThrow(i18n.t("sessionStore.invalidFile"));
   });
 
+  it("retains terminal config validation for creation and forks", () => {
+    const f = fixture();
+    const invalidConfig = { ...f.config, providerExtensions: ["relative-provider.ts"] };
+    expect(() => ManagedTerminalSession.create(f.policy, invalidConfig)).toThrow(i18n.t("terminalBackend.invalidConfig"));
+    expect(() => f.managed.fork(invalidConfig)).toThrow(i18n.t("terminalBackend.invalidConfig"));
+    expect(f.managed.readReady().manager.getHeader()?.id).toBe(f.managed.reference.sessionId);
+    f.managed.release();
+  });
+
   it("rejects policy changes while a handle owns its lease", () => {
     const f = fixture();
     const path = `${f.managed.reference.sessionFile}.pi-subagents.json`;

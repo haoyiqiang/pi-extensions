@@ -1,9 +1,12 @@
-# Private managed terminal session recovery
+# Private managed session recovery
 
 The optional `AgentExecutionBackend.reattach(reference, options?)` and
-`fork(reference, options?)` methods return **idle** `ExecutionSession` handles. Only
-the terminal backend implements them in this slice. No command, model-facing tool,
-manager-record adoption, backend routing or root-profile activation is added.
+`fork(reference, options?)` methods return **idle** `ExecutionSession` handles.
+Terminal and the explicit [managed embedded profile](./managed-embedded.md) implement
+them using shared `managed-policy.ts`, `managed-session.ts`, `session-witness.ts` and
+`session-lease.ts`. Terminal retains its existing private facade names.
+`AgentManager.restore()` can adopt these handles as idle records. No model-facing
+command/tool, backend configuration route or root-profile activation is added.
 
 ## Identity and policy
 
@@ -18,10 +21,10 @@ manager-record adoption, backend routing or root-profile activation is added.
   budget. They do not reread current agent definitions or global turn defaults.
 - An owned idle handle may be forked by its backend. Running, closed or quarantined
   sources cannot be forked. Another backend must first acquire the source's lease.
-- After restore, normal `resume()` creates a fresh process/run/feedback channel, resets
-  invocation state and returns only the new invocation's result. The idle view already
-  contains the canonical projection of the persisted history; context percentage is
-  unknown until a child reports it.
+- After restore, normal `resume()` resets invocation state and returns only the new
+  invocation's result. Terminal uses a fresh process/run/feedback channel; embedded
+  uses its owned native SDK session. The idle view already exposes persisted history.
+  Terminal context percentage is unknown until a child reports it.
 
 For a structured session, callers must re-supply `structuredOutput: CompiledSchema`
 with matching schema data for either operation. Schema object key order is immaterial;
@@ -48,8 +51,9 @@ idempotent and removes only that owner's files, never another owner's directory.
 Handles must be shut down explicitly; garbage collection does not release a lease.
 
 The lease lasts while the handle is owned, including idle time. This prevents two
-backend factories/processes from opening simultaneous writers. Parent and child are
-one owner: the supervised CLI writes under the parent's lease. A fork reads under the
+backend factories/processes from opening simultaneous writers. For terminal, parent
+and child are one owner: the supervised CLI writes under the parent's lease. Managed
+embedded writes through one owned native SDK session under the same lifetime rule. A fork reads under the
 source lease and acquires a separate lease for its destination.
 
 This is a same-user cooperation protocol, **not an OS sandbox**. Pi clients/editors
@@ -58,23 +62,26 @@ changes rather than pretending to prevent every external filesystem write.
 
 ## Checkpoints and recovery limits
 
-Before launch the record changes from `ready` to `running`. Only after authenticated
-`agent_settled` feedback **and** verified supervisor retirement can it become `ready`
-again. A ready checkpoint records exact byte length, SHA-256, entry count and leaf.
-The child's finalized in-memory witness must agree with the retired file; completion
+Before launch the record changes from `ready` to `running`. Terminal requires
+authenticated `agent_settled` feedback **and** verified supervisor retirement before
+it becomes `ready` again. Managed embedded requires tracked SDK construction/invocation
+and controls to settle, followed by native idle; eager hydration is also checkpointed. A ready checkpoint records exact byte length, SHA-256, entry count and leaf.
+The executor's finalized in-memory witness must agree with the quiescent file; completion
 also checks that the previous transcript prefix was not rewritten. Memory-only branch
 changes, missing writes and transcript writes after settlement therefore fail closed. Failed model/schema/turn-budget
-outcomes can still have a clean checkpoint if the process retired safely.
+outcomes can still have a clean checkpoint if execution retired safely.
 
-Unknown retirement, startup/feedback failure or cancellation quarantines the session.
-Its lease is retained even on shutdown. Existing leases are never stolen merely because
+Unknown retirement or startup/feedback failure quarantines the session. Terminal
+cancellation remains conservative and quarantined; embedded cancellation can checkpoint
+only after its tracked prompt/abort/control work retires with a matching witness.
+A quarantined session's lease is retained even on shutdown. Existing leases are never stolen merely because
 a PID disappeared. A `running` or quarantined policy is rejected even if an operator
-removed the lock. Crash takeover, cancellation recovery, unsafe force-unlock and repair
+removed the lock. Crash takeover, uncertain-cancellation recovery, unsafe force-unlock and repair
 of partial JSONL remain deliberately unsupported.
 
 Readers validate v3 headers, identity/CWD, newline completion, unique entry IDs and
 backward parent chains before using `SessionManager.inMemory` for canonical projection.
-They do not use `open`/`forkFrom` to inspect a source: those APIs may repair newlines,
+Read-only inspection never uses `open`/`forkFrom`: those APIs may repair newlines,
 initialize empty files or migrate old sessions. A fork serializes the selected raw
 branch to an exclusively created private destination, including header-only branches.
 
@@ -85,9 +92,10 @@ without a persisted entry is not recoverable: the persisted final entry is the t
 
 ## Compatibility boundary
 
-Older private terminal files have no policy checkpoint and are not automatically
-adopted. Legacy `run({ resumeSessionFile })` remains unsupported by terminal so it cannot
-silently replace saved policy with today's agent definition. Embedded's existing
+Legacy embedded files and older private terminal files have no managed policy
+checkpoint and are not automatically adopted. `run({ resumeSessionFile })` remains
+unsupported by terminal and managed embedded so it cannot silently replace saved
+policy with today's agent definition. The default legacy embedded factory's existing
 `resumeSessionFile` behavior is unchanged. Provider definitions and authentication must
 still be made available through the new backend's configuration; they are not copied
 from the parent runtime into a recoverable record.

@@ -286,10 +286,12 @@ export function createTerminalExecutionBackend(
       catch (error) { files.delete(state.managed.reference.sessionFile); throw error; }
     },
     async reattach(reference, options = {}) {
+      options.signal?.throwIfAborted();
       if (ownedReference(reference)) throw new Error(i18n.t("sessionStore.alreadyOwned"));
       return adopt(ManagedTerminalSession.open(reference, options), options.structuredOutput).handle;
     },
     async fork(reference, options = {}) {
+      options.signal?.throwIfAborted();
       const owned = ownedReference(reference);
       if (owned?.running) throw new Error(i18n.t("terminalBackend.busy"));
       if (owned?.poisoned || owned?.closed) throw new Error(i18n.t("terminalBackend.quarantined"));

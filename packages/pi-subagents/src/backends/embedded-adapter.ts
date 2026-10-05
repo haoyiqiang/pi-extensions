@@ -10,14 +10,19 @@ import type { ExecutionSession, SessionViewEvent, TranscriptMessage } from "./se
 import type {
   AgentExecutionBackend,
   ExecutionRunOptions,
+  ExecutionRestoreOptions,
   ExecutionRunResult,
 } from "./types.js";
+
+import type { PersistentSessionReference } from "./session-reference.js";
 
 export interface EmbeddedExecutionBackendPorts {
   runAgent?: typeof runEmbeddedAgent;
   resumeAgent?: typeof resumeEmbeddedAgent;
   steerEmbeddedSession?: typeof steerEmbeddedSession;
   shutdownEmbeddedSession?: typeof shutdownEmbeddedSession;
+  reattachSession?: (reference: PersistentSessionReference, options?: ExecutionRestoreOptions) => Promise<AgentSession>;
+  forkSession?: (reference: PersistentSessionReference, options?: ExecutionRestoreOptions) => Promise<AgentSession>;
 }
 
 const EMPTY_MESSAGES: readonly TranscriptMessage[] = Object.freeze([]);
@@ -87,6 +92,8 @@ export function createEmbeddedExecutionBackend(
   const shutdownSession = ports.shutdownEmbeddedSession
     ?? ((...args) => shutdownEmbeddedSession(...args));
 
+  const reattachSession = ports.reattachSession;
+  const forkSession = ports.forkSession;
   const nativeToHandle = new WeakMap<AgentSession, ExecutionSession>();
   const handleToNative = new WeakMap<ExecutionSession, AgentSession>();
   const closedHandles = new WeakSet<ExecutionSession>();
@@ -202,6 +209,10 @@ export function createEmbeddedExecutionBackend(
 
   return {
     kind: "embedded",
+    ...(reattachSession ? { reattach: async (reference: PersistentSessionReference, options?: ExecutionRestoreOptions) =>
+      wrapSession(await reattachSession(reference, options)) } : {}),
+    ...(forkSession ? { fork: async (reference: PersistentSessionReference, options?: ExecutionRestoreOptions) =>
+      wrapSession(await forkSession(reference, options)) } : {}),
     run(ctx, type, prompt, options: ExecutionRunOptions): Promise<ExecutionRunResult> {
       const onSessionCreated = options.onSessionCreated;
       const nativeOptions: Parameters<typeof runEmbeddedAgent>[3] = onSessionCreated

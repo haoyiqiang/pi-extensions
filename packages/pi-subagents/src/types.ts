@@ -171,7 +171,8 @@ export interface AgentRecord {
    */
   alias?: string;
   description: string;
-  status: "queued" | "running" | "completed" | "steered" | "aborted" | "stopped" | "error";
+  /** Restored sessions start idle: history is readable, but no invocation has run here. */
+  status: "idle" | "queued" | "running" | "completed" | "steered" | "aborted" | "stopped" | "error";
   result?: string;
   error?: string;
   toolUses: number;
@@ -223,10 +224,11 @@ export interface AgentRecord {
   /**
    * Lifetime usage breakdown, accumulated via `message_end` events. Survives
    * compaction. Total = input + output + cacheWrite (cacheRead deliberately
-   * excluded — see issue #38). Initialized to zeros at spawn.
+   * excluded — see issue #38). Initialized to zeros at spawn or adoption;
+   * restoring readable history never replays that history's usage.
    */
   lifetimeUsage: LifetimeUsage;
-  /** Number of times this agent's session has compacted. Initialized to 0 at spawn. */
+  /** Compactions observed since this record was spawned or adopted. Initialized to 0. */
   compactionCount: number;
   /**
    * Whether this agent was spawned to run in the background. Tri-state, set at

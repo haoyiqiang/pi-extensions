@@ -10,6 +10,7 @@ import type { SessionView, TranscriptBlock, TranscriptMessage } from "../backend
 import { type Component, Input, Markdown, type MarkdownOptions, type MarkdownTheme, matchesKey, type TUI, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { renderAgentName } from "../agent-color.js";
 import { extractText } from "../context.js";
+import { i18n } from "../i18n.js";
 import type { AgentRecord, ViewerMarkdownMode } from "../types.js";
 import { getLifetimeCost, getLifetimeTotal, getSessionContextPercent } from "../usage.js";
 import type { Theme } from "./agent-widget.js";
@@ -305,7 +306,9 @@ export class ConversationViewer implements Component {
         : this.record.status === "error"
           ? th.fg("error", "✗")
           : th.fg("dim", "○");
-    const duration = formatDuration(this.record.startedAt, this.record.completedAt);
+    const duration = this.record.status === "idle"
+      ? i18n.t("managerRestore.idle")
+      : formatDuration(this.record.startedAt, this.record.completedAt);
 
     const headerParts: string[] = [duration];
     const toolUses = this.activity?.toolUses ?? this.record.toolUses;

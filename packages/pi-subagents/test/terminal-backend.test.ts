@@ -129,6 +129,21 @@ describe("real terminal backend coordinator port", () => {
     await f.backend.shutdown(run.handle);
   });
 
+  it.each(["reattach", "fork"] as const)("rejects pre-cancelled %s before acquiring or creating a session", async (mode) => {
+    const f = fixture();
+    const run = await f.running();
+    f.finish(0);
+    await run.promise;
+    await f.backend.shutdown(run.handle);
+    const controller = new AbortController();
+    controller.abort(new Error("cancelled restore"));
+    await expect(f.backend[mode]!(run.handle.reference as any, { signal: controller.signal })).rejects.toThrow("cancelled restore");
+    const restored = await f.backend.reattach!(run.handle.reference as any);
+    expect(restored.reference).toEqual(run.handle.reference);
+    expect(f.calls).toHaveLength(1);
+    await f.backend.shutdown(restored);
+  });
+
   it("fails closed for native Windows until job-object retirement is available", () => {
     const descriptor = Object.getOwnPropertyDescriptor(process, "platform")!;
     try {

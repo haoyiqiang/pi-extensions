@@ -40,6 +40,14 @@ Manager 的会话句柄以及 UI/输出观察接口已与原生 `AgentSession` �
 `embedded-invocation.ts`：schema 数据、turn limit 与宽限值在创建时保存，捕获、计数、
 补救次数和监听则每次调用重建。取消或最终错误后不再补救；并发调用在修改捕获状态前被拒绝。
 
+显式启用的 `createManagedEmbeddedExecutionBackend()` 现支持隔离持久会话的 reattach/fork，
+复用公共策略、检查点和整个句柄持有期的文件租约。恢复时重新提供当前 Pi 模型运行时及校验器；
+无法确认清理完成时保留隔离状态和租约。默认 embedded 工厂和原始 runner 不变。
+资源与设置范围见 [受管 embedded](./docs/managed-embedded.md)。
+
+`AgentManager.restore()` 可以把受管 embedded 或 terminal 句柄接管为空闲记录；不会发起模型请求、
+重放历史结果/用量，或在开始新调用前占用并发槽位。
+
 请求准备仍使用 Pi context，terminal 需要显式私有工厂注入。私有回调契约变化、兼容约定
 及剩余工作见 [执行边界](./docs/execution-backend.md)。此步没有新增用户配置。
 
@@ -58,7 +66,7 @@ Manager 的会话句柄以及 UI/输出观察接口已与原生 `AgentSession` �
 已有干净检查点的 terminal 受管会话现在可跨 backend 实例 reattach，或 fork 为新身份并保留有效分支历史。
 保存的执行策略随会话恢复；文件租约覆盖句柄整个持有期，阻止协作方并发写入同一记录。
 裸 JSONL 导入、崩溃/不确定退出后的恢复、继承上下文、memory 和原生 Windows 仍明确拒绝。
-embedded 已对齐 owned-session resume 的结构化输出与轮次策略；恢复端口的双后端整合仍未完成。
+两种受管后端均支持干净会话恢复；跨 backend 转换、非隔离 embedded 资源恢复和公开配置路由仍未接通。
 完成判断使用独立的进程退出回执，不信任屏幕文本中的结束标记。
 
 策略、校验器要求与租约限制见 [受管会话恢复](./docs/managed-sessions.md)。
@@ -100,4 +108,4 @@ npm run check
 - [上游 RPC 协议参考](./docs/rpc.md)
 - [上游脚本 workflow 参考](./docs/workflows.md)
 
-下一步：完善会话存储、恢复和 terminal 能力对齐，再加入后端路由、本地化和统一 UI/配置。完成整合后才切换根 profile 与发布元数据。
+下一步：完善 workflow host 接入和 terminal 能力对齐，再加入后端路由、本地化和统一 UI/配置。完成整合后才切换根 profile 与发布元数据。

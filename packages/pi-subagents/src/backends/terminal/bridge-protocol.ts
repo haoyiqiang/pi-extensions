@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+export { modelFingerprint } from "../model-identity.js";
 import { i18n } from "../../i18n.js";
 import type { ExecutionSession, SessionViewEvent, TranscriptMessage } from "../session.js";
 import type { RunReference } from "../session-reference.js";
@@ -56,11 +56,6 @@ export interface ChildHello {
   token: string;
   runId: string;
   sessionId: string;
-}
-
-export function modelFingerprint(model: { provider: string; id: string; api?: unknown; baseUrl?: unknown }): string | undefined {
-  if (typeof model.api !== "string" || typeof model.baseUrl !== "string") return undefined;
-  return createHash("sha256").update(JSON.stringify([model.provider, model.id, model.api, model.baseUrl])).digest("hex");
 }
 
 /** Bounded UTF-8 NDJSON framing shared by the two ends; no transport side effects. */

@@ -42,6 +42,9 @@ Agent tool / nested tools / workflow host / UI
   idempotent session shutdown.
 - `src/agent-runner.ts` re-exports the embedded module, preserving all upstream
   imports, test doubles, and one shared instance of runner settings.
+- `src/backends/embedded-managed.ts` adds an opt-in isolated persistent profile using
+  the same embedded adapter/invocation engine and the shared managed store. It does
+  not replace the default factory or raw runner. See [managed embedded](./managed-embedded.md).
 - `src/backends/types.ts` describes the internal execution port. The manager's
   optional sixth constructor argument injects it; default construction uses the
   embedded implementation. Injection is for composition/tests, not model input.
@@ -131,10 +134,24 @@ under current agent settings, not restoration of this in-memory policy map.
 ## Managed restoration (optional port)
 
 `reattach(reference, options?)` and `fork(reference, options?)` are optional methods
-returning an idle `ExecutionSession`. The terminal backend now implements them for
-its own checkpointed policy records; embedded does not yet implement this port.
-They are not manager-record adoption or model-facing commands. The caller still owns
-scheduling and must shut down handles. See [managed sessions](./managed-sessions.md)
+returning an idle `ExecutionSession`. Terminal and the opt-in managed embedded factory
+implement them for their own checkpointed policy records. Embedded restore requires
+`options.ctx` to rebind the current model runtime; schema validation is re-supplied.
+The session's backend is sticky. The default legacy embedded factory has no restore port.
+
+`AgentManager.restore(reference, options)` adopts a backend-returned handle with a new
+record ID, preserved session identity/view, explicit `idle` status and zero invocation
+usage. It does not replay results, acquire a pool slot, or emit start/completion events.
+Duplicate ownership is refused while acquisition or cleanup is pending. Cancellation,
+manager disposal and session reset reject pending adoption and clean up late handles.
+Subsequent resume uses the existing manager scheduling and result-consumption paths.
+Invocation reservations last through settlement, including stopped runs still draining.
+Foreground resume's actual promise is recorded, and `waitForAll()` no longer consults
+an old completed promise. Foreground resume remains outside the foreground spawn pool.
+Post-dispatch `onSpawned` observer errors cannot detach a running invocation. Manager
+owned worktree startup stays tracked after record eviction; opaque backend preflight
+is cancelled and late handles are retired, not awaited indefinitely at quit.
+These are private APIs, not new commands, RPC operations or tombstone revival. See [managed sessions](./managed-sessions.md)
 for the canonical path lease, strict v3 snapshot/fork semantics and fail-closed limits.
 
 ## Observation semantics
@@ -163,8 +180,8 @@ serialized cross-process protocol or public workflow API. A native-free fake bac
 exercises the manager, UI, output, and resume path independently of the SDK. The real
 terminal implementation adds CLI/child policy and authenticated remote observations
 for a restricted private slice, including clean managed-session reattach/fork.
-Cross-backend managed recovery, interrupted-process recovery, full policy parity and
-configuration routing remain separate integration steps. There is no public package subpath for this interface.
+Backend conversion, interrupted-process recovery, unrestricted embedded-resource
+restoration, full policy parity and configuration routing remain separate integration steps. There is no public package subpath for this interface.
 
 The mention clone remains a separate throwaway launcher. The agent it starts flows
 through the manager normally; its off-screen prompt is not a new backend or registry.

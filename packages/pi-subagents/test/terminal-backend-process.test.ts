@@ -39,7 +39,8 @@ import {
   TERMINAL_FAUX_REQUEST_ACTIVE,
 } from "./fixtures/terminal-faux-provider.js";
 
-vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
+// Real CLI cold imports compete with SDK/Vitest workers; this does not change production deadlines.
+vi.setConfig({ testTimeout: 120_000, hookTimeout: 60_000 });
 
 const PROVIDER_EXTENSION = fileURLToPath(new URL("./fixtures/terminal-faux-provider.ts", import.meta.url));
 const TERMINAL_FAUX_API = "terminal-faux-api";
@@ -360,7 +361,7 @@ function createFixture() {
     agentDir: environment.agentDir,
     providerExtensions: [PROVIDER_EXTENSION],
     mode: "json",
-    startupTimeoutMs: 30_000,
+    startupTimeoutMs: 60_000,
   }, { dependencies: harness.dependencies });
   const backend = newBackend();
   const manager = new AgentManager(undefined, undefined, undefined, undefined, undefined, backend);

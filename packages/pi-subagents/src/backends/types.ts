@@ -11,6 +11,9 @@ export type ExecutionRunOptions = Omit<RunOptions, "onSessionCreated"> & {
 export type ExecutionRunResult = Omit<RunResult, "session"> & { session: ExecutionSession };
 export type ExecutionResumeOptions = Parameters<typeof resumeAgent>[2];
 export interface ExecutionRestoreOptions {
+  /** Embedded restoration rebinds the current model runtime/auth; never persisted. */
+  ctx?: ExtensionContext;
+  signal?: AbortSignal;
   /** Re-supply non-serializable caller validation for structured managed sessions. */
   structuredOutput?: CompiledSchema;
 }

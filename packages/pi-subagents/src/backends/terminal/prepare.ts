@@ -2,21 +2,16 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { getAgentDir, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { BUILTIN_TOOL_NAMES, getAgentConfig, getToolNamesForType, isDefaultsDisabled } from "../../agent-types.js";
-import { DEFAULT_AGENTS } from "../../default-agents.js";
-import { detectEnv } from "../../env.js";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { i18n } from "../../i18n.js";
 import { STRUCTURED_OUTPUT_TOOL_NAME } from "../../structured-output.js";
-import { buildAgentPrompt, type PromptExtras } from "../../prompts.js";
-import type { AgentConfig, EffectiveThinkingLevel, SubagentType } from "../../types.js";
-import { getGraceTurns, resolveDefaultModel, resolveEffectiveMaxTurns } from "../embedded.js";
+import { validateManagedPolicy as validatePolicy, type ManagedPolicy } from "../managed-policy.js";
 import type { PersistentSessionReference } from "../session-reference.js";
-import type { ExecutionRunOptions } from "../types.js";
-import { TERMINAL_MANIFEST_ENV, modelFingerprint, type TerminalChildManifest } from "./bridge-protocol.js";
+import { TERMINAL_MANIFEST_ENV, type TerminalChildManifest } from "./bridge-protocol.js";
 import type { TerminalLaunchPlan } from "./types.js";
 import type { ProcessExitReceipt } from "./process-exit.js";
-import { compileTerminalSchema, validTurnBudget } from "./run-policy.js";
+
+export { prepareManagedPolicy as prepareTerminalPolicy, validateManagedPolicy as validatePolicy } from "../managed-policy.js";
 
 const DEFAULT_ROOT_DIRECTORY = "terminal-subagents";
 const DEFAULT_INTERPRETER = "bash";
@@ -39,20 +34,8 @@ export interface TerminalBackendConfig {
   exitTimeoutMs?: number;
 }
 
-/** Fully resolved, credential-free policy for one isolated terminal conversation. */
-export interface TerminalPolicy {
-  readonly type: SubagentType;
-  readonly name: string;
-  readonly cwd: string;
-  readonly model: Readonly<{ provider: string; id: string }>;
-  readonly modelFingerprint?: string;
-  readonly thinkingLevel?: EffectiveThinkingLevel;
-  readonly tools: readonly string[];
-  readonly systemPrompt: string;
-  readonly structuredSchema?: Record<string, unknown>;
-  readonly maxTurns?: number;
-  readonly graceTurns?: number;
-}
+/** Compatibility name for the shared isolated managed policy. */
+export type TerminalPolicy = ManagedPolicy;
 
 interface ResolvedTerminalBackendConfig {
   readonly sessionDir: string;
@@ -71,54 +54,6 @@ interface LaunchProcessConfig {
   cwd: string;
   env: Record<string, string>;
   processExit: ProcessExitReceipt;
-}
-
-/** Resolve and validate all policy that must be fixed before a terminal child is created. */
-export async function prepareTerminalPolicy(
-  ctx: ExtensionContext,
-  type: SubagentType,
-  options: ExecutionRunOptions,
-): Promise<TerminalPolicy> {
-  const agent = resolveAgent(type);
-
-  // Terminal execution is deliberately narrower than the embedded backend. Keep
-  // these checks ahead of detectEnv(), the first operation that may spawn a process.
-  rejectUnsupportedOptions(agent, options);
-  if (options.structuredOutput !== undefined && (!options.structuredOutput || typeof options.structuredOutput.check !== "function")) invalidConfig();
-  const structuredSchema = options.structuredOutput === undefined ? undefined
-    : compileTerminalSchema(options.structuredOutput.schema).schema;
-  const maxTurns = resolveEffectiveMaxTurns(type, options.maxTurns);
-  const graceTurns = maxTurns === undefined ? undefined : getGraceTurns();
-  if (!validTurnBudget(maxTurns, graceTurns)) invalidConfig();
-
-  const tools = resolveTools(type, agent);
-  const selectedModel = options.model ?? resolveDefaultModel(ctx.model, ctx.modelRegistry, agent.model);
-  if (!selectedModel || !nonEmpty(selectedModel.provider) || !nonEmpty(selectedModel.id)) {
-    throw new Error(i18n.t("terminalBackend.noModel"));
-  }
-
-  const cwd = options.cwd ?? ctx.cwd;
-  if (!nonEmpty(cwd) || !isAbsolute(cwd)) invalidConfig();
-
-  const env = await detectEnv(options.pi, cwd);
-  const extras: PromptExtras = {};
-  if (options.worktreeBase) extras.worktreeBase = options.worktreeBase;
-  if (options.workflow && !structuredSchema) extras.workflowChild = true;
-  const systemPrompt = buildAgentPrompt(agent, cwd, env, ctx.getSystemPrompt(), extras);
-  const thinkingLevel = options.thinkingLevel ?? agent.thinking;
-
-  return Object.freeze({
-    type,
-    name: agent.displayName ?? agent.name,
-    cwd,
-    model: Object.freeze({ provider: selectedModel.provider, id: selectedModel.id }),
-    modelFingerprint: modelFingerprint(selectedModel),
-    ...(thinkingLevel !== undefined ? { thinkingLevel } : {}),
-    tools: Object.freeze(tools),
-    systemPrompt,
-    ...(structuredSchema ? { structuredSchema } : {}),
-    ...(maxTurns !== undefined ? { maxTurns, graceTurns } : {}),
-  });
 }
 
 /** Create one fresh, persisted Pi v3 session with a stable terminal reference. */
@@ -220,52 +155,6 @@ export function prepareTerminalLaunch(
   };
 }
 
-function resolveAgent(type: SubagentType): AgentConfig {
-  const registered = getAgentConfig(type);
-  if (registered?.enabled === false) invalidConfig();
-  if (registered) return registered;
-
-  if (isDefaultsDisabled()) invalidConfig();
-  const lower = type.toLowerCase();
-  for (const [name, agent] of DEFAULT_AGENTS) {
-    if (name.toLowerCase() === lower && agent.enabled !== false) return agent;
-  }
-  invalidConfig();
-}
-
-function rejectUnsupportedOptions(
-  agent: AgentConfig,
-  options: ExecutionRunOptions,
-): void {
-  if (options.isolated !== true) unsupported("isolated=false");
-  if (options.inheritContext === true) unsupported("inheritContext");
-  if (options.resumeSessionFile !== undefined) unsupported("resumeSessionFile");
-  if (agent.memory !== undefined) unsupported("memory");
-  if (agent.persistSession === false) unsupported("persistSession=false");
-  // nestedRuntime is intentionally ignored: isolated embedded runs do not admit
-  // nested delegation tools either, so no manager object crosses the boundary.
-}
-
-function resolveTools(type: SubagentType, agent: AgentConfig): string[] {
-  // Direct callers may prepare a built-in before the process-wide registry has
-  // been populated. Preserve that built-in's explicit tool tier in that case.
-  const requested = getAgentConfig(type) === undefined && agent.builtinToolNames !== undefined
-    ? agent.builtinToolNames
-    : getToolNamesForType(type);
-  const known = new Set(BUILTIN_TOOL_NAMES);
-  const tools: string[] = [];
-  const seen = new Set<string>();
-  for (const name of requested) {
-    if (!known.has(name)) unsupported(`tool:${name}`);
-    if (!seen.has(name)) {
-      seen.add(name);
-      tools.push(name);
-    }
-  }
-  const denied = new Set(agent.disallowedTools ?? []);
-  return tools.filter((name) => !denied.has(name));
-}
-
 function buildCliArguments(
   policy: TerminalPolicy,
   session: PersistentSessionReference<"terminal">,
@@ -341,19 +230,6 @@ function resolveConfig(config: TerminalBackendConfig): ResolvedTerminalBackendCo
   };
 }
 
-export function validatePolicy(value: unknown): asserts value is TerminalPolicy {
-  if (!value || typeof value !== "object" || Array.isArray(value)) invalidConfig();
-  const policy = value as TerminalPolicy;
-  if (!nonEmpty(policy.type) || !nonEmpty(policy.name) || !nonEmpty(policy.cwd)
-    || !isAbsolute(policy.cwd) || !policy.model || !nonEmpty(policy.model.provider)
-    || !nonEmpty(policy.model.id) || typeof policy.systemPrompt !== "string" || !Array.isArray(policy.tools)
-    || policy.tools.some((tool) => !BUILTIN_TOOL_NAMES.includes(tool)) || new Set(policy.tools).size !== policy.tools.length
-    || (policy.modelFingerprint !== undefined && !/^[a-f0-9]{64}$/.test(policy.modelFingerprint))
-    || (policy.thinkingLevel !== undefined && !["off", "minimal", "low", "medium", "high", "xhigh", "max"].includes(policy.thinkingLevel))
-    || !validTurnBudget(policy.maxTurns, policy.graceTurns)) invalidConfig();
-  if (policy.structuredSchema !== undefined) compileTerminalSchema(policy.structuredSchema);
-}
-
 function validateSession(session: PersistentSessionReference<"terminal">): void {
   if (!session || session.backend !== "terminal" || !nonEmpty(session.sessionId)
     || !nonEmpty(session.sessionFile) || !isAbsolute(session.sessionFile)) invalidConfig();
@@ -375,10 +251,6 @@ function quoteBash(value: string): string {
 
 function quotePowerShell(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
-}
-
-function unsupported(feature: string): never {
-  throw new Error(i18n.t("terminalBackend.unsupported", { feature }));
 }
 
 function invalidConfig(): never {

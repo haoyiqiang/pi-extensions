@@ -15,14 +15,16 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { statSync } from "node:fs";
-import { isAbsolute } from "node:path";
+import { realpathSync, statSync } from "node:fs";
+import { isAbsolute, resolve } from "node:path";
 import type { Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ToolActivity } from "./agent-runner.js";
 import { createEmbeddedExecutionBackend } from "./backends/embedded-adapter.js";
 import type { ExecutionSession } from "./backends/session.js";
-import type { AgentExecutionBackend, ExecutionResumeResult } from "./backends/types.js";
+import type { PersistentSessionReference, SessionReference } from "./backends/session-reference.js";
+import type { AgentExecutionBackend, ExecutionResumeResult, ExecutionRunOptions, ExecutionRunResult } from "./backends/types.js";
+import { i18n } from "./i18n.js";
 import { assignHandle, handleBase } from "./mention.js";
 import { describeModel } from "./model-resolver.js";
 import type { AgentInvocation, AgentRecord, AgentTombstone, IsolationMode, MentionResolution, SubagentType, ThinkingLevel } from "./types.js";
@@ -306,6 +308,40 @@ interface SpawnOptions {
   rootSessionId?: string;
 }
 
+/** Private managed adoption: metadata belongs to this manager, policy to the backend. */
+export interface RestoreOptions {
+  mode?: "reattach" | "fork";
+  type: SubagentType;
+  description: string;
+  name?: string;
+  ctx?: ExtensionContext;
+  structuredOutput?: CompiledSchema;
+  /** Cancels adoption only; resumed invocations receive their own signal. */
+  signal?: AbortSignal;
+  workflowId?: string;
+  parentAgentId?: string;
+  depth?: number;
+  maxSubagentDepth?: number;
+  rootSessionId?: string;
+}
+
+/** Backend leases enforce canonical filesystem ownership; this also guards local aliases. */
+function sessionPath(path: string): string {
+  try { return realpathSync(path); } catch { return resolve(path); }
+}
+
+function sameSession(a: SessionReference, b: SessionReference): boolean {
+  return a.backend === b.backend && (a.sessionId === b.sessionId ||
+    (!!a.sessionFile && !!b.sessionFile && sessionPath(a.sessionFile) === sessionPath(b.sessionFile)));
+}
+
+function isPersistentReference(reference: unknown): reference is PersistentSessionReference {
+  if (!reference || typeof reference !== "object" || Array.isArray(reference)) return false;
+  const value = reference as Partial<SessionReference>;
+  return typeof value.sessionId === "string" && value.sessionId.trim().length > 0 &&
+    typeof value.sessionFile === "string" && isAbsolute(value.sessionFile);
+}
+
 interface ResumeOptions {
   /**
    * Run the resumed turn detached in the background: return immediately with
@@ -370,6 +406,15 @@ export class AgentManager {
   /** Base repos worktrees were created from — so dispose() can prune them all,
    *  not just the parent repo (caller-supplied cwd can target other repos). */
   private worktreeRepos = new Set<string>();
+  private disposed = false;
+  /** Kept until acquisition AND any late-handle cleanup settle, even after caller cancellation. */
+  private restorations = new Map<AbortController, Promise<void>>();
+  private restoreReservations = new Set<SessionReference>();
+  /** Eviction is detached, but disposal still awaits it and ownership stays reserved meanwhile. */
+  private shutdowns = new Map<ExecutionSession, Promise<void>>();
+  private closedSessions = new WeakMap<ExecutionSession, Promise<void>>();
+  /** Status may already be stopped/completed while backend or manager cleanup still owns the run. */
+  private invocations = new Map<string, Promise<void>>();
 
   /**
    * Startup phases, keyed by agent id. `spawn()` still returns synchronously,
@@ -492,6 +537,7 @@ export class AgentManager {
     prompt: string,
     options: SpawnOptions,
   ): string {
+    if (this.disposed) throw new Error(i18n.t("managerRestore.disposed"));
     // Validate before the queue branch — a queued spawn should fail at the
     // call, not minutes later at drain. Throw (not warn): programmatic callers
     // can fix and retry; the RPC layer converts throws into error envelopes.
@@ -577,6 +623,139 @@ export class AgentManager {
   }
 
   /**
+   * Adopt a backend-restored idle session. No prompt, run callback, historical result
+   * or pool slot is produced; only a later resume enters the existing scheduler.
+   */
+  async restore(
+    reference: PersistentSessionReference,
+    options: RestoreOptions,
+  ): Promise<{ id: string; record: AgentRecord }> {
+    if (!isPersistentReference(reference)) throw new Error(i18n.t("managerRestore.invalidReference"));
+    if (!options || typeof options !== "object" || Array.isArray(options) ||
+      typeof options.type !== "string" || !options.type.trim() ||
+      typeof options.description !== "string" || !options.description.trim() ||
+      (options.name !== undefined && typeof options.name !== "string") ||
+      (options.signal !== undefined && !(options.signal instanceof AbortSignal))) {
+      throw new Error(i18n.t("managerRestore.invalidOptions"));
+    }
+    const mode = options.mode === undefined ? "reattach" : options.mode;
+    if (reference.backend !== this.execution.kind) throw new Error(i18n.t("managerRestore.backendMismatch"));
+    if (mode !== "reattach" && mode !== "fork") throw new Error(i18n.t("managerRestore.invalidMode"));
+    const restore = this.execution[mode];
+    if (typeof restore !== "function") throw new Error(i18n.t("managerRestore.unsupported", { mode, backend: this.execution.kind }));
+    if (this.disposed) throw new Error(i18n.t("managerRestore.disposed"));
+    if (options.signal?.aborted) throw new Error(i18n.t("managerRestore.cancelled"));
+
+    // Snapshot identity and metadata before yielding; caller mutation cannot retarget
+    // the reservation or change ownership while backend preparation is pending.
+    reference = Object.freeze({ ...reference });
+    options = { ...options };
+    if (mode === "reattach") {
+      this.assertRestoreAvailable(reference);
+      this.restoreReservations.add(reference);
+    }
+
+    const controller = new AbortController();
+    const onParentAbort = () => controller.abort();
+    options.signal?.addEventListener("abort", onParentAbort, { once: true });
+    let onAbort!: () => void;
+    const cancelled = new Promise<never>((_resolve, reject) => {
+      onAbort = () => reject(new Error(i18n.t("managerRestore.cancelled")));
+      controller.signal.addEventListener("abort", onAbort, { once: true });
+    });
+    const assertActive = () => {
+      if (this.disposed || controller.signal.aborted) throw new Error(i18n.t("managerRestore.cancelled"));
+    };
+
+    // Defer backend entry until the task is registered: even synchronous backend
+    // hooks that reset/dispose the manager must find and cancel this restoration.
+    const acquiring = Promise.resolve().then(() => {
+      assertActive();
+      return restore.call(this.execution, reference, {
+        ctx: options.ctx,
+        structuredOutput: options.structuredOutput,
+        signal: controller.signal,
+      });
+    });
+    const adoption = Promise.race([acquiring, cancelled]).then(session => {
+      assertActive();
+      const restored = session?.reference;
+      if (!isPersistentReference(restored) || restored.backend !== this.execution.kind ||
+        (mode === "reattach"
+          ? restored.sessionId !== reference.sessionId || sessionPath(restored.sessionFile) !== sessionPath(reference.sessionFile)
+          : sameSession(restored, reference))) {
+        throw new Error(i18n.t("managerRestore.invalidSession"));
+      }
+      this.assertRestoreAvailable(restored, reference);
+
+      const id = randomUUID().slice(0, 17);
+      const record: AgentRecord = {
+        id,
+        type: options.type,
+        description: options.description,
+        handle: isTopLevelAgent(options) ? assignHandle(handleBase(options.type), this.takenHandles()) : undefined,
+        status: "idle",
+        session,
+        sessionFile: restored.sessionFile,
+        startedAt: Date.now(),
+        resultConsumed: true,
+        toolUses: 0,
+        lifetimeUsage: { input: 0, output: 0, cacheWrite: 0, cost: 0 },
+        compactionCount: 0,
+        invocation: {
+          ...(session.model ? describeModel(session.model) : {}),
+          ...(session.thinkingLevel ? { thinking: session.thinkingLevel } : {}),
+        },
+        workflowId: options.workflowId,
+        parentAgentId: options.parentAgentId,
+        depth: options.depth ?? 1,
+        maxSubagentDepth: options.maxSubagentDepth,
+        rootSessionId: options.rootSessionId,
+      };
+      if (record.handle !== undefined && options.name !== undefined) {
+        const taken = this.takenHandles();
+        taken.add(record.handle);
+        record.alias = assignHandle(handleBase(options.name), taken);
+      }
+      assertActive();
+      this.agents.set(id, record);
+      return { id, record };
+    });
+    const settled = Promise.allSettled([acquiring, adoption]).then(async ([acquired, adopted]) => {
+      if (acquired.status === "fulfilled" && adopted.status === "rejected") {
+        const session = acquired.value;
+        // A broken backend may hand back the very handle already in the map.
+        // Reject that duplicate without closing the original owner's session.
+        if (session && typeof session === "object" && ![...this.agents.values()].some(record => record.session === session)) {
+          await this.shutdownSession(session);
+        }
+      }
+    }).finally(() => {
+      this.restoreReservations.delete(reference);
+      this.restorations.delete(controller);
+    });
+    this.restorations.set(controller, settled);
+    try {
+      // The caller stops waiting immediately; acquisition and cleanup remain tracked.
+      return await adoption;
+    } finally {
+      options.signal?.removeEventListener("abort", onParentAbort);
+      controller.signal.removeEventListener("abort", onAbort);
+    }
+  }
+
+  private assertRestoreAvailable(reference: SessionReference, ownReservation?: SessionReference): void {
+    const references = [
+      ...[...this.agents.values()].flatMap(record => record.session ? [record.session.reference] : []),
+      ...[...this.shutdowns.keys()].map(session => session.reference),
+      ...[...this.restoreReservations].filter(reserved => reserved !== ownReservation),
+    ];
+    if (references.some(owned => owned && sameSession(owned, reference))) {
+      throw new Error(i18n.t("managerRestore.duplicate"));
+    }
+  }
+
+  /**
    * Wire a parent abort signal for a record that is about to be QUEUED.
    * `startAgent` does this for running agents, and a queued record never gets
    * there, so without this Esc could not release a queue position.
@@ -619,29 +798,38 @@ export class AgentManager {
    *   handle goes back.
    */
   private launch(id: string, record: AgentRecord, args: SpawnArgs, queuedPool: Pool | undefined): Promise<void> {
-    const startup = this.startAgent(id, record, args).then(
-      () => { this.startups.delete(id); },
+    const finishInvocation = this.beginInvocation(id);
+    let resolve!: () => void;
+    let reject!: (error: unknown) => void;
+    const startup = new Promise<void>((done, fail) => { resolve = done; reject = fail; });
+    // Register before callbacks, without deferring the synchronous default launch.
+    this.startups.set(id, startup);
+    void this.startAgent(id, record, args, finishInvocation).then(
+      () => {
+        this.startups.delete(id);
+        // A stopped startup never assigned a run promise; otherwise its finally owns release.
+        if (!record.promise) finishInvocation();
+      },
       (err) => {
         this.startups.delete(id);
-        if (queuedPool !== undefined) {
-          // Mirrors settleRun: an inline caller gets this failure as a throw
-          // out of spawnAndWait, so an unconsumed record would ALSO nudge the
-          // session about it — the same failure reported twice.
-          if (queuedPool === "foreground") record.resultConsumed = true;
-          record.status = "error";
-          record.error = err instanceof Error ? err.message : String(err);
-          record.completedAt = Date.now();
-          this.onComplete?.(record);
-        } else {
-          this.agents.delete(id);
+        try {
+          if (queuedPool !== undefined && !this.disposed && this.agents.get(id) === record) {
+            // An inline caller receives this failure itself, not a second notification.
+            if (queuedPool === "foreground") record.resultConsumed = true;
+            record.status = "error";
+            record.error = err instanceof Error ? err.message : String(err);
+            record.completedAt = Date.now();
+            this.onComplete?.(record);
+          } else {
+            this.agents.delete(id);
+          }
+          this.drainQueue();
+          throw err;
+        } finally {
+          if (!record.promise) finishInvocation();
         }
-        // The agent never kept its slot (startAgent gives it back on failure),
-        // so anything queued behind it can go now.
-        this.drainQueue();
-        throw err;
       },
-    );
-    this.startups.set(id, startup);
+    ).then(resolve, reject);
     // Nothing is obliged to await `startups` — swallow the rejection once here
     // so an unawaited startup can't take the process down, and hand callers
     // (drainQueue) that swallowed promise.
@@ -661,12 +849,25 @@ export class AgentManager {
     return this.startups.get(id) ?? Promise.resolve();
   }
 
+  /** Reserve before any caller/backend callback, and release only after manager settlement. */
+  private beginInvocation(id: string): () => void {
+    let resolve!: () => void;
+    const settled = new Promise<void>(done => { resolve = done; });
+    this.invocations.set(id, settled);
+    return () => {
+      if (this.invocations.get(id) === settled) this.invocations.delete(id);
+      resolve();
+    };
+  }
+
   /** Actually start an agent (called immediately or from queue drain). */
   private async startAgent(
     id: string,
     record: AgentRecord,
     { pi, ctx, type, prompt, options }: SpawnArgs,
+    finishInvocation: () => void,
   ) {
+    if (this.disposed || this.agents.get(id) !== record) return;
     // Re-validate a caller-supplied cwd: queued spawns can start minutes after
     // spawn()'s check, and the directory may be gone by then (TOCTOU). Same
     // curated errors; drainQueue parks a throw on the record as an error.
@@ -709,7 +910,9 @@ export class AgentManager {
     // that omits the field can't stop a caller that never saw the schema.
     let worktreeCwd: string | undefined;
     if (options.isolation === "worktree" && isWorktreeIsolationEnabled()) {
-      const wt = await createWorktree(pi, baseCwd, id);
+      let wt: Awaited<ReturnType<typeof createWorktree>>;
+      try { wt = await createWorktree(pi, baseCwd, id); }
+      catch (error) { releaseSlot(); throw error; }
       if (!wt) {
         releaseSlot();
         throw new Error(
@@ -732,7 +935,7 @@ export class AgentManager {
       // synchronous. The record is already terminal, so launching the run would
       // burn tokens on work nobody is waiting for: discard the fresh (and by
       // definition unchanged) worktree instead.
-      if (record.status !== "running") {
+      if (record.status !== "running" || this.disposed || this.agents.get(id) !== record) {
         releaseSlot();
         record.worktreeResult = await cleanupWorktree(pi, baseCwd, wt, options.description);
         this.drainQueue();
@@ -740,7 +943,19 @@ export class AgentManager {
       }
     }
 
-    this.onStart?.(record);
+    try { this.onStart?.(record); }
+    catch (error) {
+      releaseSlot();
+      if (record.worktree) {
+        try { record.worktreeResult = await cleanupWorktree(pi, baseCwd, record.worktree, options.description); } catch { /* best effort */ }
+      }
+      throw error;
+    }
+    if (this.disposed || this.agents.get(id) !== record) {
+      releaseSlot();
+      if (record.worktree) record.worktreeResult = await cleanupWorktree(pi, baseCwd, record.worktree, options.description);
+      return;
+    }
 
     // Wire parent abort signal to stop the subagent when the parent is interrupted
     let detachParentSignal: (() => void) | undefined;
@@ -757,7 +972,7 @@ export class AgentManager {
     }
     const detach = () => { detachParentSignal?.(); detachParentSignal = undefined; };
 
-    const promise = this.execution.run(ctx, type, prompt, {
+    const runOptions: ExecutionRunOptions = {
       pi,
       agentId: id,
       model: options.model,
@@ -803,6 +1018,10 @@ export class AgentManager {
         maxSubagentDepth: record.maxSubagentDepth,
       },
       onSessionCreated: (session) => {
+        if (this.disposed || this.agents.get(id) !== record) {
+          void this.shutdownSession(session);
+          return;
+        }
         record.session = session;
         // Capture now, while the session object exists: after eviction this
         // path is the only thing that can reopen the conversation, and an
@@ -841,7 +1060,19 @@ export class AgentManager {
         }
         options.onSessionCreated?.(session);
       },
-    })
+    };
+    let running: Promise<ExecutionRunResult>;
+    try { running = this.execution.run(ctx, type, prompt, runOptions); }
+    catch (error) {
+      detach();
+      releaseSlot();
+      if (record.session) await this.shutdownSession(record.session);
+      if (record.worktree) {
+        try { record.worktreeResult = await cleanupWorktree(pi, baseCwd, record.worktree, options.description); } catch { /* best effort */ }
+      }
+      throw error;
+    }
+    const promise = running
       .then(async ({ responseText, session, aborted, steered, failure, structuredJson, structuredRetried }) => {
         // Don't overwrite status if externally stopped via abort()
         if (record.status !== "stopped") {
@@ -863,7 +1094,8 @@ export class AgentManager {
         // this is a machine-readable payload one caller asked for by schema.
         record.structuredJson = structuredJson;
         record.structuredRetried = structuredRetried;
-        record.session = session;
+        if (this.disposed || this.agents.get(id) !== record) await this.shutdownSession(session);
+        else record.session = session;
         record.completedAt ??= Date.now();
 
         detach();
@@ -931,7 +1163,7 @@ export class AgentManager {
 
         this.settleRun(record, false, pool);
         return "";
-      });
+      }).finally(finishInvocation);
 
     record.promise = promise;
 
@@ -940,7 +1172,10 @@ export class AgentManager {
     // Used by spawnAndWait to let the caller set up output files before streaming
     // starts. Read off the options, so a spawn that started from a queue drain
     // still reaches the caller that queued it.
-    options.onSpawned?.(id);
+    if (!this.disposed && this.agents.get(id) === record) {
+      // Dispatch already happened; observational wiring cannot turn it into a lost startup.
+      try { options.onSpawned?.(id); } catch { /* keep ownership until normal settlement */ }
+    }
   }
 
   /**
@@ -966,6 +1201,7 @@ export class AgentManager {
     if (pool === "background") this.runningBackground--;
     else if (pool === "foreground") this.runningForeground--;
 
+    if (this.disposed || this.agents.get(record.id) !== record) return;
     if (guardCallback) {
       try { this.onComplete?.(record); } catch { /* ignore completion side-effect errors */ }
     } else {
@@ -1002,6 +1238,7 @@ export class AgentManager {
    * eligible entry keeps FIFO within each pool, which is what callers see.
    */
   private drainQueue() {
+    if (this.disposed) return;
     for (;;) {
       const i = this.queue.findIndex(e => this.poolHasRoom(e.pool));
       if (i === -1) return;
@@ -1107,9 +1344,10 @@ export class AgentManager {
     options?: ResumeOptions,
   ): Promise<AgentRecord | undefined> {
     const record = this.agents.get(id);
-    if (!record?.session) return undefined;
+    if (this.disposed || !record?.session) return undefined;
+    // Abort changes the visible status immediately, not backend/settlement ownership.
     // A refused resume must not replace a live controller or clear its result fields.
-    if (record.status === "running" || record.status === "queued") return undefined;
+    if (this.invocations.has(id) || record.status === "running" || record.status === "queued") return undefined;
 
     // Background resume: settle asynchronously and notify on completion exactly
     // like a background spawn, returning immediately with the record still
@@ -1163,7 +1401,9 @@ export class AgentManager {
       return record;
     }
 
-    // Foreground resume: run inline and return the settled record.
+    // Foreground resume: run inline and return the settled record, without a pool slot.
+    const finishInvocation = this.beginInvocation(id);
+    const session = record.session;
     record.status = "running";
     record.startedAt = Date.now();
     record.completedAt = undefined;
@@ -1177,37 +1417,40 @@ export class AgentManager {
     if (signal?.aborted) onParentAbort();
     else signal?.addEventListener("abort", onParentAbort, { once: true });
 
-    try {
-      const result = await this.execution.resume(record.session, prompt, {
-        onToolActivity: (activity) => {
-          if (activity.type === "end") record.toolUses++;
-          options?.onToolActivity?.(activity);
-        },
-        onAssistantUsage: (usage) => {
-          addUsage(record.lifetimeUsage, usage);
-          this.onUsage?.(record, usage);
-          options?.onAssistantUsage?.(usage);
-        },
-        onCompaction: (info) => {
-          record.compactionCount++;
-          this.onCompact?.(record, info);
-          options?.onCompaction?.(info);
-        },
-        signal: abortController.signal,
-      });
-      applyResumeResult(record, result);
-      record.completedAt ??= Date.now();
-    } catch (err) {
-      applyResumeError(record, err);
-      record.completedAt ??= Date.now();
-    } finally {
-      signal?.removeEventListener("abort", onParentAbort);
-    }
+    record.promise = (async () => {
+      try {
+        if (this.disposed || this.agents.get(id) !== record) return "";
+        const result = await this.execution.resume(session, prompt, {
+          onToolActivity: (activity) => {
+            if (activity.type === "end") record.toolUses++;
+            options?.onToolActivity?.(activity);
+          },
+          onAssistantUsage: (usage) => {
+            addUsage(record.lifetimeUsage, usage);
+            this.onUsage?.(record, usage);
+            options?.onAssistantUsage?.(usage);
+          },
+          onCompaction: (info) => {
+            record.compactionCount++;
+            this.onCompact?.(record, info);
+            options?.onCompaction?.(info);
+          },
+          signal: abortController.signal,
+        });
+        applyResumeResult(record, result);
+        return result.text;
+      } catch (err) {
+        applyResumeError(record, err);
+        return "";
+      } finally {
+        record.completedAt ??= Date.now();
+        signal?.removeEventListener("abort", onParentAbort);
+        // The exposed promise includes metadata, signal teardown and owned-child cleanup.
+        this.abortOwnedChildren(id);
+      }
+    })().finally(finishInvocation);
 
-    // Same contract as the spawn settle paths: children spawned during the
-    // resumed turn must not outlive it — nothing else can see or reach them.
-    this.abortOwnedChildren(id);
-
+    await record.promise;
     return record;
   }
 
@@ -1225,12 +1468,13 @@ export class AgentManager {
     parentSignal: AbortSignal | undefined,
     options: ResumeOptions,
   ) {
-    if (!record.session) return;
-
+    if (this.disposed || !record.session || this.agents.get(id) !== record) return;
+    const session = record.session;
+    const finishInvocation = this.beginInvocation(id);
+    const holdsSlot = occupiesPoolSlot(record);
     record.status = "running";
     record.startedAt = Date.now();
-    if (occupiesPoolSlot(record)) this.runningBackground++;
-    this.onStart?.(record);
+    if (holdsSlot) this.runningBackground++;
 
     // Fresh abort controller so /agents stop and steering target THIS run rather
     // than the previous one's settled controller.
@@ -1248,10 +1492,6 @@ export class AgentManager {
       if (parentSignal.aborted) onParentAbort();
     }
 
-    // Per-run side effects (output streaming) — see ResumeOptions.onStarted.
-    // After the record is in its running shape, before the run is kicked off.
-    try { options.onStarted?.(); } catch { /* ignore caller wiring errors */ }
-
     const settle = () => {
       detachParentSignal?.();
       detachParentSignal = undefined;
@@ -1262,42 +1502,47 @@ export class AgentManager {
       }
       // Children spawned during the resumed turn must not outlive it.
       this.abortOwnedChildren(id);
-      if (occupiesPoolSlot(record)) this.runningBackground--;
-      try { this.onComplete?.(record); } catch { /* ignore completion side-effect errors */ }
+      if (holdsSlot) this.runningBackground--;
+      if (!this.disposed && this.agents.get(id) === record) {
+        try { this.onComplete?.(record); } catch { /* ignore completion side-effect errors */ }
+      }
       this.drainQueue();
     };
 
-    const promise = this.execution.resume(record.session, prompt, {
-      onToolActivity: (activity) => {
-        if (activity.type === "end") record.toolUses++;
-        options.onToolActivity?.(activity);
-      },
-      onAssistantUsage: (usage) => {
-        addUsage(record.lifetimeUsage, usage);
-        this.onUsage?.(record, usage);
-        options.onAssistantUsage?.(usage);
-      },
-      onCompaction: (info) => {
-        record.compactionCount++;
-        this.onCompact?.(record, info);
-        options.onCompaction?.(info);
-      },
-      signal: abortController.signal,
-    })
-      .then((result) => {
+    record.promise = (async () => {
+      try {
+        this.onStart?.(record);
+        // Per-run output wiring runs under the reservation and fresh controller.
+        if (this.disposed || this.agents.get(id) !== record) return "";
+        try { options.onStarted?.(); } catch { /* ignore caller wiring errors */ }
+        if (this.disposed || this.agents.get(id) !== record) return "";
+        const result = await this.execution.resume(session, prompt, {
+          onToolActivity: (activity) => {
+            if (activity.type === "end") record.toolUses++;
+            options.onToolActivity?.(activity);
+          },
+          onAssistantUsage: (usage) => {
+            addUsage(record.lifetimeUsage, usage);
+            this.onUsage?.(record, usage);
+            options.onAssistantUsage?.(usage);
+          },
+          onCompaction: (info) => {
+            record.compactionCount++;
+            this.onCompact?.(record, info);
+            options.onCompaction?.(info);
+          },
+          signal: abortController.signal,
+        });
         applyResumeResult(record, result);
-        record.completedAt ??= Date.now();
-        settle();
         return result.text;
-      })
-      .catch((err) => {
+      } catch (err) {
         applyResumeError(record, err);
+        return "";
+      } finally {
         record.completedAt ??= Date.now();
         settle();
-        return "";
-      });
-
-    record.promise = promise;
+      }
+    })().finally(finishInvocation);
   }
 
   /**
@@ -1362,7 +1607,7 @@ export class AgentManager {
     const wanted = name.toLowerCase();
     let fallback: AgentRecord | undefined;
     for (const record of this.agents.values()) {
-      if (record.parentAgentId !== undefined) continue;
+      if (!isTopLevelAgent(record)) continue;
       // Handle and alias share one namespace, so at most one agent answers a
       // name and it makes no difference which of the two matched.
       if (record.handle?.toLowerCase() !== wanted && record.alias?.toLowerCase() !== wanted) continue;
@@ -1371,7 +1616,7 @@ export class AgentManager {
     }
     if (fallback) return { kind: "live", record: fallback };
     const byId = this.agents.get(name);
-    if (byId?.parentAgentId === undefined && byId !== undefined) return { kind: "live", record: byId };
+    if (byId !== undefined && isTopLevelAgent(byId)) return { kind: "live", record: byId };
     // Only once nothing live answers: a tombstone is a conversation to reopen,
     // and reopening one while its record still exists would fork the session.
     for (const entry of this.tombstones.values()) {
@@ -1435,13 +1680,34 @@ export class AgentManager {
     // nothing can observe a session that is half torn down.
     record.session = undefined;
     this.agents.delete(id);
-    // A failed startup keeps its (rejected) entry so a late awaitStartup still
-    // sees it; drop it with the record so the map can't grow unbounded.
-    this.startups.delete(id);
+    // Evicting an immediately stopped record must not erase an in-flight worktree
+    // startup from disposal tracking. Its launch settlement removes the entry.
+    if (!this.invocations.has(id)) this.startups.delete(id);
     // Fire-and-forget is right here and only here: this runs from the 60s cleanup timer
     // and from `clearCompleted()` on session boundaries, with the process staying alive,
     // so handlers get their full window. The quit path awaits instead — see dispose().
-    void this.execution.shutdown(session);
+    void this.shutdownSession(session);
+  }
+
+  /** Observe all rejections, including a backend that throws before returning a promise. */
+  private shutdownSession(session: ExecutionSession | undefined): Promise<void> {
+    if (session) {
+      const closed = this.closedSessions.get(session);
+      if (closed) return closed;
+    }
+    let resolve!: () => void;
+    const settled = new Promise<void>(done => { resolve = done; });
+    if (session) {
+      this.closedSessions.set(session, settled);
+      this.shutdowns.set(session, settled);
+    }
+    const finish = () => {
+      if (session) this.shutdowns.delete(session);
+      resolve();
+    };
+    try { Promise.resolve(this.execution.shutdown(session)).then(finish, finish); }
+    catch { finish(); }
+    return settled;
   }
 
   /**
@@ -1473,18 +1739,21 @@ export class AgentManager {
     const cutoff = Date.now() - 10 * 60_000;
     for (const [id, record] of this.agents) {
       if (record.status === "running" || record.status === "queued") continue;
-      if ((record.completedAt ?? 0) >= cutoff) continue;
+      if ((record.status === "idle" ? record.startedAt : record.completedAt ?? 0) >= cutoff) continue;
       this.removeRecord(id, record);
     }
   }
 
   /**
-   * Remove all completed/stopped/errored records immediately.
+   * Remove all idle/completed/stopped/errored records immediately.
    * Called on session start/switch so tasks from a prior session don't persist.
    * Pass skipUnconsumed=true to preserve records the LLM hasn't read yet
    * (resultConsumed=false) — they will be evicted by the 10-minute cleanup timer instead.
    */
   clearCompleted(skipUnconsumed = false): void {
+    // A session boundary also invalidates restorations that have not returned a
+    // handle yet. Their late handles are closed, never inserted into the new session.
+    for (const controller of this.restorations.keys()) controller.abort();
     for (const [id, record] of this.agents) {
       if (record.status === "running" || record.status === "queued") continue;
       if (skipUnconsumed && !record.resultConsumed) continue;
@@ -1537,15 +1806,9 @@ export class AgentManager {
     // agents finish they start queued ones, which need awaiting too.
     while (true) {
       this.drainQueue();
-      const pending: Promise<unknown>[] = [];
-      for (const record of this.agents.values()) {
-        if (record.status !== "running" && record.status !== "queued") continue;
-        // An agent whose worktree is still being created is "running" with no
-        // `promise` yet — without its startup the wait would return too early.
-        const startup = this.startups.get(record.id);
-        if (startup) pending.push(startup);
-        if (record.promise) pending.push(record.promise);
-      }
+      // Includes stopped runs still draining, foreground resumes, and startup
+      // callbacks before record.promise exists. Never waits on an old fulfilled run.
+      const pending = [...this.invocations.values()];
       if (pending.length === 0) break;
       await Promise.allSettled(pending);
     }
@@ -1557,13 +1820,19 @@ export class AgentManager {
    *   it (tests, teardown of a manager that never spawned) skips the prune.
    */
   async dispose(pi?: ExtensionAPI): Promise<void> {
+    this.disposed = true;
     clearInterval(this.cleanupInterval);
-    // Clear queue — via dequeue, so anyone blocked in spawnAndWait is woken
-    // rather than left awaiting a gate nothing will ever resolve.
-    this.dequeue(() => true);
-    const sessions = [...this.agents.values()].map(record => record.session);
+    for (const controller of this.restorations.keys()) controller.abort();
+    // Abort before detaching: startup/backend preflight must observe disposal too.
+    // abortAll also releases every queued caller without dispatching it.
+    this.abortAll();
+    const sessions = [...this.agents.values()].map(record => {
+      const session = record.session;
+      record.session = undefined;
+      return session;
+    });
+    const startups = [...this.startups.values()];
     this.agents.clear();
-    this.startups.clear();
     if (pi) {
       // Prune any orphaned git worktrees (crash recovery). Detached: dispose runs
       // on the shutdown path, which cannot wait for git. Started before the awaited
@@ -1575,9 +1844,12 @@ export class AgentManager {
       // exit with in-flight agents would otherwise leave stale registrations there.
       for (const repo of this.worktreeRepos) prune(repo);
     }
-    // Awaited, unlike the eviction path: pi awaits this extension's `session_shutdown`
-    // handler and the process exits right after it returns, so anything left unawaited
-    // here never runs at all. Bounded — each call carries its own ceiling, concurrently.
-    await Promise.all(sessions.map(session => this.execution.shutdown(session)));
+    // Await known handles, managed restores and manager-owned startup. run() has no
+    // separate readiness promise: opaque backend preflight is cancelled by its signal;
+    // late handle callbacks/results are closed above, without awaiting an unbounded run.
+    const closing = sessions.map(session => this.shutdownSession(session));
+    await Promise.allSettled([...closing, ...this.shutdowns.values(), ...this.restorations.values(), ...startups]);
+    // Startup may finish a worktree copy or hand back a late session while we wait.
+    await Promise.allSettled([...this.shutdowns.values()]);
   }
 }

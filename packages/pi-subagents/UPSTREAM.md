@@ -209,5 +209,37 @@ for external reattach/fork, add backend routing, or activate the private package
   persistent failures still withhold retirement receipts. No public routing switch,
   root-profile change, legacy product change or release activation.
 
-Embedded restoration-port integration and recovery of dirty/crashed sessions remain
-separate work; see managed-sessions.md for the exact limited recovery contract.
+At that step, embedded restoration-port integration and recovery of dirty/crashed
+sessions remained separate work; see the following delta for managed embedded.
+
+## Managed embedded restoration and manager adoption
+
+- Extracted backend-neutral managed policy, strict checkpoint store, model fingerprint
+  and native-tree witness. Terminal keeps its prior facades and serialized format.
+- Added an explicit isolated managed embedded factory using the existing SDK adapter
+  and invocation policy engine. It rebinds a current model runtime, checkpoints eager
+  hydration metadata, supports identity-preserving reattach and raw active-branch fork,
+  and never converts bare or foreign-backend files. Default/raw embedded is unchanged.
+- Tracked SDK preparation, invocation and literal steering through retirement. Native
+  idle/dispose alone cannot release leases; uncertain startup, timeout, tamper and
+  late construction keep quarantine. Cache warming is disabled for this profile.
+- Reserve file writes before admitting early steering; reject controls at settlement.
+  Capture schema and validator binding before asynchronous preparation, and clear
+  aborted/failed invocations' undelivered queues before proving a clean checkpoint.
+- Added private manager restore/adoption with an explicit idle status, no prompt/result
+  replay or historical accounting, guarded ownership reservations and late-handle cleanup.
+  Viewer/fleet surfaces distinguish idle history from completed work.
+- Track fresh and resumed invocation settlement independently of immediate stopped
+  status. Foreground resume exposes its actual promise; waitForAll no longer observes
+  stale/missing promises. Dispose rejects admission and closes late handles without
+  republishing them. Existing pool policies remain unchanged.
+- Added offline real-SDK, generic-store and manager regression tests. No public config
+  route, model-facing restore command, workflow provider registration, release activation
+  or changes to the existing interactive-subagents runtime.
+
+Manager disposal cannot prove retirement of an opaque backend preflight or cancelled
+SDK construction that never publishes a handle; cancellation, quarantine and late-handle
+cleanup are preserved, not an
+unbounded wait for an arbitrary run promise. Full readiness/cancellation signaling,
+unrestricted resource restoration, dirty-session recovery and tombstone migration are
+still future work.

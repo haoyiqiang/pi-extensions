@@ -14,6 +14,7 @@
 import { Editor, isKeyRelease, Key, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { hasAgentBadge, renderAgentName } from "../agent-color.js";
 import { type AgentManager, isTopLevelAgent } from "../agent-manager.js";
+import { i18n } from "../i18n.js";
 import type { AgentRecord, ViewerMarkdownMode } from "../types.js";
 import { getLifetimeCost, getLifetimeTotal } from "../usage.js";
 import { type AgentActivity, formatCost, type Theme } from "./agent-widget.js";
@@ -238,7 +239,7 @@ export class FleetList {
   /**
    * Agents shown in the list, ordered earliest-launched first so the ones you
    * started sooner sit at the top. Every row is openable (has a session), so Enter
-   * never dead-ends. Included: running/queued, plus the agent currently being
+   * never dead-ends. Included: idle/running/queued, plus the agent currently being
    * viewed, plus recently-finished ones (they linger briefly before dropping out).
    * Pending agents with no session yet are hidden until they start.
    * (`listAgents()` is newest-first, so we re-sort.)
@@ -247,7 +248,7 @@ export class FleetList {
     const now = Date.now();
     return this.manager.listAgents()
       .filter(a => isTopLevelAgent(a) && a.session && (
-        a.status === "running" || a.status === "queued"
+        a.status === "idle" || a.status === "running" || a.status === "queued"
         || a.id === this.viewingAgentId
         || (a.completedAt != null && now - a.completedAt < FINISHED_LINGER_MS)
       ))
@@ -536,7 +537,9 @@ export class FleetList {
     const tokens = getLifetimeTotal(record.lifetimeUsage);
     const elapsedMs = (record.completedAt ?? Date.now()) - record.startedAt; // freezes once finished
     const cost = this.showCost() ? formatCost(getLifetimeCost(record.lifetimeUsage)) : "";
-    const stats = `${formatFleetElapsed(elapsedMs)} · ${formatFleetTokens(tokens)}${cost ? ` · ${cost}` : ""}`;
+    const stats = record.status === "idle"
+      ? i18n.t("managerRestore.idle")
+      : `${formatFleetElapsed(elapsedMs)} · ${formatFleetTokens(tokens)}${cost ? ` · ${cost}` : ""}`;
     const right = selected ? theme.fg("text", stats) : theme.fg("dim", stats);
     return rightAlign(left, right, width);
   }

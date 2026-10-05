@@ -79,6 +79,11 @@ it("does not let an older foreground parent listener cancel the next invocation"
   const parent = new AbortController();
   const first = manager.resume(record.id, "A", parent.signal);
   manager.abort(record.id);
+  const previousController = record.abortController;
+  await expect(manager.resume(record.id, "too early")).resolves.toBeUndefined();
+  expect(record.abortController).toBe(previousController);
+  resumed.resolve({ text: "old partial", aborted: true });
+  await first;
   const nextResult = deferred<ExecutionResumeResult>();
   resume.mockImplementationOnce(() => nextResult.promise);
   const second = manager.resume(record.id, "B");
@@ -87,9 +92,8 @@ it("does not let an older foreground parent listener cancel the next invocation"
   parent.abort();
   expect(nextController.signal.aborted).toBe(false);
   expect(record.status).toBe("running");
-  resumed.resolve({ text: "old partial", aborted: true });
   nextResult.resolve({ text: "new result" });
-  await Promise.all([first, second]);
+  await second;
   expect(record.result).toBe("new result");
 });
 

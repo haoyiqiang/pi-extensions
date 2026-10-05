@@ -49,6 +49,15 @@ with the native session, while capture, counters, retry allowance and listeners 
 fresh per invocation. Cancellation and final provider errors suppress the one
 structured-output retry; concurrent invocations are rejected before capture changes.
 
+The opt-in `createManagedEmbeddedExecutionBackend()` now adds isolated persistent
+reattach/fork using shared policy/checkpoints and lifetime leases. It requires the current
+Pi model runtime on restore, keeps caller validators explicit, and quarantines uncertain
+cleanup. The default embedded factory and raw runner are unchanged. See
+[managed embedded](./docs/managed-embedded.md) for its narrower resource/settings scope.
+
+`AgentManager.restore()` adopts managed embedded or terminal handles as idle records:
+no prompt, result replay, usage replay or concurrency slot until an invocation starts.
+
 Request preparation still uses Pi context; terminal execution is an explicit private opt-in.
 See [execution boundary](./docs/execution-backend.md) for the private callback-contract
 change, preserved behavior, and remaining work. No new user configuration is added.
@@ -118,6 +127,6 @@ terminal multiplexer, or local Pi daemon are needed. Test fixtures under
 - [Upstream RPC reference](./docs/rpc.md)
 - [Upstream scripted workflow reference](./docs/workflows.md)
 
-Next: extend session-store/recovery and terminal capability parity, then add backend
+Next: complete workflow-host integration and terminal capability parity, then add backend
 routing and unified UI/config/localization. Switch the root profile and
 release metadata only after that integration is complete.
