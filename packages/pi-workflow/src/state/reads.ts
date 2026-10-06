@@ -26,6 +26,7 @@ import type {
 	RoutingDecision,
 	RunRecap,
 	RunSummary,
+	RunTerminalRow,
 	StageStatus,
 	WorkflowHeader,
 	WorkflowStage,
@@ -132,6 +133,31 @@ const ROUTED_STOP = "stop";
 /** Shape guard for loop-cap telemetry rows. */
 const isLoopCapRow = (r: unknown): r is LoopCapRow => (r as { type?: unknown } | undefined)?.type === "loop-cap";
 
+/** Additive run-level cleanup-failure marker. Keep the guard strict because
+ * resume treats a matching row as authoritative terminal state. */
+const RUN_WORKFLOW_STATUSES: ReadonlySet<string> = new Set([
+	"running",
+	"completed",
+	"failed",
+	"aborted",
+	"cancelled",
+]);
+const isRunTerminalRow = (row: unknown): row is RunTerminalRow => {
+	const r = row as Partial<RunTerminalRow> | null;
+	return (
+		!!r &&
+		r.type === "run-terminal" &&
+		r.status === "cleanup-failed" &&
+		typeof r.workflowStatus === "string" &&
+		RUN_WORKFLOW_STATUSES.has(r.workflowStatus) &&
+		typeof r.stagesCompleted === "number" &&
+		Number.isInteger(r.stagesCompleted) &&
+		r.stagesCompleted >= 0 &&
+		typeof r.error === "string" &&
+		typeof r.ts === "string"
+	);
+};
+
 const isWorkflowHeader = (row: unknown): row is WorkflowHeader =>
 	!!row &&
 	typeof (row as { runId?: unknown }).runId === "string" &&
@@ -203,6 +229,12 @@ export function readRoutingDecisions(cwd: string, runId: string): RoutingDecisio
 /** All loop-cap telemetry rows for a run, in trail order. */
 export function readLoopCaps(cwd: string, runId: string): LoopCapRow[] {
 	return readJsonlRows(cwd, runId, isLoopCapRow);
+}
+
+/** Latest run-level cleanup-failure override, if executor retirement failed. */
+export function readRunTerminal(cwd: string, runId: string): RunTerminalRow | undefined {
+	const rows = readJsonlRows(cwd, runId, isRunTerminalRow);
+	return rows[rows.length - 1];
 }
 
 export function listArtifacts(
@@ -279,7 +311,9 @@ function trailingRoutingStop(cwd: string, runId: string): RoutingDecision | unde
  * renders on end-of-run. Returns `undefined` when no stage row exists (no terminal row
  * ⇒ outcome unrecoverable from the trail). `failureReason` is set only for a
  * non-completed outcome with a present `last.errMsg`, so a collected halt's errMsg
- * never leaks into a completed recap. Fail-soft by inheritance — never throws.
+ * never leaks into a completed recap. A cleanup-failed run-terminal row overrides
+ * the stage-derived outcome/reason with `failed` + its retirement error. Fail-soft
+ * by inheritance — never throws.
  *
  * A run whose trail ENDS with a routed `stop` (see `trailingRoutingStop`) is
  * refined from `"completed"` to `"stopped"`: the runner reports a gate-routed
@@ -300,14 +334,16 @@ export function summarizeRun(cwd: string, runId: string): RunRecap | undefined {
 	const stages = readAllStages(cwd, runId);
 	if (stages.length === 0) return undefined;
 	const last = stages[stages.length - 1];
-	const outcome = recapOutcomeOf(last);
+	const terminal = readRunTerminal(cwd, runId);
+	const outcome = terminal ? "failed" : recapOutcomeOf(last);
 	const header = readHeader(cwd, runId);
 	const recap: RunRecap = {
 		outcome,
 		artifacts: stagesToArtifacts(stages).map(({ artifact }) => handleToString(artifact.handle)),
 		workflow: header?.workflow,
 	};
-	if (outcome !== "completed" && last.errMsg !== undefined) recap.failureReason = last.errMsg;
+	if (terminal) recap.failureReason = terminal.error;
+	else if (outcome !== "completed" && last.errMsg !== undefined) recap.failureReason = last.errMsg;
 	// Route-note recap — rides EVERY outcome. Forward rows only; a stop row's
 	// note renders once, below, as the stopped-refinement failureReason — never
 	// twice. Set only when non-empty (absent, never []).

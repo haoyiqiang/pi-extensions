@@ -13,6 +13,7 @@
 
 import type { PromptFn, StageDef } from "./api.js";
 import { type Artifact, handleToString } from "./handle.js";
+import { raceWithWorkflowCancellation } from "./internal-utils.js";
 import { isFailedOutput, type Output } from "./output.js";
 import { readName, readsAll } from "./stage-def.js";
 import { actsPublishName, resolvePublishName } from "./stage-identity.js";
@@ -46,9 +47,14 @@ export function currentPrimaryArtifact(state: RunState): Artifact | undefined {
  * runner/) so loop.ts consumes it cycle-free — same posture as
  * `stageEntryArgs` below.
  */
-export async function resolveStagePrompt(prompt: string | PromptFn, cwd: string, state: RunState): Promise<string> {
+export async function resolveStagePrompt(
+	prompt: string | PromptFn,
+	cwd: string,
+	state: RunState,
+	signal?: AbortSignal,
+): Promise<string> {
 	if (typeof prompt === "string") return prompt;
-	return prompt({ cwd, input: state.output, state });
+	return raceWithWorkflowCancellation(() => prompt({ cwd, input: state.output, state, signal }), signal);
 }
 
 const isPromptStage = (def: StageDef): boolean => def.prompt !== undefined;

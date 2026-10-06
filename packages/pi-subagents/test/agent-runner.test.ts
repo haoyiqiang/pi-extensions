@@ -1753,7 +1753,7 @@ describe("agent-runner async extension tool registration", () => {
 
   it("isolated keeps the static allowlist — no live scoping installed", async () => {
     vi.mocked(getConfig).mockReturnValueOnce(makeConfig({ extensions: false }));
-    vi.mocked(getAgentConfig).mockReturnValueOnce(makeAgentConfig({ extensions: false }));
+    vi.mocked(getAgentConfig).mockReturnValueOnce(makeAgentConfig({ extensions: false, builtinToolNames: ["read"] }));
     vi.mocked(getToolNamesForType).mockReturnValueOnce(["read"]);
     withExtensions({ "/ext/foo.ts": ["foo_tool"] });
     const { session } = createSession("OK");
@@ -2326,6 +2326,7 @@ describe("agent-runner ext: tool selectors", () => {
     vi.mocked(getAgentConfig).mockReturnValueOnce(
       makeAgentConfig({
         extensions: o.extensions,
+        builtinToolNames: o.builtinToolNames,
         extSelectors: o.extSelectors,
         disallowedTools: o.disallowedTools,
       }),

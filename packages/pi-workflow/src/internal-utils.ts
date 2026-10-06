@@ -101,6 +101,36 @@ export function throwIfWorkflowCancelled(signal: AbortSignal | undefined): void 
 }
 
 /**
+ * Stop awaiting an operation as soon as workflow cancellation fires. The
+ * operation is a THUNK so cancellation is checked before author code runs.
+ * Its observed promise is created before the already-aborted check and always
+ * consumed, so a synchronous throw/rejection can never become unhandled. Once
+ * author code has started it is not force-cancelled; the logical run's writer
+ * fence excludes any late settlement. Cooperative callbacks can additionally
+ * observe the same signal directly.
+ */
+export async function raceWithWorkflowCancellation<T>(
+	operation: () => T | PromiseLike<T>,
+	signal: AbortSignal | undefined,
+): Promise<T> {
+	const observed = Promise.resolve().then(() => {
+		throwIfWorkflowCancelled(signal);
+		return operation();
+	});
+	if (!signal || signal.aborted) return observed;
+	let onAbort!: () => void;
+	const cancelled = new Promise<never>((_resolve, reject) => {
+		onAbort = () => reject(workflowCancellationError(signal));
+		signal.addEventListener("abort", onAbort, { once: true });
+	});
+	try {
+		return await Promise.race([observed, cancelled]);
+	} finally {
+		signal.removeEventListener("abort", onAbort);
+	}
+}
+
+/**
  * Thrown on a programmer-error misconfiguration of a runtime primitive (e.g. a
  * `Semaphore` constructed with `limit < 1`). A named type — matching the
  * package convention (`WorkflowAbortError`, `StagePreflightError`) — so a

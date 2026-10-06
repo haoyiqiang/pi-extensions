@@ -1,5 +1,7 @@
+import { randomUUID } from "node:crypto";
 import type { EventBus, ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { loadWorkflowConfig, workflowExecutorSettings } from "./config.js";
+import { loadWorkflowConfig, resolveWorkflowModel, workflowExecutorSettings } from "./config.js";
+import { COMMAND_LIFETIME } from "./command-lifetime.js";
 import {
   getWorkflowExecutionProvider,
   registerWorkflowExecutionHost,
@@ -7,7 +9,7 @@ import {
   type WorkflowExecutionIdentity,
   type WorkflowExecutionProvider,
 } from "./execution-host.js";
-import type { ModelSelection, WorkflowHostContext } from "./host.js";
+import type { ModelSelection, WorkflowHostContext, WorkflowLauncherContext } from "./host.js";
 import { i18n, notifyWorkflow } from "./i18n.js";
 import {
   WORKFLOW_EXECUTOR_DISCOVERY,
@@ -38,13 +40,18 @@ interface ProviderExecution extends WorkflowExecution {
 }
 
 interface OwnedProvider extends WorkflowExecutionProvider {
-  readonly [PROVIDER_OWNER]: { events: EventBus };
+  readonly [PROVIDER_OWNER]: {
+    events: EventBus;
+    runtime?: PiWorkflowExecutionRuntime;
+    relinquish?: () => void;
+  };
 }
 
 interface RunControl {
-  readonly runId: string;
+  runId: string;
   readonly controller: AbortController;
-  readonly cancellationError: (signal: AbortSignal) => Error;
+  cancellationError: (signal: AbortSignal) => Error;
+  commandRun?: Promise<unknown>;
   acquisition?: Promise<ProviderExecution>;
   active?: ActiveExecution;
   retirement?: Promise<void>;
@@ -59,6 +66,7 @@ interface ActiveExecution {
 
 export interface PiWorkflowExecutionRuntime {
   readonly installed: boolean;
+  runCommand(ctx: WorkflowLauncherContext, handler: (ctx: WorkflowLauncherContext) => Promise<void>): Promise<void>;
   activeRunIds(): readonly string[];
   cancelRun(runId: string): Promise<boolean>;
   cancelAll(): Promise<readonly string[]>;
@@ -85,25 +93,25 @@ export function isPiWorkflowExecutionProvider(value: unknown): value is Workflow
 export function installPiWorkflowExecution(
   pi: Pick<ExtensionAPI, "events" | "on">,
 ): PiWorkflowExecutionRuntime {
-  // Embedded child loaders share the workflow execution-host registry with the
-  // root process. A provider already owned by a different event bus belongs to
-  // that root; do not let the child replace it with a bus that has no root
-  // executor listeners. Same-bus replacement remains allowed for /reload.
+  // Resource discovery also evaluates factories later filtered from SDK children.
+  // A different bus becomes the root owner only if session_start actually fires.
   const existing = getWorkflowExecutionProvider();
-  if (isPiWorkflowExecutionProvider(existing) && (existing as OwnedProvider)[PROVIDER_OWNER].events !== pi.events) {
-    return noopRuntime();
-  }
+  const deferActivation = isPiWorkflowExecutionProvider(existing)
+    && (existing as OwnedProvider)[PROVIDER_OWNER].events !== pi.events;
 
   let closed = false;
+  let activated = false;
   let closing: Promise<void> | undefined;
   const runs = new Map<string, RunControl>();
+  const commandAdmissions = new WeakMap<AbortSignal, RunControl>();
+  const inherited = new Set<PiWorkflowExecutionRuntime>();
   const active = new Set<ActiveExecution>();
   const pending = new Set<Promise<ProviderExecution>>();
   const retiring = new Set<Promise<void>>();
   const retirementErrors: unknown[] = [];
 
   const provider: OwnedProvider = {
-    [PROVIDER_OWNER]: Object.freeze({ events: pi.events }),
+    [PROVIDER_OWNER]: { events: pi.events },
     createHost(observer: WorkflowHostContext, run: ProviderCreateOptions): Promise<ProviderExecution> {
       if (closed) return Promise.reject(failure("provider.closed"));
       try {
@@ -111,13 +119,18 @@ export function installPiWorkflowExecution(
       } catch (error) {
         return Promise.reject(error);
       }
-      if (runs.has(run.runId)) return Promise.reject(failure("execution.duplicateRun", { runId: run.runId }));
+      if (activeRunIds().includes(run.runId)) return Promise.reject(failure("execution.duplicateRun", { runId: run.runId }));
 
-      const control: RunControl = {
+      const admissionSignal = run.signal ?? observer.signal;
+      const control: RunControl = (admissionSignal && commandAdmissions.get(admissionSignal)) || {
         runId: run.runId,
         controller: new AbortController(),
         cancellationError: run.cancellationError,
       };
+      if (control.controller.signal.aborted) return Promise.reject(run.cancellationError(control.controller.signal));
+      runs.delete(control.runId);
+      control.runId = run.runId;
+      control.cancellationError = run.cancellationError;
       runs.set(run.runId, control);
       // Defer acquisition by one microtask so the complete operation is
       // published to close/cancel before config, discovery or factory code runs.
@@ -135,9 +148,39 @@ export function installPiWorkflowExecution(
     },
   };
 
-  const unregister = registerWorkflowExecutionHost(provider);
+  let unregister = () => {};
+  let offStart: (() => void) | undefined;
   let offShutdown: (() => void) | undefined;
-  offShutdown = pi.on("session_shutdown", async () => {
+
+  function relinquish(): void {
+    closed = true;
+    activated = false;
+    unregister();
+    offStart?.();
+    offShutdown?.();
+    // Cold commands cannot admit work through an invalidated launcher context.
+    for (const control of runs.values()) if (!control.active) control.controller.abort();
+  }
+
+  function activate(): void {
+    if (closed) return;
+    const previous = getWorkflowExecutionProvider();
+    if (previous !== provider && isPiWorkflowExecutionProvider(previous)) {
+      const owner = (previous as OwnedProvider)[PROVIDER_OWNER];
+      if (owner.runtime) inherited.add(owner.runtime);
+      owner.relinquish?.();
+    }
+    unregister = registerWorkflowExecutionHost(provider);
+    activated = true;
+  }
+
+  offStart = pi.on("session_start", activate);
+  offShutdown = pi.on("session_shutdown", async (event) => {
+    if (["new", "resume", "fork"].includes(event.reason)) {
+      // The next root adopts cancellation controls for already-admitted runs.
+      for (const control of runs.values()) if (!control.active) control.controller.abort();
+      return;
+    }
     await close();
   });
 
@@ -206,18 +249,23 @@ export function installPiWorkflowExecution(
       if (signal.aborted) throw cancellationFor(control, signal);
       throw failure("provider.closed");
     }
-    return wrapExecution(record, signal);
+    return wrapExecution(record, signal, id => resolveWorkflowModel(config, id));
   }
 
-  function wrapExecution(record: ActiveExecution, signal: AbortSignal): ProviderExecution {
+  function wrapExecution(
+    record: ActiveExecution,
+    signal: AbortSignal,
+    configuredModel: (id: { workflow: string; stage: string; skill: string }) => ModelSelection | undefined,
+  ): ProviderExecution {
     const execution = record.execution;
     const closeExecution = () => retire(record);
+    const executorModel = execution.resolveModel?.bind(execution);
     return {
       host: execution.host,
       signal: combineSignals(signal, execution.signal),
       identity: execution.identity,
       readSessionBranch: (file) => execution.readSessionBranch(file),
-      ...(execution.resolveModel ? { resolveModel: execution.resolveModel.bind(execution) } : {}),
+      resolveModel: id => configuredModel(id) ?? executorModel?.(id),
       close: closeExecution,
       dispose: closeExecution,
     };
@@ -312,30 +360,36 @@ export function installPiWorkflowExecution(
         if (control.active) await retire(control.active);
         else if (control.retirement) await control.retirement;
       }
+      // The runner's signal fence blocks late writes immediately. Opaque user
+      // callbacks may outlive cancellation; do not await them after retirement.
+      if (runs.get(control.runId) === control) runs.delete(control.runId);
     })().then(finish, fail);
     return barrier;
   }
 
   function activeRunIds(): readonly string[] {
-    return Object.freeze([...runs.keys()].sort());
+    return Object.freeze([...new Set([
+      ...runs.keys(), ...[...inherited].flatMap((runtime) => [...runtime.activeRunIds()]),
+    ])].sort());
   }
 
   async function cancelRun(runId: string): Promise<boolean> {
     const control = runs.get(runId);
-    if (!control) return false;
+    if (!control) {
+      for (const runtime of inherited) if (await runtime.cancelRun(runId)) return true;
+      return false;
+    }
     await cancelControl(control);
     return true;
   }
 
   async function cancelAll(): Promise<readonly string[]> {
-    const selected = [...activeRunIds()]
-      .map((runId) => ({ runId, control: runs.get(runId) }))
-      .filter((entry): entry is { runId: string; control: RunControl } => entry.control !== undefined);
-    const results = await Promise.allSettled(selected.map(({ control }) => cancelControl(control)));
+    const selected = [...activeRunIds()];
+    const results = await Promise.allSettled(selected.map((runId) => cancelRun(runId)));
     const errors: unknown[] = [];
     for (const result of results) if (result.status === "rejected") recordUnique(errors, result.reason);
     throwCollected(errors, "cancel.failedMultiple");
-    return Object.freeze(selected.map(({ runId }) => runId));
+    return Object.freeze(selected);
   }
 
   function close(): Promise<void> {
@@ -350,9 +404,10 @@ export function installPiWorkflowExecution(
     // executor-close callback can reenter runtime.close().
     closing = barrier;
     closed = true;
+    activated = false;
     const sideEffectErrors: unknown[] = [];
     try { unregister(); } catch (error) { recordUnique(sideEffectErrors, error); }
-    try { offShutdown?.(); } catch (error) { recordUnique(sideEffectErrors, error); }
+    try { offStart?.(); offShutdown?.(); } catch (error) { recordUnique(sideEffectErrors, error); }
     for (const control of runs.values()) {
       try { control.controller.abort(); } catch (error) { recordUnique(sideEffectErrors, error); }
     }
@@ -361,6 +416,8 @@ export function installPiWorkflowExecution(
       while (pending.size > 0) await Promise.allSettled([...pending]);
       await Promise.allSettled([...active].map(retire));
       while (retiring.size > 0) await Promise.allSettled([...retiring]);
+      const previous = await Promise.allSettled([...inherited].map((runtime) => runtime.close()));
+      for (const result of previous) if (result.status === "rejected") recordUnique(sideEffectErrors, result.reason);
       const errors = [...sideEffectErrors];
       for (const error of retirementErrors) recordUnique(errors, error);
       throwCollected(errors, "provider.closeFailed");
@@ -369,10 +426,49 @@ export function installPiWorkflowExecution(
   }
 
   function removeRun(control: RunControl): void {
-    if (runs.get(control.runId) === control) runs.delete(control.runId);
+    if (!control.commandRun && runs.get(control.runId) === control) runs.delete(control.runId);
   }
 
-  return { installed: true, activeRunIds, cancelRun, cancelAll, close };
+  async function runCommand(ctx: WorkflowLauncherContext, handler: (ctx: WorkflowLauncherContext) => Promise<void>): Promise<void> {
+    if (closed) throw failure("provider.closed");
+    const control: RunControl = {
+      runId: `pending-${randomUUID().slice(0, 8)}`,
+      controller: new AbortController(),
+      cancellationError: () => new DOMException("Aborted", "AbortError"),
+    };
+    const signal = combineSignals(control.controller.signal, ctx.signal)!;
+    commandAdmissions.set(signal, control);
+    runs.set(control.runId, control);
+    const lifetime = {
+      track(run: Promise<unknown>) {
+        control.commandRun = run;
+        const settled = () => { control.commandRun = undefined; removeRun(control); };
+        void run.then(settled, settled);
+      },
+    };
+    const observer = new Proxy(ctx, {
+      get(target, key) {
+        if (key === "signal") return signal;
+        if (key === COMMAND_LIFETIME) return lifetime;
+        return Reflect.get(target, key, target);
+      },
+    });
+    try {
+      await handler(observer);
+    } catch (error) {
+      if (!signal.aborted) throw error;
+    } finally {
+      if (!control.commandRun && !control.acquisition) removeRun(control);
+    }
+  }
+
+  const runtime: PiWorkflowExecutionRuntime = {
+    get installed() { return activated; },
+    runCommand, activeRunIds, cancelRun, cancelAll, close,
+  };
+  Object.assign(provider[PROVIDER_OWNER], { runtime, relinquish });
+  if (!deferActivation) activate();
+  return runtime;
 }
 
 /** Register the additive cancellation command without widening install()'s test seam. */
@@ -434,7 +530,7 @@ export function registerWorkflowCancellationCommand(
 export function discoverExecutor(
   events: EventBus,
   executorId: string,
-  backend: WorkflowExecutorBackend,
+  backend?: WorkflowExecutorBackend,
 ): WorkflowExecutorOffer {
   const offers: WorkflowExecutorOffer[] = [];
   const errors: Error[] = [];
@@ -465,7 +561,7 @@ export function discoverExecutor(
   if (offers.length === 0) throw failure("discovery.missing", { executor: executorId });
   if (offers.length > 1) throw failure("discovery.ambiguous", { executor: executorId, count: offers.length });
   const offer = offers[0]!;
-  if (!offer.backends.includes(backend)) {
+  if (backend !== undefined && !offer.backends.includes(backend)) {
     throw failure("discovery.unsupportedBackend", { executor: executorId, backend });
   }
   return offer;
@@ -568,17 +664,6 @@ function cancellationFor(control: RunControl, signal: AbortSignal): Error {
 
 function isBackend(value: unknown): value is WorkflowExecutorBackend {
   return value === "embedded" || value === "terminal";
-}
-
-function noopRuntime(): PiWorkflowExecutionRuntime {
-  const done = Promise.resolve();
-  return {
-    installed: false,
-    activeRunIds: () => Object.freeze([]),
-    cancelRun: async () => false,
-    cancelAll: async () => Object.freeze([]),
-    close: () => done,
-  };
 }
 
 function recordUnique(errors: unknown[], error: unknown): void {

@@ -4,10 +4,12 @@ import type { ExecutionSession, SessionViewEvent, TranscriptMessage } from "../s
 import type { RunReference } from "../session-reference.js";
 import type { SessionStatsLike, LifetimeUsage } from "../../usage.js";
 import type { SessionWitness } from "./session-witness.js";
+import type { StandardTerminalPolicy } from "./standard-policy.js";
 
 export const BRIDGE_VERSION = 1;
 export const MAX_BRIDGE_FRAME_BYTES = 16 * 1024 * 1024;
 export const TERMINAL_MANIFEST_ENV = "PI_SUBAGENTS_TERMINAL_MANIFEST";
+export const STANDARD_TERMINAL_CONFIG_ENV = "PI_SUBAGENTS_STANDARD_TERMINAL_CONFIG";
 
 export interface TerminalSnapshot {
   messages: readonly TranscriptMessage[];
@@ -17,11 +19,22 @@ export interface TerminalSnapshot {
 }
 
 /** Private, per-run capability file. Never contains provider credentials. */
+export interface StandardTerminalChildConfig {
+  version: 1;
+  policy: StandardTerminalPolicy;
+  promptFile: string;
+  agentDir: string;
+  providerExtensions: string[];
+  outputMode: "text" | "json";
+}
+
 export interface TerminalChildManifest {
   version: 1;
+  /** Omitted by older managed launchers; managed remains the compatibility default. */
+  profile?: "managed" | "standard";
   run: RunReference<"terminal">;
   endpoint: { host: "127.0.0.1"; port: number; token: string };
-  model: { provider: string; id: string };
+  model?: { provider: string; id: string };
   /** Detect parent-only API/endpoint overrides without serializing their URLs or credentials. */
   modelFingerprint?: string;
   tools: string[];
@@ -29,6 +42,22 @@ export interface TerminalChildManifest {
   structuredSchema?: Record<string, unknown>;
   maxTurns?: number;
   graceTurns?: number;
+  /** Standard product sessions may remain at the TUI after a turn settles. */
+  interactive?: boolean;
+  autoExit?: boolean;
+  /** Standard profile preflight checks the actual post-extension active set. */
+  requiredTools?: string[];
+}
+
+export interface ChildSettlement {
+  snapshot: TerminalSnapshot;
+  text: string;
+  aborted: boolean;
+  failure?: string;
+  structuredJson?: string;
+  structuredRetried?: boolean;
+  steered?: boolean;
+  witness?: SessionWitness;
 }
 
 export type ChildFeedback =
@@ -39,8 +68,8 @@ export type ChildFeedback =
   | { type: "usage"; usage: LifetimeUsage }
   | { type: "turn"; count: number }
   | { type: "compaction"; info: { reason: "manual" | "threshold" | "overflow"; tokensBefore: number } }
-  | { type: "settled"; snapshot: TerminalSnapshot; text: string; aborted: boolean; failure?: string;
-      structuredJson?: string; structuredRetried?: boolean; steered?: boolean; witness?: SessionWitness }
+  | ({ type: "idle" } & ChildSettlement)
+  | ({ type: "settled" } & ChildSettlement)
   | { type: "ack"; id: string; error?: string }
   | { type: "failure"; error: string };
 

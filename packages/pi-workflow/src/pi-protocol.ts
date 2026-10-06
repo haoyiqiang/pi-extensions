@@ -17,7 +17,9 @@ export interface WorkflowExecutorSkillApproval {
 }
 
 export interface WorkflowExecutorSettings {
-  readonly backend: WorkflowExecutorBackend;
+  readonly profile?: "standard" | "managed";
+  /** Managed stage placement only; ordinary Agent backend selection belongs to subagents. */
+  readonly backend?: WorkflowExecutorBackend;
   readonly agentType?: string;
   readonly maxConcurrency?: number;
   readonly maxTurns?: number;

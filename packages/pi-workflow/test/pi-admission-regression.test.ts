@@ -395,7 +395,13 @@ function commandHarness(stageSkill: string, ambientSkills: readonly string[]): C
     "",
   ].join("\n"));
   writeFileSync(join(piConfigDir, "pi-workflow.json"), JSON.stringify({
-    execution: { executor: EXECUTOR_ID, backend: "embedded", agentType: "workflow-offline", maxConcurrency: 1 },
+    execution: {
+      executor: EXECUTOR_ID,
+      profile: "managed",
+      backend: "embedded",
+      agentType: "workflow-offline",
+      maxConcurrency: 1,
+    },
     skills: [{ name: "approved", filePath: join(skillDir, "SKILL.md"), baseDir: skillDir, format: "pi" }],
     requiredTools: [],
   }));

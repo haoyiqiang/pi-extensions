@@ -1,10 +1,11 @@
-# Private terminal execution backend
+# Private managed terminal execution backend
 
-`src/backends/terminal/backend.ts` now provides a real `AgentExecutionBackend`, not
-just a prepared-launch primitive. It is **programmatic opt-in only**. Default
-`AgentManager` construction still uses embedded execution; the root profile still
-loads `pi-interactive-subagents`. There is no public package export, command,
-configuration switch, or workflow-provider registration for this backend yet.
+This document describes the isolated **managed** profile in
+`src/backends/terminal/backend.ts`. `createTerminalExecutionBackend()` retains that
+compatibility default; `createStandardTerminalExecutionBackend()` is the ordinary
+product backend selected by `subagents.json`. See the [package README](../README.md)
+for standard resources, interactive sessions and common Agent/RPC routing. Neither
+private entry is selected by the root distribution profile yet.
 
 ## Supported private slice
 
@@ -33,7 +34,8 @@ skills, and discovered extensions, matching the embedded isolated policy.
 
 This is not the long-running interactive handoff mode: a visible Pi terminal may be
 used while the task is running, but the process exits automatically after settlement.
-Claude CLI, raw/imported-session recovery, crash takeover and automatic backend routing remain deferred.
+These managed restrictions do not describe the standard product backend. Crash
+and uncertain-writer takeover remain unsupported in this isolated profile.
 
 ## Launch and configuration
 

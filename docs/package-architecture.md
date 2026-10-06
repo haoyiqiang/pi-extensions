@@ -33,11 +33,11 @@ Foundations must not depend on product or capability packages. A new foundation 
 ### Internal packages
 
 - `@maplezzk/pi-test-utils` provides deterministic temp-directory and extension-registration fixtures.
-- `@maplezzk/pi-subagents` is a private upstream migration baseline. It retains the embedded engine, backend-neutral session views, and an opt-in isolated terminal backend using the public i18n/mux foundations, but is not activated; `@maplezzk/pi-interactive-subagents` remains the active product. Backend integration, shared config/localization, and the eventual product-layer promotion are separate changes.
+- `@maplezzk/pi-subagents` is the private unified subagent implementation. Its explicit product entry keeps Agent/RPC/Fleet ownership in one manager runtime and selects standard embedded or terminal execution from canonical `subagents.json`. Interactive capability belongs to the backend; the old interactive tool names, commands and `__pi_subagents` bridge are not carried forward. The upstream `Symbol.for("pi-subagents:manager")` view of the same root manager remains for existing consumers; workflow integration uses the versioned event bus, not that registry. Managed isolation remains a separate optional profile. The root profile still selects `@maplezzk/pi-interactive-subagents` pending distribution promotion; never co-load both products.
 
-- `@maplezzk/pi-workflow` is the private workflow product migration: the imported `rpiv-workflow` engine owns DSL/routing, run journals, retries/recovery, `/wf` and its UI. It does not absorb subagent lifecycle or terminal operations. The explicit `pi-subagents/workflow-executor` entry provides managed execution without enabling the retained upstream `SubagentWorkflow` engine or Agent UI.
+- `@maplezzk/pi-workflow` is the private independent workflow engine: the imported `rpiv-workflow` owns DSL/routing, run journals, retries/recovery, `/wf` and its UI. The standard host keeps SDK stage sessions and ordinary approved resources, and injects scoped Agent tools using the same subagent backend factory. The unified subagent entry offers this executor; the standalone `pi-subagents/workflow-executor` entry is an alternative without root Agent UI. Neither enables the retained upstream `SubagentWorkflow` engine.
 
-The two private products collaborate through the versioned Pi event-bus protocol `pi-workflow:executor:discover:v1`, not runtime imports of one another. The workflow consumer owns execution configuration and registration/teardown; the executor owns backend construction and managed policy/resource admission. Backend/resource identity travels in the run journal. No new shared request library or process-global executor slot is introduced.
+The two private products collaborate through `pi-workflow:executor:discover:v1`, not runtime imports of one another. Subagents owns the ordinary backend default and definition policy; workflow owns its execution profile, concurrency, registration and run lifetime. Standard stages remain SDK sessions and pin the delegation backend; explicit managed execution may place the stage itself in a managed backend. Backend/resource identity travels in the journal. No new shared request library or process-global executor registry is introduced. Root replacement hands off cancellation through the existing owned provider, while quit/reload retires the whole run.
 
 Internal packages are `private: true`. They are part of workspace type checks and tests but never enter release-please, npm tarball checks, or the root Pi profile.
 
@@ -56,7 +56,7 @@ pi-extensions-i18n ─────────────→ pi-extensions-conf
 pi-terminal-mux ────────────────→ pi-extensions-i18n
 pi-spark ───────────────────────→ pi-terminal-mux
 @maplezzk/pi-interactive-subagents → pi-terminal-mux
-@maplezzk/pi-subagents (private) ─→ pi-extensions-i18n / pi-terminal-mux
+@maplezzk/pi-subagents (private) ─→ pi-extensions-config / pi-extensions-i18n / pi-terminal-mux
 @maplezzk/pi-workflow (private) ──→ pi-extensions-config / pi-extensions-i18n
 ```
 

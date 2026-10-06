@@ -28,6 +28,7 @@ import type { LifecycleDispatcher, LifecycleListeners } from "./events.js";
 import type { Artifact } from "./handle.js";
 import type { ModelSelection, WorkflowHost, WorkflowHostContext } from "./host.js";
 import type { Output } from "./output.js";
+import type { RunScope } from "./run-scope.js";
 import type { SkillContractMap } from "./skill-contract.js";
 import type { SessionRef } from "./state/index.js";
 import type { BranchEntry } from "./transcript.js";
@@ -277,8 +278,11 @@ export interface RunWorkflowResult {
 	 * this to `readLastStage` / `listArtifacts` / future inspect-past-run
 	 * helpers without recomputing the slug.
 	 *
-	 * Undefined ONLY for pre-flight rejections (e.g. start stage not declared,
-	 * name collision) where no JSONL file was created.
+	 * Undefined for pre-flight-style rejections surfaced directly by the command
+	 * layer. Most occur before a JSONL file is created; the intentional exception
+	 * is resume refusal on a persisted `run-terminal/cleanup-failed` marker — the
+	 * old trail exists, but `runId` is omitted so the refusal is notified exactly
+	 * once and no recorded stage effects are replayed.
 	 */
 	runId?: string;
 	stagesCompleted: number;
@@ -299,8 +303,10 @@ export interface RunWorkflowResult {
 	 * unwound without reaching any terminal write — callers treat it as
 	 * failure, same as the `success: false` projection does.
 	 *
-	 * Undefined ONLY for pre-flight rejections (no run was constructed) —
-	 * same rule as `runId`.
+	 * Usually undefined for pre-flight rejections where no run was constructed.
+	 * A cleanup-marker resume refusal returns a synthetic `failed` termination
+	 * while omitting `runId`, so callers retain the full-fidelity reason and the
+	 * command layer still owns the single notification.
 	 */
 	termination?: RunTermination;
 	/**
@@ -452,6 +458,13 @@ export interface RunContext {
 	/** Lifecycle event dispatcher — see `events.ts`. Threaded by reference. */
 	lifecycle: LifecycleDispatcher;
 	/**
+	 * Invocation-local writer/termination fence. Production contexts always carry
+	 * one; optionality preserves structurally-authored embedding/test contexts.
+	 * Signal abortion closes ordinary writes immediately, one terminal writer may
+	 * still claim the run, and runner retirement seals it permanently.
+	 */
+	scope?: RunScope;
+	/**
 	 * Optional cooperative-cancellation signal from `RunWorkflowOptions.signal`.
 	 * Checked at the between-stage seam (top of `dispatchStageOrRecordFailure`, before
 	 * the start stage and before every routed next stage). An aborted signal
@@ -486,6 +499,9 @@ export interface SessionContext {
 	skill: string;
 	/** Shared lifecycle dispatcher. Threaded from `RunContext` so the audit layer can fire `onStageEnd` / `onStageError` / `onUnitEnd` without re-importing it. */
 	lifecycle: LifecycleDispatcher;
+	/** Shared logical-run writer/terminal fence. Optional only for compatible
+	 * structurally-authored contexts; production session contexts always carry it. */
+	scope?: RunScope;
 	/**
 	 * Read-only run identity passed to lifecycle callbacks. Captured at
 	 * session construction (cwd + runId + workflow name + totalStages +

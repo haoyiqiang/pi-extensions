@@ -19,6 +19,7 @@ const overrides: Record<string, string | undefined> = {
   PI_CODING_AGENT_DIR: join(home, ".pi", "agent"),
   PI_CODING_AGENT_SESSION_DIR: join(home, "sessions"),
   PI_E2E_LIVE: "0",
+  PI_EXTENSIONS_LOCALE: "en-US",
 };
 const previous = new Map(Object.keys(overrides).map((key) => [key, process.env[key]]));
 for (const [key, value] of Object.entries(overrides)) {

@@ -54,16 +54,25 @@ export { allocateStageNumber, decorateStage, recordStage, unitRowFields } from "
 export type { FatalFailureArgs } from "./messages.js";
 export { abortedArgs, failedArgs } from "./messages.js";
 
-/**
- * `state.termination` mutator. Every terminal path — completion
- * (`finalizeWorkflow`), failure/abort (`recordFatalFailure`), cancellation
- * (`recordCancellation`), audit-write halts — lands its outcome through here,
- * so the union can never be half-set and a new outcome variant has one
- * write-site to thread through. Last write wins (a failure recorded after an
- * earlier failure on the same unwind keeps today's semantics).
- */
+/** Low-level `state.termination` mutator retained for compatible internal/test
+ * callers. Production terminal paths use `claimRunTermination` below so only
+ * one async continuation can own the logical run's terminal transition. */
 export function terminate(state: RunState, outcome: Exclude<RunTermination, { status: "running" }>): void {
 	state.termination = outcome;
+}
+
+/** Claim and publish the run's single terminal outcome. A scope claim is
+ * allowed after its signal aborts (the abort writer must still land), but never
+ * after another terminal owner or retirement sealing. Scope-less structural
+ * contexts fall back to the historical state-only first-writer guard. */
+export function claimRunTermination(
+	owner: Pick<AuditContext, "state" | "scope">,
+	outcome: Exclude<RunTermination, { status: "running" }>,
+): boolean {
+	if (owner.state.termination.status !== "running") return false;
+	if (owner.scope && !owner.scope.claimTerminal()) return false;
+	terminate(owner.state, outcome);
+	return true;
 }
 
 /**
@@ -75,10 +84,15 @@ export function terminate(state: RunState, outcome: Exclude<RunTermination, { st
  * halt token (`false` / `"halted"`). `subject` is the skill (or stage) the
  * failure message names.
  */
-export function failAuditWrite(ctx: WorkflowHostContext, state: RunState, subject: string): void {
+export function failAuditWrite(
+	ctx: WorkflowHostContext,
+	state: RunState,
+	subject: string,
+	scope?: AuditContext["scope"],
+): void {
 	const failure = FAIL_AUDIT_WRITE(subject);
+	if (!claimRunTermination({ state, scope }, { status: "failed", error: failure.error })) return;
 	ctx.ui.notify(failure.toast, "error");
-	terminate(state, { status: "failed", error: failure.error });
 }
 
 /** Surface every artifact recorded so far — recap on stage failure. */
@@ -143,14 +157,11 @@ export async function recordFatalFailure(
 	args: FatalFailureArgs,
 	onFailure?: (ctx: WorkflowHostContext) => void,
 ): Promise<void> {
-	// First-failure-wins: under parallel fanout dispatch with
-	// `failFast`, two siblings can fail near-simultaneously and BOTH reach here.
-	// This writer is NOT status-gated, so without this guard it would write two
-	// terminal rows + fire `onStageError` twice + `terminate()` twice. Skip the
-	// duplicate so the trail records the ONE original failure.
-	// Harmless on the sequential path (always `"running"` at the
-	// first and only terminal failure).
-	if (!auditWriteIsActive(audit)) return;
+	// First terminal owner wins across parallel failures, cancellation races,
+	// and abandoned callbacks. Claim BEFORE the row append so every competing
+	// ordinary writer is fenced synchronously; signal abortion does not bar the
+	// abort writer's claim.
+	if (!claimRunTermination(audit, { status: args.status, error: args.errMsg })) return;
 	recordFailureRow(ctx, audit, {
 		stage: audit.stageName,
 		// Script-stage failure rows omit `skill` (the row split landed in A.0);
@@ -167,7 +178,6 @@ export async function recordFatalFailure(
 	recordFailureForensics(ctx, audit, args.errMsg);
 	ctx.ui.notify(args.notifyMsg, args.notifyLevel);
 	onFailure?.(ctx);
-	terminate(audit.state, { status: args.status, error: args.errMsg });
 	const ref = audit.isScript
 		? scriptStageRef(audit.stageName, audit.state.lastAllocatedStageNumber)
 		: skillStageRef(audit.stageName, audit.state.lastAllocatedStageNumber, audit.skill);
@@ -241,7 +251,6 @@ function stopFailureArgs(skill: string, stop: Exclude<StopSignal, "stop">, error
 }
 
 export function recordCancellation(ctx: WorkflowHostContext, audit: AuditContext): void {
-	if (!auditWriteIsActive(audit)) return;
 	// Cancellation is a first-class termination outcome: the canonical in-memory
 	// name is `RunTermination.status: "cancelled"` (types.ts), but the JSONL row
 	// is written with the FROZEN `StageStatus: "skipped"` (state/state.ts) — a
@@ -250,6 +259,7 @@ export function recordCancellation(ctx: WorkflowHostContext, audit: AuditContext
 	// a `"skipped"` row. `errMsg` is mirrored into the row so post-mortems work
 	// from the trail alone (same posture as `recordFatalFailure`).
 	const errMsg = `${audit.skill} cancelled by user`;
+	if (!claimRunTermination(audit, { status: "cancelled", error: errMsg })) return;
 	recordFailureRow(ctx, audit, {
 		stage: audit.stageName,
 		skill: audit.skill,
@@ -260,5 +270,4 @@ export function recordCancellation(ctx: WorkflowHostContext, audit: AuditContext
 		...unitRowFields(audit.unit),
 	});
 	ctx.ui.notify(i18n.t("messages.workflowCancelled"), "info");
-	terminate(audit.state, { status: "cancelled", error: errMsg });
 }

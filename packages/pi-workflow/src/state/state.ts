@@ -183,6 +183,24 @@ export interface LoopCapRow {
 }
 
 /**
+ * Run-level terminal override written only when executor retirement fails.
+ * Stage rows remain the replay source for successful/failed work; this additive
+ * foreign row tells resume that the logical invocation did not retire cleanly.
+ * Resume therefore refuses without re-running already-recorded side effects.
+ * Older readers ignore the row by shape, so this does not require a stage
+ * schema-version bump.
+ */
+export interface RunTerminalRow {
+	type: "run-terminal";
+	status: "cleanup-failed";
+	/** Workflow outcome reached before retirement was attempted. */
+	workflowStatus: "running" | "completed" | "failed" | "aborted" | "cancelled";
+	stagesCompleted: number;
+	error: string;
+	ts: string;
+}
+
+/**
  * On-disk schema version stamped into every new header's `v`. Bump when a
  * row/envelope shape changes in a way the resume fold cannot replay —
  * `reconstructState` refuses headers carrying any other version
@@ -287,11 +305,12 @@ export interface RunRecap {
 	 */
 	artifacts: string[];
 	/**
-	 * Reason a non-completed run terminated — sourced from the LAST stage row's
-	 * `errMsg`, which mirrors the in-memory `state.termination.error` set by
-	 * `recordFatalFailure` / `recordCancellation` (present only on
-	 * `"failed" | "aborted" | "skipped"`-translated rows). Optional because
-	 * `errMsg` is optional on the persisted row: a legacy/truncated trail may
+	 * Reason a non-completed run terminated — normally sourced from the LAST
+	 * stage row's `errMsg`, which mirrors the in-memory
+	 * `state.termination.error` set by `recordFatalFailure` /
+	 * `recordCancellation`. A `run-terminal/cleanup-failed` row overrides it
+	 * with the executor-retirement error because that additive row is the
+	 * authoritative run outcome. Optional because a legacy/truncated trail may
 	 * carry no reason even on a terminal row.
 	 */
 	failureReason?: string;
@@ -354,7 +373,8 @@ export {
 	readLastStage,
 	readLoopCaps,
 	readRoutingDecisions,
+	readRunTerminal,
 	summarizeRun,
 } from "./reads.js";
 export { resolveRun } from "./resolve.js";
-export { appendHeader, appendLoopCap, appendRoutingDecision, appendStage } from "./writes.js";
+export { appendHeader, appendLoopCap, appendRoutingDecision, appendRunTerminal, appendStage } from "./writes.js";

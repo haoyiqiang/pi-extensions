@@ -150,6 +150,30 @@ export function resolveAgentInvocationConfig(
   };
 }
 
+export interface AgentLaunchOverrides {
+  interactive?: boolean;
+  autoExit?: boolean;
+}
+
+export interface ResolvedAgentLaunchBehavior {
+  interactive: boolean;
+  autoExit: boolean;
+}
+
+/** Ordinary Agent calls remain autonomous; explicit invocation modes outrank frontmatter. */
+export function resolveAgentLaunchBehavior(
+  agent: Pick<AgentConfig, "interactive" | "autoExit"> | undefined,
+  overrides: AgentLaunchOverrides = {},
+): ResolvedAgentLaunchBehavior {
+  const configuredAutoExit = overrides.autoExit
+    ?? (overrides.interactive === undefined ? agent?.autoExit : !overrides.interactive);
+  const interactive = overrides.interactive ?? agent?.interactive ?? configuredAutoExit === false;
+  return {
+    interactive,
+    autoExit: configuredAutoExit ?? !interactive,
+  };
+}
+
 export function resolveJoinMode(defaultJoinMode: JoinMode, runInBackground: boolean): JoinMode | undefined {
   return runInBackground ? defaultJoinMode : undefined;
 }

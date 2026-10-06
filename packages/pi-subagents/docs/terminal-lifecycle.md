@@ -97,10 +97,11 @@ The manager and transcript/output/UI consumers now use backend-neutral session
 handles and read-only observation interfaces. The embedded adapter alone unwraps
 native sessions for controls. The separate terminal backend now supplies remote
 observation and command/child-extension construction for isolated autonomous tasks.
-Those features are not responsibilities of this lower-level primitive. Full policy
-parity, interrupted-session recovery and configuration routing remain deferred.
+Those features are not responsibilities of this lower-level primitive. The standard
+product backend and configuration routing now compose this primitive; see the
+[package README](../README.md). Uncertain/crash recovery remains profile-specific.
 
 The old lineage-only mode creates an empty conversation with parent metadata; it is
 **not** a full-context fork. Workflow fresh/reattach/fork semantics need a separate
 session-store implementation, including a new ID/file on fork and no mutation of the
-source. Claude CLI support is also outside this batch.
+source. The unified product uses Pi only.

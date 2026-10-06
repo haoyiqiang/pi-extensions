@@ -37,9 +37,10 @@
  */
 
 import type { AssessLoop, LoopDef } from "./api.js";
+import { auditWriteIsActive } from "./audit.js";
 import { applyCompletedStage } from "./chain-state.js";
 import { lifecycleCtxFor, skillStageRef } from "./events.js";
-import { nowIso } from "./internal-utils.js";
+import { nowIso, throwIfWorkflowCancelled } from "./internal-utils.js";
 import { type AnyJudge, isPanel, type PanelJudge } from "./judge.js";
 import { panelVerdictChannel, panelVerdictDef } from "./loop-constructors.js";
 import {
@@ -195,6 +196,8 @@ async function step(
 	deps: LoopDeps,
 ): Promise<void> {
 	const next = await sequentialStrategyOf(e.loop.kind).pull(e, cursor, cap, run);
+	throwIfWorkflowCancelled(run.signal);
+	if (!auditWriteIsActive(run)) return;
 	if (next.kind === "complete") return finishLoop(hostCtx, e, cursor, run, deps);
 	if (next.kind === "cap") return hitCap(hostCtx, e, cursor, next.count, cap, run, deps);
 	return dispatchUnit(hostCtx, e, cursor, next, cap, run, deps);
@@ -217,6 +220,8 @@ async function dispatchUnit(
 		{ role: u.role, index: cursor.index, unitId: u.id, label: u.label, skill: u.skill },
 		lifecycleCtxFor(run),
 	);
+	throwIfWorkflowCancelled(run.signal);
+	if (!auditWriteIsActive(run)) return;
 
 	const snapshot = await deps.captureSnapshot(hostCtx, e.name, u.def, e.stageIdx, run);
 
@@ -321,6 +326,8 @@ async function finishLoop(
 	run: RunContext,
 	deps: LoopDeps,
 ): Promise<void> {
+	throwIfWorkflowCancelled(run.signal);
+	if (!auditWriteIsActive(run)) return;
 	// haltWhenAllFailed — the SINGLE spelling of the all-failed generation-close
 	// halt. It lives here (never a loop-parallel gate twin) because finishLoop is
 	// the one funnel every closing path reaches: the live under-cap finalTail, the
@@ -350,6 +357,8 @@ async function hitCap(
 	run: RunContext,
 	deps: LoopDeps,
 ): Promise<void> {
+	throwIfWorkflowCancelled(run.signal);
+	if (!auditWriteIsActive(run)) return;
 	if (e.loop.onCap === "halt") return deps.haltLoop(hostCtx, run, e, count, cap);
 	appendLoopCap(run.cwd, run.runId, { type: "loop-cap", stage: e.name, count, max: cap, ts: nowIso() });
 	hostCtx.ui.notify(MSG_LOOP_CAP_ADVANCE(e.skill, cap), "warning");
@@ -360,5 +369,7 @@ async function hitCap(
 		{ kind: e.loop.kind, count, max: cap, policy: "advance" as const },
 		lifecycleCtxFor(run),
 	);
+	throwIfWorkflowCancelled(run.signal);
+	if (!auditWriteIsActive(run)) return;
 	return finishLoop(hostCtx, e, cursor, run, deps);
 }

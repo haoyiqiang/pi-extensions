@@ -38,6 +38,7 @@ const ALLOWED_WORKSPACE_EDGES = new Set([
   "pi-models-discovery -> pi-extensions-i18n",
   "pi-rewind -> pi-extensions-i18n",
   "pi-context-view -> pi-extensions-i18n",
+  "@maplezzk/pi-subagents -> pi-extensions-config",
   "@maplezzk/pi-subagents -> pi-extensions-i18n",
   "@maplezzk/pi-subagents -> pi-terminal-mux",
   "@maplezzk/pi-workflow -> pi-extensions-config",

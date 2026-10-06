@@ -196,6 +196,8 @@ async function softHaltUnit(
 		reason,
 		lifecycleCtxFromSession(s),
 	);
+	throwIfWorkflowCancelled(s.signal);
+	if (!auditWriteIsActive(s)) return;
 	await s.onSuccess(ctx, failedOutput(outputMetaFor(s), reason, s.unit?.label));
 }
 
@@ -236,6 +238,7 @@ const auditFor = (s: StageSessionContext, session: SessionRef | null): AuditCont
 	// cancellation (the one writer here that never entered a session).
 	session,
 	lifecycle: s.lifecycle,
+	scope: s.scope,
 	runIdentity: s.runIdentity,
 	// The activation's pre-allocated stage number (set once output production
 	// began) — a failure row reuses it instead of burning a second number.

@@ -1,10 +1,12 @@
 # Execution and session observation boundary
 
-This is a private refactoring boundary, **not** the final dual-backend API. The
-workspace remains inactive and unpublished. An opt-in [terminal backend](./terminal-backend.md)
-now implements this port for isolated autonomous invocations. Default construction
-remains embedded. The isolated `workflow-executor.ts` entry offers managed execution to
-private `pi-workflow`; top-level subagent routing and product replacement remain deferred.
+This is a private execution boundary, not a stable published SDK. The unified
+product entry injects a per-cwd router into AgentManager: ordinary embedded and
+standard terminal execution share Agent/RPC/management ownership. Low-level default
+manager construction remains embedded for programmatic compatibility. The
+[managed terminal profile](./terminal-backend.md) is separately opt-in.
+`workflow-executor.ts` offers standard SDK stage hosting or explicit managed
+execution; distribution replacement remains a separate boundary.
 
 ## Implementation map
 
@@ -15,7 +17,7 @@ Agent tool / nested tools / workflow host / UI
        records, ownership, queue, completion
                       |
              AgentExecutionBackend
-          run / resume / steer / shutdown
+          run / resume / steer / interrupt / shutdown
                       |
        ExecutionSession (read-only view)
                       |
@@ -217,7 +219,9 @@ exercises the manager, UI, output, and resume path independently of the SDK. The
 terminal implementation adds CLI/child policy and authenticated remote observations
 for a restricted private slice, including clean managed-session reattach/fork.
 Backend conversion, interrupted-process recovery, unrestricted embedded-resource
-restoration, full policy parity and configuration routing remain separate integration steps. There is no public package subpath for this interface.
+restoration and uncertain-writer recovery remain profile-specific. Product routing
+now lives in `runtime.ts` / `product-backend.ts`; there is no published package
+subpath promising a stable backend SDK.
 
 The mention clone remains a separate throwaway launcher. The agent it starts flows
 through the manager normally; its off-screen prompt is not a new backend or registry.

@@ -102,7 +102,7 @@ function executionFor(request: WorkflowExecutorRequest, close = vi.fn(async () =
     identity: {
       version: 1,
       executor: "pi-subagents",
-      backend: request.identity?.backend ?? request.settings.backend,
+      backend: request.identity?.backend ?? request.settings.backend ?? "embedded",
       promptBinding,
     },
     close,
@@ -150,6 +150,7 @@ function runOptions(root: string) {
 
 function workspace(): string {
   const root = mkdtempSync(join(tmpdir(), "pi-workflow-wiring-"));
+  projectConfig(root, { execution: { profile: "managed", backend: "embedded" } });
   roots.push(root);
   return root;
 }
@@ -227,7 +228,7 @@ describe("Pi executor discovery", () => {
     const request = {
       observer: observer(root, "snapshot"),
       run: { runId: "snapshot", childSessionsDir: join(root, "sessions") },
-      settings: { backend: "embedded" as const },
+      settings: { profile: "managed" as const, backend: "embedded" as const },
       cancellationError: () => new Error("cancelled"),
     };
     admitted.createExecution(request);
@@ -251,7 +252,13 @@ describe("Pi executor discovery", () => {
 describe("Pi executor forwarding and ownership", () => {
   it("reads settings per run, forwards the live observer/error factory/signal, and keeps saved backend identity sticky", async () => {
     const root = workspace();
-    projectConfig(root, { execution: { backend: "embedded", maxConcurrency: 9 } });
+    projectConfig(root, {
+      execution: { profile: "managed", backend: "embedded", maxConcurrency: 9 },
+      models: {
+        defaults: { model: "test/default", thinking: "medium" },
+        skills: { review: { thinking: "off" } },
+      },
+    });
     const host = fakePi();
     const requests: WorkflowExecutorRequest[] = [];
     registerOffer(host.bus, offer((request) => { requests.push(request); return executionFor(request); }));
@@ -269,15 +276,17 @@ describe("Pi executor forwarding and ownership", () => {
     expect(requests[0]?.signal).toBeInstanceOf(AbortSignal);
     expect(requests[0]?.signal).not.toBe(signal);
     expect(requests[0]!.signal!.aborted).toBe(false);
-    expect(requests[0]?.settings).toMatchObject({ backend: "embedded", maxConcurrency: 9 });
+    expect(requests[0]?.settings).toMatchObject({ profile: "managed", backend: "embedded", maxConcurrency: 9 });
     expect(requests[0]?.identity).toEqual(identity);
     expect(first.identity.backend).toBe("terminal");
+    expect(first.resolveModel?.({ workflow: "flow", stage: "work", skill: "review" }))
+      .toEqual({ model: "test/default", thinking: "off" });
 
-    projectConfig(root, { execution: { backend: "terminal", maxConcurrency: 2 } });
+    projectConfig(root, { execution: { profile: "managed", backend: "terminal", maxConcurrency: 2 } });
     const newer = observer(root, "newer");
     await provider().createHost(newer, { ...runOptions(root), runId: "run-2" });
     expect(requests[1]?.observer).toBe(newer);
-    expect(requests[1]?.settings).toMatchObject({ backend: "terminal", maxConcurrency: 2 });
+    expect(requests[1]?.settings).toMatchObject({ profile: "managed", backend: "terminal", maxConcurrency: 2 });
     await runtime.close();
   });
 

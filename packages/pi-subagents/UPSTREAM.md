@@ -6,6 +6,27 @@
 - Baseline commit: [`e955e29c51b7a6cce37e1108cd2d6c57a77e151c`](https://github.com/tintinweb/pi-subagents/commit/e955e29c51b7a6cce37e1108cd2d6c57a77e151c)
 - License: MIT; original copyright notice retained verbatim in `LICENSE`.
 
+## Unified runtime integration
+
+The historical steps below are retained as provenance. The current private product
+entry now routes original Agent/RPC/management calls through a shared configuration
+and backend factory. Standard terminal execution uses a small SDK child bootstrap
+and the existing supervisor/bridge, including interactive lifecycle controls; the
+old interactive tool names, commands, global bridge and bundled `/plan` surface
+are deliberately not migrated. Managed isolation remains explicit.
+
+The standard workflow host and bash watchdog adapt the contracts and behavior of
+`packages/rpiv-pi/extensions/rpiv-core/sdk-workflow-host.ts` and `bash-timeout.ts`
+from [rpiv-mono at 68d9a001](https://github.com/juicesharp/rpiv-mono/tree/68d9a0014b70006d7b04b57933752338a2716db7).
+They reuse Pi 0.87.1 services and this package's scoped Agent runtime rather than
+copying RPIV's lane UI or activating a second workflow engine. The repository's
+MIT attribution is retained in `docs/LICENSE.rpiv-workflow`.
+
+Canonical config I/O uses `pi-extensions-config`; new controls/diagnostics use
+bilingual catalogs. Old management UI translation and distribution promotion remain
+separate from the functional integration. See the package README for current entry
+composition; earlier statements about missing routing describe their historical step.
+
 ## Import scope
 
 Imported `src/`, `test/` (including hidden `.pi` fixtures), `docs/`, `examples/`,

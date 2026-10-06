@@ -37,8 +37,17 @@ export interface SessionView {
 }
 
 /** Opaque execution identity plus observations. No prompt, steer, abort, dispose or SDK manager. */
+export interface TerminalSessionPresentation {
+  readonly cli: "pi";
+  readonly interactive: boolean;
+  readonly autoExit: boolean;
+  readonly surface?: string;
+}
+
 export interface ExecutionSession extends SessionView {
   readonly reference: SessionReference;
+  /** Present for sessions displayed in a multiplexer/headless terminal surface. */
+  readonly terminal?: TerminalSessionPresentation;
   /** Raw active branch, including compaction and metadata; never projected context messages. */
   getBranch?(): readonly SessionBranchEntry[];
   readonly model?: { readonly provider: string; readonly id: string; readonly name?: string };

@@ -9,22 +9,22 @@
  */
 
 import type { AgentRecord } from "./types.js";
+import { i18n } from "./i18n.js";
 
 /**
  * Explicit parenthetical note for a non-normal terminal outcome, so the parent
  * agent can't mistake partial output for a completed result. Empty string for a
  * clean completion (and any unknown/non-terminal status).
  *
- * `stopped` (a human aborted it) is deliberately distinct from `aborted` (the
- * turn limit was hit) — the parent should treat human intervention differently
- * from a budget cutoff.
+ * `stopped` is an explicit whole-agent stop; `aborted` can be a turn interruption
+ * or a hard budget cutoff, so status alone must not invent its cause.
  */
 export function getStatusNote(status: string): string {
   switch (status) {
     case "stopped":
       return " (STOPPED BY THE USER before completion — output is partial; the task was NOT finished)";
     case "aborted":
-      return " (aborted — hit the turn limit before completion; output may be incomplete)";
+      return i18n.t("product.abortedNote");
     case "steered":
       return " (wrapped up at the turn limit — output may be partial)";
     default:
@@ -50,7 +50,7 @@ export function getStatusNote(status: string): string {
  * a considered final answer or a fragment, and `stopped` shouts because a human
  * intervening outranks everything else in the string. Only `steered` hedges on
  * completion — it was told to wrap up and did, so it may well have finished at
- * the limit; an aborted run blew through its grace turns while still working,
+ * the limit; an aborted run ended before normal settlement,
  * and `stopped` can only fire on a running agent, so neither ever delivered a
  * final answer. Identical confidence gets identical wording: phrasing one fact
  * two ways invites a hunt for a distinction that isn't there.
@@ -71,7 +71,7 @@ export function getForegroundOutcomeNote(status: string): string {
     case "stopped":
       return " (STOPPED BY THE USER — everything the agent produced is above; the task is unfinished)";
     case "aborted":
-      return " (aborted at the turn limit — everything the agent produced is above; the task is unfinished)";
+      return i18n.t("product.abortedInlineNote");
     case "steered":
       return " (wrapped up at the turn limit — everything the agent produced is above; the task may be unfinished)";
     default:

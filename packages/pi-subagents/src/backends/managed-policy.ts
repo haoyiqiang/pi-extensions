@@ -1,13 +1,13 @@
 import { isAbsolute } from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { BUILTIN_TOOL_NAMES, getAgentConfig, getToolNamesForType, isDefaultsDisabled } from "../agent-types.js";
+import { BUILTIN_TOOL_NAMES, getAgentConfig, isDefaultsDisabled } from "../agent-types.js";
 import { DEFAULT_AGENTS } from "../default-agents.js";
 import { detectEnv } from "../env.js";
 import { i18n } from "../i18n.js";
 import { buildAgentPrompt, type PromptExtras } from "../prompts.js";
 import { STRUCTURED_OUTPUT_TOOL_NAME } from "../structured-output.js";
 import type { AgentConfig, EffectiveThinkingLevel, SubagentType } from "../types.js";
-import { getGraceTurns, resolveDefaultModel, resolveEffectiveMaxTurns } from "./embedded.js";
+import { getDefaultMaxTurns, getGraceTurns, normalizeMaxTurns, resolveDefaultModel } from "./embedded.js";
 import { compileInvocationSchema, validTurnBudget } from "./invocation-policy.js";
 import { modelFingerprint } from "./model-identity.js";
 import { snapshotPromptBinding, type PromptBinding } from "./prompt-binding.js";
@@ -41,7 +41,7 @@ export async function prepareManagedPolicy(
   const promptBinding = snapshotPromptBinding(options.promptBinding);
   const invalidConfig = (): never => { throw new Error(i18n.t(`${diagnosticPrefix}.invalidConfig`)); };
   const unsupported = (feature: string): never => { throw new Error(i18n.t(`${diagnosticPrefix}.unsupported`, { feature })); };
-  const agent = resolveAgent(type, invalidConfig);
+  const agent = resolveAgent(type, options.agentConfig, invalidConfig);
 
   // Managed execution is deliberately narrower than the legacy embedded backend.
   // Keep these checks ahead of detectEnv(), the first operation that may spawn a process.
@@ -49,11 +49,11 @@ export async function prepareManagedPolicy(
   if (options.structuredOutput !== undefined && (!options.structuredOutput || typeof options.structuredOutput.check !== "function")) invalidConfig();
   const structuredSchema = options.structuredOutput === undefined ? undefined
     : compileInvocationSchema(options.structuredOutput.schema).schema;
-  const maxTurns = resolveEffectiveMaxTurns(type, options.maxTurns);
+  const maxTurns = normalizeMaxTurns(options.maxTurns ?? agent.maxTurns ?? getDefaultMaxTurns());
   const graceTurns = maxTurns === undefined ? undefined : getGraceTurns();
   if (!validTurnBudget(maxTurns, graceTurns)) invalidConfig();
 
-  const tools = resolveTools(type, agent, unsupported);
+  const tools = resolveTools(agent, unsupported);
   assertRequiredTools(requiredTools, structuredSchema === undefined ? tools : [...tools, STRUCTURED_OUTPUT_TOOL_NAME]);
   const selectedModel = options.model ?? resolveDefaultModel(ctx.model, ctx.modelRegistry, agent.model);
   if (!selectedModel || !nonEmpty(selectedModel.provider) || !nonEmpty(selectedModel.id)) {
@@ -99,7 +99,9 @@ export function validateManagedPolicy(value: unknown): asserts value is ManagedP
   if (policy.structuredSchema !== undefined) compileInvocationSchema(policy.structuredSchema);
 }
 
-function resolveAgent(type: SubagentType, invalidConfig: () => never): AgentConfig {
+function resolveAgent(type: SubagentType, captured: AgentConfig | undefined, invalidConfig: () => never): AgentConfig {
+  if (captured?.enabled === false) invalidConfig();
+  if (captured) return captured;
   const registered = getAgentConfig(type);
   if (registered?.enabled === false) invalidConfig();
   if (registered) return registered;
@@ -126,12 +128,10 @@ function rejectUnsupportedOptions(
   // nested delegation tools either, so no manager object crosses the boundary.
 }
 
-function resolveTools(type: SubagentType, agent: AgentConfig, unsupported: (feature: string) => never): string[] {
+function resolveTools(agent: AgentConfig, unsupported: (feature: string) => never): string[] {
   // Direct callers may prepare a built-in before the process-wide registry has
   // been populated. Preserve that built-in's explicit tool tier in that case.
-  const requested = getAgentConfig(type) === undefined && agent.builtinToolNames !== undefined
-    ? agent.builtinToolNames
-    : getToolNamesForType(type);
+  const requested = agent.builtinToolNames ?? [...BUILTIN_TOOL_NAMES];
   const known = new Set(BUILTIN_TOOL_NAMES);
   const tools: string[] = [];
   const seen = new Set<string>();

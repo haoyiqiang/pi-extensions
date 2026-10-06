@@ -17,7 +17,7 @@ const fixtures: ReturnType<typeof fixture>[] = [];
 function fixture() {
   const f = executionFixture();
   const bus = new Map<string, Set<(data: unknown) => void>>();
-  const hooks = new Map<string, Set<() => unknown>>();
+  const hooks = new Map<string, Set<(event: { type: string; reason: string }) => unknown>>();
   function on<T>(map: Map<string, Set<T>>, name: string, fn: T) {
     let listeners = map.get(name);
     if (!listeners) map.set(name, listeners = new Set());
@@ -27,7 +27,7 @@ function fixture() {
   const pi = Object.assign(f.pi, {
     events: { on: (name: string, fn: (data: unknown) => void) => on(bus, name, fn),
       emit: (name: string, data: unknown) => { for (const fn of [...bus.get(name) ?? []]) fn(data); } },
-    on: (name: string, fn: () => unknown) => on(hooks, name, fn),
+    on: (name: string, fn: (event: { type: string; reason: string }) => unknown) => on(hooks, name, fn),
   }) as unknown as ExtensionAPI;
   const createBackend = vi.fn((_kind: "embedded" | "terminal", _sessionDir: string) => ({ ...f.backend, kind: _kind }));
   const registrations: ReturnType<typeof registerWorkflowExecutor>[] = [];
@@ -40,10 +40,12 @@ function fixture() {
   function request(extra: Partial<WorkflowExecutorRequest> = {}): WorkflowExecutorRequest {
     return { observer: Object.assign({}, f.observer, f.ctx),
       run: { runId: "bridge-run", childSessionsDir: dirname(f.sessionDir), workflow: "example", input: "input" },
-      settings: { backend: "embedded" }, cancellationError: signal => new ConsumerCancellation(signal), ...extra };
+      settings: { profile: "managed", backend: "embedded" }, cancellationError: signal => new ConsumerCancellation(signal), ...extra };
   }
   const subject = { ...f, pi, bus, hooks, createBackend, registrations, register, discover, request,
-    emit: async (name: string) => { await Promise.all([...hooks.get(name) ?? []].map(fn => fn())); } };
+    emit: async (name: string, reason = "quit") => {
+      await Promise.all([...hooks.get(name) ?? []].map(fn => fn({ type: name, reason })));
+    } };
   fixtures.push(subject);
   return subject;
 }
@@ -100,12 +102,14 @@ describe("explicit Pi workflow executor discovery", () => {
     expect(f.discover()).toHaveLength(1);
   });
 
-  it.each(["session_start", "session_before_switch", "session_before_fork", "session_before_tree"])("invalidates old offers on %s", async event => {
+  it.each(["session_start", "session_before_switch", "session_before_fork", "session_before_tree"])("keeps offers through %s and retires managed work only on committed navigation", async event => {
     const f = fixture();
     f.register();
     const old = f.discover()[0];
     const execution = await old.createExecution(f.request());
     await f.emit(event);
+    expect(execution.signal?.aborted).toBe(false);
+    await f.emit("session_shutdown", "new");
     expect(execution.signal?.aborted).toBe(true);
     expect(() => old.createExecution(f.request())).toThrow(diagnostic("closed"));
     const next = await f.discover()[0].createExecution(f.request());
@@ -120,7 +124,7 @@ describe("executor admission and resource identity", () => {
     const offer = f.discover()[0];
     expect(() => offer.createExecution(f.request({ observer: f.observer }))).toThrow(diagnostic("context"));
     expect(() => offer.createExecution(f.request({ cancellationError: undefined as never }))).toThrow(diagnostic("request"));
-    expect(() => offer.createExecution(f.request({ settings: { backend: "other" as never } }))).toThrow(diagnostic("request"));
+    expect(() => offer.createExecution(f.request({ settings: { profile: "managed", backend: "other" as never } }))).toThrow(diagnostic("request"));
     expect(f.createBackend).not.toHaveBeenCalled();
   });
 
@@ -151,15 +155,15 @@ describe("executor admission and resource identity", () => {
     const f = fixture();
     f.register();
     const offer = f.discover()[0];
-    const first = await offer.createExecution(f.request({ settings: { backend: "terminal", requiredTools: ["read", "bash", "read"] } }));
-    expect(first.identity.backend).toBe("terminal");
+    const first = await offer.createExecution(f.request({ settings: { profile: "managed", backend: "terminal", requiredTools: ["read", "bash", "read"] } }));
+    expect(first.identity).toMatchObject({ backend: "terminal", profile: "managed" });
     expect(Object.isFrozen(first.identity.promptBinding)).toBe(true);
     await first.close();
     const resumed = await offer.createExecution(f.request({ identity: first.identity,
-      settings: { backend: "embedded", requiredTools: ["bash", "read"] } }));
+      settings: { profile: "managed", backend: "embedded", requiredTools: ["bash", "read"] } }));
     expect(resumed.identity).toEqual(first.identity);
     expect(f.createBackend.mock.calls.map(call => call[0])).toEqual(["terminal", "terminal"]);
-    expect(() => offer.createExecution(f.request({ identity: first.identity, settings: { backend: "embedded", requiredTools: ["read"] } })))
+    expect(() => offer.createExecution(f.request({ identity: first.identity, settings: { profile: "managed", backend: "embedded", requiredTools: ["read"] } })))
       .toThrow(i18n.t("promptBinding.mismatch"));
     expect(f.createBackend).toHaveBeenCalledTimes(2);
   });
@@ -180,7 +184,7 @@ describe("executor admission and resource identity", () => {
     f.register();
     const filePath = join(f.root, "SKILL.md");
     writeFileSync(filePath, "---\nname: build\ndescription: fixture\n---\nOriginal $ARGUMENTS");
-    const settings = { backend: "embedded" as const, requiredTools: ["read"], skills: [
+    const settings = { profile: "managed" as const, backend: "embedded" as const, requiredTools: ["read"], skills: [
       { name: "build", filePath, baseDir: f.root, format: "positional-v1" as const, requiredTools: ["bash"] },
     ] };
     const offer = f.discover()[0];
@@ -209,7 +213,7 @@ describe("executor retirement barriers", () => {
     } }));
     f.register();
     await f.discover()[0].createExecution(f.request());
-    const rotation = f.emit("session_before_switch");
+    const rotation = f.emit("session_shutdown", "new");
     const second = await f.discover()[0].createExecution(f.request());
     await flush();
     expect(closes[0]).toHaveBeenCalledOnce();

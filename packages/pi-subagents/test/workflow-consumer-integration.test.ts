@@ -112,6 +112,8 @@ function integration(kind: ExecutionBackendKind): Integration {
   let configuredBackend = kind;
   let requiredTools: readonly string[] = [];
   const executor = registerWorkflowExecutor(pi, {
+    // workflowRealBackend already installed this fixture's in-memory agent registry.
+    runtimeInitialized: true,
     createBackend(requested, sessionDir) {
       backendRequests.push(requested);
       const childSessionsDir = dirname(sessionDir);
@@ -141,6 +143,7 @@ function integration(kind: ExecutionBackendKind): Integration {
           input: options.input,
         },
         settings: {
+          profile: "managed",
           backend: configuredBackend,
           agentType: "workflow-offline",
           maxConcurrency: 1,
@@ -279,6 +282,7 @@ for (const kind of ["embedded", "terminal"] as const) {
       await f.retireLatest();
 
       expect(result).toMatchObject({ success: true, stagesCompleted: 2, termination: { status: "completed" } });
+      expect(f.executions[0]?.identity.profile).toBe("managed");
       const rows = readAllStages(f.real.cwd, result.runId!);
       expect(rows.map(row => row.status)).toEqual(["completed", "completed"]);
       const source = rows[0]!.session!;

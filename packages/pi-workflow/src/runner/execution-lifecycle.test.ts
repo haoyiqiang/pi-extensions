@@ -277,13 +277,51 @@ describe("cancellation propagation and late-write exclusion", () => {
 			});
 			if (source === "caller") caller.abort();
 			else execution.abort();
+			const ended = vi.fn();
 			const result = await runWorkflow(host.ctx, {
 				workflow: scriptWorkflow(),
 				input: source,
 				signal: caller.signal,
+				lifecycle: { onWorkflowEnd: ended },
 			});
 			expect(result.termination?.status).toBe("aborted");
+			expect(ended).toHaveBeenCalledOnce();
+			expect(ended.mock.calls[0]?.[0]).toBe(result);
 		}
+	});
+
+	it("stops awaiting a held onWorkflowEnd after cancellation and returns the already-durable result", async () => {
+		const host = createFakeConcurrentHost({ cwd });
+		const controller = new AbortController();
+		const entered = deferred();
+		const release = deferred();
+		let hookSettled = false;
+
+		const running = runWorkflow(host.ctx, {
+			workflow: scriptWorkflow(),
+			input: "x",
+			signal: controller.signal,
+			lifecycle: {
+				onWorkflowEnd: async () => {
+					entered.resolve();
+					await release.promise;
+					hookSettled = true;
+				},
+			},
+		});
+		await entered.promise;
+		controller.abort("stop waiting for terminal observer");
+
+		const result = await running;
+		expect(result).toMatchObject({ success: true, termination: { status: "completed" } });
+		expect(hookSettled).toBe(false);
+		const before = readAllStages(cwd, result.runId!);
+		expect(before).toHaveLength(1);
+		expect(before[0]?.status).toBe("completed");
+
+		release.resolve();
+		await vi.waitFor(() => expect(hookSettled).toBe(true));
+		expect(readAllStages(cwd, result.runId!)).toEqual(before);
 	});
 
 	it("propagates canonical cancellation through a retrying fanout without collecting the cancelled unit", async () => {

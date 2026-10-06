@@ -29,12 +29,26 @@
  */
 
 import type { ScriptContext } from "../api.js";
-import { auditCtxFor, auditWriteIsActive, failAuditWrite, failedArgs, recordFatalFailure } from "../audit.js";
+import {
+	abortedArgs,
+	auditCtxFor,
+	auditWriteIsActive,
+	failAuditWrite,
+	failedArgs,
+	notifyPartialArtifacts,
+	recordFatalFailure,
+} from "../audit.js";
 import { allocateStageNumber, persistStageSuccess } from "../audit-rows.js";
 import { lifecycleCtxFor, scriptStageRef } from "../events.js";
 import type { Artifact } from "../handle.js";
-import { formatError, isAbortError, nowIso } from "../internal-utils.js";
-import { FAIL_SCRIPT_THREW, FAIL_VALIDATION_EXHAUSTED } from "../messages.js";
+import {
+	formatError,
+	isAbortError,
+	nowIso,
+	raceWithWorkflowCancellation,
+	throwIfWorkflowCancelled,
+} from "../internal-utils.js";
+import { FAIL_SCRIPT_THREW, FAIL_VALIDATION_EXHAUSTED, FAIL_WORKFLOW_ABORTED } from "../messages.js";
 import { finalizeOutput, type Output, outputMeta } from "../output.js";
 import type { RunContext, WorkflowHostContext } from "../types.js";
 import {
@@ -65,11 +79,14 @@ export async function runScript(
 ): Promise<ChainOutcome> {
 	const ref = scriptStageRef(stage.name, stage.stageNumber);
 	await run.lifecycle.fire(hostCtx, "onStageStart", ref, lifecycleCtxFor(run));
+	throwIfWorkflowCancelled(run.signal);
+	if (!auditWriteIsActive(run)) return "halted";
 
 	const scriptCtx: ScriptContext = {
 		cwd: run.cwd,
 		input: run.state.output,
 		state: run.state,
+		signal: run.signal,
 	};
 
 	// One allocation per activation, BEFORE any output is built — the
@@ -99,22 +116,32 @@ export async function runScript(
 				return { kind: "ok", value: output };
 			},
 			validate: async (output) => {
-				if (!(stage.def.kind === "produces" && stage.def.outputSchema)) {
-					return { kind: "ok", result: { valid: true, failures: [] } };
-				}
+				const schema = stage.def.kind === "produces" ? stage.def.outputSchema : undefined;
+				if (!schema) return { kind: "ok", result: { valid: true, failures: [] } };
 				// No catch: a throwing author schema propagates to the runner's
-				// single catch site (today's contract).
+				// single catch site (today's contract). Cancellation stops awaiting an
+				// uncooperative async schema; the run fence excludes its late settlement.
 				return {
 					kind: "ok",
-					result: await Promise.resolve(validateOutputData(stage.def.outputSchema, output.data)),
+					result: await raceWithWorkflowCancellation(() => validateOutputData(schema, output.data), run.signal),
 				};
 			},
 			onRetry: async (attempt) => {
 				await run.lifecycle.fire(hostCtx, "onStageRetry", ref, attempt, lifecycleCtxFor(run));
-				return { kind: "ok" };
+				throwIfWorkflowCancelled(run.signal);
+				return auditWriteIsActive(run) ? { kind: "ok" } : { kind: "aborted", abort: "recorded" };
 			},
 		},
-	);
+	).catch(async (error: unknown) => {
+		if (!isAbortError(error)) throw error;
+		await recordFatalFailure(
+			hostCtx,
+			scriptAuditCtx(run, stage, stageNumber),
+			abortedArgs(FAIL_WORKFLOW_ABORTED(stage.name)),
+			(ctx) => notifyPartialArtifacts(ctx, run.cwd, run.runId),
+		);
+		return { kind: "aborted" as const, abort: "recorded" as const };
+	});
 
 	if (result.kind === "aborted") return "halted";
 	if (result.kind === "exhausted") {
@@ -130,6 +157,7 @@ export async function runScript(
 	const output = result.value;
 	// Cancellation can stop awaiting an async script while its Promise keeps
 	// running. Do not let that abandoned callback append after the abort row.
+	throwIfWorkflowCancelled(run.signal);
 	if (!auditWriteIsActive(run)) return "halted";
 	// `skill` is intentionally absent on script-stage rows — JSON.stringify
 	// drops `undefined` so the JSONL row carries no skill field at all.
@@ -140,11 +168,13 @@ export async function runScript(
 		stage.def,
 	);
 	if (!persisted) {
-		failAuditWrite(hostCtx, run.state, stage.name);
+		failAuditWrite(hostCtx, run.state, stage.name, run.scope);
 		return "halted";
 	}
 
 	await run.lifecycle.fire(hostCtx, "onStageEnd", ref, output, lifecycleCtxFor(run));
+	throwIfWorkflowCancelled(run.signal);
+	if (!auditWriteIsActive(run)) return "halted";
 	return advance(hostCtx, stage.name, idx, run);
 }
 
@@ -167,7 +197,7 @@ async function invokeRun(
 	stageNumber: number,
 ): Promise<ScriptInvocationResult> {
 	try {
-		const result = await Promise.resolve(stage.def.run!(scriptCtx));
+		const result = await raceWithWorkflowCancellation(() => stage.def.run!(scriptCtx), run.signal);
 		const raw =
 			stage.def.kind === "produces"
 				? (result as { kind: string; artifacts: readonly Artifact[]; data: unknown })

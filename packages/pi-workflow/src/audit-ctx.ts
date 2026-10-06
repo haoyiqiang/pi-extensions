@@ -43,6 +43,7 @@ export type AuditContext = Pick<
 	| "stageName"
 	| "skill"
 	| "lifecycle"
+	| "scope"
 	| "runIdentity"
 	| "allocatedStageNumber"
 	| "readSessionBranch"
@@ -70,11 +71,12 @@ export function runIdentityOf(run: RunContext): SessionContext["runIdentity"] {
 }
 
 /** Late async callbacks may outlive cancellation because an execution host can
- *  stop awaiting them while it retires the underlying session. Every durable
- *  writer checks this predicate immediately before persistence so an abandoned
- *  callback cannot append behind the run's terminal row. */
-export function auditWriteIsActive(ctx: Pick<SessionContext, "state">): boolean {
-	return ctx.state.termination.status === "running";
+ *  stop awaiting them while it retires the underlying session. Every ordinary
+ *  writer checks both in-memory termination and the invocation scope immediately
+ *  before persistence. The scope closes on signal abortion even before an abort
+ *  row is claimed, then seals permanently after executor retirement. */
+export function auditWriteIsActive(ctx: Pick<SessionContext, "state" | "scope">): boolean {
+	return ctx.state.termination.status === "running" && (ctx.scope?.isActive() ?? true);
 }
 
 /**
@@ -104,6 +106,7 @@ export function auditCtxFor(
 		skill,
 		session: null,
 		lifecycle: run.lifecycle,
+		scope: run.scope,
 		runIdentity: runIdentityOf(run),
 		...(opts?.isScript ? { isScript: true } : {}),
 		...(opts?.unit ? { unit: opts.unit } : {}),

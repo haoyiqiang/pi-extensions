@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -49,6 +49,11 @@ const runtimes: PiWorkflowExecutionRuntime[] = [];
 
 function root(): string {
   const value = mkdtempSync(join(tmpdir(), "pi-workflow-cancel-"));
+  const configDir = join(value, ".pi");
+  mkdirSync(configDir, { recursive: true });
+  writeFileSync(join(configDir, "pi-workflow.json"), `${JSON.stringify({
+    execution: { profile: "managed", backend: "embedded" },
+  })}\n`);
   roots.push(value);
   return value;
 }
@@ -64,7 +69,7 @@ function validExecution(request: WorkflowExecutorRequest, close: () => Promise<v
     identity: {
       version: 1,
       executor: "pi-subagents",
-      backend: request.settings.backend,
+      backend: request.identity?.backend ?? request.settings.backend ?? "embedded",
       promptBinding: { resolverId: "test/cancel@1", resourceSetDigest: "digest", assetMode: "live" },
     },
     close,

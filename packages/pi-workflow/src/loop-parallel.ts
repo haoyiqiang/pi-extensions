@@ -37,10 +37,10 @@
  * (`loop-kinds.ts`, `loop-waves.ts`) and never imports loop.ts back (loop.ts → here only).
  */
 
-import { decorateStage } from "./audit.js";
+import { auditWriteIsActive, decorateStage } from "./audit.js";
 import { lifecycleCtxFor, skillStageRef } from "./events.js";
 import { handleToString } from "./handle.js";
-import { isAbortError, nowIso, workflowCancellationError } from "./internal-utils.js";
+import { isAbortError, nowIso, workflowCancellationError, WorkflowAbortError } from "./internal-utils.js";
 import {
 	buildUnitSession,
 	fanoutUnitAt,
@@ -138,7 +138,6 @@ async function dispatchGeneration(
 	genAbort: AbortController,
 	idToIndex: Map<string, number>,
 ): Promise<void> {
-	const failFast = isFailFast(e.loop);
 	// A fanout may cap its own concurrency BELOW the host cap (`implement`'s
 	// `concurrency: 1`); floored at 1, never raised above the host cap.
 	const loopCap = e.loop.kind === "fanout" ? e.loop.concurrency : undefined;
@@ -174,20 +173,28 @@ async function dispatchGeneration(
 				// unit's deps just filled. Empty when the loop sets no flag or no deps.
 				const suffix = depArtifactSuffix(e, cursor, i, idToIndex);
 				const out = await sem.run(() => dispatchUnitDetached(hostCtx, e, i, run, deps, genAbort.signal, suffix));
-				// ONE synchronous block, and its order is load-bearing. (1) A fail-fast
-				// unit's worker terminated state via recordFatalFailure — fire genAbort
-				// so in-flight siblings get session.abort()'d NOW and no dependent released
-				// below can still slip into the semaphore. (2) Fold BEFORE the latch opens:
-				// a dependent's `depArtifactSuffix` reads `cursor.slots`, so an early
-				// release would make it design blind for this dep.
-				if (failFast && run.state.termination.status !== "running") genAbort.abort();
+				// Terminal ownership comes before the late-result fence: a fail-fast
+				// semantic halt (or any terminal worker outcome) must abort siblings and
+				// drain queued acquires even though this result itself must not be folded.
+				if (run.state.termination.status !== "running") {
+					genAbort.abort();
+					return;
+				}
+				// A host may have stopped awaiting the callback while the child settled.
+				// Never fold a synthetic/late result into a sealed run.
+				if (!auditWriteIsActive(run)) return;
+				// Fold BEFORE the latch opens: a dependent's `depArtifactSuffix` reads
+				// `cursor.slots`, so an early release would make it design blind for this dep.
 				cursor.ranThisInvocation++;
 				// index-addressed placement (shared with the resume fold) so declared order
 				// survives parallel completion + dep gating + resume.
 				foldFanoutCompletion(run.state, cursor, e.def, e.name, i, e.units!.length, out);
 			} catch (reason) {
 				// aborted / never-started → unfilled slot (resume re-dispatches)
-				if (!isAbortError(reason)) await deps.recordWorkerThrow(hostCtx, fanoutUnitRef(e, i), e.skill, run, reason);
+				if (!isAbortError(reason)) {
+					await deps.recordWorkerThrow(hostCtx, fanoutUnitRef(e, i), e.skill, run, reason);
+					if (run.state.termination.status !== "running") genAbort.abort();
+				}
 			} finally {
 				// Dependents proceed even when this unit failed — `depArtifactSuffix` skips
 				// a failed/unfilled slot, so they design blind for it rather than stalling.
@@ -259,11 +266,15 @@ async function dispatchUnitDetached(
 			{ role: u.role, index, unitId: u.id, label: u.label, skill: u.skill },
 			lifecycleCtxFor(run),
 		);
+		if (signal?.aborted) throw workflowCancellationError(signal);
+		if (!auditWriteIsActive(run)) throw new WorkflowAbortError();
 		// Re-captured PER ATTEMPT, before the stage body: a file is "new since
 		// snapshot" iff it is absent from THIS listing or its mtime moved — so a
 		// retry's disk-first collection sees only what the retry's own session
 		// wrote, never attempt-1's leftovers.
 		const snapshot = await deps.captureSnapshot(hostCtx, e.name, u.def, e.stageIdx, run);
+		if (signal?.aborted) throw workflowCancellationError(signal);
+		if (!auditWriteIsActive(run)) throw new WorkflowAbortError();
 		let captured: Output | undefined;
 		await deps.executeStageSession(
 			hostCtx,

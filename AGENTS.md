@@ -18,7 +18,7 @@ pi-extensions/
 │   ├── pi-rewind/               # Git-backed checkpoints and rewind
 │   ├── pi-spark/                # Compact TUI, clean transcript, credits, presets, recap, metrics, resources, naming
 │   ├── test-utils/              # Private deterministic workspace test fixtures
-│   ├── pi-subagents/            # Private managed executor and upstream migration baseline
+│   ├── pi-subagents/            # Private unified Agent/RPC runtime and embedded/terminal execution
 │   └── pi-workflow/             # Private independent workflow engine; explicit opt-in only
 ├── scripts/                     # Repository checks and workspace helpers
 ├── .github/workflows/           # CI and release automation
@@ -49,7 +49,7 @@ The layer model, allowed workspace dependency edges, UI ownership, and root dist
 
 Keep packages composable and independently installable. Avoid coupling one extension to another extension's private implementation details or display state.
 
-`packages/pi-subagents` and `packages/pi-workflow` are private migration workspaces. Preserve upstream provenance and regression tests; do not add them to the root profile or release metadata until product integration and composition checks are complete. `pi-workflow` owns DSL/orchestration, journals, retries/recovery and `/wf`; `pi-subagents` owns managed execution through its isolated `workflow-executor.ts` entry. They collaborate through a versioned Pi event-bus protocol, without cross-product source imports. Do not activate the retained upstream `SubagentWorkflow` as a second formal engine. The existing interactive-subagents product remains unchanged during incubation.
+`packages/pi-subagents` and `packages/pi-workflow` are private migration workspaces. Preserve upstream provenance and regression tests; do not add them to the root profile or release metadata until product integration and composition checks are complete. `pi-workflow` owns DSL/orchestration, journals, retries/recovery and `/wf`; `pi-subagents` owns the common Agent/RPC/Fleet runtime and canonical backend selection. Standard workflow stages keep SDK/resource semantics and inject scoped Agent tools using that runtime; managed isolation is explicit. They collaborate through a versioned Pi event-bus protocol, without cross-product source imports. Do not activate the retained upstream `SubagentWorkflow` as a second formal engine or add old interactive-tool aliases. The existing interactive-subagents distribution remains unchanged during incubation; never co-load both product entries.
 
 ## Portability and safety
 

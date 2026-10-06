@@ -4,6 +4,7 @@
 
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import type { ExecutionSession } from "./backends/session.js";
+import type { PersistentSessionReference } from "./backends/session-reference.js";
 import type { LifetimeUsage } from "./usage.js";
 
 export type { ThinkingLevel };
@@ -54,6 +55,12 @@ export interface AgentConfig {
   model?: string;
   thinking?: ThinkingLevel;
   maxTurns?: number;
+  /** Explicit terminal interaction classification; outranks the `auto-exit` derived default. */
+  interactive?: boolean;
+  /** Interactive-subagents `auto-exit:` launch preference. */
+  autoExit?: boolean;
+  /** Default working directory, resolved relative to the parent project's cwd. */
+  cwd?: string;
   /** Persist this subagent as a normal pi session instead of keeping it in memory only. */
   persistSession?: boolean;
   /** Write the subagent's .output transcript. Defaults to true; false suppresses only that transcript. */
@@ -142,6 +149,8 @@ export interface AgentTombstone {
   description: string;
   /** Always set — a record with no session file is never tombstoned. */
   sessionFile: string;
+  /** Sticky backend identity for restoring an evicted managed conversation. */
+  reference?: PersistentSessionReference;
   completedAt: number;
 }
 

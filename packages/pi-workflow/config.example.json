@@ -1,20 +1,26 @@
 {
   "execution": {
     "executor": "pi-subagents",
-    "backend": "embedded",
-    "agentType": "general-purpose",
-    "maxConcurrency": 4,
-    "maxTurns": 24
+    "profile": "standard",
+    "maxConcurrency": 4
   },
-  "skills": [
-    {
-      "name": "example-skill",
-      "filePath": "./skills/example-skill/SKILL.md",
-      "baseDir": "./skills/example-skill",
-      "format": "pi",
-      "requiredTools": ["read", "bash"],
-      "expectedSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  "models": {
+    "defaults": {
+      "model": "provider/default-model",
+      "thinking": "medium"
+    },
+    "stages": {
+      "review": { "thinking": "high" }
+    },
+    "skills": {
+      "quick-check": "provider/fast-model"
+    },
+    "presets": {
+      "inspect": {
+        "stages": {
+          "review": { "model": "provider/review-model", "thinking": "off" }
+        }
+      }
     }
-  ],
-  "requiredTools": ["read", "bash"]
+  }
 }

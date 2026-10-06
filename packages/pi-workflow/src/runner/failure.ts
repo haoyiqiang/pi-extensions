@@ -8,10 +8,11 @@
 import {
 	abortedArgs,
 	auditCtxFor,
+	auditWriteIsActive,
+	claimRunTermination,
 	failedArgs,
 	notifyPartialArtifacts,
 	recordFatalFailure,
-	terminate,
 } from "../audit.js";
 import { formatError, isAbortError } from "../internal-utils.js";
 import { FAIL_WORKFLOW_ABORTED, MSG_STAGE_THREW } from "../messages.js";
@@ -85,7 +86,7 @@ export async function recordEntryThrow(
 	e: unknown,
 	unit?: { ref: UnitRef; skill: string },
 ): Promise<ChainOutcome> {
-	if (isAbortError(e)) return recordAbortedAtSeam(hostCtx, name, run);
+	if (run.signal?.aborted || isAbortError(e)) return recordAbortedAtSeam(hostCtx, name, run);
 	if (e instanceof StagePreflightError) {
 		return haltChain(
 			hostCtx,
@@ -121,6 +122,12 @@ export function recordAbortedAtSeam(
 	name: string,
 	run: RunContext,
 ): Promise<ChainOutcome> {
+	// After a completed stage, a static successor is already known without
+	// invoking a routing predicate after cancellation. Preserve that seam's attribution.
+	const output = run.state.output;
+	const edge = run.workflow.edges[name];
+	if (output?.meta.stage === name && output.meta.stageNumber === run.state.lastAllocatedStageNumber
+		&& typeof edge === "string" && edge !== "stop") name = edge;
 	return haltChain(hostCtx, run, name, name, abortedArgs(FAIL_WORKFLOW_ABORTED(name)), (ctx) =>
 		notifyPartialArtifacts(ctx, run.cwd, run.runId),
 	);
@@ -148,6 +155,7 @@ export async function withStageEntryGuard(
 	inner: () => Promise<ChainOutcome>,
 ): Promise<ChainOutcome> {
 	if (run.signal?.aborted) return recordAbortedAtSeam(hostCtx, name, run);
+	if (!auditWriteIsActive(run)) return "halted";
 	try {
 		return await inner();
 	} catch (e) {
@@ -157,6 +165,5 @@ export async function withStageEntryGuard(
 }
 
 export function finalizeWorkflow(_hostCtx: WorkflowHostContext, run: RunContext): ChainOutcome {
-	terminate(run.state, { status: "completed" });
-	return "completed";
+	return claimRunTermination(run, { status: "completed" }) ? "completed" : "halted";
 }

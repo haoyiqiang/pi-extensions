@@ -60,6 +60,23 @@ following local integration is separate from that baseline and is not an upstrea
 release. See the local [README](./README.md), not the archived upstream installation
 instructions, for current activation and limitations.
 
+## Standard host and run-lifetime integration
+
+The Pi frontend now defaults to the standard SDK host offered by the unified
+`pi-subagents` runtime. Delegated Agent backend selection belongs to subagents;
+managed isolation is explicit. The engine still does not import the execution
+product or absorb its host implementation.
+
+Run-local cancellation fences prevent abandoned scripts/lifecycle continuations
+from mutating journals after termination. Script/prompt contexts gain an optional
+signal. Additive cleanup-failure rows prevent recovery from treating failed
+retirement as success or repeating completed side effects. The frontend covers
+cold command admission and hands off active-run cancellation across root session
+replacement, without changing the DSL or `/wf` grammar.
+
+The following list describes the preceding private managed integration, which
+remains available as a separate profile.
+
 ## Local consumer integration
 
 - The execution registrar gains token-owned unregister semantics; the actual runner

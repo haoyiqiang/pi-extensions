@@ -20,6 +20,9 @@ import { hasAgentBadge, renderAgentName } from "./agent-color.js";
 import { buildNewAgentFile, disableInContent, enableInContent, isEmptyStub, locateAgentFile, personalAgentsDir, projectAgentsDir, serializeAgentFile } from "./agent-file-toggle.js";
 import { AgentManager, isTopLevelAgent } from "./agent-manager.js";
 import type { ExecutionSession } from "./backends/session.js";
+import type { AgentExecutionBackend } from "./backends/types.js";
+import { initializeSubagentsRuntime } from "./runtime.js";
+import { i18n } from "./i18n.js";
 import { getAgentConversation } from "./transcript.js";
 import { getDefaultMaxTurns, getGraceTurns, getRememberAgents, normalizeMaxTurns, resolveEffectiveMaxTurns, SUBAGENT_TOOL_NAMES, setDefaultMaxTurns, setGraceTurns, setRememberAgents } from "./agent-runner.js";
 import { BUILTIN_TOOL_NAMES, getAgentConfig, getAllTypes, getAvailableTypes, getConfig, getFallbackSubagent, isDefaultsDisabled, NO_FALLBACK, registerAgents, resolveSpawnType, resolveType, setDefaultsDisabled, setFallbackSubagent } from "./agent-types.js";
@@ -36,7 +39,7 @@ import { getMaxSubagentDepth, setMaxSubagentDepth } from "./nested-tools.js";
 import { createOutputFilePath, ensureOutputFile, getOutputTranscriptDefault, sessionTaskDir, setOutputTranscriptDefault, streamToOutputFile, writeInitialEntry } from "./output-file.js";
 import { SubagentScheduler } from "./schedule.js";
 import { resolveStorePath, ScheduleStore } from "./schedule-store.js";
-import { applyAndEmitLoaded, loadSettings, type SubagentsSettings, saveAndEmitChanged, type ToolDescriptionMode } from "./settings.js";
+import { loadSettings, type SubagentsSettings, saveAndEmitChanged, type ToolDescriptionMode } from "./settings.js";
 import { getForegroundOutcomeNote, getStatusNote, partialOutputSuffix } from "./status-note.js";
 import { type AgentConfig, type AgentInvocation, type AgentMentionMode, type AgentRecord, type JoinMode, type NotificationDetails, type SubagentType, type ViewerMarkdownMode, type WidgetMode } from "./types.js";
 import { createMentionProvider, mentionRoster, type TypeInfo } from "./ui/agent-mention.js";
@@ -162,7 +165,7 @@ const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "ma
 function getStatusLabel(status: string, error?: string): string {
   switch (status) {
     case "error": return `Error: ${error ?? "unknown"}`;
-    case "aborted": return "Aborted (max turns exceeded)";
+    case "aborted": return i18n.t("product.abortedLabel");
     case "steered": return "Wrapped up (turn limit)";
     case "stopped": return "Stopped";
     default: return "Done";
@@ -300,11 +303,18 @@ export const WORKFLOW_FILE_FLAG = "subagents-workflow-file";
  */
 export { FOREIGN_WORKFLOW_TOOL_NAMES, WORKFLOW_ENTRY_TYPE, type WorkflowEntryData, workflowEntryData };
 
-export default function (pi: ExtensionAPI) {
+export interface SubagentsExtensionOptions {
+  /** Retained upstream engine for programmatic compatibility, not the product entry. */
+  legacyWorkflow?: boolean;
+  execution?: AgentExecutionBackend;
+}
+
+export default function (pi: ExtensionAPI, options: SubagentsExtensionOptions = {}) {
   // Child AgentSessions load normal extensions. Re-entering this extension there
   // would create another manager and leak handlers. Nested orchestration is
   // injected as scoped custom tools by the existing manager instead.
   if (inChildSessionContext()) return;
+  let currentCtx: ExtensionContext | undefined;
 
   // ---- Register custom notification renderer ----
   pi.registerMessageRenderer<NotificationDetails>(
@@ -377,13 +387,13 @@ export default function (pi: ExtensionAPI) {
   // result uses, not a second one. Custom entries with no registered renderer
   // are silently dropped by the host, which is why this is registered at
   // activation rather than lazily.
-  pi.registerEntryRenderer<WorkflowEntryData>(WORKFLOW_ENTRY_TYPE, (entry, _options, theme) =>
+  if (options.legacyWorkflow !== false) pi.registerEntryRenderer<WorkflowEntryData>(WORKFLOW_ENTRY_TYPE, (entry, _options, theme) =>
     renderWorkflowEntryCard(entry.data, theme));
 
   // Registered at activation; READ from session_start. The host applies CLI
   // values after every extension factory has run, so `getFlag` here would only
   // ever hand back the registered default (see the read site below).
-  pi.registerFlag(WORKFLOW_FILE_FLAG, {
+  if (options.legacyWorkflow !== false) pi.registerFlag(WORKFLOW_FILE_FLAG, {
     type: "string",
     description:
       `Run a workflow script at startup: --${WORKFLOW_FILE_FLAG}=<path>. ` +
@@ -396,7 +406,7 @@ export default function (pi: ExtensionAPI) {
 
   /** Reload agents from project/global custom agent dirs and merge with defaults (called on init and each Agent invocation). */
   const reloadCustomAgents = (strict = false) => {
-    const userAgents = loadCustomAgents(process.cwd(), strict);
+    const userAgents = loadCustomAgents(currentCtx?.cwd ?? process.cwd(), strict);
     registerAgents(userAgents);
   };
 
@@ -646,7 +656,7 @@ export default function (pi: ExtensionAPI) {
     // see `PendingUsagePool`. Skipped entirely when the feature is off, so no
     // pool grows in a session that will never drain it.
     if (reportUsage) pendingUsage.add(usage);
-  });
+  }, options.execution);
 
   // Expose manager via Symbol.for() global registry for cross-package access.
   // Standard Node.js pattern for cross-package singletons (used by OpenTelemetry, etc.).
@@ -699,6 +709,8 @@ export default function (pi: ExtensionAPI) {
 
   const spawnTopLevel = (piRef: any, ctxRef: any, type: string, prompt: string, options: any) => {
     const safeOptions = { ...(options ?? {}) };
+    delete safeOptions.agentConfig;
+    delete safeOptions.backend;
     delete safeOptions.parentAgentId;
     // Internal too: a forged value would hide an RPC-spawned agent inside
     // someone else's workflow, and take it out of the concurrency pool with it.
@@ -752,7 +764,6 @@ export default function (pi: ExtensionAPI) {
   }
 
   // --- Cross-extension RPC via pi.events ---
-  let currentCtx: ExtensionContext | undefined;
   // RPC handlers + the `subagents:ready` broadcast are wired on `session_start`
   // (a bound lifecycle event), not at factory time. pi runs every extension
   // factory before the `extensions:` filter and only fires lifecycle events for
@@ -790,6 +801,7 @@ export default function (pi: ExtensionAPI) {
   // bound session_start, so a filtered-out activation never advertises (#142).
   pi.on("session_start", async (_event, ctx) => {
     currentCtx = ctx;
+    applyRuntimeSettings(ctx.cwd);
     if (ctx.hasUI) {
       widget.setUICtx(ctx.ui);
       fleet.setUICtx(ctx.ui as any);
@@ -990,6 +1002,7 @@ export default function (pi: ExtensionAPI) {
           description: entry.description,
           reclaim: { handle: entry.handle, alias: entry.alias },
           resumeSessionFile: entry.sessionFile,
+          backend: entry.reference?.backend,
           isBackground: true,
         });
         // The agent may still be starting — wait, so a startup failure lands in
@@ -1193,12 +1206,12 @@ export default function (pi: ExtensionAPI) {
   // is what `resolveWorkflowCollisions` checks before yielding to another
   // extension's workflow tool: a default may be overridden by what else is
   // loaded, an explicit choice may not.
-  let workflowsEnabled = true;
+  let workflowsEnabled = options.legacyWorkflow !== false;
   let workflowsPinned = false;
   function isWorkflowsEnabled(): boolean { return workflowsEnabled; }
   function isWorkflowsPinned(): boolean { return workflowsPinned; }
   function setWorkflowsEnabled(b: boolean) {
-    workflowsEnabled = b;
+    workflowsEnabled = options.legacyWorkflow !== false && b;
     workflowsPinned = true;
   }
 
@@ -1402,8 +1415,8 @@ export default function (pi: ExtensionAPI) {
   // Apply persisted settings on startup and emit `subagents:settings_loaded`.
   // Global + project merged; missing → defaults; corrupt file emits a warning
   // to stderr and falls back to defaults.
-  applyAndEmitLoaded(
-    {
+  const applyRuntimeSettings = (cwd: string) => initializeSubagentsRuntime(cwd, {
+    appliers: {
       setMaxConcurrent: (n) => manager.setMaxConcurrent(n),
       setMaxConcurrentForeground: (n) => manager.setMaxConcurrentForeground(n),
       setDefaultMaxTurns,
@@ -1429,8 +1442,9 @@ export default function (pi: ExtensionAPI) {
       setShowModel,
       setViewerMarkdown,
     },
-    (event, payload) => pi.events.emit(event, payload),
-  );
+    emit: (event, payload) => pi.events.emit(event, payload),
+  });
+  applyRuntimeSettings(process.cwd());
 
   // ---- Agent tool ----
 
@@ -1644,6 +1658,7 @@ Terse command-style prompts produce shallow, generic work.
           description: "If true, fork parent conversation into the agent. Default: false (fresh context).",
         }),
       ),
+      interactive: Type.Optional(Type.Boolean({ description: i18n.t("product.interactiveParameter") })),
       ...isolationParam(isWorktreeIsolationEnabled()),
       ...scheduleParam,
     }),
@@ -1758,7 +1773,7 @@ Terse command-style prompts produce shallow, generic work.
       if (details.status === "error") {
         line += "\n" + theme.fg("error", `  ⎿  Error: ${details.error ?? "unknown"}`);
       } else {
-        line += "\n" + theme.fg("warning", "  ⎿  Aborted (max turns exceeded)");
+        line += "\n" + theme.fg("warning", `  ⎿  ${i18n.t("product.abortedLabel")}`);
       }
 
       return new Text(line, 0, 0);
@@ -1928,6 +1943,7 @@ Terse command-style prompts produce shallow, generic work.
 
       // ---- Schedule: register a job, don't spawn now ----
       if (params.schedule) {
+        if (params.interactive !== undefined) throw new Error(i18n.t("product.interactiveSchedule"));
         if (!isSchedulingEnabled()) {
           return textResult("Scheduling is disabled in this project. Enable via /agents → Settings → Scheduling.");
         }
@@ -2063,6 +2079,7 @@ Terse command-style prompts produce shallow, generic work.
           inheritContext,
           thinkingLevel: thinking,
           isBackground: true,
+          interactive: params.interactive,
           isolation,
           invocation: agentInvocation,
           rootSessionId: ctx.sessionManager.getSessionId(),
@@ -2216,6 +2233,7 @@ Terse command-style prompts produce shallow, generic work.
           isolated,
           inheritContext,
           thinkingLevel: thinking,
+          interactive: params.interactive,
           isolation,
           invocation: agentInvocation,
           signal,
@@ -2660,7 +2678,7 @@ Terse command-style prompts produce shallow, generic work.
    */
   let workflowFlagHandled = false;
   function runWorkflowFlag(ctx: ExtensionContext): void {
-    if (workflowFlagHandled) return;
+    if (options.legacyWorkflow === false || workflowFlagHandled) return;
     const flag = pi.getFlag(WORKFLOW_FILE_FLAG);
     if (flag === undefined || flag === false) return;
     workflowFlagHandled = true;
@@ -2823,26 +2841,36 @@ Terse command-style prompts produce shallow, generic work.
   registerToolReportingUsage(defineTool({
     name: SUBAGENT_TOOL_NAMES.STEER,
     label: "Steer Agent",
-    description:
-      "Send a steering message to a running agent. The message will interrupt the agent after its current tool execution " +
-      "and be injected into its conversation, allowing you to redirect its work mid-run. Only works on running agents.",
-    promptSnippet: "Send a steering message to redirect a running background agent",
+    description: i18n.t("product.controlDescription"),
+    promptSnippet: i18n.t("product.controlSnippet"),
     parameters: Type.Object({
       agent_id: Type.String({
         description: "The agent ID to steer (must be currently running). The agent's handle also works — its `name` if you gave it one, otherwise its type (`explore`, `explore-2`).",
       }),
-      message: Type.String({
-        description: "The steering message to send. This will appear as a user message in the agent's conversation.",
-      }),
+      action: Type.Optional(Type.Union([Type.Literal("steer"), Type.Literal("interrupt"), Type.Literal("stop")], {
+        description: i18n.t("product.controlAction"),
+      })),
+      message: Type.Optional(Type.String({ description: i18n.t("product.controlMessage") })),
     }),
     execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
       const record = resolveAgentRef(params.agent_id);
       if (!record || !isTopLevelAgent(record)) {
         return textResult(`Agent not found: "${params.agent_id}". It may have been cleaned up.`);
       }
+      if (params.action === "stop") {
+        await manager.release(record.id);
+        widget.update();
+        fleet.update();
+        return textResult(i18n.t("product.stopped", { id: record.id }));
+      }
+      if (params.action === "interrupt") {
+        if (!await manager.interrupt(record.id)) throw new Error(i18n.t("product.cannotInterrupt", { id: record.id }));
+        return textResult(i18n.t("product.interrupted", { id: record.id }));
+      }
       if (record.status !== "running") {
         return textResult(`Agent "${params.agent_id}" is not running (status: ${record.status}). Cannot steer a non-running agent.`);
       }
+      if (params.message === undefined) throw new Error(i18n.t("product.messageRequired"));
       if (!record.session) {
         // Session not ready yet — queue the steer for delivery once initialized
         manager.steer(record.id, params.message);
@@ -3566,7 +3594,7 @@ Write the file using the write tool. Only write the file, nothing else.`;
           currentValue: isSchedulingEnabled() ? "on" : "off",
           values: ["on", "off"],
         },
-        {
+        ...(options.legacyWorkflow !== false ? [{
           id: "workflowsEnabled",
           label: "Workflows",
           description:
@@ -3574,7 +3602,7 @@ Write the file using the write tool. Only write the file, nothing else.`;
             + "(off keeps the SubagentWorkflow tool out of the tool spec; applies on next pi session)",
           currentValue: isWorkflowsEnabled() ? "on" : "off",
           values: ["on", "off"],
-        },
+        }] : []),
         {
           id: "scopeModels",
           label: "Scope models",

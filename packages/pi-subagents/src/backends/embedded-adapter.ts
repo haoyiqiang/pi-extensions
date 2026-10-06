@@ -22,6 +22,7 @@ export interface EmbeddedExecutionBackendPorts {
   resumeAgent?: typeof resumeEmbeddedAgent;
   steerEmbeddedSession?: typeof steerEmbeddedSession;
   shutdownEmbeddedSession?: typeof shutdownEmbeddedSession;
+  interruptEmbeddedSession?: (session: AgentSession) => Promise<void>;
   reattachSession?: (reference: PersistentSessionReference, options?: ExecutionRestoreOptions) => Promise<AgentSession>;
   forkSession?: (reference: PersistentSessionReference, options?: ExecutionRestoreOptions) => Promise<AgentSession>;
   inspectSession?: (sessionFile: string) => ExecutionSessionSnapshot;
@@ -93,6 +94,7 @@ export function createEmbeddedExecutionBackend(
   const steerSession = ports.steerEmbeddedSession ?? ((...args) => steerEmbeddedSession(...args));
   const shutdownSession = ports.shutdownEmbeddedSession
     ?? ((...args) => shutdownEmbeddedSession(...args));
+  const interruptSession = ports.interruptEmbeddedSession ?? ((session: AgentSession) => session.abort());
 
   const reattachSession = ports.reattachSession;
   const forkSession = ports.forkSession;
@@ -249,6 +251,13 @@ export function createEmbeddedExecutionBackend(
     steer(handle, message) {
       try {
         return steerSession(openNative(handle), message);
+      } catch (error) {
+        return reject(error);
+      }
+    },
+    interrupt(handle) {
+      try {
+        return interruptSession(openNative(handle));
       } catch (error) {
         return reject(error);
       }

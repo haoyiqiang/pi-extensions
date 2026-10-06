@@ -54,6 +54,7 @@ function feedback(value: unknown): value is ChildPacket {
       && (value.usage.cacheRead === undefined || number(value.usage.cacheRead));
     case "turn": return Number.isSafeInteger(value.count) && value.count > 0;
     case "compaction": return object(value.info) && ["manual", "threshold", "overflow"].includes(value.info.reason) && number(value.info.tokensBefore);
+    case "idle":
     case "settled": return snapshot(value.snapshot) && typeof value.text === "string" && typeof value.aborted === "boolean"
       && (value.failure === undefined || typeof value.failure === "string")
       && (value.structuredJson === undefined || typeof value.structuredJson === "string")

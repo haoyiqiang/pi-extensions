@@ -48,12 +48,15 @@ export function workflowNoticeObserver<T extends WorkflowNoticeContext>(ctx: T):
   if (ctx.mode === undefined || noticeOrigins.has(ctx)) return ctx;
   const previous = noticeViews.get(ctx);
   if (previous) return previous as T;
-  const ui = Object.create(ctx.ui, { notify: { value: (message: string, level: NoticeLevel = "info") => {
-    notifyWorkflow(ctx, message, level);
+  // The detached run may outlive the launcher's guarded SDK context. Capture
+  // only the notice port; model/session fields still come from the live context.
+  const noticeContext: WorkflowNoticeContext = { mode: ctx.mode, ui: ctx.ui };
+  const ui = Object.create(noticeContext.ui, { notify: { value: (message: string, level: NoticeLevel = "info") => {
+    notifyWorkflow(noticeContext, message, level);
   } } });
   const view = Object.create(ctx, { ui: { value: ui } }) as T;
   noticeViews.set(ctx, view);
-  noticeOrigins.set(view, ctx);
+  noticeOrigins.set(view, noticeContext);
   return view;
 }
 

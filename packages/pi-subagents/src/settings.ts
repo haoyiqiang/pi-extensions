@@ -1,12 +1,19 @@
 // Persistence for pi-subagents operational settings.
-// - Global:  ~/.pi/agent/subagents.json (via getAgentDir()) — manual defaults, never written here
+// - Global:  <agentDir>/subagents.json (via resolveAgentDir()) — manual defaults, never written here
 // - Project: <cwd>/.pi/subagents.json — written by /agents → Settings; overrides global on load
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { join } from "node:path";
+import {
+  readJsonObjectResult,
+  resolveAgentDir,
+  tryWriteJsonAtomic,
+  type JsonObject,
+} from "pi-extensions-config";
 import { NO_FALLBACK } from "./agent-types.js";
+import { i18n } from "./i18n.js";
 import type { AgentMentionMode, JoinMode, ViewerMarkdownMode, WidgetMode } from "./types.js";
+
+export type SubagentBackend = "embedded" | "terminal";
 
 export interface SubagentsSettings {
   maxConcurrent?: number;
@@ -306,6 +313,31 @@ export interface SubagentsSettings {
 
 export type ToolDescriptionMode = "full" | "compact" | "custom";
 
+/**
+ * Complete file-backed configuration. `backend` is kept separate from the
+ * imported settings UI surface so older UI snapshots preserve it without
+ * having to own backend construction.
+ */
+export interface SubagentsConfig extends SubagentsSettings {
+  /** Backend used for newly-created conversations. Existing sessions stay pinned. */
+  backend?: SubagentBackend;
+}
+
+export interface SubagentsConfigPaths {
+  global: string;
+  project: string;
+}
+
+/** Fields owned by the imported `/agents` settings UI. */
+const UI_SETTING_KEYS: readonly (keyof SubagentsSettings)[] = [
+  "maxConcurrent", "maxConcurrentForeground", "defaultMaxTurns", "graceTurns",
+  "defaultJoinMode", "backgroundByDefault", "schedulingEnabled", "scopeModels",
+  "strictAgentFiles", "disableDefaultAgents", "toolDescriptionMode", "fleetView",
+  "agentMentions", "rememberAgents", "widgetMode", "outputTranscript",
+  "worktreeIsolation", "workflowsEnabled", "maxSubagentDepth", "fallbackSubagent",
+  "reportUsage", "showCost", "showModel", "viewerMarkdown",
+];
+
 /** Setter hooks used by applySettings to wire persisted values into in-memory state. */
 export interface SettingsAppliers {
   setMaxConcurrent: (n: number) => void;
@@ -352,10 +384,15 @@ const GRACE_TURNS_CEILING = 1_000;
 const SUBAGENT_DEPTH_CEILING = 16;
 
 /** Drop fields that don't match the expected shape. Silent — garbage becomes absent. */
-function sanitize(raw: unknown): SubagentsSettings {
-  if (!raw || typeof raw !== "object") return {};
-  const r = raw as Record<string, unknown>;
-  const out: SubagentsSettings = {};
+function sanitize(raw: JsonObject): SubagentsConfig {
+  const r = raw;
+  const out: SubagentsConfig = {};
+  if (Object.hasOwn(r, "backend")) {
+    if (r.backend !== "embedded" && r.backend !== "terminal") {
+      throw new Error(i18n.t("product.backendUsage"));
+    }
+    out.backend = r.backend;
+  }
   if (
     Number.isInteger(r.maxConcurrent) &&
     (r.maxConcurrent as number) >= 1 &&
@@ -464,79 +501,80 @@ function sanitize(raw: unknown): SubagentsSettings {
   return out;
 }
 
-function globalPath(): string {
-  return join(getAgentDir(), "subagents.json");
-}
-
-function projectPath(cwd: string): string {
-  return join(cwd, ".pi", "subagents.json");
+export function getSubagentsConfigPaths(
+  cwd: string = process.cwd(),
+  agentDir: string = resolveAgentDir(),
+): SubagentsConfigPaths {
+  return {
+    global: join(agentDir, "subagents.json"),
+    project: join(cwd, ".pi", "subagents.json"),
+  };
 }
 
 /**
  * Read a settings file. Missing file is silent (returns `{}`). A file that
  * exists but can't be parsed emits a warning to stderr so users aren't
- * silently reverted to defaults — and still returns `{}` so startup proceeds.
+ * silently reverted to defaults. An explicit unsupported backend throws rather
+ * than quietly selecting embedded; other malformed fields retain legacy drop behavior.
  */
-function readSettingsFile(path: string): SubagentsSettings {
-  if (!existsSync(path)) return {};
-  try {
-    return sanitize(JSON.parse(readFileSync(path, "utf-8")));
-  } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
-    console.warn(`[pi-subagents] Ignoring malformed settings at ${path}: ${reason}`);
-    return {};
-  }
+function readSettingsFile(path: string): SubagentsConfig {
+  const result = readJsonObjectResult(path);
+  if (result.status === "missing") return {};
+  if (result.status === "loaded") return sanitize(result.value);
+  console.warn(`[pi-subagents] Ignoring malformed settings at ${path}: ${result.error.message}`);
+  return {};
 }
 
 /** Load merged settings: global provides defaults, project overrides. */
-export function loadSettings(cwd: string = process.cwd()): SubagentsSettings {
-  return { ...readSettingsFile(globalPath()), ...readSettingsFile(projectPath(cwd)) };
+export function loadSettings(cwd: string = process.cwd()): SubagentsConfig {
+  const paths = getSubagentsConfigPaths(cwd);
+  return { ...readSettingsFile(paths.global), ...readSettingsFile(paths.project) };
 }
 
 /**
  * Write project-local settings. Global is never touched from code.
- * Returns `true` on success, `false` if the write (or mkdir) failed so the
- * caller can surface a warning — persistence isn't fatal but isn't silent.
+ *
+ * The imported settings UI writes its complete legacy snapshot. Replace only
+ * that UI-owned surface so backend/terminal/future product keys survive an
+ * unrelated toggle; omitted UI fields retain their historical delete meaning.
  */
-export function saveSettings(s: SubagentsSettings, cwd: string = process.cwd()): boolean {
-  const path = projectPath(cwd);
-  try {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, JSON.stringify(s, null, 2), "utf-8");
-    return true;
-  } catch {
-    return false;
-  }
+export function saveSettings(s: SubagentsConfig, cwd: string = process.cwd()): boolean {
+  const path = getSubagentsConfigPaths(cwd).project;
+  const current = readJsonObjectResult(path);
+  const next: JsonObject = current.status === "loaded" ? { ...current.value } : {};
+  for (const key of UI_SETTING_KEYS) delete next[key];
+  Object.assign(next, s);
+  return tryWriteJsonAtomic(path, next);
 }
 
 /** Apply persisted settings to the in-memory state via caller-supplied setters. */
-export function applySettings(s: SubagentsSettings, appliers: SettingsAppliers): void {
-  if (typeof s.maxConcurrent === "number") appliers.setMaxConcurrent(s.maxConcurrent);
+export function applySettings(s: SubagentsSettings, appliers: Partial<SettingsAppliers>): void {
+  if (typeof s.maxConcurrent === "number") appliers.setMaxConcurrent?.(s.maxConcurrent);
   if (typeof s.maxConcurrentForeground === "number") {
-    appliers.setMaxConcurrentForeground(s.maxConcurrentForeground);
+    appliers.setMaxConcurrentForeground?.(s.maxConcurrentForeground);
   }
-  if (typeof s.defaultMaxTurns === "number") appliers.setDefaultMaxTurns(s.defaultMaxTurns);
-  if (typeof s.graceTurns === "number") appliers.setGraceTurns(s.graceTurns);
-  if (typeof s.maxSubagentDepth === "number") appliers.setMaxSubagentDepth(s.maxSubagentDepth);
-  if (typeof s.fallbackSubagent === "string") appliers.setFallbackSubagent(s.fallbackSubagent);
-  if (s.defaultJoinMode) appliers.setDefaultJoinMode(s.defaultJoinMode);
-  if (typeof s.backgroundByDefault === "boolean") appliers.setBackgroundByDefault(s.backgroundByDefault);
-  if (typeof s.schedulingEnabled === "boolean") appliers.setSchedulingEnabled(s.schedulingEnabled);
-  if (typeof s.scopeModels === "boolean") appliers.setScopeModels(s.scopeModels);
-  if (typeof s.strictAgentFiles === "boolean") appliers.setStrictAgentFiles(s.strictAgentFiles);
-  if (typeof s.disableDefaultAgents === "boolean") appliers.setDisableDefaultAgents(s.disableDefaultAgents);
-  if (s.toolDescriptionMode) appliers.setToolDescriptionMode(s.toolDescriptionMode);
-  if (typeof s.fleetView === "boolean") appliers.setFleetView(s.fleetView);
-  if (s.agentMentions) appliers.setAgentMentions(s.agentMentions);
-  if (typeof s.rememberAgents === "boolean") appliers.setRememberAgents(s.rememberAgents);
-  if (s.widgetMode) appliers.setWidgetMode(s.widgetMode);
-  if (typeof s.outputTranscript === "boolean") appliers.setOutputTranscript(s.outputTranscript);
-  if (typeof s.worktreeIsolation === "boolean") appliers.setWorktreeIsolation(s.worktreeIsolation);
-  if (typeof s.reportUsage === "boolean") appliers.setReportUsage(s.reportUsage);
-  if (typeof s.showCost === "boolean") appliers.setShowCost(s.showCost);
-  if (typeof s.showModel === "boolean") appliers.setShowModel(s.showModel);
-  if (s.viewerMarkdown) appliers.setViewerMarkdown(s.viewerMarkdown);
-  if (typeof s.workflowsEnabled === "boolean") appliers.setWorkflowsEnabled(s.workflowsEnabled);
+  if (typeof s.defaultMaxTurns === "number") appliers.setDefaultMaxTurns?.(s.defaultMaxTurns);
+  if (typeof s.graceTurns === "number") appliers.setGraceTurns?.(s.graceTurns);
+  if (typeof s.maxSubagentDepth === "number") appliers.setMaxSubagentDepth?.(s.maxSubagentDepth);
+  if (typeof s.fallbackSubagent === "string") appliers.setFallbackSubagent?.(s.fallbackSubagent);
+  if (s.defaultJoinMode) appliers.setDefaultJoinMode?.(s.defaultJoinMode);
+  if (typeof s.backgroundByDefault === "boolean") appliers.setBackgroundByDefault?.(s.backgroundByDefault);
+  if (typeof s.schedulingEnabled === "boolean") appliers.setSchedulingEnabled?.(s.schedulingEnabled);
+  if (typeof s.scopeModels === "boolean") appliers.setScopeModels?.(s.scopeModels);
+  if (typeof s.strictAgentFiles === "boolean") appliers.setStrictAgentFiles?.(s.strictAgentFiles);
+  if (typeof s.disableDefaultAgents === "boolean") appliers.setDisableDefaultAgents?.(s.disableDefaultAgents);
+  if (s.toolDescriptionMode) appliers.setToolDescriptionMode?.(s.toolDescriptionMode);
+  if (typeof s.fleetView === "boolean") appliers.setFleetView?.(s.fleetView);
+  if (s.agentMentions) appliers.setAgentMentions?.(s.agentMentions);
+  if (typeof s.rememberAgents === "boolean") appliers.setRememberAgents?.(s.rememberAgents);
+  if (s.widgetMode) appliers.setWidgetMode?.(s.widgetMode);
+  if (typeof s.outputTranscript === "boolean") appliers.setOutputTranscript?.(s.outputTranscript);
+  if (typeof s.worktreeIsolation === "boolean") appliers.setWorktreeIsolation?.(s.worktreeIsolation);
+  if (typeof s.reportUsage === "boolean") appliers.setReportUsage?.(s.reportUsage);
+  if (typeof s.showCost === "boolean") appliers.setShowCost?.(s.showCost);
+  if (typeof s.showModel === "boolean") appliers.setShowModel?.(s.showModel);
+  if (s.viewerMarkdown) appliers.setViewerMarkdown?.(s.viewerMarkdown);
+  if (typeof s.workflowsEnabled === "boolean") appliers.setWorkflowsEnabled?.(s.workflowsEnabled);
 }
 
 /**
@@ -562,7 +600,7 @@ export function applyAndEmitLoaded(
   appliers: SettingsAppliers,
   emit: SettingsEmit,
   cwd: string = process.cwd(),
-): SubagentsSettings {
+): SubagentsConfig {
   const settings = loadSettings(cwd);
   applySettings(settings, appliers);
   emit("subagents:settings_loaded", { settings });

@@ -17,6 +17,7 @@ import {
 } from "./agent-types.js";
 import { loadCustomAgents } from "./custom-agents.js";
 import { isolationParam, resolveAgentInvocationConfig } from "./invocation-config.js";
+import { i18n } from "./i18n.js";
 import { resolveModel } from "./model-resolver.js";
 import { checkModelScope } from "./model-scope.js";
 import {
@@ -51,19 +52,21 @@ const NESTED_TOOL_NAMES = ["Agent", "get_subagent_result", "steer_subagent"] as 
 
 interface NestedSpawnOptions {
   description: string;
+  agentConfig?: AgentConfig;
   model?: Model<any>;
   maxTurns?: number;
   isolated?: boolean;
   inheritContext?: boolean;
   thinkingLevel?: ThinkingLevel;
   isBackground?: boolean;
+  interactive?: boolean;
   isolation?: IsolationMode;
   invocation?: AgentInvocation;
   signal?: AbortSignal;
   onAssistantUsage?: (usage: { input: number; output: number; cacheWrite: number }) => void;
   onSessionCreated?: (session: ExecutionSession) => void;
   depth: number;
-  parentAgentId: string;
+  parentAgentId?: string;
   maxSubagentDepth: number;
   configCwd?: string;
   rootSessionId?: string;
@@ -91,13 +94,17 @@ export interface NestedAgentManager {
   getRecord(id: string): AgentRecord | undefined;
   resume(id: string, prompt: string, signal?: AbortSignal): Promise<AgentRecord | undefined>;
   steerAndWait(id: string, message: string): Promise<boolean>;
+  interrupt(id: string): Promise<boolean>;
+  release(id: string): Promise<void>;
 }
 
 export interface NestedToolContext {
   manager: NestedAgentManager;
   pi: ExtensionAPI;
-  parentAgentId: string;
+  /** Absent for a scoped runtime's own top-level Agent tools. */
+  parentAgentId?: string;
   depth: number;
+  defaultRunInBackground?: boolean;
   maxSubagentDepth: number;
   /** "all" = any enabled agent; string[] = only those types. Never empty. */
   allowedSubagents: "all" | string[];
@@ -113,8 +120,8 @@ function toolError(message: string): never {
   throw new Error(message);
 }
 
-function ownsRecord(record: AgentRecord | undefined, parentAgentId: string): record is AgentRecord {
-  return record?.parentAgentId === parentAgentId;
+function ownsRecord(record: AgentRecord | undefined, parentAgentId: string | undefined): record is AgentRecord {
+  return record !== undefined && record.parentAgentId === parentAgentId;
 }
 
 /**
@@ -177,9 +184,10 @@ export function createNestedSubagentTools(context: NestedToolContext): ToolDefin
       max_turns: Type.Optional(Type.Number({ minimum: 1 })),
       run_in_background: Type.Optional(
         Type.Boolean({
-          description: "Defaults to false for nested spawns — the call blocks and returns the child's result inline. Set true only for work you will collect later with get_subagent_result; a detached child is stopped when you finish.",
+          description: i18n.t("product.scopedBackground", { value: String(context.defaultRunInBackground ?? false) }),
         }),
       ),
+      interactive: Type.Optional(Type.Boolean({ description: i18n.t("product.interactiveParameter") })),
       resume: Type.Optional(Type.String({ description: "Resume a nested agent owned by this parent." })),
       isolated: Type.Optional(Type.Boolean()),
       inherit_context: Type.Optional(Type.Boolean()),
@@ -224,11 +232,10 @@ export function createNestedSubagentTools(context: NestedToolContext): ToolDefin
       }
 
       const config = getAgentConfigIn(registry, resolvedType);
-      // Foreground regardless of `backgroundByDefault` — see the reasoning on
-      // ResolveOptions. An explicit `true` here still opts in.
+      // Nested actors default to foreground; a stage-scoped root can use its configured default.
       const invocation = resolveAgentInvocationConfig(config, params, {
         worktreeAllowed: isWorktreeIsolationEnabled(),
-        defaultRunInBackground: false,
+        defaultRunInBackground: context.defaultRunInBackground ?? false,
       });
       let model = ctx.model;
       if (invocation.modelInput) {
@@ -255,12 +262,16 @@ export function createNestedSubagentTools(context: NestedToolContext): ToolDefin
 
       // The whole branch shares the root session's transcript directory; read it
       // off the owning parent rather than this child session's own id.
-      const rootSessionId = context.manager.getRecord(context.parentAgentId)?.rootSessionId;
+      const rootSessionId = context.parentAgentId
+        ? context.manager.getRecord(context.parentAgentId)?.rootSessionId
+        : ctx.sessionManager.getSessionId();
       const childDepth = context.depth + 1;
       const options: NestedSpawnOptions = {
         description: params.description,
+        agentConfig: config,
         model,
         maxTurns: invocation.maxTurns,
+        interactive: params.interactive,
         isolated: invocation.isolated,
         inheritContext: invocation.inheritContext,
         thinkingLevel: invocation.thinking,
@@ -396,16 +407,31 @@ export function createNestedSubagentTools(context: NestedToolContext): ToolDefin
   const steerTool = defineTool({
     name: NESTED_TOOL_NAMES[2],
     label: "Steer Nested Agent",
-    description: "Send guidance to a running nested agent owned by this parent.",
+    description: i18n.t("product.controlDescription"),
     parameters: Type.Object({
       agent_id: Type.String(),
-      message: Type.String(),
+      action: Type.Optional(Type.Union([Type.Literal("steer"), Type.Literal("interrupt"), Type.Literal("stop")], {
+        description: i18n.t("product.controlAction"),
+      })),
+      message: Type.Optional(Type.String({ description: i18n.t("product.controlMessage") })),
     }),
     execute: async (_toolCallId, params) => {
       const record = context.manager.getRecord(params.agent_id);
-      if (!ownsRecord(record, context.parentAgentId) || record.status !== "running") {
+      if (!ownsRecord(record, context.parentAgentId)) {
         return toolError(`Running nested agent not found or not owned by this parent: "${params.agent_id}".`);
       }
+      if (params.action === "stop") {
+        await context.manager.release(record.id);
+        return textResult(i18n.t("product.stopped", { id: record.id }));
+      }
+      if (params.action === "interrupt") {
+        if (!await context.manager.interrupt(record.id)) return toolError(i18n.t("product.cannotInterrupt", { id: record.id }));
+        return textResult(i18n.t("product.interrupted", { id: record.id }));
+      }
+      if (record.status !== "running") {
+        return toolError(`Running nested agent not found or not owned by this parent: "${params.agent_id}".`);
+      }
+      if (params.message === undefined) return toolError(i18n.t("product.messageRequired"));
       // Session not ready yet — queue the steer. The manager flushes pending
       // steers when the session is created (same contract as the top-level tool).
       if (!record.session) {

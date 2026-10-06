@@ -81,6 +81,8 @@ beforeEach(() => {
     awaitStartup: vi.fn(async () => {}),
     getRecord: (id: string) => records.get(id),
     resume: vi.fn(),
+    interrupt: vi.fn(async () => true),
+    release: vi.fn(async (id: string) => { records.delete(id); }),
     steerAndWait: vi.fn(async (id: string, message: string) => {
       const record = records.get(id);
       if (!record || record.status !== "running") return false;
@@ -97,6 +99,26 @@ afterEach(() => {
 });
 
 describe("child-safe nested Agent tools", () => {
+  it("forwards interactive mode and exposes owned turn-interrupt and stop controls", async () => {
+    const [agent, , control] = tools();
+    await execute(agent, {
+      subagent_type: "reviewer", description: "interactive review", prompt: "Discuss it",
+      run_in_background: true, interactive: true,
+    });
+    expect(spawn).toHaveBeenCalledWith(expect.anything(), expect.anything(), "reviewer", "Discuss it",
+      expect.objectContaining({ interactive: true }));
+    await execute(control, { agent_id: "child-1", action: "interrupt" });
+    expect(manager.interrupt).toHaveBeenCalledWith("child-1");
+    expect(records.has("child-1")).toBe(true);
+    await expect(execute(control, { agent_id: "child-1" })).rejects.toThrow("steering message");
+    records.set("foreign", { id: "foreign", parentAgentId: "other", status: "running" });
+    await expect(execute(control, { agent_id: "foreign", action: "stop" })).rejects.toThrow("not owned");
+    expect(manager.release).not.toHaveBeenCalled();
+    await execute(control, { agent_id: "child-1", action: "stop" });
+    expect(manager.release).toHaveBeenCalledWith("child-1");
+    expect(records.has("child-1")).toBe(false);
+  });
+
   it("allows any enabled agent when allowed_subagents is omitted", async () => {
     const [agent] = tools();
     const result = await execute(agent, {

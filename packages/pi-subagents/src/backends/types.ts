@@ -42,6 +42,8 @@ export interface ExecutionResumeResult {
  */
 export interface AgentExecutionBackend {
   readonly kind: ExecutionBackendKind;
+  /** A router can restore persisted owners independently of its current default. */
+  readonly restorationBackends?: readonly ExecutionBackendKind[];
   /** Completes when this invocation settles. signal cancels execution, not just waiting. */
   run(ctx: ExtensionContext, type: SubagentType, prompt: string, options: ExecutionRunOptions): Promise<ExecutionRunResult>;
   resume(session: ExecutionSession, prompt: string, options?: ExecutionResumeOptions): Promise<ExecutionResumeResult>;
@@ -52,6 +54,8 @@ export interface AgentExecutionBackend {
   fork?(reference: PersistentSessionReference, options?: ExecutionRestoreOptions): Promise<ExecutionSession>;
   /** Resolves on delivery; rejects on failure so callers do not report false success. */
   steer(session: ExecutionSession, message: string): Promise<void>;
+  /** Interrupt only the active turn. Interactive sessions remain open and resumable. */
+  interrupt?(session: ExecutionSession): Promise<void>;
   /** Best-effort, idempotent lifecycle shutdown; must settle even if a handler hangs. */
   shutdown(session: ExecutionSession | undefined): Promise<void>;
 }

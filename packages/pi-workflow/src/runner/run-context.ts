@@ -10,6 +10,7 @@ import type { Workflow } from "../api.js";
 import { LifecycleDispatcher, type LifecycleListeners } from "../events.js";
 import type { ModelSelection, WorkflowHost } from "../host.js";
 import { MSG_BUDGET_INVALID } from "../messages.js";
+import { createRunScope } from "../run-scope.js";
 import { getSkillContracts } from "../skill-contracts/index.js";
 import type { BranchEntry } from "../transcript.js";
 import type { RunTrigger } from "../triggers.js";
@@ -168,6 +169,7 @@ export function buildRunContext(
 		maxIterations: options.maxIterations ?? MAX_ITERATIONS,
 		trigger: identity.trigger,
 		lifecycle: new LifecycleDispatcher(options.lifecycle),
+		scope: createRunScope(options.signal),
 		signal: options.signal,
 		resolveModel: options.resolveModel,
 		readSessionBranch: options.readSessionBranch,

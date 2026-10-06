@@ -30,7 +30,7 @@ import { buildAgentPrompt, type PromptExtras } from "../prompts.js";
 import { preloadSkills } from "../skill-loader.js";
 import { createEmbeddedInvocationPolicy, embeddedStructuredTools, invokeEmbeddedSession, observeEmbeddedActivity, rememberEmbeddedPolicy,
   type EmbeddedInvocationOptions, type EmbeddedInvocationResult } from "./embedded-invocation.js";
-import type { SubagentType, EffectiveThinkingLevel } from "../types.js";
+import type { AgentConfig, SubagentType, EffectiveThinkingLevel } from "../types.js";
 import type { LifetimeUsage } from "../usage.js";
 import type { CompiledSchema } from "../workflow/json-schema.js";
 import { snapshotRequiredTools } from "./tool-requirements.js";
@@ -397,6 +397,8 @@ export interface ToolActivity {
 }
 
 export interface RunOptions {
+  /** Definition captured in the caller's config cwd before queueing. */
+  agentConfig?: AgentConfig;
   /** Explicit resolver/resource identity for managed sessions; never inferred from prompt text. */
   promptBinding?: import("./prompt-binding.js").PromptBinding;
   /** Minimum active tool names for this invocation; a managed-only precondition, never grants. */
@@ -410,6 +412,13 @@ export interface RunOptions {
   signal?: AbortSignal;
   isolated?: boolean;
   inheritContext?: boolean;
+  /** Per-call backend selection consumed by the manager/runtime; embedded execution ignores it. */
+  backend?: "embedded" | "terminal";
+  /** Keep the terminal child available for direct user interaction after a turn settles. */
+  interactive?: boolean;
+  /** Exit the child automatically after its autonomous turn. Defaults to !interactive. */
+  autoExit?: boolean;
+  /** Select the standard terminal product CLI. Embedded execution ignores this field. */
   thinkingLevel?: EffectiveThinkingLevel;
   /**
    * Reopen this pi session file rather than starting an empty conversation.
@@ -544,9 +553,18 @@ export async function runAgent(
 ): Promise<RunResult> {
   if (snapshotRequiredTools(options.requiredTools)?.length) throw new Error(i18n.t("toolRequirements.unsupportedLegacy"));
   options.signal?.throwIfAborted();
-  const config = getConfig(type);
-  const agentConfig = getAgentConfig(type);
-  const maxTurns = resolveEffectiveMaxTurns(type, options.maxTurns);
+  const agentConfig = options.agentConfig ?? getAgentConfig(type);
+  const config = agentConfig && agentConfig.enabled !== false ? {
+    displayName: agentConfig.displayName ?? agentConfig.name,
+    color: agentConfig.color,
+    description: agentConfig.description,
+    builtinToolNames: agentConfig.builtinToolNames ?? BUILTIN_TOOL_NAMES,
+    extensions: agentConfig.extensions,
+    excludeExtensions: agentConfig.excludeExtensions,
+    skills: agentConfig.skills,
+    promptMode: agentConfig.promptMode,
+  } : getConfig(type);
+  const maxTurns = normalizeMaxTurns(options.maxTurns ?? agentConfig?.maxTurns ?? getDefaultMaxTurns());
   const invocationPolicy = createEmbeddedInvocationPolicy({
     maxTurns, graceTurns: maxTurns === undefined ? undefined : getGraceTurns(), structuredOutput: options.structuredOutput,
   });
@@ -582,7 +600,7 @@ export async function runAgent(
     }
   }
 
-  let toolNames = getToolNamesForType(type);
+  let toolNames = [...config.builtinToolNames];
 
   // Persistent memory: detect write capability and branch accordingly.
   // Account for disallowedTools — a tool in the base set but on the denylist is not truly available.

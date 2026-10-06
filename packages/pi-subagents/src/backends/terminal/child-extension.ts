@@ -63,9 +63,12 @@ export function registerTerminalChild(
   let hardLimitReached = false;
   let structuredCapture: StructuredCapture | undefined;
   let structuredRetried = false;
+  const isManaged = () => (manifest?.profile ?? "managed") === "managed";
+  const isPersistentInteractive = () => !isManaged() && manifest?.autoExit === false;
   const allowedTools = () => [...(manifest?.tools ?? []), ...(structuredCapture ? [STRUCTURED_OUTPUT_TOOL_NAME] : [])];
   let permitted = false;
   let agentStarted = false;
+  let interactiveIdle = false;
   const pendingSteers: Array<Extract<ParentControl, { type: "steer" }>> = [];
   let abortRequested = false;
   let shutdownRequested = false;
@@ -275,11 +278,15 @@ export function registerTerminalChild(
       return;
     }
 
+    if (!isManaged() && interactiveIdle && state === "running" && ctx.isIdle() && !abortRequested) {
+      dispatchSteer(value, ctx);
+      return;
+    }
     if (state === "running" && !agentStarted && !abortRequested) {
       pendingSteers.push(value);
       return;
     }
-    if (state === "settling" || abortRequested || (state === "running" && ctx.isIdle())) {
+    if (state === "settling" || abortRequested || (isManaged() && state === "running" && ctx.isIdle())) {
       writeFrame(nextPacket({ type: "ack", id: value.id, error: i18n.t("bridge.notRunning") }), {
         allowTerminalState: true,
       });
@@ -295,7 +302,8 @@ export function registerTerminalChild(
 
   const dispatchSteer = (value: Extract<ParentControl, { type: "steer" }>, ctx: ExtensionContext): void => {
     try {
-      pi.sendUserMessage(value.message, { deliverAs: "steer" });
+      if (!isManaged() && ctx.isIdle()) pi.sendUserMessage(value.message);
+      else pi.sendUserMessage(value.message, { deliverAs: "steer" });
       if (!sendFeedback({ type: "ack", id: value.id })) {
         failClosed(i18n.t("bridge.disconnected"), ctx, { report: false });
       }
@@ -391,7 +399,7 @@ export function registerTerminalChild(
         return;
       }
     }
-    if (!enforceTools(ctx, allowedTools())) return;
+    if (isManaged() && !enforceTools(ctx, allowedTools())) return;
     const validatedManifest = manifest;
 
     state = "connecting";
@@ -454,13 +462,14 @@ export function registerTerminalChild(
       failClosed(i18n.t("bridge.modelMismatch"), ctx);
       return { action: "handled" };
     }
-    if (!enforceTools(ctx, allowedTools())) return { action: "handled" };
+    if (isManaged() && !enforceTools(ctx, allowedTools())) return { action: "handled" };
     return { action: "continue" };
   });
 
   pi.on("agent_start", (_event, ctx) => {
     if (!permitted || state !== "running" || abortRequested) { safeAbort(ctx); return; }
     agentStarted = true;
+    interactiveIdle = false;
     for (const pending of pendingSteers.splice(0)) dispatchSteer(pending, ctx);
   });
 
@@ -480,14 +489,24 @@ export function registerTerminalChild(
       failClosed(i18n.t("bridge.modelMismatch"), ctx);
       return;
     }
-    if (!enforceTools(ctx, allowedTools())) {
-      event.systemPromptOptions.selectedTools = [];
-      return;
+    if (isManaged()) {
+      if (!enforceTools(ctx, allowedTools())) {
+        event.systemPromptOptions.selectedTools = [];
+        return;
+      }
+      event.systemPromptOptions.selectedTools = allowedTools();
+      event.systemPromptOptions.forceSystemPrompt = manifest.systemPrompt;
+      return { systemPrompt: manifest.systemPrompt };
     }
-
-    event.systemPromptOptions.selectedTools = allowedTools();
-    event.systemPromptOptions.forceSystemPrompt = manifest.systemPrompt;
-    return { systemPrompt: manifest.systemPrompt };
+    // Standard product execution keeps the SDK resource/tool runtime live.
+    const active = new Set(pi.getActiveTools());
+    const missing = (manifest.requiredTools ?? []).filter((name) => !active.has(name));
+    if (missing.length > 0) {
+      policyFailure = i18n.t("toolRequirements.missing", { tools: missing.join(", ") });
+      event.systemPromptOptions.selectedTools = [];
+      safeAbort(ctx);
+    }
+    return;
   });
 
   pi.on("message_update", (event, ctx) => {
@@ -532,7 +551,7 @@ export function registerTerminalChild(
       return;
     }
     sendSnapshot({ type: "turn_end" }, ctx);
-    if (event.outcome === "aborted") abortRequested = true;
+    if (event.outcome === "aborted" && !isPersistentInteractive()) abortRequested = true;
     if (state !== "running" || abortRequested || policyFailure || manifest?.maxTurns === undefined) return;
     if (turnCount >= manifest.maxTurns + manifest.graceTurns!) {
       hardLimitReached = true;
@@ -548,7 +567,7 @@ export function registerTerminalChild(
   });
 
   pi.on("agent_before_settle", (event) => {
-    if (event.outcome === "aborted") abortRequested = true;
+    if (event.outcome === "aborted" && !isPersistentInteractive()) abortRequested = true;
     if (state !== "running" || !permitted || abortRequested || policyFailure || !structuredCapture
       || structuredCapture.json !== undefined || structuredRetried || event.outcome !== "completed") return;
     structuredRetried = true;
@@ -579,14 +598,16 @@ export function registerTerminalChild(
 
   pi.on("tool_call", (event, ctx) => {
     if (state === "running" && permitted && !abortRequested && manifest
-      && matchesSession(manifest, ctx) && matchesModel(manifest, ctx) && allowedTools().includes(event.toolName)) return;
+      && matchesSession(manifest, ctx) && matchesModel(manifest, ctx)
+      && (!isManaged() || allowedTools().includes(event.toolName))) return;
     policyFailure = i18n.t("bridge.toolDenied", { name: event.toolName });
     return { block: true, reason: policyFailure, terminate: true };
   });
 
   pi.on("agent_settled", (_event, ctx) => {
     if (state !== "running") return;
-    state = "settling";
+    const persistent = isPersistentInteractive() && !abortRequested && !hardLimitReached && !policyFailure;
+    if (!persistent) state = "settling";
 
     let finalSnapshot: TerminalSnapshot;
     let witness: SessionWitness;
@@ -600,7 +621,7 @@ export function registerTerminalChild(
 
     const aborted = abortRequested || finalAssistant?.stopReason === "aborted";
     const feedback: ChildFeedback = {
-      type: "settled",
+      type: persistent ? "idle" : "settled",
       snapshot: finalSnapshot,
       witness,
       text: finalAssistant ? assistantText(finalAssistant).trim() : "",
@@ -612,6 +633,13 @@ export function registerTerminalChild(
       ...(structuredRetried ? { structuredRetried: true } : {}),
       ...(softLimitReached ? { steered: true } : {}),
     };
+
+    if (persistent) {
+      if (!sendFeedback(feedback)) failClosed(i18n.t("bridge.disconnected"), ctx, { report: false });
+      agentStarted = false;
+      interactiveIdle = true;
+      return;
+    }
 
     const sent = writeFrame(nextPacket(feedback), {
       allowTerminalState: true,
@@ -660,14 +688,21 @@ function validateManifest(value: unknown): TerminalChildManifest {
     || !isAbsolute(value.run.session.sessionFile as string)) {
     throw invalidManifest();
   }
-  if (!isRecord(value.model)
-    || !nonEmptyString(value.model.provider)
-    || !nonEmptyString(value.model.id)
+  const profile = value.profile ?? "managed";
+  if ((profile !== "managed" && profile !== "standard")
+    || (value.model !== undefined && (!isRecord(value.model)
+      || !nonEmptyString(value.model.provider) || !nonEmptyString(value.model.id)))
+    || (profile === "managed" && !isRecord(value.model))
     || (value.modelFingerprint !== undefined && (typeof value.modelFingerprint !== "string" || !/^[0-9a-f]{64}$/.test(value.modelFingerprint)))
     || typeof value.systemPrompt !== "string"
     || !Array.isArray(value.tools)
-    || value.tools.some((tool) => !nonEmptyString(tool) || !BUILTIN_TOOLS.has(tool as string))
-    || new Set(value.tools).size !== value.tools.length || !validTurnBudget(value.maxTurns, value.graceTurns)) {
+    || value.tools.some((tool) => !nonEmptyString(tool) || (profile === "managed" && !BUILTIN_TOOLS.has(tool as string)))
+    || new Set(value.tools).size !== value.tools.length
+    || (value.interactive !== undefined && typeof value.interactive !== "boolean")
+    || (value.autoExit !== undefined && typeof value.autoExit !== "boolean")
+    || (value.requiredTools !== undefined && (!Array.isArray(value.requiredTools)
+      || value.requiredTools.some((tool) => !nonEmptyString(tool)) || new Set(value.requiredTools).size !== value.requiredTools.length))
+    || !validTurnBudget(value.maxTurns, value.graceTurns)) {
     throw invalidManifest();
   }
   if (value.structuredSchema !== undefined) compileTerminalSchema(value.structuredSchema);
@@ -691,6 +726,7 @@ function matchesSession(manifest: TerminalChildManifest, ctx: ExtensionContext):
 }
 
 function matchesModel(manifest: TerminalChildManifest, ctx: ExtensionContext): boolean {
+  if (!manifest.model) return true;
   const model = ctx.model;
   return model?.provider === manifest.model.provider && model.id === manifest.model.id
     && (!manifest.modelFingerprint || modelFingerprint(model) === manifest.modelFingerprint);

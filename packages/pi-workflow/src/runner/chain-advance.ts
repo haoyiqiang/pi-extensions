@@ -12,7 +12,7 @@
  */
 
 import { type EdgeTarget, PROGRESS_VALUES, type ProgressValue, type StageDef, takeRouteNote } from "../api.js";
-import { auditCtxFor, failedArgs, recordFatalFailure } from "../audit.js";
+import { auditCtxFor, auditWriteIsActive, failedArgs, recordFatalFailure } from "../audit.js";
 import { resolveSkill } from "../chain-state.js";
 import { lifecycleCtxFor, skillStageRef } from "../events.js";
 import { nowIso } from "../internal-utils.js";
@@ -26,7 +26,7 @@ import {
 import { edgeIsDecision, nextStage } from "../routing.js";
 import { appendRoutingDecision } from "../state/index.js";
 import type { RunContext, RunState, WorkflowHostContext } from "../types.js";
-import { type ChainOutcome, finalizeWorkflow, haltChain } from "./failure.js";
+import { type ChainOutcome, finalizeWorkflow, haltChain, recordAbortedAtSeam } from "./failure.js";
 
 /**
  * The walk continuation injected by the composition site
@@ -50,6 +50,10 @@ export async function advanceChain(
 	run: RunContext,
 	deps: ChainDeps,
 ): Promise<ChainOutcome> {
+	run.scope?.setActiveStage(currentName);
+	const inactive = await inactiveRunOutcome(hostCtx, currentName, run);
+	if (inactive) return inactive;
+
 	// Mark the just-completed stage as visited BEFORE consulting the next edge.
 	// A thrown EdgeFn would otherwise leave currentName un-marked, opening a
 	// (narrow) window where a recovery path could under-count revisits.
@@ -69,6 +73,8 @@ export async function advanceChain(
 		const note = stopRouteNote(wasDecision, run.workflow.edges[currentName]);
 		if (wasDecision) auditRoutingDecision(hostCtx, run, idx, currentName, "stop", note);
 		await run.lifecycle.fire(hostCtx, "onRoute", fromRef, "stop", lifecycleCtxFor(run));
+		const afterRoute = await inactiveRunOutcome(hostCtx, currentName, run);
+		if (afterRoute) return afterRoute;
 		if (isBlockedGateStop(note)) {
 			return haltChain(hostCtx, run, currentName, skill, failedArgs(FAIL_GATE_STOP(currentName, note, run.runId)));
 		}
@@ -85,6 +91,9 @@ export async function advanceChain(
 		const edge = run.workflow.edges[currentName];
 		const edgeNote = typeof edge === "function" ? takeRouteNote(edge) : undefined;
 		const guard = await evaluateBackwardJumpGuard(run, nextName);
+		if (guard.kind === "inactive") {
+			return (await inactiveRunOutcome(hostCtx, currentName, run)) ?? "halted";
+		}
 		const note = guard.kind === "re-entry" ? [edgeNote, guard.note].filter(Boolean).join("; ") : edgeNote;
 		auditRoutingDecision(hostCtx, run, idx, currentName, nextName, note);
 		if (guard.kind === "re-entry" && guard.halt) {
@@ -100,12 +109,29 @@ export async function advanceChain(
 	// before the next stage runs. Deterministic auto-edges still fire so
 	// listeners see every transition.
 	await run.lifecycle.fire(hostCtx, "onRoute", fromRef, nextName, lifecycleCtxFor(run));
+	const afterRoute = await inactiveRunOutcome(hostCtx, currentName, run);
+	if (afterRoute) return afterRoute;
 
 	// deps.runNext owns the catch for throws out of the *next* stage, so the
 	// JSONL row records `nextName` (the stage that actually threw) rather than
 	// `currentName` (which would mis-attribute the failure to the prior stage
 	// that already completed successfully).
 	return deps.runNext(hostCtx, nextName, idx + 1, run);
+}
+
+/** Translate a closed writer fence into the chain outcome. A cold aborted
+ * signal still needs its one terminal writer; an already-owned/sealed run only
+ * halts the abandoned continuation. */
+async function inactiveRunOutcome(
+	hostCtx: WorkflowHostContext,
+	stageName: string,
+	run: RunContext,
+): Promise<ChainOutcome | undefined> {
+	if (auditWriteIsActive(run)) return undefined;
+	if (run.signal?.aborted && run.state.termination.status === "running") {
+		return recordAbortedAtSeam(hostCtx, stageName, run);
+	}
+	return "halted";
 }
 
 /**
@@ -160,7 +186,10 @@ function auditRoutingDecision(
  * so an additional absolute bound can ride the same deferred-`halt` seam
  * without touching the caller.
  */
-export type GuardEvaluation = { kind: "first-visit" } | { kind: "re-entry"; note: string; halt?: FailureText };
+export type GuardEvaluation =
+	| { kind: "inactive" }
+	| { kind: "first-visit" }
+	| { kind: "re-entry"; note: string; halt?: FailureText };
 
 /**
  * Ring depth for `RunContext.progressTrail` — the halt text carries at most
@@ -235,6 +264,9 @@ export async function evaluateBackwardJumpGuard(run: RunContext, nextName: strin
 	if (!run.visited.has(nextName)) return { kind: "first-visit" };
 
 	const verdict = await invokeProgressHook(run.workflow.stages[nextName], run.state);
+	// A progress hook is author code and may outlive managed-host cancellation.
+	// Fence before touching the ledgers or emitting its routing row.
+	if (!auditWriteIsActive(run)) return { kind: "inactive" };
 	run.state.telemetry.backwardJumps++;
 	// Absolute lap ledger — every re-entry counts here, whatever the verdict.
 	const laps = (run.laps.get(nextName) ?? 0) + 1;

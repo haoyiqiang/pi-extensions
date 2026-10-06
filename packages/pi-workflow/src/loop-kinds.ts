@@ -547,6 +547,7 @@ export function buildUnitSession(
 		stageName: decorateStage(e.name, u.tag), // DISPLAY only — machine identity is `unit`
 		skill: u.skill,
 		lifecycle: run.lifecycle,
+		scope: run.scope,
 		runIdentity: runIdentityOf(run),
 		stage: u.def,
 		skillContracts: run.skillContracts,
@@ -812,7 +813,7 @@ async function resolveProduceArg(loop: AssessLoop, cursor: LoopCursor, e: LoopEn
 				state: run.state,
 			})
 		: isPrompt
-			? await resolveStagePrompt(e.def.prompt!, run.cwd, run.state)
+			? await resolveStagePrompt(e.def.prompt!, run.cwd, run.state, run.signal)
 			: e.entryArgs;
 }
 

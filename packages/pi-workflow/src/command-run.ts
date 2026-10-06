@@ -6,6 +6,7 @@
 
 import { flushBuiltInProviders } from "./built-ins.js";
 import { parseArgs } from "./command.js";
+import { trackCommandRun } from "./command-lifetime.js";
 import { loadWorkflowConfig } from "./config.js";
 import { getWorkflowExecutionProvider } from "./execution-host.js";
 import { isPiWorkflowExecutionProvider } from "./pi-execution.js";
@@ -55,12 +56,14 @@ export async function prewarmWorkflowRuntime(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 export async function handleWorkflowCommand(host: WorkflowHost, args: string, ctx: WorkflowHostContext): Promise<void> {
+	ctx.signal?.throwIfAborted();
 	if (!ctx.hasUI) {
 		notifyWorkflow(ctx, i18n.t("messages.interactiveOnly"), "error");
 		return;
 	}
 
 	const loaded = await loadWorkflows(ctx.cwd);
+	ctx.signal?.throwIfAborted();
 	surfaceIssues(ctx, loaded.issues);
 
 	const workflowNames = new Set(loaded.workflows.map((w) => w.name));
@@ -154,7 +157,7 @@ export async function handleWorkflowCommand(host: WorkflowHost, args: string, ct
 	// after pi replaced the launcher session — notify via notifyOrDropIfStale so a
 	// stale ctx drops the toast instead of throwing out of the tail (which would
 	// be an unhandled rejection → uncaughtException → pi exits).
-	void runWorkflow(workflowNoticeObserver(ctx), {
+	void trackCommandRun(ctx, runWorkflow(workflowNoticeObserver(ctx), {
 		workflow,
 		input,
 		host: approvedHost,
@@ -162,7 +165,7 @@ export async function handleWorkflowCommand(host: WorkflowHost, args: string, ct
 		name,
 		maxBackwardJumps: parsed.maxBackwardJumps,
 		maxLaps: parsed.maxLaps,
-	})
+	}))
 		.then((result) => {
 			// Surface pre-flight rejections (collision, etc.) — no runId means no JSONL on disk.
 			if (!result.success && result.runId === undefined && result.error) {
@@ -191,7 +194,7 @@ async function handleResume(
 	}
 	// Float the resume off the prompt — identical shape to the run path,
 	// including the stale-safe settle tails.
-	void resumeWorkflowByRunId(workflowNoticeObserver(ctx), ref, { host, maxBackwardJumps, maxLaps })
+	void trackCommandRun(ctx, resumeWorkflowByRunId(workflowNoticeObserver(ctx), ref, { host, maxBackwardJumps, maxLaps, signal: ctx.signal }))
 		.then((result) => {
 			// A failure with no runId is a no-JSONL refusal (run-id didn't resolve,
 			// load error, workflow gone, or an unreconstructable trail) — nothing else
@@ -223,7 +226,9 @@ async function handleResume(
 function approvedSkillHostOrNotify(host: WorkflowHost, ctx: WorkflowHostContext): WorkflowHost | undefined {
 	if (!isPiWorkflowExecutionProvider(getWorkflowExecutionProvider())) return host;
 	try {
-		const approved = loadWorkflowConfig(ctx.cwd).skills;
+		const config = loadWorkflowConfig(ctx.cwd);
+		if (config.execution.profile !== "managed") return host;
+		const approved = config.skills;
 		return {
 			registerCommand: host.registerCommand.bind(host),
 			getCommands: () => approved.map((skill) => ({ name: `skill:${skill.name}`, source: "skill" })),

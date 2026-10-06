@@ -1,48 +1,49 @@
-# @maplezzk/pi-workflow — 私有工作流集成
+# @maplezzk/pi-workflow — 独立工作流引擎
 
 > English documentation: [README.md](./README.md)
 
-这是从 [`@juicesharp/rpiv-workflow` 2.12.0](./UPSTREAM.md) 导入的**独立工作流引擎**，
-负责阶段/循环 DSL、谓词路由、产物收集与校验、重试、JSONL 审计日志、恢复及 `/wf`。
-子代理生命周期与执行后端属于 `pi-subagents`，不会合并进本包。
+从 [`@juicesharp/rpiv-workflow` 2.12.0](./UPSTREAM.md) 导入，保留阶段/循环 DSL、
+路由、输出校验、重试、审计日志、恢复和 `/wf`。执行与子代理生命周期属于 `pi-subagents`。
 
-**私有、显式启用**：本包与新的子代理执行入口都不加入根 Pi profile 或发布配置，现有
-interactive-subagents 产品保持不变。这不是完整 RPIV 套件、默认工作流、技能、扩展工具
-或 lane UI 的即插即用替代品。
+本 workspace 仍为**私有、显式加载**，不加入根 profile 或发布配置。它不等于安装完整 RPIV
+套件、默认工作流包、技能、工具扩展或 lane UI。
 
 ## 架构
 
 ```text
-pi-workflow：DSL / 编排引擎 / 日志 / /wf / 执行配置
-    │  pi-workflow:executor:discover:v1（Pi 事件总线）
+pi-workflow：DSL / runner / 日志 / /wf
+    │  pi-workflow:executor:discover:v1
     ▼
-pi-subagents/workflow-executor：受管生命周期与已存策略
-    ├─ embedded：隔离的进程内 Pi SDK 会话
-    └─ terminal：隔离的 Pi CLI 子进程 → pi-terminal-mux
+pi-subagents：标准 SDK WorkflowHost
+    └─ 阶段 AgentSession，使用正常且已授权的 Pi 资源
+        └─ Agent → 统一子代理运行时 → embedded 或 terminal
 ```
 
-两包没有跨产品运行时依赖，不导入彼此的私有源码。执行器通过同步、版本化协议发现；缺少
-执行器或存在多个匹配项时明确失败，不回退到主会话执行。executor-only 入口不会加载保留的
-上游 `SubagentWorkflow` 引擎或 Agent UI。
+默认 `standard` 配置沿用原 RPIV host 的结构：阶段会话仍由 SDK 创建，阶段内的 Agent
+通过 `subagents.json` 选择后端，工作流不再是唯一能切换子代理后端的入口。宿主保留正常
+技能/模板/扩展行为、首次提示、原始 Pi 会话恢复、continuation 分叉、模型/思考等级覆盖、
+嵌套作用域和 bash 超时恢复。
 
-程序化调用者仍可提供自己的 host。startup 注册接口通过独立 token 保证注销所有权；真正
-执行的 runner 每次传入自己的取消错误工厂，并等待执行资源退役。运行头记录执行器身份，
-它与子会话策略、模型凭据相互独立。
+两包没有跨产品运行时导入。执行器发现保持版本化，缺少或重复的执行器明确失败。
+统一产品入口不加载旧 `SubagentWorkflow` 引擎或旧交互式子代理工具别名。
 
 ## 开发时显式启用
 
-在仓库根目录执行 `npm install` 后，于可信的开发会话中**显式加载以下文件**：
+在仓库根目录执行 `npm install` 后：
 
 ```sh
-pi -e ./packages/pi-extensions-i18n/index.ts \
-   -e ./packages/pi-subagents/workflow-executor.ts \
-   -e ./packages/pi-workflow/extension.ts
+pi --no-extensions \
+  -e ./packages/pi-extensions-i18n/index.ts \
+  -e ./packages/pi-subagents/index.ts \
+  -e ./packages/pi-workflow/extension.ts
 ```
 
-不要为了运行工作流而加载 `pi-subagents/index.ts`：它是保留的旧产品工厂，会注册另一套
-工具/UI。上面的 i18n 入口用于带来源标签的通知；此操作不改写 settings 或根 profile。
+不要再加载旧 interactive-subagents 产品。只需要工作流的启动器可以把
+`pi-subagents/index.ts` 换成 `pi-subagents/workflow-executor.ts`；不要同时加载这两个
+执行入口。后者提供子会话内的 Agent 工具，不加载根管理界面。主会话所需的其他工具扩展
+可以另外添加。
 
-本包**不附带默认工作流**。可在项目 `.rpiv/workflows/config.ts` 中定义：
+本包不附带默认工作流包。项目 `.rpiv/workflows/config.ts` 示例：
 
 ```ts
 import { acts, defineWorkflow } from "@maplezzk/pi-workflow";
@@ -53,7 +54,7 @@ export default defineWorkflow({
   stages: {
     review: acts.prompt({ prompt: "检查当前改动并总结风险。" }),
     check: acts.prompt({
-      prompt: "复核这些发现，指出还缺少哪些验证。",
+      prompt: "复核这些发现，指出缺少的验证。",
       sessionPolicy: "continue",
     }),
   },
@@ -61,104 +62,145 @@ export default defineWorkflow({
 });
 ```
 
-使用 `/wf inspect 检查当前改动` 运行。continue 阶段分叉前一阶段的已存历史，不在主会话
-中执行。保留的命令语法也支持 `/wf @<run-id-or-name>` 恢复。继承的 DSL 与完整语法见
-[基础文档](./docs/workflow-basics.md) 和[编写参考](./docs/workflow-authoring.md)；
-其中提及的上游宿主/UI 并不代表受管执行配置已提供相同功能。
+使用 `/wf inspect 检查当前改动` 运行，或 `/wf @<run-id-or-name>` 恢复。
+continue 阶段分叉前一阶段，不替换主会话自身的对话。另见[基础文档](./docs/workflow-basics.md)
+和[编写参考](./docs/workflow-authoring.md)。
 
-### 取消运行
+## 配置
 
-`/wf-cancel` 在只有一个活动运行时取消它；存在多个运行时则列出运行 ID。
-用 `/wf-cancel <run-id>` 选择一个，或 `/wf-cancel all` 取消当前全部运行。
-尚在获取执行器的运行也可取消。命令会等待已知资源退役；清理失败时明确报告，而不声称
-已正常停止。这不改变 `/wf` 的解析规则，也不占用 lane/widget 界面。切换或关闭所属
-Pi 会话也会取消其受管执行。
+每次运行读取：
 
-## 执行配置
+- `<agentDir>/extensions/pi-workflow/config.json`；
+- `<cwd>/.pi/pi-workflow.json`，项目层覆盖全局层。
 
-配置示例见 [`config.example.json`](./config.example.json)，每次运行时重新读取：
-
-- 全局：`<agentDir>/extensions/pi-workflow/config.json`。
-- 项目：`<cwd>/.pi/pi-workflow.json`。
-- agent 目录通过 `pi-extensions-config` 解析，支持 `PI_CODING_AGENT_DIR`。
+agent 目录支持 `PI_CODING_AGENT_DIR`。[配置示例](./config.example.json) 展示正常模式和
+模型级联；其中模型键占位符需替换为 Pi 实际可用的模型：
 
 ```json
 {
   "execution": {
     "executor": "pi-subagents",
-    "backend": "embedded",
+    "profile": "standard",
+    "maxConcurrency": 4
+  }
+}
+```
+
+可选 `models` 配置阶段的模型与思考等级覆盖：
+
+```json
+{
+  "models": {
+    "defaults": { "model": "provider/default-model", "thinking": "medium" },
+    "stages": { "review": { "thinking": "high" } },
+    "skills": { "quick-check": "provider/fast-model" },
+    "presets": {
+      "inspect": {
+        "stages": { "review": { "model": "provider/review-model", "thinking": "off" } }
+      }
+    }
+  }
+}
+```
+
+每个叶子可以是模型字符串，也可以是 `{ "model"?, "thinking"? }`；`thinking` 支持
+`off`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`。解析按首个匹配层级：
+`presets.<workflow>.stages.<stage>`、`stages.<stage>`、`skills.<skill>`、`defaults`。
+选中的一个叶子会与 `defaults` 组合；互相竞争的 preset/stage/skill 叶子不会跨层按字段合并。
+
+项目层按键覆盖全局模型配置：项目 `defaults` 存在时整体替换全局 `defaults`；`stages`、
+`skills` 按条目名合并；`presets` 按 workflow 和 stage 合并，同名项目叶子替换全局叶子。
+如果没有解析到任何模型配置，新的 standard 子会话使用 SDK 原生 settings 基线，而不会
+强制继承启动会话当前选择的模型或思考等级。
+
+要让委派的代理使用终端，请配置**子代理**，而不是阶段放置位置：
+
+```json
+{ "backend": "terminal" }
+```
+
+把它写入 `.pi/subagents.json`，或使用 `/config:subagents terminal`。
+标准运行会记录所选委派后端，恢复时继续使用它，不转换已有会话的后端。
+
+`requiredTools` 表示最低工具需求，不授予权限。标准子会话检查实际激活的工具。
+资源必须已安装，并遵守启动器确认的项目授权；根编排/UI 产品从阶段会话中排除，普通工具
+扩展仍可发现。RPIV 专有参数替换需要对应资源扩展，本引擎不模拟它，也不附带全部辅助文件。
+
+可选 `execution.maxTurns` 限制阶段轮次。bash 看门狗保留 `RPIV_BASH_TIMEOUT_MS`：
+默认每条命令 180 秒，限制在 5 秒至 30 分钟之间。它提供原有
+`toolTimeout/resetToolTimeout` 恢复接口，不把命令超时伪装成普通用户取消。
+
+### 显式使用 managed
+
+已有的受限隔离模式需要显式选择：
+
+```json
+{
+  "execution": {
+    "profile": "managed",
+    "backend": "terminal",
     "agentType": "general-purpose",
     "maxConcurrency": 4
   },
   "skills": [],
-  "requiredTools": []
+  "requiredTools": ["read", "bash"]
 }
 ```
 
-项目 execution 按字段覆盖全局值；项目 `skills`、`requiredTools` 各自整体替换全局数组。
-未知字段、损坏文件、错误类型/后端以及无效正整数限额均明确拒绝。可选
-`execution.maxTurns` 设置子会话轮次预算。`backend: "terminal"` 选择独立自主完成型
-CLI 子进程，不是长期等待人工交互的终端会话。terminal 暂不支持原生 Windows；子进程
-可见的 provider/model 配置和凭据必须与所请求模型匹配。
+在此模式中，`execution.backend` 决定阶段自身放置位置，`agentType` 选择代理定义。
+`skills` 保存批准的指令快照：`name`、`filePath`、`baseDir`、`format`（`pi` 或
+`positional-v1`），以及可选 `requiredTools`、`expectedSha256`。相对路径以配置文件所在
+目录解析；项目技能/工具需求数组整体替换全局数组。
 
-恢复使用日志中保存的后端，即使配置已改变新运行的默认后端，也不会转换既有会话。
-已有子会话继续遵守保存的模型、思考等级、工具、提示词及轮次策略。
+managed 仍只接入内置工具，不自动激活环境资源；保留已存策略、资源绑定、租约和检查点
+恢复。裸旧 JSONL 不是受管会话。这些限制**不施加到 standard SDK 模式**。
+详见[受管资源](../pi-subagents/docs/workflow-resources.md)。
 
-### 显式批准技能
+## 取消与生命周期
 
-每条批准记录包含 `name`、`filePath`、`baseDir` 和 `format`（`pi` 或
-`positional-v1`），可选 `requiredTools`、`expectedSha256`。相对文件/基础目录路径
-以**定义该记录的配置文件所在目录**解析，不以进程工作目录解析。只读取明确批准的指令，
-不自动发现环境中的技能、提示模板或扩展。
+- `/wf-cancel` 取消唯一活动运行，存在多个时列出 ID。
+- `/wf-cancel <id>` 选择一个，`/wf-cancel all` 取消当前全部运行。
+- 冷启动命令加载和等待获取执行器的阶段也可取消。
+- 浏览树或被取消的导航尝试不终止后台运行。standard 运行可跨主会话
+  new/resume/fork 继续，新的根会话接管取消入口；managed 在实际替换时退役。
+  quit/reload 关闭全部所属执行。
 
-指令快照、规范资源元数据与解析器身份绑定到受管会话策略。批准集合、指令或工具需求
-发生变化时，恢复会在模型请求或获取写租约之前拒绝。配套脚本和素材仍是**实时文件**；
-这不是完整不可变资源包，也不是操作系统沙箱。`requiredTools` 只是最低需求，不授予权限。
-目前受管执行只使用内置工具，不自动启用嵌套 Agent、问答、顾问或网页扩展工具。
-完整语义与限制见 [workflow 资源](../pi-subagents/docs/workflow-resources.md)。
+取消被观察到后，runner 立即封锁普通日志写入，迟到的脚本或生命周期回调不能再在终态后
+追加成功/路由记录。异步 script/prompt 作者可通过新增的 `ScriptContext.signal`
+协作取消 I/O。JavaScript 无法强制终止任意不合作的作者代码；runner 会停止等待并封锁其
+后续推进。
 
-## 存储与上游兼容性
+报告成功前会等待执行器退役。退役失败时，持久化的 `run-terminal/cleanup-failed` 记录
+覆盖仅从阶段推导出的成功；自动恢复会拒绝该运行，而不是重放已经成功的副作用。
+请先检查失败和剩余资源，再决定下一步操作。
 
-不自动迁移现有存储：
+## 存储与迁移
 
-- 项目定义/配置包：`.rpiv/workflows/config.ts` 和 `packs/*.ts`。
-- 用户定义/配置包：`$XDG_CONFIG_HOME/rpiv-workflow/`，默认
-  `~/.config/rpiv-workflow/`。
-- 运行日志：`.rpiv/workflows/runs/`，保留 schema 版本 3，增加可选执行身份。
-- 受管子会话位于各运行的 `sessions/managed` 目录，日志保存准确文件路径；
-  不将原有顶层裸 JSONL 清理改为递归清理。
+保留原有布局：
 
-jiti 加载器**仅在配置/配置包求值时**，把 `@maplezzk/pi-workflow` 与旧名
-`@juicesharp/rpiv-workflow` 的公开子路径解析到本地引擎，并非额外安装旧产品。
-定义是具有宿主权限的可执行 TypeScript，加载不可信仓库前务必审查。保留的旧全局注册表
-用于导入兼容；不要在同一进程中再加载另一份上游工作流实现。
+- 项目定义/包：`.rpiv/workflows/config.ts` 和 `packs/*.ts`；
+- 用户定义/包：`$XDG_CONFIG_HOME/rpiv-workflow/`，默认 `~/.config/rpiv-workflow/`；
+- 日志：`.rpiv/workflows/runs/`，schema v3，包含可选执行身份及增量清理失败记录。
 
-支持干净受管会话的 reattach/fork；不会静默接管裸旧 JSONL、崩溃/隔离中的写入者、
-不兼容的模型策略，也不会模拟 RPIV shell/runtime 替换或任意扩展工具。
+标准阶段使用原生 Pi JSONL，可以打开已有原始阶段会话。受管子会话继续位于各运行的
+`sessions/managed`，不会把 orphan 清理扩展成递归删除租约和 sidecar。
 
-## 入口与验证
+配置/包求值期间，jiti 把 `@maplezzk/pi-workflow` 和旧
+`@juicesharp/rpiv-workflow` 公开子路径解析到本引擎，而不是安装第二套上游运行时。
+定义以宿主权限执行，加载不可信仓库前应先审查。不要在同一进程同时加载另一个工作流引擎。
 
-| 入口 | 用途 |
-| --- | --- |
-| 包根入口 | 引擎 API，不导出默认扩展工厂 |
-| `/registration` | DSL、加载器、校验器和 host 契约 |
-| `/startup` | 轻量生命周期/执行注册 |
-| `/runner` | 运行与恢复 API |
-| `/internal` | 私有测试/重置工具 |
-| `./extension.ts` | 显式加载的 Pi `/wf` 前端 |
+## 入口与检查
+
+包根是程序化引擎 API，`/registration`、`/startup`、`/runner`、`/internal` 保持原有职责，
+`./extension.ts` 是 Pi 前端。程序化调用者仍可提供自己的 host/provider。
 
 ```sh
-npm run typecheck --workspace @maplezzk/pi-workflow
-npm test --workspace @maplezzk/pi-workflow
+npm run typecheck -w @maplezzk/pi-workflow
+npm test -w @maplezzk/pi-workflow
 npm run check
 ```
 
-要求 Node.js 22+，Pi 开发版本为 0.87.1。测试隔离 HOME/agent 目录，使用脚本化 host/model；
-真实 SDK/CLI 后端一致性测试位于 subagents 工作区，不需要 API 凭据、在线模型、mux 守护
-进程或外部源码目录。真实 provider 与可见终端复用器仍需人工冒烟验证。继承的内部引擎诊断
-仍在单独迁移；私有状态不代表产品本地化已全部完成或已可发布。
+要求 Node.js 22+，开发时使用 Pi 0.87.1。确定性检查使用临时配置和脚本化模型，不依赖凭据或
+在线服务。真实 provider 与可见终端行为另需冒烟验证。
 
-## 许可证
-
-[MIT](./LICENSE)。准确上游提交、归属、保留的测试/文档与本地差异见
-[UPSTREAM.md](./UPSTREAM.md)。
+[MIT](./LICENSE)。来源和本地变更记录见 [UPSTREAM.md](./UPSTREAM.md)。

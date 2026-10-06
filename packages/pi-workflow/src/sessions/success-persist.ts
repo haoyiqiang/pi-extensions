@@ -88,9 +88,13 @@ export async function recordStageSuccess(
 			rollLastSession(s.state, session);
 			await s.lifecycle.fire(ctx, "onStageEnd", currentStageRef(s), output, lifecycleCtxFromSession(s));
 		}
-		return true;
+		// A managed host may abandon this callback while the lifecycle observer is
+		// suspended. Re-check both cancellation and the run fence before admitting
+		// its continuation into routing/cursor mutation.
+		throwIfWorkflowCancelled(s.signal);
+		return auditWriteIsActive(s);
 	}
-	failAuditWrite(ctx, s.state, s.skill);
+	failAuditWrite(ctx, s.state, s.skill, s.scope);
 	return false;
 }
 

@@ -21,10 +21,13 @@ import type { CompiledSchema } from "../../workflow/json-schema.js";
 import type { PersistentSessionReference } from "../session-reference.js";
 import { ManagedTerminalSession } from "./session-store.js";
 import { inspectManagedSession } from "../managed-session.js";
+import { createStandardTerminalExecutionBackend } from "./standard-backend.js";
 
 export type { TerminalBackendConfig } from "./prepare.js";
+export { createStandardTerminalExecutionBackend, STANDARD_TERMINAL_BACKEND_CAPABILITIES } from "./standard-backend.js";
+export type { StandardTerminalPolicy, StandardTerminalCli } from "./standard-policy.js";
 export const TERMINAL_BACKEND_CAPABILITIES = Object.freeze({
-  isolated: true, fresh: true, resumeOwnedSession: true, steer: true,
+  isolated: true, fresh: true, resumeOwnedSession: true, steer: true, interrupt: true,
   inheritContext: false, reattach: true, fork: true, structuredOutput: true, maxTurns: true,
   managedSessionsOnly: true, crashRecovery: false,
   nativeWindows: false, powershellRuntime: false,
@@ -85,7 +88,7 @@ function withExitDeadline<T>(completion: Promise<T>, milliseconds: number): Prom
 }
 
 /** Private opt-in backend. Default AgentManager construction still selects embedded execution. */
-export function createTerminalExecutionBackend(
+export function createManagedTerminalExecutionBackend(
   config: TerminalBackendConfig = {},
   ports: TerminalBackendPorts = {},
 ): AgentExecutionBackend {
@@ -150,6 +153,7 @@ export function createTerminalExecutionBackend(
           switch (event.type) {
             case "ready": publish(state, event.snapshot, { type: "changed" }); break;
             case "snapshot": publish(state, event.snapshot, event.event); break;
+            case "idle": publish(state, event.snapshot, { type: "changed" }); break;
             case "settled": publish(state, event.snapshot, { type: "changed" }); break;
             case "text": text = event.fullText; safely(() => callbacks.onTextDelta?.(event.delta, event.fullText)); break;
             case "tool": safely(() => callbacks.onToolActivity?.(event.activity)); break;
@@ -338,6 +342,11 @@ export function createTerminalExecutionBackend(
       if (!state.running || !state.bridge) throw new Error(i18n.t("bridge.notRunning"));
       await state.bridge.steer(text);
     },
+    async interrupt(handle) {
+      const state = getState(handle);
+      if (!state.running || !state.terminal) throw new Error(i18n.t("terminal.notRunning"));
+      await state.terminal.interrupt();
+    },
     shutdown(handle) {
       if (!handle) return Promise.resolve();
       const state = states.get(handle);
@@ -357,4 +366,18 @@ export function createTerminalExecutionBackend(
       return state.shutdown;
     },
   };
+}
+
+/**
+ * Terminal backend entrypoint. Managed remains the compatibility default;
+ * callers opt into ordinary product execution with profile: "standard" or the
+ * explicit createStandardTerminalExecutionBackend factory.
+ */
+export function createTerminalExecutionBackend(
+  config: TerminalBackendConfig = {},
+  ports: TerminalBackendPorts = {},
+): AgentExecutionBackend {
+  return config.profile === "standard"
+    ? createStandardTerminalExecutionBackend(config, ports)
+    : createManagedTerminalExecutionBackend(config, ports);
 }

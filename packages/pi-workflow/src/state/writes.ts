@@ -15,7 +15,7 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { formatError } from "../internal-utils.js";
 import { runsDir, stateFilePath } from "./paths.js";
-import type { LoopCapRow, RoutingDecision, WorkflowHeader, WorkflowStage } from "./state.js";
+import type { LoopCapRow, RoutingDecision, RunTerminalRow, WorkflowHeader, WorkflowStage } from "./state.js";
 
 /**
  * Shared append primitive: ensure the runs directory exists, then
@@ -71,5 +71,12 @@ export function appendRoutingDecision(cwd: string, runId: string, row: RoutingDe
  * gates the chain (the live soft-stop toast is the user-facing signal).
  */
 export function appendLoopCap(cwd: string, runId: string, row: LoopCapRow): boolean {
+	return tryAppendJsonl(cwd, runId, row);
+}
+
+/** Persist the additive run-level cleanup-failure override. Unlike ordinary
+ * telemetry, resume consumes this row to refuse replay of a run whose recorded
+ * stage effects succeeded but whose executor did not retire cleanly. */
+export function appendRunTerminal(cwd: string, runId: string, row: RunTerminalRow): boolean {
 	return tryAppendJsonl(cwd, runId, row);
 }

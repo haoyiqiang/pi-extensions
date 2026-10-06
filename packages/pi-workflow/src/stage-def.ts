@@ -116,6 +116,12 @@ export interface ScriptContext {
 	 */
 	input: Output | undefined;
 	state: RunView;
+	/**
+	 * Optional cooperative-cancellation signal for async script/prompt bodies.
+	 * The runner stops awaiting a script when it fires; authors should also pass
+	 * it into cancellable I/O to stop underlying work promptly.
+	 */
+	signal?: AbortSignal;
 }
 
 /**

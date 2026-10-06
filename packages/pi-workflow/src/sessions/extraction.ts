@@ -17,9 +17,18 @@
 
 import type { StageDef, StageSchema } from "../api.js";
 import { allocateStageNumber, currentStageRef } from "../audit.js";
+import { auditWriteIsActive } from "../audit.js";
 import { lifecycleCtxFromSession } from "../events.js";
 import type { Artifact } from "../handle.js";
-import { assertNever, formatError, isAbortError, nowIso, withTimeout } from "../internal-utils.js";
+import {
+	assertNever,
+	formatError,
+	isAbortError,
+	nowIso,
+	throwIfWorkflowCancelled,
+	withTimeout,
+	WorkflowAbortError,
+} from "../internal-utils.js";
 import {
 	ERR_COLLECTOR_THREW,
 	ERR_PARSER_THREW,
@@ -332,6 +341,8 @@ export async function handleRetry(
 ): Promise<{ kind: "ok" } | { kind: "aborted"; abort: Fatal }> {
 	const baselineDigest = resolveDigest(s.worktreeDigest, s.cwd);
 	await s.lifecycle.fire(ctx, "onStageRetry", currentStageRef(s), attempt, lifecycleCtxFromSession(s));
+	throwIfWorkflowCancelled(s.signal);
+	if (!auditWriteIsActive(s)) throw new WorkflowAbortError();
 	try {
 		await askAgentToFix(ctx, s, attempt, failures, timeoutMs);
 	} catch (e) {

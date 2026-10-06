@@ -12,6 +12,12 @@ import { installPiWorkflowExecution, registerWorkflowCancellationCommand } from 
 export default function (pi: ExtensionAPI): void {
 	const execution = installPiWorkflowExecution(pi);
 	registerWorkflowCancellationCommand(pi, execution);
-	registerWorkflowCommand(pi);
+	registerWorkflowCommand({
+		getCommands: () => pi.getCommands(),
+		registerCommand: (name, command) => pi.registerCommand(name, {
+			...command,
+			handler: (args, ctx) => execution.runCommand(ctx, (observer) => command.handler(args, observer)),
+		}),
+	});
 	registerDocsProtocol(pi);
 }

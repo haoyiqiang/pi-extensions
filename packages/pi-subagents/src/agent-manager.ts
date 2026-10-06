@@ -27,9 +27,11 @@ import type { ExecutionSession } from "./backends/session.js";
 import type { PersistentSessionReference, SessionReference } from "./backends/session-reference.js";
 import type { AgentExecutionBackend, ExecutionResumeResult, ExecutionRunOptions, ExecutionRunResult } from "./backends/types.js";
 import { i18n } from "./i18n.js";
+import { getAgentConfig } from "./agent-types.js";
+import { resolveAgentLaunchBehavior } from "./invocation-config.js";
 import { assignHandle, handleBase } from "./mention.js";
 import { describeModel } from "./model-resolver.js";
-import type { AgentInvocation, AgentRecord, AgentTombstone, IsolationMode, MentionResolution, SubagentType, EffectiveThinkingLevel } from "./types.js";
+import type { AgentConfig, AgentInvocation, AgentRecord, AgentTombstone, IsolationMode, MentionResolution, SubagentType, EffectiveThinkingLevel } from "./types.js";
 import { addUsage, type LifetimeUsage } from "./usage.js";
 import type { CompiledSchema } from "./workflow/json-schema.js";
 import { cleanupWorktree, createWorktree, isWorktreeIsolationEnabled, pruneWorktrees, } from "./worktree.js";
@@ -173,8 +175,13 @@ interface SpawnArgs {
   options: SpawnOptions;
 }
 
-interface SpawnOptions {
+export interface SpawnOptions {
   description: string;
+  /** Definition resolved in the caller's configuration scope, before queueing. */
+  agentConfig?: AgentConfig;
+  backend?: "embedded" | "terminal";
+  interactive?: boolean;
+  autoExit?: boolean;
   promptBinding?: PromptBinding;
   /** Minimum active tool names for this invocation, not permission grants. */
   requiredTools?: readonly string[];
@@ -557,7 +564,14 @@ export class AgentManager {
     prompt: string,
     options: SpawnOptions,
   ): string {
-    options = { ...options, requiredTools: snapshotRequiredTools(options.requiredTools), promptBinding: snapshotPromptBinding(options.promptBinding) };
+    const definition = options.agentConfig ?? getAgentConfig(type);
+    options = {
+      ...options,
+      agentConfig: definition,
+      cwd: options.cwd ?? (definition?.cwd ? resolve(options.configCwd ?? ctx.cwd, definition.cwd) : undefined),
+      requiredTools: snapshotRequiredTools(options.requiredTools),
+      promptBinding: snapshotPromptBinding(options.promptBinding),
+    };
     if (this.disposed) throw new Error(i18n.t("managerRestore.disposed"));
     // Validate before the queue branch — a queued spawn should fail at the
     // call, not minutes later at drain. Throw (not warn): programmatic callers
@@ -660,10 +674,13 @@ export class AgentManager {
       throw new Error(i18n.t("managerRestore.invalidOptions"));
     }
     const mode = options.mode === undefined ? "reattach" : options.mode;
-    if (reference.backend !== this.execution.kind) throw new Error(i18n.t("managerRestore.backendMismatch"));
+    const expectedBackend = reference.backend;
+    if (!(this.execution.restorationBackends ?? [this.execution.kind]).includes(expectedBackend)) {
+      throw new Error(i18n.t("managerRestore.backendMismatch"));
+    }
     if (mode !== "reattach" && mode !== "fork") throw new Error(i18n.t("managerRestore.invalidMode"));
     const restore = this.execution[mode];
-    if (typeof restore !== "function") throw new Error(i18n.t("managerRestore.unsupported", { mode, backend: this.execution.kind }));
+    if (typeof restore !== "function") throw new Error(i18n.t("managerRestore.unsupported", { mode, backend: expectedBackend }));
     if (this.disposed) throw new Error(i18n.t("managerRestore.disposed"));
     if (options.signal?.aborted) throw new Error(i18n.t("managerRestore.cancelled"));
 
@@ -702,7 +719,7 @@ export class AgentManager {
     const adoption = Promise.race([acquiring, cancelled]).then(session => {
       assertActive();
       const restored = session?.reference;
-      if (!isPersistentReference(restored) || restored.backend !== this.execution.kind ||
+      if (!isPersistentReference(restored) || restored.backend !== expectedBackend ||
         (mode === "reattach"
           ? restored.sessionId !== reference.sessionId || sessionPath(restored.sessionFile) !== sessionPath(reference.sessionFile)
           : sameSession(restored, reference))) {
@@ -998,9 +1015,14 @@ export class AgentManager {
     }
     const detach = () => { detachParentSignal?.(); detachParentSignal = undefined; };
 
-    const runOptions: ExecutionRunOptions = {
+    const launch = resolveAgentLaunchBehavior(options.agentConfig, options);
+    const runOptions: ExecutionRunOptions & { agentConfig?: AgentConfig } = {
       pi,
       agentId: id,
+      agentConfig: options.agentConfig,
+      backend: options.backend,
+      interactive: launch.interactive,
+      autoExit: launch.autoExit,
       model: options.model,
       maxTurns: options.maxTurns,
       isolated: options.isolated,
@@ -1707,6 +1729,16 @@ export class AgentManager {
     return true;
   }
 
+  /** Stop only the current turn; retain the session for a later prompt or human input. */
+  async interrupt(id: string): Promise<boolean> {
+    const record = this.agents.get(id);
+    if (!record || record.status !== "running") return false;
+    await this.awaitStartup(id);
+    if (!record.session || !this.execution.interrupt) return false;
+    await this.execution.interrupt(record.session);
+    return true;
+  }
+
   /** Pin this record against timed GC, not explicit release/reset/disposal. */
   retain(id: string): () => void {
     const record = this.agents.get(id);
@@ -1857,6 +1889,7 @@ export class AgentManager {
       type: record.type,
       description: record.description,
       sessionFile: record.sessionFile,
+      ...(record.session ? { reference: { ...record.session.reference, sessionFile: record.sessionFile } } : {}),
       completedAt: record.completedAt ?? Date.now(),
     });
     // Bound the memory a long session can accumulate. Oldest first, since the

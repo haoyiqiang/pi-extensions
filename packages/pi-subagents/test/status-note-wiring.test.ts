@@ -87,7 +87,8 @@ describe("status note reaches the parent through the real handlers", () => {
     const out = textOf(res);
     // Exact lead clause, not just "turn limit": a steered/aborted mix-up would
     // otherwise slip through, and they are different outcomes.
-    expect(out).toContain("aborted at the turn limit");
+    expect(out).toContain("aborted before completion");
+    expect(out).not.toContain("aborted at the turn limit");
     expect(out).toContain("partial work so far");     // partial result still delivered
     expect(out).not.toContain("STOPPED BY THE USER"); // not mislabelled as a user stop
 

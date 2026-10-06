@@ -21,11 +21,18 @@
  */
 
 import type { StageDef, Unit } from "../api.js";
-import { auditCtxFor, failedArgs, notifyPartialArtifacts, recordFatalFailure, runIdentityOf } from "../audit.js";
+import {
+	auditCtxFor,
+	auditWriteIsActive,
+	failedArgs,
+	notifyPartialArtifacts,
+	recordFatalFailure,
+	runIdentityOf,
+} from "../audit.js";
 import { currentPrimaryArtifact, resolveStagePrompt, stageEntryArgs } from "../chain-state.js";
 import { lifecycleCtxFor, skillStageRef } from "../events.js";
 import { failureMemoSuffix } from "../failure-memos.js";
-import { formatError, isAbortError } from "../internal-utils.js";
+import { formatError, isAbortError, throwIfWorkflowCancelled } from "../internal-utils.js";
 import { announceLoopStart, runLoop } from "../loop.js";
 import { freezesEntryArgsOf } from "../loop-constructors.js";
 import { buildLoopEntry, freshCursor, type LoopDeps, type LoopEntry } from "../loop-kinds.js";
@@ -101,6 +108,7 @@ export async function dispatchStageOrRecordFailure(
 	idx: number,
 	run: RunContext,
 ): Promise<ChainOutcome> {
+	run.scope?.setActiveStage(name);
 	return withStageEntryGuard(hostCtx, name, run, () => dispatchStage(hostCtx, name, idx, run));
 }
 
@@ -170,7 +178,7 @@ async function prepareSingleStage(
 
 	const prompt =
 		stage.dispatch === "prompt"
-			? await resolveStagePrompt(stage.def.prompt!, run.cwd, run.state)
+			? await resolveStagePrompt(stage.def.prompt!, run.cwd, run.state, run.signal)
 			: buildPrompt(stage.skill, inputForStage(stage, run));
 
 	await ensureInputValid(stage, run);
@@ -201,6 +209,7 @@ function buildSingleStageSession(
 		stageName: stage.name,
 		skill: stage.skill,
 		lifecycle: run.lifecycle,
+		scope: run.scope,
 		runIdentity: runIdentityOf(run),
 		stage: stage.def,
 		skillContracts: run.skillContracts,
@@ -339,6 +348,8 @@ async function runSingleStage(
 
 	// onStageStart fires after preflight, before the Pi session opens.
 	await announceSingleStageStart(hostCtx, run, stage);
+	throwIfWorkflowCancelled(run.signal);
+	if (!auditWriteIsActive(run)) return "halted";
 
 	// `continue` forks the predecessor's persisted session (`run.state.lastSession`)
 	// into a fresh child carrying its transcript; `continueStageSession` re-derives
@@ -445,6 +456,8 @@ async function resumeWithSessionLadder(
 
 	// Same bracketing as live: onStageStart before the (re)attached child opens.
 	await announceSingleStageStart(hostCtx, run, stage);
+	throwIfWorkflowCancelled(run.signal);
+	if (!auditWriteIsActive(run)) return "halted";
 
 	// Detached reattach: spawn a child BOUND to the persisted session file (the
 	// host opens it and does NOT replay the prompt); reattachStageSession promotes
@@ -511,6 +524,8 @@ async function runLoopStage(
 	);
 
 	await announceLoopStart(hostCtx, run, entry);
+	throwIfWorkflowCancelled(run.signal);
+	if (!auditWriteIsActive(run)) return "halted";
 	await runLoop(hostCtx, entry, freshCursor(), run, buildLoopDeps());
 	return "dispatched";
 }

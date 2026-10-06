@@ -28,7 +28,13 @@ import {
 } from "../execution-host.js";
 import { handleToString } from "../handle.js";
 import type { ModelSelection, WorkflowHost, WorkflowHostContext } from "../host.js";
-import { formatError, nowIso, workflowCancellationError } from "../internal-utils.js";
+import {
+	formatError,
+	isAbortError,
+	nowIso,
+	raceWithWorkflowCancellation,
+	workflowCancellationError,
+} from "../internal-utils.js";
 import { i18n } from "../i18n.js";
 import {
 	MSG_HEADER_WRITE_FAILED,
@@ -40,10 +46,12 @@ import {
 import { pruneOrphanedChildSessions } from "../sessions/index.js";
 import {
 	appendHeader,
+	appendRunTerminal,
 	type ClaimResult,
 	claimName,
 	generateRunId,
 	readAllStages,
+	readRunTerminal,
 	releaseName,
 	STATE_SCHEMA_VERSION,
 	type WorkflowHeader,
@@ -54,6 +62,7 @@ import { DEFAULT_TRIGGER } from "../triggers.js";
 import type { RunContext, RunWorkflowOptions, RunWorkflowResult } from "../types.js";
 import { reconstructState } from "./resume.js";
 import { resumeRefusalError, selectResumeEntry } from "./resume-entry.js";
+import { recordAbortedAtSeam } from "./failure.js";
 import { buildRunContext, freshRunState, validateRunBudgets } from "./run-context.js";
 import { dispatchStageOrRecordFailure } from "./run-stage.js";
 
@@ -61,11 +70,25 @@ import { dispatchStageOrRecordFailure } from "./run-stage.js";
 // Shared run body + post-retirement tail
 // ---------------------------------------------------------------------------
 
-/** Fire the start bracket and enter the chain. Execution retirement is owned by
- * the caller and MUST finish before `finishRun` publishes success/end state. */
+/** Fire the start bracket and enter the chain. The whole nonterminal body is
+ * raced against cancellation so a held onWorkflowStart/onStageEnd/onRoute
+ * observer cannot keep `/wf-cancel` pending forever. The abandoned body stays
+ * observed by the race and is fenced by RunScope; exactly one canonical abort
+ * writer owns the durable terminal row. Execution retirement remains caller-
+ * owned and finishes before `finishRun` publishes the result/end event. */
 async function executeRun(ctx: WorkflowHostContext, run: RunContext, entry: () => Promise<unknown>): Promise<void> {
-	await run.lifecycle.fire(ctx, "onWorkflowStart", lifecycleCtxFor(run));
-	await entry();
+	try {
+		await raceWithWorkflowCancellation(
+			async () => {
+				await run.lifecycle.fire(ctx, "onWorkflowStart", lifecycleCtxFor(run));
+				await entry();
+			},
+			run.signal,
+		);
+	} catch (error) {
+		if (!isAbortError(error)) throw error;
+		await recordAbortedAtSeam(ctx, run.scope?.activeStage ?? run.workflow.start, run);
+	}
 }
 
 /** Assemble and publish the terminal envelope only after the execution host's
@@ -97,7 +120,18 @@ async function finishRun(ctx: WorkflowHostContext, run: RunContext): Promise<Run
 	};
 
 	if (result.success) ctx.ui.notify(MSG_WORKFLOW_COMPLETE(state.stagesCompleted), "info");
-	await run.lifecycle.fire(ctx, "onWorkflowEnd", result, lifecycleCtxFor(run));
+	// End observers still receive aborted results; cancellation stops waiting,
+	// rather than suppressing the terminal lifecycle event altogether.
+	const ended = Promise.resolve().then(() => run.lifecycle.fire(ctx, "onWorkflowEnd", result, lifecycleCtxFor(run)));
+	void ended.catch(() => {});
+	try {
+		await raceWithWorkflowCancellation(() => ended, run.signal);
+	} catch (error) {
+		// The terminal result is already durable and executor retirement is complete.
+		// Cancellation only stops awaiting this observer; the race keeps its late
+		// rejection observed and no second terminal row is written.
+		if (!isAbortError(error)) throw error;
+	}
 	return result;
 }
 
@@ -208,7 +242,11 @@ async function retireExecutor(detached: DetachedExecutor): Promise<void> {
 
 /** Run one body and ALWAYS await executor retirement. If both fail, preserve
  * both causes rather than letting `finally` mask the original failure. */
-async function withExecutorRetirement<T>(detached: DetachedExecutor, body: () => Promise<T>): Promise<T> {
+async function withExecutorRetirement<T>(
+	detached: DetachedExecutor,
+	body: () => Promise<T>,
+	onCleanupFailure?: (error: unknown) => void,
+): Promise<T> {
 	let value!: T;
 	let bodyFailed = false;
 	let bodyError: unknown;
@@ -225,6 +263,12 @@ async function withExecutorRetirement<T>(detached: DetachedExecutor, body: () =>
 		} catch (error) {
 			cleanupFailed = true;
 			cleanupError = error;
+			try {
+				onCleanupFailure?.(error);
+			} catch {
+				// Diagnostic persistence/notification is secondary: never replace the
+				// body error or executor-cleanup error this helper must preserve.
+			}
 		}
 	}
 	if (bodyFailed && cleanupFailed)
@@ -249,6 +293,23 @@ async function failureAfterRetirement(
 			error: `${error}; ${EXECUTION_CLEANUP_FAILED(formatError(cleanupError))}`,
 		};
 	}
+}
+
+/** Persist the authoritative run-level override for a failed executor close.
+ * Stage rows are deliberately left intact: they record effects that may already
+ * have succeeded. Resume consumes this marker and refuses rather than replaying
+ * those effects. The row is additive; older readers ignore it by shape. */
+function recordCleanupFailure(ctx: WorkflowHostContext, run: RunContext, error: unknown): void {
+	const durableError = EXECUTION_CLEANUP_FAILED(formatError(error));
+	const written = appendRunTerminal(run.cwd, run.runId, {
+		type: "run-terminal",
+		status: "cleanup-failed",
+		workflowStatus: run.state.termination.status,
+		stagesCompleted: run.state.stagesCompleted,
+		error: durableError,
+		ts: nowIso(),
+	});
+	if (!written) ctx.ui.notify(i18n.t("consumer.cleanupMarkerWriteFailed", { runId: run.runId }), "warning");
 }
 
 /** Shared execution-host construction for fresh runs and resumes. Per-call
@@ -387,24 +448,34 @@ export async function runWorkflow(ctx: WorkflowHostContext, options: RunWorkflow
 	}
 
 	const { execCtx, resolveModel, readSessionBranch, signal } = detached;
-	let run!: RunContext;
-	await withExecutorRetirement(detached, async () => {
-		// Construction stays under the retirement barrier too: a malformed graph
-		// that throws here must not leak an execution host.
-		run = buildRunContext(
-			cwd,
-			workflow,
-			{ ...options, resolveModel, readSessionBranch, signal },
-			{
-				runId,
-				state: freshRunState(options.input),
-				visited: new Set(),
-				trigger,
+	let run: RunContext | undefined;
+	try {
+		await withExecutorRetirement(
+			detached,
+			async () => {
+				// Construction stays under the retirement barrier too: a malformed graph
+				// that throws here must not leak an execution host.
+				run = buildRunContext(
+					cwd,
+					workflow,
+					{ ...options, resolveModel, readSessionBranch, signal },
+					{
+						runId,
+						state: freshRunState(options.input),
+						visited: new Set(),
+						trigger,
+					},
+				);
+				await executeRun(execCtx, run, () => dispatchStageOrRecordFailure(execCtx, workflow.start, 0, run!));
+			},
+			(error) => {
+				if (run) recordCleanupFailure(ctx, run, error);
 			},
 		);
-		await executeRun(execCtx, run, () => dispatchStageOrRecordFailure(execCtx, workflow.start, 0, run));
-	});
-	return finishRun(ctx, run);
+	} finally {
+		run?.scope?.seal();
+	}
+	return finishRun(ctx, run!);
 }
 
 export interface ResumeWorkflowOptions {
@@ -452,6 +523,13 @@ export interface ResumeWorkflowOptions {
  *
  * New rows **append to the same JSONL file** so the trail reads as one
  * story: *ran → failed → resumed → continued*.
+ *
+ * Exception: a trailing additive `run-terminal/cleanup-failed` marker is an
+ * authoritative non-replayable outcome. Resume returns a preflight-style
+ * failed envelope (no `runId`, so the command notifies once) before executor
+ * construction and appends nothing: recorded stage effects may
+ * already have succeeded, so the operator must fix cleanup and start a new run
+ * rather than blindly replaying them.
  */
 export async function resumeWorkflow(
 	ctx: WorkflowHostContext,
@@ -465,6 +543,20 @@ export async function resumeWorkflow(
 	// refused before any row lands.
 	const budgetError = validateRunBudgets(options);
 	if (budgetError !== undefined) return { stagesCompleted: 0, success: false, error: budgetError };
+
+	const durableTerminal = readRunTerminal(cwd, header.runId);
+	if (durableTerminal) {
+		const error = i18n.t("consumer.resumeCleanupFailed", { reason: durableTerminal.error });
+		return {
+			// Preflight refusal contract: omit runId so the /wf command surface emits
+			// this error exactly once. The referenced JSONL still exists; no executor
+			// is constructed and no rows/effects are replayed.
+			stagesCompleted: durableTerminal.stagesCompleted,
+			success: false,
+			error,
+			termination: { status: "failed", error },
+		};
+	}
 
 	let savedIdentity: WorkflowExecutionIdentity | undefined;
 	try {
@@ -505,20 +597,30 @@ export async function resumeWorkflow(
 	}
 
 	const { execCtx, resolveModel, readSessionBranch, signal } = detached;
-	let run!: RunContext;
-	await withExecutorRetirement(detached, async () => {
-		run = buildRunContext(
-			cwd,
-			workflow,
-			{ ...options, resolveModel, readSessionBranch, signal },
-			{
-				runId: header.runId,
-				state: recon.state,
-				visited: recon.visited,
-				trigger: { kind: "command", name: "wf", meta: { resumedFrom: options.ref } },
+	let run: RunContext | undefined;
+	try {
+		await withExecutorRetirement(
+			detached,
+			async () => {
+				run = buildRunContext(
+					cwd,
+					workflow,
+					{ ...options, resolveModel, readSessionBranch, signal },
+					{
+						runId: header.runId,
+						state: recon.state,
+						visited: recon.visited,
+						trigger: { kind: "command", name: "wf", meta: { resumedFrom: options.ref } },
+					},
+				);
+				await executeRun(execCtx, run, selectResumeEntry(execCtx, recon, run));
+			},
+			(error) => {
+				if (run) recordCleanupFailure(ctx, run, error);
 			},
 		);
-		await executeRun(execCtx, run, selectResumeEntry(execCtx, recon, run));
-	});
-	return finishRun(ctx, run);
+	} finally {
+		run?.scope?.seal();
+	}
+	return finishRun(ctx, run!);
 }

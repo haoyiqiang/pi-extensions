@@ -4,7 +4,8 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { getAgentDir, parseFrontmatter } from "@earendil-works/pi-coding-agent";
+import { parseFrontmatter } from "@earendil-works/pi-coding-agent";
+import { resolveAgentDir } from "pi-extensions-config";
 import { BUILTIN_TOOL_NAMES } from "./agent-types.js";
 import type { AgentConfig, IsolationMode, MemoryScope, ThinkingLevel } from "./types.js";
 
@@ -42,7 +43,7 @@ const RESERVED_IN_TYPE = ":";
  * filename clash, and `warnSkippedOverride` reports the substitution.
  */
 export function loadCustomAgents(cwd: string, strict = false): Map<string, AgentConfig> {
-  const globalDir = join(getAgentDir(), "agents");
+  const globalDir = join(resolveAgentDir(), "agents");
   const workspaceProjectDir = join(cwd, ".agents", "agents");
   const projectDir = join(cwd, ".pi", "agents");
 
@@ -103,6 +104,7 @@ function loadFromDir(dir: string, agents: Map<string, AgentConfig>, source: "pro
     const name = declared || filenameType;
 
     const { builtinToolNames, extSelectors } = parseToolsField(fm.tools);
+    const promptMode = fm["system-prompt"] ?? fm.system_prompt ?? fm.prompt_mode;
 
     agents.set(name, {
       name,
@@ -114,19 +116,24 @@ function loadFromDir(dir: string, agents: Map<string, AgentConfig>, source: "pro
       description: str(fm.description) ?? name,
       builtinToolNames,
       extSelectors,
-      disallowedTools: csvListOptional(fm.disallowed_tools),
+      disallowedTools: mergeCsvLists(fm.disallowed_tools, fm["deny-tools"], fm.deny_tools),
       extensions: inheritField(fm.extensions ?? fm.inherit_extensions),
       excludeExtensions: csvListOptional(fm.exclude_extensions),
-      skills: inheritField(fm.skills ?? fm.inherit_skills),
+      skills: inheritField(fm.skill ?? fm.skills ?? fm.inherit_skills),
       model: str(fm.model),
       thinking: str(fm.thinking) as ThinkingLevel | undefined,
       maxTurns: nonNegativeInt(fm.max_turns),
+      // Terminal-product compatibility fields. They are data here; launch-time
+      // overrides and derived interactive behavior are resolved by runtime.ts.
+      interactive: optionalBoolean(fm.interactive),
+      autoExit: optionalBoolean(fm["auto-exit"] ?? fm.auto_exit ?? fm.autoExit),
+      cwd: str(fm.cwd),
       persistSession: fm.persist_session != null ? fm.persist_session === true : undefined,
       outputTranscript: fm.output_transcript != null ? fm.output_transcript !== false : undefined,
       sessionDir: str(fm.session_dir),
       allowedSubagents: parseAllowedSubagents(fm.allowed_subagents),
       systemPrompt: body.trim(),
-      promptMode: fm.prompt_mode === "append" ? "append" : "replace",
+      promptMode: promptMode === "append" ? "append" : "replace",
       inheritContext: fm.inherit_context != null ? fm.inherit_context === true : undefined,
       runInBackground: fm.run_in_background != null ? fm.run_in_background === true : undefined,
       isolated: fm.isolated != null ? fm.isolated === true : undefined,
@@ -222,6 +229,11 @@ function nonNegativeInt(val: unknown): number | undefined {
   return typeof val === "number" && val >= 0 ? val : undefined;
 }
 
+/** Only explicit YAML booleans participate; strings are not silently coerced. */
+function optionalBoolean(val: unknown): boolean | undefined {
+  return typeof val === "boolean" ? val : undefined;
+}
+
 /**
  * Parse a raw CSV field value into items, or undefined if absent/empty/"none".
  */
@@ -283,6 +295,12 @@ function parseToolsField(val: unknown): { builtinToolNames: string[]; extSelecto
  */
 function csvListOptional(val: unknown): string[] | undefined {
   return parseCsvField(val);
+}
+
+/** Merge current and interactive-subagents denylist spellings without duplicates. */
+function mergeCsvLists(...values: unknown[]): string[] | undefined {
+  const merged = [...new Set(values.flatMap(value => parseCsvField(value) ?? []))];
+  return merged.length > 0 ? merged : undefined;
 }
 
 /**
