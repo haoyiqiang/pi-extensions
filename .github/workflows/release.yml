@@ -211,7 +211,7 @@ jobs:
             npm publish --provenance
           fi
 
-  # Wave 4: both packages import terminal-mux at runtime.
+  # Wave 4: Spark imports terminal-mux at runtime.
   publish-terminal-consumers:
     needs: [release-please, release-verify, publish-i18n, publish-terminal-mux]
     if: ${{ always() && github.event_name == 'push' && needs.release-please.outputs.paths_released && needs.release-verify.result == 'success' && (needs.publish-i18n.result == 'success' || needs.publish-i18n.result == 'skipped') && (needs.publish-terminal-mux.result == 'success' || needs.publish-terminal-mux.result == 'skipped') }}
@@ -221,7 +221,6 @@ jobs:
       matrix:
         include:
           - dir: packages/pi-spark
-          - dir: packages/pi-interactive-subagents
     steps:
       - uses: actions/checkout@v4
 
@@ -282,6 +281,21 @@ jobs:
 
       - name: Run repository gate
         run: npm run check
+
+      - name: Verify package is release-managed and public
+        env:
+          PACKAGE_DIR: ${{ inputs.package_dir }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync } from "node:fs";
+          const packageDirectory = process.env.PACKAGE_DIR;
+          const releaseConfig = JSON.parse(readFileSync("release-please-config.json", "utf8"));
+          if (!Object.hasOwn(releaseConfig.packages ?? {}, packageDirectory)) {
+            throw new Error(`Package is not release-managed: ${packageDirectory}`);
+          }
+          const manifest = JSON.parse(readFileSync(`${packageDirectory}/package.json`, "utf8"));
+          if (manifest.private === true) throw new Error(`Refusing to publish private package: ${manifest.name}`);
+          NODE
 
       - name: Verify package version
         working-directory: ${{ inputs.package_dir }}

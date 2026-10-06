@@ -9,6 +9,7 @@ const workflowSource = readFileSync(join(ROOT, ".github/workflows/release.yml"),
 const workflow = parseReleaseWorkflow(workflowSource);
 const packageJobs = collectPublishedPackageJobs(workflowSource);
 const packageByName = new Map();
+const publicPackageByDirectory = new Map();
 
 for (const entry of readdirSync(PACKAGES_DIR, { withFileTypes: true })) {
   if (!entry.isDirectory()) continue;
@@ -16,7 +17,13 @@ for (const entry of readdirSync(PACKAGES_DIR, { withFileTypes: true })) {
   if (!existsSync(manifestPath)) continue;
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
   if (manifest.private === true) continue;
-  packageByName.set(manifest.name, { directory: `packages/${entry.name}`, manifest });
+  const record = { directory: `packages/${entry.name}`, manifest };
+  packageByName.set(manifest.name, record);
+  publicPackageByDirectory.set(record.directory, record);
+}
+
+for (const [directory, jobName] of packageJobs) {
+  assert.ok(publicPackageByDirectory.has(directory), `${jobName} must not automatically publish private or unknown package ${directory}`);
 }
 
 let edgeCount = 0;

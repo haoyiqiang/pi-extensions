@@ -6,12 +6,15 @@
 结果和 Fleet/widget 界面属于 `pi-subagents`，终端操作使用 `pi-terminal-mux`。
 独立的 `pi-workflow` 负责工作流定义、编排、日志和 `/wf`。
 
-## 开发边界
+## 启用与发布
 
-本 workspace 仍为私有、显式加载，不发布，也尚未进入根分发配置。不要与旧
-`pi-interactive-subagents` 产品或另一份上游 subagents 扩展同时加载。旧产品暂时保留在
-仓库中，等待分发迁移。导入的管理界面文案仍需在公开分发前完成 catalog 迁移；
-新增控制与诊断使用双语 catalog。
+仓库 Git／本地 profile 已默认加载本产品及 `pi-workflow`。npm 包仍为私有、未发布，
+发布准备与运行入口启用分开处理。不要与已退役的 `pi-interactive-subagents` 入口或另一份
+上游 subagents 扩展同时加载。旧包仅保留源码，不再加载或发布。
+导入管理界面的完整 catalog 迁移仍属于 npm 发布准备；新增控制与诊断使用双语 catalog。
+
+重新加载既有环境前，请阅读[迁移指南](./docs/migration.zh-CN.md)。旧活跃任务和 ID
+不会自动转交给新管理器。
 
 统一入口**不提供**旧 `subagent`、`subagent_resume`、`subagents_list`、
 `subagent_interrupt`、`/plan` 或 `__pi_subagents` 兼容层，也不启用上游另一套

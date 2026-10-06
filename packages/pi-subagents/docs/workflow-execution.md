@@ -1,11 +1,11 @@
 # Private managed workflow execution
 
-This is a **private development interface**, not the complete replacement subagent product.
-The default manager remains legacy embedded and the active interactive-subagents extension
-is unchanged. Its factory has no registration side effect. The explicit
-`workflow-executor.ts` entry offers this profile to independent `pi-workflow` through
-Pi's event bus, without a workflow-engine dependency or root-profile entry. Workflow
-execution configuration and `/wf` belong to that consumer.
+This document covers the **explicit managed source interface**, not the default
+standard SDK workflow profile. The unified root-profile product offers both through
+Pi's versioned event bus; the retired interactive product is not loaded. The
+low-level factory has no registration side effect. `workflow-executor.ts` remains
+an alternative executor-only entry, not an additional entry to co-load with the
+full product. Workflow configuration and `/wf` belong to `pi-workflow`.
 
 ## Contract and ownership
 
@@ -59,7 +59,7 @@ session ID/file, **not** the manager record ID. The local callback type also exp
 `reference` and `abort()`; an external consumer needs only the smaller structural
 host/session interface.
 
-The default profile accepts already composed **plain text**. An explicit optional
+This managed profile accepts already composed **plain text**. An explicit optional
 `preparePrompt` can prepare fresh/send inputs; `createWorkflowSkillPreparer` provides
 approved, bounded instruction snapshots and `/skill:name` expansion with a declared
 format. Prepared tool requirements are checked against actual managed policy before

@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { test } from "node:test";
-import { collectPublishedPackageDirectories } from "./release-publish-coverage.mjs";
+import { collectPublishedPackageDirectories, parseReleaseWorkflow } from "./release-publish-coverage.mjs";
+
+const ROOT = resolve(import.meta.dirname, "..");
 
 function workflow(jobs) {
   return `jobs:\n${jobs}`;
@@ -22,8 +25,24 @@ test("真实发布工作流覆盖分波 matrix 与专用自动发布 job，并�
     "packages/pi-rewind",
     "packages/pi-terminal-mux",
     "packages/pi-spark",
-    "packages/pi-interactive-subagents",
   ]);
+});
+
+test("自动发布覆盖不包含任何 private workspace", () => {
+  const source = readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
+  for (const directory of collectPublishedPackageDirectories(source)) {
+    const manifest = JSON.parse(readFileSync(join(ROOT, directory, "package.json"), "utf8"));
+    assert.notEqual(manifest.private, true, `${directory} must not be automatically published`);
+  }
+});
+
+test("手动重试仅允许 release-managed public package", () => {
+  const source = readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
+  const workflow = parseReleaseWorkflow(source);
+  const retry = workflow.jobs["publish-npm-retry"];
+  const guard = retry.steps.find((step) => step.name === "Verify package is release-managed and public");
+  assert.match(guard.run, /release-please-config\.json/);
+  assert.match(guard.run, /manifest\.private === true/);
 });
 
 test("registry 验证 step 不是发布覆盖", () => {
@@ -36,12 +55,12 @@ test("registry 验证 step 不是发布覆盖", () => {
   assert.deepEqual(collectPublishedPackageDirectories(source), []);
 });
 
-test("删除专用 mux publish step 或 spark matrix 项后不再报告对应覆盖", () => {
+test("删除专用 mux publish step 会移除覆盖，删除唯一 Spark matrix 项会使配置失败", () => {
   const source = readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
   const withoutMux = source.replace(/\n      - name: Publish to npm\n        working-directory: packages\/pi-terminal-mux\n        run: \|[\s\S]*?\n          fi\n/, "\n");
   assert.ok(!collectPublishedPackageDirectories(withoutMux).includes("packages/pi-terminal-mux"));
   const withoutSpark = source.replace("\n          - dir: packages/pi-spark", "");
-  assert.ok(!collectPublishedPackageDirectories(withoutSpark).includes("packages/pi-spark"));
+  assert.throws(() => collectPublishedPackageDirectories(withoutSpark), /matrix\.include/);
 });
 
 test("只有 matrix 而没有 publish step 不算发布覆盖", () => {

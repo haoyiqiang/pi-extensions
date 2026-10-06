@@ -2,7 +2,7 @@
   "name": "@maplezzk/pi-subagents",
   "version": "0.1.0",
   "private": true,
-  "description": "Private migration baseline for unified embedded and terminal Pi subagents, imported from tintinweb/pi-subagents",
+  "description": "Unified embedded and terminal Pi subagents with shared Agent, RPC, lifecycle, and workflow execution",
   "type": "module",
   "main": "./index.ts",
   "exports": {
@@ -40,6 +40,12 @@
     "test:e2e": "vitest run e2e",
     "build": "npm run typecheck",
     "check": "npm run typecheck && npm test"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts",
+      "../pi-extensions-i18n/index.ts"
+    ]
   },
   "dependencies": {
     "@sinclair/typebox": "^0.34.49",

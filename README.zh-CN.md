@@ -9,7 +9,7 @@
 
 ## 包清单
 
-每个包都可以独立安装；具体行为、配置、示例和测试请查看对应包内的 README。
+已发布的包可以通过 npm 独立安装；统一子代理与工作流产品已加入 Git／本地套件，但尚未发布 npm。具体行为、配置、示例和测试请查看各包 README。
 
 | 包 | 说明 | 文档 |
 | --- | --- | --- |
@@ -21,7 +21,8 @@
 | [`pi-models-discovery`](./packages/pi-models-discovery) | 自动发现 models.json 中标记 `discoverModels` 的 provider 的模型列表，启动走持久化缓存，并提供手动刷新命令。 | [English](./packages/pi-models-discovery/README.md) · [中文](./packages/pi-models-discovery/README.zh-CN.md) |
 | [`pi-extensions-i18n`](./packages/pi-extensions-i18n) | 提供共享的语言选择、catalog 加载、插值和 `/config:language` 命令。 | [English](./packages/pi-extensions-i18n/README.md) · [中文](./packages/pi-extensions-i18n/README.zh-CN.md) |
 | [`@maplezzk/pi-web-search`](./packages/pi-web-search) | 整合 LLM 内置网络搜索、独立 Search API、Gemini/Vertex URL Context、有界网页抓取和可选 GitHub 仓库提取。 | [English](./packages/pi-web-search/README.md) · [中文](./packages/pi-web-search/README.zh-CN.md) |
-| [`@maplezzk/pi-interactive-subagents`](./packages/pi-interactive-subagents) | 终端复用器分屏中的非阻塞交互式子 agent，带实时状态 widget、`/plan` 与 `/iterate` 工作流。Fork 自 HazAT/pi-interactive-subagents。 | [English](./packages/pi-interactive-subagents/README.md) · [中文](./packages/pi-interactive-subagents/README.zh-CN.md) |
+| [`@maplezzk/pi-subagents`](./packages/pi-subagents) | 统一 Agent/RPC/Fleet，通过配置选择 embedded 或 terminal Pi 执行。已加入 Git／本地 profile，npm 发布另行处理。 | [English](./packages/pi-subagents/README.md) · [中文](./packages/pi-subagents/README.zh-CN.md) |
+| [`@maplezzk/pi-workflow`](./packages/pi-workflow) | 独立工作流 DSL、`/wf`、日志、取消与恢复，使用统一执行运行时。已加入 Git／本地 profile。 | [English](./packages/pi-workflow/README.md) · [中文](./packages/pi-workflow/README.zh-CN.md) |
 
 共享库会发布到 npm 供功能包依赖，但不会被当作扩展加载：[`pi-extensions-config`](./packages/pi-extensions-config) 提供可移植的 JSON 配置读写，[`pi-terminal-mux`](./packages/pi-terminal-mux) 提供终端 surface 操作。
 
@@ -29,11 +30,13 @@
 
 > `pi-session-tools` 已退役并从本仓库移除。对于历史会话中的 `session-squash` 条目，明确提供兼容逻辑的包仍可读取。
 
-插件管理类斜杠命令统一采用 `/config:<功能>[-动作]` 命名。改名前的命令会继续作为兼容别名保留；`/plan`、`/iterate`、`/subagent` 是刻意保留的高频工作流快捷命令。
+> `pi-interactive-subagents` 已退出默认 profile 与发布链。重新加载前，请先停止旧任务，并移除单独安装的旧入口。详见[迁移指南](./packages/pi-subagents/docs/migration.zh-CN.md)；不保留旧工具及 `/plan`／`/iterate`／`/subagent` 别名。
+
+插件管理类斜杠命令统一采用 `/config:<功能>[-动作]` 命名。工作流使用 `/wf` 与 `/wf-cancel`。
 
 ## 一键安装全部扩展
 
-要求：具备兼容扩展 API 的 Pi，以及 Node.js 22 或更高版本。
+要求：Pi 0.87.1 或经过验证的兼容扩展运行时，以及 Node.js 22 或更高版本。
 
 ```bash
 pi install git:github.com/maplezzk/pi-extensions
@@ -41,7 +44,7 @@ pi install git:github.com/maplezzk/pi-extensions
 
 仓库根目录本身也是一个显式维护的全量 Pi profile。manifest 逐项列出扩展入口，并包含 `pi-spark` 主题；`pi-terminal-mux` 等纯库包不会被当成扩展加载。新增 workspace 包不会自动进入这个 profile。
 
-全量 profile 会有意同时启用若干侵入性能力：`pi-spark` 替换 editor/footer 并折叠运行过程，`pi-blackhole` 接管自动压缩，`pi-distill` 改写工具结果，`pi-rewind` 管理 Git 检查点，交互式子 agent 会创建终端 surface。如果不需要完整组合，优先按 npm 包名单独安装。
+全量 profile 会有意同时启用若干侵入性能力：`pi-spark` 替换 editor/footer 并折叠运行过程，`pi-blackhole` 接管自动压缩，`pi-distill` 改写工具结果，`pi-rewind` 管理 Git 检查点，统一子代理在选择 terminal 后端时会创建终端 surface。如果不需要完整组合，已发布的能力包可以通过 npm 单独安装。
 
 安装后重新加载 Pi：
 
@@ -49,7 +52,7 @@ pi install git:github.com/maplezzk/pi-extensions
 /reload
 ```
 
-如果只想安装单个包，可以使用对应的 npm 包名：
+如果只想独立安装某个已发布的包，可以使用对应的 npm 包名（两个统一产品仍未发布 npm）：
 
 ```bash
 pi install npm:<package-name>
@@ -68,7 +71,7 @@ npm run check
 
 `check` 会执行 workspace 类型检查、测试，以及可移植性和 i18n 门禁。
 
-[`packages/pi-subagents`](./packages/pi-subagents/README.zh-CN.md) 与 [`packages/pi-workflow`](./packages/pi-workflow/README.zh-CN.md) 是私有迁移工作区：前者通过可配置的 embedded/terminal 执行统一 Agent/RPC/Fleet，不保留旧交互工具别名；后者保留从 `rpiv-workflow` 导入的独立 DSL、编排引擎、运行日志及 `/wf` 前端。标准 SDK 阶段保留正常资源语义，通过同一子代理运行时委派；受管隔离是显式选择的配置。两者通过显式事件总线执行协议协作，不跨产品导入内部实现。它们参与开发检查，但不发布、也不加入根 Pi profile；现有 interactive-subagents 包仍保持启用。
+根 profile 已加载 [`pi-subagents`](./packages/pi-subagents/README.zh-CN.md) 与 [`pi-workflow`](./packages/pi-workflow/README.zh-CN.md)。它们仍是 npm 私有产品，但不再是未启用的工作区：Agent/RPC/Fleet 与可配置 Pi 执行属于 subagents；独立 DSL、编排、日志与 `/wf` 属于 workflow，两者通过版本化事件总线协作。旧交互包仅作为私有源码快照保留，不再加载或发布。npm 发布准备和导入界面的完整本地化，与本次运行入口切换分开处理。
 
 仓库根 `.npmrc` 固定 `https://registry.npmjs.org/`，保证 lockfile 里的 tarball 地址可移植。用镜像 registry 安装会把地址改写成镜像域名，导致 npm 12+ 的 `npm ci` 报 `EALLOWREMOTE`；`node scripts/check-lockfile-registry.mjs`（已纳入 `npm run check`）在合并前拦下这类改动。
 

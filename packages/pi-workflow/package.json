@@ -2,7 +2,7 @@
   "name": "@maplezzk/pi-workflow",
   "version": "0.1.0",
   "private": true,
-  "description": "Private independent workflow engine with audited orchestration and managed Pi executor integration",
+  "description": "Independent workflow engine with audited orchestration, cancellation, recovery, and unified Pi execution",
   "type": "module",
   "main": "./index.ts",
   "exports": {
@@ -39,6 +39,12 @@
     "test": "vitest run",
     "build": "npm run typecheck",
     "check": "npm run typecheck && npm test"
+  },
+  "pi": {
+    "extensions": [
+      "./extension.ts",
+      "../pi-extensions-i18n/index.ts"
+    ]
   },
   "dependencies": {
     "jiti": "^2.7.0",

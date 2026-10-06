@@ -5,8 +5,9 @@
 从 [`@juicesharp/rpiv-workflow` 2.12.0](./UPSTREAM.md) 导入，保留阶段/循环 DSL、
 路由、输出校验、重试、审计日志、恢复和 `/wf`。执行与子代理生命周期属于 `pi-subagents`。
 
-本 workspace 仍为**私有、显式加载**，不加入根 profile 或发布配置。它不等于安装完整 RPIV
-套件、默认工作流包、技能、工具扩展或 lane UI。
+Git／本地根 profile 已**默认加载本产品和统一 `pi-subagents`**。npm 包仍为私有，
+不进入发布配置；启用运行入口不代表已经发布。它不安装完整 RPIV 套件、默认工作流包、
+技能、工具扩展或 lane UI。切换既有环境前请阅读[迁移指南](../pi-subagents/docs/migration.zh-CN.md)。
 
 ## 架构
 
@@ -27,9 +28,10 @@ pi-subagents：标准 SDK WorkflowHost
 两包没有跨产品运行时导入。执行器发现保持版本化，缺少或重复的执行器明确失败。
 统一产品入口不加载旧 `SubagentWorkflow` 引擎或旧交互式子代理工具别名。
 
-## 开发时显式启用
+## 默认与选择性启用
 
-在仓库根目录执行 `npm install` 后：
+将本仓库安装为 Pi package 会默认加载两个统一产品。只需选择性启动时，在仓库根目录
+执行 `npm install` 后运行：
 
 ```sh
 pi --no-extensions \

@@ -1,7 +1,8 @@
 {
   "name": "@maplezzk/pi-interactive-subagents",
   "version": "3.16.2",
-  "description": "Interactive async subagents for pi — spawn, orchestrate, and manage sub-agent sessions in multiplexer panes. Fork of HazAT/pi-interactive-subagents.",
+  "private": true,
+  "description": "Retired private provenance workspace for the former interactive async subagents extension.",
   "type": "module",
   "main": "./index.ts",
   "exports": {
@@ -23,12 +24,6 @@
     "build": "npm run typecheck",
     "check": "npm run typecheck && npm test && npm pack --dry-run --json > /dev/null"
   },
-  "pi": {
-    "extensions": [
-      "./index.ts",
-      "../pi-extensions-i18n/index.ts"
-    ]
-  },
   "engines": {
     "node": ">=22"
   },
@@ -43,10 +38,6 @@
     "type": "git",
     "url": "git+https://github.com/maplezzk/pi-extensions.git",
     "directory": "packages/pi-interactive-subagents"
-  },
-  "publishConfig": {
-    "access": "public",
-    "registry": "https://registry.npmjs.org"
   },
   "keywords": [
     "pi-package",

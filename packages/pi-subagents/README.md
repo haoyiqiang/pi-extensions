@@ -7,14 +7,18 @@ execution. Agent definitions, scheduling, queues, results and the Fleet/widget U
 belong to `pi-subagents`; terminal operations use `pi-terminal-mux`. The independent
 `pi-workflow` package owns workflow definitions, orchestration, journals and `/wf`.
 
-## Development boundary
+## Activation and publication
 
-This workspace is still private and explicitly loaded. It is not published or
-selected by the root distribution profile. Do not co-load it with the old
-`pi-interactive-subagents` product or another copy of the upstream subagents
-extension. The old product remains in this repository pending distribution migration.
+The repository's Git/local profile loads this product by default, together with
+`pi-workflow`. The package remains npm-private and unpublished; publication
+readiness is separate from runtime activation. Do not co-load the retired
+`pi-interactive-subagents` entry or another copy of the upstream subagents extension.
+The old package is a source-only snapshot, not an active or released workspace.
 Imported management-UI strings still require complete catalog migration before
-public distribution; new controls and diagnostics use bilingual catalogs.
+npm publication; new controls and diagnostics use bilingual catalogs.
+
+See the [migration guide](./docs/migration.md) before reloading an existing setup.
+Old live tasks and IDs are not transferred automatically.
 
 The unified entry does **not** register the old `subagent`, `subagent_resume`,
 `subagents_list`, `subagent_interrupt`, `/plan`, or `__pi_subagents` compatibility

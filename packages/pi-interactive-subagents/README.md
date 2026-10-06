@@ -1,4 +1,10 @@
-# pi-interactive-subagents
+# pi-interactive-subagents — retired source snapshot
+
+> **Retired:** this workspace is private, has no Pi resource manifest, and is excluded
+> from the default profile and future releases. Use [unified Pi subagents](../pi-subagents/README.md)
+> and the [migration guide](../pi-subagents/docs/migration.md). Existing published npm
+> versions are not altered by this repository change. The historical documentation
+> below is retained for provenance, not installation guidance. Do not co-load the old entry.
 
 Async subagents for [pi](https://github.com/badlogic/pi-mono) — spawn, orchestrate, and manage sub-agent sessions in multiplexer panes. **Fully non-blocking** — the main agent keeps working while subagents run in the background.
 

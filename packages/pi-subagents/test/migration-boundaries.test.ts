@@ -7,24 +7,27 @@ const repositoryRoot = new URL("../../../", import.meta.url);
 const readJson = (path: string, root = repositoryRoot) =>
   JSON.parse(readFileSync(new URL(path, root), "utf8"));
 
-describe("private migration boundary", () => {
-  it("does not publish or auto-load the imported implementation", () => {
+describe("unpublished product boundary", () => {
+  it("declares a root-profile extension without becoming an npm release", () => {
     const manifest = readJson("package.json", packageRoot);
     expect(manifest.name).toBe("@maplezzk/pi-subagents");
     expect(manifest.private).toBe(true);
-    expect(manifest.pi).toBeUndefined();
+    expect(manifest.pi.extensions).toEqual(["./index.ts", "../pi-extensions-i18n/index.ts"]);
     expect(readJson("release-please-config.json").packages).not.toHaveProperty("packages/pi-subagents");
     expect(Object.keys(readJson(".release-please-manifest.json"))).not.toContain("packages/pi-subagents");
     expect(readFileSync(new URL(".github/workflows/release.yml", repositoryRoot), "utf8"))
       .not.toContain("packages/pi-subagents");
   });
 
-  it("keeps the existing interactive product as the only active subagent entry", () => {
+  it("activates only unified subagents and retires the former interactive entry", () => {
     const entries = readJson("package.json").pi.extensions as string[];
     expect(entries.filter((entry) => entry.includes("subagents")))
-      .toEqual(["packages/pi-interactive-subagents/index.ts"]);
-    expect(readJson("packages/pi-interactive-subagents/package.json").name)
-      .toBe("@maplezzk/pi-interactive-subagents");
+      .toEqual(["packages/pi-subagents/index.ts"]);
+    expect(entries).toContain("packages/pi-workflow/extension.ts");
+    const retired = readJson("packages/pi-interactive-subagents/package.json");
+    expect(retired.private).toBe(true);
+    expect(retired.pi).toBeUndefined();
+    expect(readJson("release-please-config.json").packages).not.toHaveProperty("packages/pi-interactive-subagents");
   });
 
   it("exports a source factory without activating its manager", () => {

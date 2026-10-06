@@ -6,9 +6,11 @@ Imported from [`@juicesharp/rpiv-workflow` 2.12.0](./UPSTREAM.md), retaining the
 and loop DSL, routing, output validation, retries, audit journals, recovery and
 `/wf`. Execution and subagent lifecycle belong to `pi-subagents`.
 
-This workspace remains **private and explicitly loaded**, outside the root
-profile and release configuration. It is not an installation of the complete RPIV
-bundle, its default workflow pack, skills, tool extensions or lane UI.
+The Git/local root profile **loads this product by default** alongside unified
+`pi-subagents`. It remains npm-private and outside release configuration; runtime
+activation does not imply publication. It does not install the complete RPIV
+bundle, default workflow pack, skills, tool extensions or lane UI.
+See the [migration guide](../pi-subagents/docs/migration.md) before switching an existing setup.
 
 ## Architecture
 
@@ -32,9 +34,10 @@ There is no cross-product runtime import. Discovery remains versioned and missin
 or duplicate executors fail clearly. The old `SubagentWorkflow` engine and the old
 interactive-subagent tool aliases are not loaded by the unified product entry.
 
-## Explicit development activation
+## Default and selective activation
 
-From this repository, after `npm install`:
+Installing this repository as a Pi package loads both unified products. For a
+selective session from the checkout, after `npm install`:
 
 ```sh
 pi --no-extensions \

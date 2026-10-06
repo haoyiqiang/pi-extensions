@@ -6,7 +6,15 @@
 - Exact source revision: `68d9a0014b70006d7b04b57933752338a2716db7`
 - Revision link: https://github.com/juicesharp/rpiv-mono/tree/68d9a0014b70006d7b04b57933752338a2716db7/packages/rpiv-workflow
 - License: MIT; the upstream [LICENSE](./LICENSE) is preserved byte-for-byte.
-- Destination: private `@maplezzk/pi-workflow` 0.1.0; no release or product activation.
+- Destination: npm-private `@maplezzk/pi-workflow` 0.1.0; active in the root Git/local profile, not an npm release.
+
+## Root-profile activation
+
+The root Git/local profile now loads `extension.ts` alongside unified subagents.
+The library `index.ts` remains the DSL API, not an extension side-effect entry.
+Publication remains disabled; the old interactive product is no longer loaded or
+released. The historical import/integration steps below describe their original
+boundaries, not the current root activation state.
 
 ## Imported material
 

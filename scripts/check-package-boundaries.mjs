@@ -12,15 +12,15 @@ const PACKAGE_LAYERS = new Map([
   ["pi-terminal-mux", "foundation"],
   ["pi-spark", "product"],
   ["pi-blackhole", "product"],
-  ["@maplezzk/pi-interactive-subagents", "product"],
+  ["@maplezzk/pi-subagents", "product"],
+  ["@maplezzk/pi-workflow", "product"],
   ["pi-distill", "capability"],
   ["@maplezzk/pi-web-search", "capability"],
   ["pi-models-discovery", "capability"],
   ["pi-rewind", "capability"],
   ["pi-context-view", "capability"],
   ["@maplezzk/pi-test-utils", "internal"],
-  ["@maplezzk/pi-subagents", "internal"],
-  ["@maplezzk/pi-workflow", "internal"],
+  ["@maplezzk/pi-interactive-subagents", "internal"],
 ]);
 
 const ALLOWED_WORKSPACE_EDGES = new Set([
@@ -81,7 +81,7 @@ for (const record of packageRecords) {
     }
   }
 
-  const runtimeFiles = collectRuntimeTypeScriptFiles(root);
+  const runtimeFiles = collectRuntimeTypeScriptFiles(root, manifest);
   for (const file of runtimeFiles) {
     const source = readFileSync(file, "utf8");
     for (const specifier of collectImportSpecifiers(source)) {
@@ -123,9 +123,13 @@ function collectLocalDependencies(manifest, knownPackages) {
   return dependencies;
 }
 
-function collectRuntimeTypeScriptFiles(packageRoot) {
-  const candidates = [join(packageRoot, "index.ts"), join(packageRoot, "src"), join(packageRoot, "pi-extension")];
-  return candidates.flatMap((candidate) => collectTypeScriptFiles(candidate));
+function collectRuntimeTypeScriptFiles(packageRoot, manifest) {
+  const extensionEntries = (manifest.pi?.extensions ?? [])
+    .filter((entry) => typeof entry === "string" && entry.startsWith("./"))
+    .map((entry) => resolve(packageRoot, entry.slice(2)))
+    .filter((entry) => isWithin(entry, packageRoot));
+  const candidates = [join(packageRoot, "index.ts"), join(packageRoot, "src"), join(packageRoot, "pi-extension"), ...extensionEntries];
+  return [...new Set(candidates.flatMap((candidate) => collectTypeScriptFiles(candidate)))];
 }
 
 function collectTypeScriptFiles(path) {

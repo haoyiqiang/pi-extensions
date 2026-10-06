@@ -6,10 +6,23 @@ import { join, resolve } from "node:path";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const releaseConfig = JSON.parse(readFileSync(join(ROOT, "release-please-config.json"), "utf8"));
-const packageDirectories = Object.keys(releaseConfig.packages ?? {}).sort();
+const releasePackageDirectories = Object.keys(releaseConfig.packages ?? {}).sort();
+const rootManifest = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
+const rootActivePrivateDirectories = [...new Set((rootManifest.pi?.extensions ?? [])
+  .map((entry) => typeof entry === "string" ? entry.match(/^(packages\/[^/]+)\//)?.[1] : undefined)
+  .filter(Boolean)
+  .filter((directory) => {
+    const manifestPath = join(ROOT, directory, "package.json");
+    if (!existsSync(manifestPath)) return false;
+    return JSON.parse(readFileSync(manifestPath, "utf8")).private === true;
+  }))].sort();
+const packageTargets = [
+  ...releasePackageDirectories.map((directory) => ({ directory, kind: "public release" })),
+  ...rootActivePrivateDirectories.map((directory) => ({ directory, kind: "private root deployment" })),
+];
 const errors = [];
 
-for (const packageDirectory of packageDirectories) {
+for (const { directory: packageDirectory, kind } of packageTargets) {
   const packageRoot = join(ROOT, packageDirectory);
   const manifestPath = join(packageRoot, "package.json");
   if (!existsSync(manifestPath)) {
@@ -18,6 +31,14 @@ for (const packageDirectory of packageDirectories) {
   }
 
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  if (kind === "public release" && manifest.private === true) {
+    errors.push(`${packageDirectory}: private package must not be treated as a public release`);
+    continue;
+  }
+  if (kind === "private root deployment" && manifest.private !== true) {
+    errors.push(`${packageDirectory}: root deployment target must remain private`);
+    continue;
+  }
   let report;
   try {
     const output = execFileSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], {
@@ -64,7 +85,7 @@ for (const packageDirectory of packageDirectories) {
     }
   }
 
-  console.log(`✓ ${manifest.name}@${manifest.version}: ${files.size} files, ${report.unpackedSize} unpacked bytes`);
+  console.log(`✓ ${manifest.name}@${manifest.version} [${kind}]: ${files.size} files, ${report.unpackedSize} unpacked bytes`);
 }
 
 if (errors.length > 0) {
@@ -73,7 +94,9 @@ if (errors.length > 0) {
   process.exit(1);
 }
 
-console.log(`Package tarball check passed (${packageDirectories.length} packages).`);
+console.log(
+  `Package tarball check passed (${releasePackageDirectories.length} public releases, ${rootActivePrivateDirectories.length} private root deployments).`,
+);
 
 function requireFile(files, rawPath, packageName) {
   const path = normalizePath(rawPath);

@@ -6,6 +6,14 @@
 - Baseline commit: [`e955e29c51b7a6cce37e1108cd2d6c57a77e151c`](https://github.com/tintinweb/pi-subagents/commit/e955e29c51b7a6cce37e1108cd2d6c57a77e151c)
 - License: MIT; original copyright notice retained verbatim in `LICENSE`.
 
+## Root-profile activation
+
+The Git/local root profile now activates the unified product together with
+`pi-workflow`. Both remain npm-private and excluded from publication. The legacy
+interactive package is a private source snapshot, no longer a root resource or
+release target. Its historical source is retained without co-loading it. See the
+[migration guide](./docs/migration.md); old user state is not rewritten.
+
 ## Unified runtime integration
 
 The historical steps below are retained as provenance. The current private product

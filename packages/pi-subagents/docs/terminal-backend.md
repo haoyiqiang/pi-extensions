@@ -4,8 +4,8 @@ This document describes the isolated **managed** profile in
 `src/backends/terminal/backend.ts`. `createTerminalExecutionBackend()` retains that
 compatibility default; `createStandardTerminalExecutionBackend()` is the ordinary
 product backend selected by `subagents.json`. See the [package README](../README.md)
-for standard resources, interactive sessions and common Agent/RPC routing. Neither
-private entry is selected by the root distribution profile yet.
+for standard resources, interactive sessions and common Agent/RPC routing. The root
+profile loads the unified product; managed isolation remains an explicit choice.
 
 ## Supported private slice
 
@@ -158,9 +158,8 @@ listener; they never need external network access. A dedicated real-process suit
 uses the actual Pi CLI, a scripted in-process provider, temporary agent directories,
 and explicit headless surfaces. It must not use API keys or a live mux daemon.
 
-This backend is not a claim of full embedded parity. Before activation, add remaining
-cross-backend session-store integration and child-policy capabilities, safe recovery of interrupted sessions,
-configuration routing with sticky backend ownership, full localization, composition
-checks and real terminal/Windows job-object support and smoke validation. Forced
-cancellation can lose feedback/usage not yet flushed by the child. Existing package privacy and
-release gates remain in force.
+This managed backend is intentionally narrower than ordinary embedded/standard
+terminal execution. Its strict saved-policy and recovery boundaries remain in force
+when the unified product is active. Native Windows job-object support is not
+implemented; forced cancellation can lose feedback/usage not yet flushed by the
+child. Npm publication and inherited UI localization remain separate readiness work.

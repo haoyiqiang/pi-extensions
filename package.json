@@ -22,17 +22,18 @@
       "packages/pi-models-discovery/index.ts",
       "packages/pi-rewind/index.ts",
       "packages/pi-web-search/index.ts",
-      "packages/pi-interactive-subagents/index.ts"
+      "packages/pi-subagents/index.ts",
+      "packages/pi-workflow/extension.ts"
     ],
     "themes": [
       "packages/pi-spark/themes"
     ]
   },
   "peerDependencies": {
-    "@earendil-works/pi-agent-core": ">=0.85.1",
-    "@earendil-works/pi-ai": ">=0.85.1",
-    "@earendil-works/pi-coding-agent": ">=0.86.1",
-    "@earendil-works/pi-tui": ">=0.86.1"
+    "@earendil-works/pi-agent-core": ">=0.87.1",
+    "@earendil-works/pi-ai": ">=0.87.1",
+    "@earendil-works/pi-coding-agent": ">=0.87.1",
+    "@earendil-works/pi-tui": ">=0.87.1"
   },
   "scripts": {
     "test": "node scripts/run-workspaces.mjs test && node --import tsx --test test/*.test.ts",

@@ -6,7 +6,8 @@ standard terminal execution share Agent/RPC/management ownership. Low-level defa
 manager construction remains embedded for programmatic compatibility. The
 [managed terminal profile](./terminal-backend.md) is separately opt-in.
 `workflow-executor.ts` offers standard SDK stage hosting or explicit managed
-execution; distribution replacement remains a separate boundary.
+execution. The unified entry is active in the root Git/local profile; npm
+publication remains separate.
 
 ## Implementation map
 
@@ -176,9 +177,9 @@ changes. Explicit `off` is accepted by the private spawn/runner thinking option.
 
 See [workflow execution](./workflow-execution.md) for cancellation-error interoperability,
 synchronous provider disposal plus an awaited close barrier, managed storage versus
-consumer pruning, and remaining resource/consumer work. The low-level host factory has
-no registration side effect. Explicit Pi composition uses `workflow-executor.ts` and
-the versioned event-bus protocol; no root-profile change is made.
+consumer pruning, and the managed resource boundary. The low-level host factory has
+no registration side effect. Root composition uses the unified product entry and
+the versioned event bus; `workflow-executor.ts` is an alternative without root Agent UI.
 
 Prompt preparation is now optional and explicit. Fresh/send inputs can use an approved
 skill snapshot or another owner-supplied preparer; idle reattach/fork never prepares the

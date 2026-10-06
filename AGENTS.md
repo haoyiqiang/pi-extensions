@@ -18,8 +18,9 @@ pi-extensions/
 │   ├── pi-rewind/               # Git-backed checkpoints and rewind
 │   ├── pi-spark/                # Compact TUI, clean transcript, credits, presets, recap, metrics, resources, naming
 │   ├── test-utils/              # Private deterministic workspace test fixtures
-│   ├── pi-subagents/            # Private unified Agent/RPC runtime and embedded/terminal execution
-│   └── pi-workflow/             # Private independent workflow engine; explicit opt-in only
+│   ├── pi-subagents/            # Root-profile unified Agent/RPC runtime; npm-private
+│   ├── pi-workflow/             # Root-profile independent workflow engine; npm-private
+│   └── pi-interactive-subagents/ # Retired private source snapshot; never loaded/published
 ├── scripts/                     # Repository checks and workspace helpers
 ├── .github/workflows/           # CI and release automation
 ├── README.md                    # English project documentation
@@ -49,7 +50,7 @@ The layer model, allowed workspace dependency edges, UI ownership, and root dist
 
 Keep packages composable and independently installable. Avoid coupling one extension to another extension's private implementation details or display state.
 
-`packages/pi-subagents` and `packages/pi-workflow` are private migration workspaces. Preserve upstream provenance and regression tests; do not add them to the root profile or release metadata until product integration and composition checks are complete. `pi-workflow` owns DSL/orchestration, journals, retries/recovery and `/wf`; `pi-subagents` owns the common Agent/RPC/Fleet runtime and canonical backend selection. Standard workflow stages keep SDK/resource semantics and inject scoped Agent tools using that runtime; managed isolation is explicit. They collaborate through a versioned Pi event-bus protocol, without cross-product source imports. Do not activate the retained upstream `SubagentWorkflow` as a second formal engine or add old interactive-tool aliases. The existing interactive-subagents distribution remains unchanged during incubation; never co-load both product entries.
+`packages/pi-subagents` and `packages/pi-workflow` are the root Git/local profile's unified products. They remain npm-private and outside release metadata; publication readiness is independent of runtime activation. The package gate explicitly permits only these two private products to declare root-profile resources; private test/incubation and retired workspaces remain excluded. Preserve upstream provenance and regression tests. `pi-workflow` owns DSL/orchestration, journals, retries/recovery and `/wf`; `pi-subagents` owns Agent/RPC/Fleet and canonical embedded/terminal Pi execution. Standard workflow stages keep SDK/resource semantics and inject scoped Agent tools; managed isolation is explicit. The products communicate through the versioned event bus, without cross-product source imports. Never enable the retained `SubagentWorkflow` engine or old interactive-tool aliases. `pi-interactive-subagents` is a retired private source snapshot, absent from root loading and future publication; never co-load its entry with the unified product. Do not edit user-global settings or destroy old run/session files as an implicit migration.
 
 ## Portability and safety
 
@@ -108,5 +109,5 @@ Keep unrelated refactors out of a focused pull request. Run `npm run check` befo
 
 ## Releases
 
-Versions and changelogs are managed by release-please. Merging a release PR runs the repository gate once, then publishes changed packages to npm in workspace-dependency order: config first, i18n next, terminal-mux and other direct consumers after that, and terminal-mux consumers (Spark and interactive subagents) last. Publish jobs verify their own tarball plus the npm visibility of workspace dependency ranges. Do not publish manually from a local machine unless the release procedure explicitly requires it.
+Versions and changelogs are managed by release-please. Merging a release PR runs the repository gate once, then publishes changed packages to npm in workspace-dependency order: config first, i18n next, terminal-mux and other direct consumers after that, and terminal-mux consumers last. Npm-private unified subagents/workflow and the retired interactive snapshot are not publication candidates. Publish jobs verify their own tarball plus the npm visibility of workspace dependency ranges. Do not publish manually from a local machine unless the release procedure explicitly requires it.
 ase procedure explicitly requires it.

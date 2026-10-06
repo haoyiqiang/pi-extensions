@@ -1,91 +1,124 @@
 # Package architecture
 
-This repository publishes independently installable Pi extensions and a small set of shared foundations. The root package is a distribution profile for users who intentionally want the complete suite; it is not a runtime orchestrator and does not own feature behavior.
+The root package is an explicit Git/local distribution profile, not a runtime
+orchestrator. Runtime ownership, root activation, and npm publication are separate
+concerns: an npm-private product can be active in this checked-out suite without
+being eligible for release automation.
 
 ## Layers
 
 ### Product and experience packages
 
-- `pi-spark` owns the compact editor/footer, transcript folding, credits, presets, recap, metrics, session resources, and automatic/manual session and terminal naming.
-- `pi-blackhole` owns deterministic compaction, observational memory, and raw-session recall.
-- `@maplezzk/pi-interactive-subagents` owns subagent processes, persistent child sessions, terminal surfaces, and the subagent widget.
+- `pi-spark` owns the compact editor/footer, transcript folding, credits, presets,
+  recap, metrics, resources, and session/terminal naming.
+- `pi-blackhole` owns deterministic compaction, observational memory, and recall.
+- `@maplezzk/pi-subagents` owns the unified Agent/RPC/Fleet runtime, agent policy,
+  scheduling and lifecycle. `subagents.json` selects embedded or terminal Pi
+  execution. It is active in the root profile but remains npm-private.
+- `@maplezzk/pi-workflow` owns the independent workflow DSL, orchestration,
+  journals, recovery, `/wf` and `/wf-cancel`. It is active in the root profile but
+  remains npm-private.
 
-These packages may depend on foundations but must not depend on one another.
+Products may depend on foundations, not on one another's implementations.
+Subagents and workflow communicate through `pi-workflow:executor:discover:v1`.
+Standard stages use native SDK sessions with normal approved resources; their
+scoped Agent delegates use the shared subagent backend. Explicit managed mode
+retains its isolated policy/checkpoint guarantees. A standalone workflow-executor
+entry is available instead of the full subagent product, never alongside it.
+
+The old interactive tools, commands and `__pi_subagents` bridge are not carried
+forward. The upstream `Symbol.for("pi-subagents:manager")` view remains for existing
+consumers of the same root manager; workflow integration does not use that view.
+The retained upstream `SubagentWorkflow` is not a second active engine. Root
+session replacement hands off admitted workflow cancellation; quit/reload retires
+all owned work.
 
 ### Capability packages
 
-- `pi-distill` transforms verbose tool results before the next model turn.
-- `@maplezzk/pi-web-search` owns web search, URL Context, and bounded fetch tools.
-- `pi-models-discovery` owns dynamic provider model discovery.
-- `pi-rewind` owns Git-backed file and conversation restore.
-- `pi-context-view` passively inspects context composition.
+- `pi-distill`: tool-output distillation.
+- `@maplezzk/pi-web-search`: search, URL Context and bounded fetch.
+- `pi-models-discovery`: dynamic model discovery.
+- `pi-rewind`: file/session checkpoints.
+- `pi-context-view`: passive context inspection.
 
-Capability packages may depend on foundations but must not depend on product packages or another capability package.
+Capabilities may depend on foundations, not products or other capabilities.
 
 ### Foundation packages
 
-- `pi-extensions-config` owns portable agent-dir paths, JSON object reads, atomic writes, and preserving updates.
-- `pi-extensions-i18n` owns locale state, catalogs, and the shared notice outlet.
-- `pi-terminal-mux` exposes the terminal-surface abstraction used by Spark naming and subagents. It executes terminal operations without title-generation or extension-registration policy.
+- `pi-extensions-config`: portable agent directories and JSON configuration I/O.
+- `pi-extensions-i18n`: locale/catalog state and source-tagged notices.
+- `pi-terminal-mux`: terminal detection and surface operations, without naming or
+  extension-registration policy.
 
-Foundations must not depend on product or capability packages. A new foundation belongs here only after at least three real consumers need the same stable mechanism.
+Foundations must not depend on products or capabilities. Introduce another
+foundation only when at least three real consumers need the same stable mechanism.
 
-### Internal packages
+### Internal and retired workspaces
 
-- `@maplezzk/pi-test-utils` provides deterministic temp-directory and extension-registration fixtures.
-- `@maplezzk/pi-subagents` is the private unified subagent implementation. Its explicit product entry keeps Agent/RPC/Fleet ownership in one manager runtime and selects standard embedded or terminal execution from canonical `subagents.json`. Interactive capability belongs to the backend; the old interactive tool names, commands and `__pi_subagents` bridge are not carried forward. The upstream `Symbol.for("pi-subagents:manager")` view of the same root manager remains for existing consumers; workflow integration uses the versioned event bus, not that registry. Managed isolation remains a separate optional profile. The root profile still selects `@maplezzk/pi-interactive-subagents` pending distribution promotion; never co-load both products.
+- `@maplezzk/pi-test-utils` supplies deterministic test fixtures.
+- `@maplezzk/pi-interactive-subagents` is a retired private source snapshot. It
+  declares no installable Pi resources, is absent from the root profile and
+  release metadata, and must not be co-loaded with unified subagents. Historical
+  source and regression tests remain available without maintaining a second
+  active product or rewriting old user data.
 
-- `@maplezzk/pi-workflow` is the private independent workflow engine: the imported `rpiv-workflow` owns DSL/routing, run journals, retries/recovery, `/wf` and its UI. The standard host keeps SDK stage sessions and ordinary approved resources, and injects scoped Agent tools using the same subagent backend factory. The unified subagent entry offers this executor; the standalone `pi-subagents/workflow-executor` entry is an alternative without root Agent UI. Neither enables the retained upstream `SubagentWorkflow` engine.
+Private internal/retired workspaces do not enter runtime profiles or releases.
+The explicit private-product exception for **only** subagents and workflow permits
+their root activation and deployment-artifact checks, not npm publication. All
+private packages remain excluded from release-please and publish jobs.
 
-The two private products collaborate through `pi-workflow:executor:discover:v1`, not runtime imports of one another. Subagents owns the ordinary backend default and definition policy; workflow owns its execution profile, concurrency, registration and run lifetime. Standard stages remain SDK sessions and pin the delegation backend; explicit managed execution may place the stage itself in a managed backend. Backend/resource identity travels in the journal. No new shared request library or process-global executor registry is introduced. Root replacement hands off cancellation through the existing owned provider, while quit/reload retires the whole run.
+## Distribution profile
 
-Internal packages are `private: true`. They are part of workspace type checks and tests but never enter release-please, npm tarball checks, or the root Pi profile.
+The root `pi.extensions` list explicitly includes each active extension and
+`pi.themes` includes Spark themes. No source loading glob is permitted. A package
+can declare its own `./index.ts` or another explicit extension path, such as
+workflow's `./extension.ts`; its library API `index.ts` is not implicitly an
+extension. Pure libraries and retired entries must not enter the profile.
 
-### Distribution profile
-
-The private root `pi-extensions` package explicitly lists every extension and theme loaded by `pi install git:github.com/maplezzk/pi-extensions`. Adding a workspace package does not automatically add it to the full profile. Pure libraries and future private test packages must never appear in the root Pi manifest.
+The root suite requires Pi 0.87.1 or a tested compatible runtime. Adding a new
+workspace never silently activates it. Changes to the allowlist require
+composition tests, including tool/command/renderer ownership and real SDK loading.
+See the [migration guide](../packages/pi-subagents/docs/migration.md) for the
+breaking old-tool transition, configuration and installation choices.
 
 ## Dependency direction
 
-The current allowed workspace edges are intentionally narrow:
-
 ```text
-selected feature packages ─────→ pi-extensions-config
-feature packages ───────────────→ pi-extensions-i18n
-pi-extensions-i18n ─────────────→ pi-extensions-config
+selected features ──────────────→ pi-extensions-config
+features ───────────────────────→ pi-extensions-i18n
+pi-extensions-i18n ──────────────→ pi-extensions-config
 pi-terminal-mux ────────────────→ pi-extensions-i18n
 pi-spark ───────────────────────→ pi-terminal-mux
-@maplezzk/pi-interactive-subagents → pi-terminal-mux
-@maplezzk/pi-subagents (private) ─→ pi-extensions-config / pi-extensions-i18n / pi-terminal-mux
-@maplezzk/pi-workflow (private) ──→ pi-extensions-config / pi-extensions-i18n
+@maplezzk/pi-subagents ─────────→ config / i18n / terminal-mux
+@maplezzk/pi-workflow ──────────→ config / i18n
+retired interactive snapshot ──→ i18n / terminal-mux (source/test only)
 ```
 
-Runtime code imports sibling packages by their public npm name. It must not import another package through `../other-package/src/...` or any other private path.
+Runtime imports use public npm package names, not sibling private source paths.
+No new shared model-request wrapper or global workflow executor registry is added.
 
 ## UI ownership
 
-- `pi-spark` is the only package that replaces the editor or footer and the only owner of core transcript folding. It also owns `/rename`, automatic naming and `/config:naming`; do not restore the retired standalone `pi-naming` entry.
-- `@maplezzk/pi-interactive-subagents` owns the subagent widget and subagent result entries.
-- `pi-extensions-i18n` owns the shared notice entry renderer.
-- `pi-distill` owns its audit entry renderer.
-- Domain packages may create temporary modals, overlays, or namespaced status entries but must not claim another package's persistent surface.
+- Spark alone replaces the root editor/footer and owns core transcript folding,
+  `/rename` and naming configuration.
+- Unified subagents owns its agent widget/Fleet and result presentation.
+- Workflow owns run notices and commands. Child dialogs are serialized and scoped;
+  children cannot replace root editor/footer/widgets. The RPIV lane dock is not
+  bundled.
+- I18n owns the shared notice entry renderer; Distill owns its audit entry renderer.
 
-Shared UI hosts are deliberately avoided. Domain UI stays with the package that produces and understands the state.
+Domain packages may create temporary modals/overlays or namespaced status entries,
+not claim another package's persistent surfaces. There is no shared product UI host.
 
-## Package types
+## Publication and verification
 
-An extension package declares `./index.ts` in `pi.extensions`. A library package has no Pi extension entry and must have no import-time runtime side effects. Every public package owns its README files, tests, package metadata, and compatibility notes.
+Public npm packages are independently versioned and released. The unified products'
+remaining publication/localization preparation is not permission to restore the
+old default runtime. No user-global configuration is modified or npm release
+performed as part of changing the checked-out profile.
 
-Independent semantic versions are intentional. The repository does not use lockstep versions because packages remain independently installable and releasable.
-
-## Verification
-
-Repository gates enforce:
-
-- declared package layers, including private internal workspaces, and allowed runtime dependency edges;
-- no cross-package private source imports;
-- an explicit, resource-complete root distribution profile;
-- package metadata and locale consistency;
-- deterministic tests and exact Pi development dependency pins;
-- npm tarball contents, including exclusion of test sources;
-- release coverage and dependency-sensitive publication order.
+Repository gates verify dependency boundaries, exact Pi development pins, explicit
+resource manifests, locale consistency, deterministic tests, test-free tarballs,
+and dependency-sensitive release coverage. Root-active private products receive
+artifact checks while remaining non-publishable; internal test/retired workspaces
+must not leak into those deployment artifacts.

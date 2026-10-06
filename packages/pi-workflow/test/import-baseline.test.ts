@@ -19,12 +19,12 @@ afterEach(() => {
   for (const path of temporaryDirectories.splice(0)) rmSync(path, { recursive: true, force: true });
 });
 
-describe("private import metadata", () => {
-  it("has no publishing or Pi activation metadata", () => {
+describe("unpublished product metadata", () => {
+  it("declares the extension entry while remaining unpublished", () => {
     const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
     expect(pkg.name).toBe("@maplezzk/pi-workflow");
     expect(pkg.private).toBe(true);
-    expect(pkg.pi).toBeUndefined();
+    expect(pkg.pi.extensions).toEqual(["./extension.ts", "../pi-extensions-i18n/index.ts"]);
     expect(pkg.publishConfig).toBeUndefined();
     expect(Object.keys(pkg.exports).sort()).toEqual([".", "./internal", "./registration", "./runner", "./startup"]);
     for (const target of Object.values(pkg.exports)) expect(existsSync(join(root, String(target)))).toBe(true);

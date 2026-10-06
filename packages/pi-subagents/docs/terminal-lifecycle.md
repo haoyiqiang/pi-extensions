@@ -1,9 +1,9 @@
 # Private terminal lifecycle primitive
 
-This batch extracts the Pi terminal-run lifecycle from the existing interactive
-product without loading it in the root profile. It is **not** a public API, workflow
-host, or replacement tool. The [private terminal backend](./terminal-backend.md) now
-adapts it to `AgentExecutionBackend` for an explicitly limited execution slice.
+This internal primitive was extracted from the former interactive product. The
+unified root-profile product now uses it through the standard and
+[managed terminal backends](./terminal-backend.md). It is not a separate extension,
+workflow host, replacement tool or stable public API.
 
 ## Components
 
@@ -21,7 +21,7 @@ adapts it to `AgentExecutionBackend` for an explicitly limited execution slice.
   assistant output. It preserves the session and launch artifacts.
 
 The primitive has no global running-agent registry, queue, widget, notifications,
-agent discovery, or model-selection policy. The old product remains unchanged.
+agent discovery, or model-selection policy. The old product is a retired source snapshot.
 New diagnostics use the `pi-subagents` locale namespace; localization of the
 imported embedded UI/prompts is still outstanding.
 

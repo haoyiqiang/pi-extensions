@@ -115,7 +115,7 @@ export PI_SUBAGENT_HERDR_MODE=tab
 - **长命令（`sendLongCommand`）**：传 `interpreter: "powershell"` 会生成 `.ps1`，mux 通过 `powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File <path>` 执行、headless 走 `-Command "& <path>"`。显式 `scriptPath` 原样保留；自动路径按解释器选 `.ps1`/`.sh`。未传 interpreter 时保持既有 Bash command、`.sh` 路径与 `$?` 数值哨兵不变。
 - **读屏（`readScreen` / `readScreenAsync`）**：传 `{ source: "recent_unwrapped" }`（仅 herdr）选择 herdr 的软换行合并捕获；不传 options 时 herdr 保持 `recent`，其他后端保持各自读屏语义。
 
-这些都是可选项——既有 Bash 调用方与 `pi-interactive-subagents` 在所有平台继续走默认 Bash 运行时。
+这些都是可选项。既有 Bash 调用方仍使用默认 Bash 运行时；统一 `pi-subagents` 使用 Pi 执行，平台限制以其文档为准。旧 interactive-subagents workspace 已退役。
 
 ## 环境变量
 

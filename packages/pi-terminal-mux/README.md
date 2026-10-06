@@ -116,7 +116,7 @@ All platforms keep **Bash as the default** scripting runtime to preserve existin
 - **Long commands (`sendLongCommand`)**: pass `interpreter: "powershell"` to generate a `.ps1` and run it via `powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File <path>` (mux) or `-Command "& <path>"` (headless). Explicit `scriptPath` is preserved as-is; auto paths choose `.ps1`/`.sh` by interpreter. Omitted `interpreter` keeps the existing Bash command, `.sh` paths and `$?` numeric sentinels unchanged.
 - **Screen capture (`readScreen` / `readScreenAsync`)**: pass `{ source: "recent_unwrapped" }` (herdr-only) to select herdr's soft-wrap merged capture; omitted options keep herdr `recent` and other backends keep their own read semantics.
 
-These are opt-in capabilities — existing Bash callers and `pi-interactive-subagents` continue to run under the default Bash runtime on every platform.
+These are opt-in capabilities. Existing Bash callers keep the default Bash runtime; unified `pi-subagents` uses Pi execution with its documented platform limits. The old interactive-subagents workspace is retired.
 
 ## Environment variables
 

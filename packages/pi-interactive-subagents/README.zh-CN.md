@@ -1,4 +1,9 @@
-# pi-interactive-subagents
+# pi-interactive-subagents — 已退役源码快照
+
+> **已退役：** 本 workspace 为私有，不再声明 Pi 资源，也不再进入默认 profile 或后续发布。
+> 请使用[统一 Pi 子代理](../pi-subagents/README.zh-CN.md)，并阅读[迁移指南](../pi-subagents/docs/migration.zh-CN.md)。
+> 本仓库变更不修改已发布的 npm 历史版本。以下文档仅保留作来源对照，不是当前安装指南；
+> 不要把旧入口与统一产品同时加载。
 
 为 [pi](https://github.com/badlogic/pi-mono) 提供异步交互式子 agent —— 在终端复用器分屏中启动、编排和管理子会话。**完全非阻塞**：子 agent 在后台运行时，主 agent 可继续工作。
 
