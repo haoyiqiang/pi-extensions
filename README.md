@@ -71,7 +71,7 @@ npm run check
 
 The check command runs workspace type checks, tests, and the portability/i18n gates.
 
-The root profile loads [`pi-subagents`](./packages/pi-subagents/README.md) and [`pi-workflow`](./packages/pi-workflow/README.md). They remain npm-private products, not inactive workspaces: Agent/RPC/Fleet and configurable Pi execution belong to subagents; the independent DSL, runner, journals and `/wf` belong to workflow. They communicate through a versioned event bus. The retired interactive package is a private source snapshot, excluded from profile and publication. Publication readiness and inherited UI localization remain separate from this runtime switch.
+The root profile loads [`pi-subagents`](./packages/pi-subagents/README.md) and [`pi-workflow`](./packages/pi-workflow/README.md). They remain npm-private products, not inactive workspaces: Agent/RPC/Fleet and configurable Pi execution belong to subagents; the independent DSL, runner, journals and `/wf` belong to workflow. They communicate through a versioned event bus. The retired interactive source is archived outside this repository; it is no longer a workspace, build/test target or release candidate. Absorbed-code attribution remains in unified subagents. Publication readiness and inherited UI localization remain separate from this runtime switch.
 
 The repository pins `https://registry.npmjs.org/` in `.npmrc` so lockfile tarball URLs stay portable. Installing through a mirror registry rewrites those URLs and makes `npm ci` fail on npm 12+ with `EALLOWREMOTE`; `node scripts/check-lockfile-registry.mjs` (part of `npm run check`) blocks that before merge.
 

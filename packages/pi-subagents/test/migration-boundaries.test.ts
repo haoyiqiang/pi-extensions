@@ -24,9 +24,10 @@ describe("unpublished product boundary", () => {
     expect(entries.filter((entry) => entry.includes("subagents")))
       .toEqual(["packages/pi-subagents/index.ts"]);
     expect(entries).toContain("packages/pi-workflow/extension.ts");
-    const retired = readJson("packages/pi-interactive-subagents/package.json");
-    expect(retired.private).toBe(true);
-    expect(retired.pi).toBeUndefined();
+    expect(existsSync(new URL("packages/pi-interactive-subagents", repositoryRoot))).toBe(false);
+    const lock = readJson("package-lock.json").packages;
+    expect(lock).not.toHaveProperty("packages/pi-interactive-subagents");
+    expect(lock).not.toHaveProperty("node_modules/@maplezzk/pi-interactive-subagents");
     expect(readJson("release-please-config.json").packages).not.toHaveProperty("packages/pi-interactive-subagents");
   });
 
@@ -67,7 +68,8 @@ describe("unpublished product boundary", () => {
     expect(Object.keys(en).sort()).toEqual(Object.keys(zh).sort());
     expect(Object.keys(en).length).toBeGreaterThan(0);
     expect(readFileSync(new URL("docs/LICENSE.interactive-subagents", packageRoot), "utf8"))
-      .toBe(readFileSync(new URL("packages/pi-interactive-subagents/LICENSE", repositoryRoot), "utf8"));
+      .toBe(readFileSync(new URL("LICENSE.interactive-subagents", packageRoot), "utf8"));
+    expect(readFileSync(new URL("LICENSE.interactive-subagents", packageRoot), "utf8")).toContain("Copyright (c) 2026 HazAT");
   });
 
   it("runs under isolated test directories with live models disabled", () => {

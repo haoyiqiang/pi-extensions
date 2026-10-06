@@ -53,16 +53,16 @@ Capabilities may depend on foundations, not products or other capabilities.
 Foundations must not depend on products or capabilities. Introduce another
 foundation only when at least three real consumers need the same stable mechanism.
 
-### Internal and retired workspaces
+### Internal workspace and historical source
 
 - `@maplezzk/pi-test-utils` supplies deterministic test fixtures.
-- `@maplezzk/pi-interactive-subagents` is a retired private source snapshot. It
-  declares no installable Pi resources, is absent from the root profile and
-  release metadata, and must not be co-loaded with unified subagents. Historical
-  source and regression tests remain available without maintaining a second
-  active product or rewriting old user data.
+- The retired `pi-interactive-subagents` source has been archived outside this
+  repository. It is no longer an npm workspace, build/test target, runtime entry
+  or release candidate. Its history remains in Git; upstream attribution and the
+  MIT notice for absorbed code remain with unified subagents. An external archive
+  is not a repository dependency and must not be co-loaded with the unified product.
 
-Private internal/retired workspaces do not enter runtime profiles or releases.
+The private test workspace does not enter runtime profiles or releases.
 The explicit private-product exception for **only** subagents and workflow permits
 their root activation and deployment-artifact checks, not npm publication. All
 private packages remain excluded from release-please and publish jobs.
@@ -91,7 +91,6 @@ pi-terminal-mux ────────────────→ pi-extension
 pi-spark ───────────────────────→ pi-terminal-mux
 @maplezzk/pi-subagents ─────────→ config / i18n / terminal-mux
 @maplezzk/pi-workflow ──────────→ config / i18n
-retired interactive snapshot ──→ i18n / terminal-mux (source/test only)
 ```
 
 Runtime imports use public npm package names, not sibling private source paths.
@@ -120,5 +119,5 @@ performed as part of changing the checked-out profile.
 Repository gates verify dependency boundaries, exact Pi development pins, explicit
 resource manifests, locale consistency, deterministic tests, test-free tarballs,
 and dependency-sensitive release coverage. Root-active private products receive
-artifact checks while remaining non-publishable; internal test/retired workspaces
-must not leak into those deployment artifacts.
+artifact checks while remaining non-publishable; internal test scaffolding and
+external historical archives must not leak into those deployment artifacts.

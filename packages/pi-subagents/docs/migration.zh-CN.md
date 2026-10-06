@@ -4,7 +4,8 @@
 
 仓库默认 Git／本地 profile 现在加载 `pi-subagents` 和 `pi-workflow`，不再加载
 `pi-interactive-subagents`。这是运行入口切换，不是 npm 发布。两个新产品仍为
-`private: true`；旧包仅保留源码，不再进入发布流程。
+`private: true`；旧源码已移出仓库归档，不再参与 workspace 构建、测试或发布。
+统一产品继续保留其 MIT 归属信息。
 
 ## 重新加载前
 

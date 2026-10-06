@@ -21,7 +21,9 @@ workflow host, replacement tool or stable public API.
   assistant output. It preserves the session and launch artifacts.
 
 The primitive has no global running-agent registry, queue, widget, notifications,
-agent discovery, or model-selection policy. The old product is a retired source snapshot.
+agent discovery, or model-selection policy. The old source is archived outside the
+repository. Unified product turn interruption uses the authenticated SDK bridge;
+the low-level Escape primitive is not the standard backend's interrupt path.
 New diagnostics use the `pi-subagents` locale namespace; localization of the
 imported embedded UI/prompts is still outstanding.
 

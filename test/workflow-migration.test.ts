@@ -38,20 +38,22 @@ test("unified subagents and workflow stay private but active in the root profile
   assert.ok(!profile.includes("packages/pi-interactive-subagents/index.ts"));
 });
 
-test("retired interactive subagents remain source-only and outside profile and release metadata", () => {
+test("archived interactive subagents are absent from workspaces, profile and release metadata", () => {
   const path = "packages/pi-interactive-subagents";
-  const pkg = json(`${path}/package.json`);
+  const lock = json("package-lock.json").packages;
   const profile = json("package.json").pi.extensions as string[];
   const releases = json("release-please-config.json").packages;
   const manifest = json(".release-please-manifest.json");
 
-  assert.equal(pkg.private, true);
-  assert.equal(pkg.publishConfig, undefined);
+  assert.equal(existsSync(resolve(root, path)), false);
+  assert.equal(lock[path], undefined);
+  assert.equal(lock["node_modules/@maplezzk/pi-interactive-subagents"], undefined);
   assert.ok(!profile.some((entry) => entry.startsWith(`${path}/`)));
   assert.equal(releases[path], undefined);
   assert.equal(manifest[path], undefined);
-  assert.ok(existsSync(resolve(root, path, "index.ts")));
-  assert.ok(existsSync(resolve(root, path, "pi-extension")));
+  const attribution = readFileSync(resolve(root, "packages/pi-subagents/LICENSE.interactive-subagents"), "utf8");
+  assert.match(attribution, /Copyright \(c\) 2026 HazAT/);
+  assert.ok(existsSync(resolve(root, "packages/pi-subagents/UPSTREAM.md")));
 });
 
 test("executor-only entry excludes the root Agent UI and retained legacy workflow engine", () => {

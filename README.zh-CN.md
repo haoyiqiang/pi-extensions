@@ -71,7 +71,7 @@ npm run check
 
 `check` 会执行 workspace 类型检查、测试，以及可移植性和 i18n 门禁。
 
-根 profile 已加载 [`pi-subagents`](./packages/pi-subagents/README.zh-CN.md) 与 [`pi-workflow`](./packages/pi-workflow/README.zh-CN.md)。它们仍是 npm 私有产品，但不再是未启用的工作区：Agent/RPC/Fleet 与可配置 Pi 执行属于 subagents；独立 DSL、编排、日志与 `/wf` 属于 workflow，两者通过版本化事件总线协作。旧交互包仅作为私有源码快照保留，不再加载或发布。npm 发布准备和导入界面的完整本地化，与本次运行入口切换分开处理。
+根 profile 已加载 [`pi-subagents`](./packages/pi-subagents/README.zh-CN.md) 与 [`pi-workflow`](./packages/pi-workflow/README.zh-CN.md)。它们仍是 npm 私有产品，但不再是未启用的工作区：Agent/RPC/Fleet 与可配置 Pi 执行属于 subagents；独立 DSL、编排、日志与 `/wf` 属于 workflow，两者通过版本化事件总线协作。旧交互源码已移出仓库归档，不再作为 workspace、构建／测试目标或发布候选；统一子代理继续保留所吸收代码的归属信息。npm 发布准备和导入界面的完整本地化，与本次运行入口切换分开处理。
 
 仓库根 `.npmrc` 固定 `https://registry.npmjs.org/`，保证 lockfile 里的 tarball 地址可移植。用镜像 registry 安装会把地址改写成镜像域名，导致 npm 12+ 的 `npm ci` 报 `EALLOWREMOTE`；`node scripts/check-lockfile-registry.mjs`（已纳入 `npm run check`）在合并前拦下这类改动。
 

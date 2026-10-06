@@ -5,7 +5,8 @@
 The repository's default Git/local profile now loads `pi-subagents` and
 `pi-workflow`, not `pi-interactive-subagents`. This is a runtime-profile switch,
 not an npm publication. The two new products remain `private: true`; the retired
-package is source-only and no longer participates in releases.
+source is archived outside the repository and no longer participates in workspace
+builds, tests or releases. The unified package retains its MIT attribution.
 
 ## Before reloading
 

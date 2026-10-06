@@ -104,7 +104,9 @@ launch/watch/interrupt semantics and session-summary extraction from this reposi
 `@maplezzk/pi-interactive-subagents@3.16.2` (last package change `7ed4655`). That product
 is derived from [HazAT/pi-interactive-subagents](https://github.com/HazAT/pi-interactive-subagents).
 Its MIT notice is retained verbatim in [docs/LICENSE.interactive-subagents](./docs/LICENSE.interactive-subagents).
-The active old package is not modified or imported as a runtime dependency.
+The former package is now archived outside this repository and removed from the
+workspace. It is not a runtime dependency; its Git history and both retained MIT
+notice copies preserve attribution without requiring the external archive.
 
 This is a selective extraction, not a wholesale source copy. It replaces the global
 run map/module abort/UI notification coupling with per-run handles and injected ports,

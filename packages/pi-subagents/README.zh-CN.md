@@ -10,7 +10,8 @@
 
 仓库 Git／本地 profile 已默认加载本产品及 `pi-workflow`。npm 包仍为私有、未发布，
 发布准备与运行入口启用分开处理。不要与已退役的 `pi-interactive-subagents` 入口或另一份
-上游 subagents 扩展同时加载。旧包仅保留源码，不再加载或发布。
+上游 subagents 扩展同时加载。旧源码已移出仓库归档，不再属于 workspace 或构建／测试
+目标；历史源码仍可从 Git 获取，所吸收代码的归属信息继续保留在本包。
 导入管理界面的完整 catalog 迁移仍属于 npm 发布准备；新增控制与诊断使用双语 catalog。
 
 重新加载既有环境前，请阅读[迁移指南](./docs/migration.zh-CN.md)。旧活跃任务和 ID

@@ -20,7 +20,6 @@ const PACKAGE_LAYERS = new Map([
   ["pi-rewind", "capability"],
   ["pi-context-view", "capability"],
   ["@maplezzk/pi-test-utils", "internal"],
-  ["@maplezzk/pi-interactive-subagents", "internal"],
 ]);
 
 const ALLOWED_WORKSPACE_EDGES = new Set([
@@ -30,8 +29,6 @@ const ALLOWED_WORKSPACE_EDGES = new Set([
   "pi-spark -> pi-extensions-i18n",
   "pi-spark -> pi-terminal-mux",
   "pi-blackhole -> pi-extensions-i18n",
-  "@maplezzk/pi-interactive-subagents -> pi-extensions-i18n",
-  "@maplezzk/pi-interactive-subagents -> pi-terminal-mux",
   "pi-distill -> pi-extensions-config",
   "pi-distill -> pi-extensions-i18n",
   "@maplezzk/pi-web-search -> pi-extensions-i18n",

@@ -13,7 +13,8 @@ The repository's Git/local profile loads this product by default, together with
 `pi-workflow`. The package remains npm-private and unpublished; publication
 readiness is separate from runtime activation. Do not co-load the retired
 `pi-interactive-subagents` entry or another copy of the upstream subagents extension.
-The old package is a source-only snapshot, not an active or released workspace.
+The old source is archived outside this repository, not a workspace or build/test
+target. Historical source remains in Git and absorbed-code attribution stays here.
 Imported management-UI strings still require complete catalog migration before
 npm publication; new controls and diagnostics use bilingual catalogs.
 
