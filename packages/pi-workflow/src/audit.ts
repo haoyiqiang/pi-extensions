@@ -22,7 +22,12 @@ import { writeDeathSceneArtifact } from "./death-scene.js";
 import { lifecycleCtxFromSession, scriptStageRef, skillStageRef } from "./events.js";
 import { appendFailureMemo } from "./failure-memos.js";
 import { handleToString } from "./handle.js";
-import { assertNever, nowIso } from "./internal-utils.js";
+import {
+	assertNever,
+	isAbortError,
+	nowIso,
+	raceWithWorkflowCancellation,
+} from "./internal-utils.js";
 import { i18n } from "./i18n.js";
 import {
 	abortedArgs,
@@ -181,7 +186,19 @@ export async function recordFatalFailure(
 	const ref = audit.isScript
 		? scriptStageRef(audit.stageName, audit.state.lastAllocatedStageNumber)
 		: skillStageRef(audit.stageName, audit.state.lastAllocatedStageNumber, audit.skill);
-	await audit.lifecycle.fire(ctx, "onStageError", ref, args.errMsg, lifecycleCtxFromSession(audit));
+	// Fire the terminal observer even when cancellation already won, but do not
+	// let an uncooperative listener keep cancellation pending forever. Starting
+	// the promise before the race preserves the event; the detached catch keeps
+	// every late rejection observed after the run's write fence has closed.
+	const observed = Promise.resolve().then(() =>
+		audit.lifecycle.fire(ctx, "onStageError", ref, args.errMsg, lifecycleCtxFromSession(audit)),
+	);
+	void observed.catch(() => {});
+	try {
+		await raceWithWorkflowCancellation(() => observed, audit.scope?.signal);
+	} catch (error) {
+		if (!isAbortError(error)) throw error;
+	}
 }
 
 /**

@@ -19,6 +19,7 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { BUILTIN_TOOL_NAMES, getAgentConfig, getConfig, getMemoryToolNames, getReadOnlyMemoryToolNames, getToolNamesForType } from "../agent-types.js";
+import { resolveChildAgentConfig, withoutOrdinaryChildProducts } from "../child-resource-policy.js";
 import { runInChildSessionContext } from "../child-context.js";
 import { buildParentContext } from "../context.js";
 import { DEFAULT_AGENTS } from "../default-agents.js";
@@ -27,6 +28,8 @@ import { i18n } from "../i18n.js";
 import { buildMemoryBlock, buildReadOnlyMemoryBlock } from "../memory.js";
 import { createNestedSubagentTools, getMaxSubagentDepth, type NestedAgentManager } from "../nested-tools.js";
 import { buildAgentPrompt, type PromptExtras } from "../prompts.js";
+import { resolveProjectTrusted } from "../project-trust.js";
+import type { SubagentsRuntimePolicy } from "../runtime-policy.js";
 import { preloadSkills } from "../skill-loader.js";
 import { createEmbeddedInvocationPolicy, embeddedStructuredTools, invokeEmbeddedSession, observeEmbeddedActivity, rememberEmbeddedPolicy,
   type EmbeddedInvocationOptions, type EmbeddedInvocationResult } from "./embedded-invocation.js";
@@ -467,6 +470,14 @@ export interface RunOptions {
    * parent's repo, so config resolving inside it is correct.)
    */
   configCwd?: string;
+  /**
+   * Project-resource decision captured for configCwd. Callers that own a
+   * custom-only trust decision must pass it explicitly because Pi 0.87 does not
+   * emit project_trust for `.pi/agents`/`.pi/subagents.json` alone.
+   */
+  projectTrusted?: boolean;
+  /** Invocation-owned config defaults captured by the caller. */
+  runtimePolicy?: SubagentsRuntimePolicy;
   /** Called on tool start/end with activity info. */
   onToolActivity?: (activity: ToolActivity) => void;
   /** Called on streaming text deltas from the assistant response. */
@@ -553,7 +564,25 @@ export async function runAgent(
 ): Promise<RunResult> {
   if (snapshotRequiredTools(options.requiredTools)?.length) throw new Error(i18n.t("toolRequirements.unsupportedLegacy"));
   options.signal?.throwIfAborted();
-  const agentConfig = options.agentConfig ?? getAgentConfig(type);
+  // Resolve working directory: worktree override > parent cwd
+  const effectiveCwd = options.cwd ?? ctx.cwd;
+  // Filesystem work happens in effectiveCwd; config discovery in configCwd.
+  // They differ only for SpawnOptions.cwd spawns (config stays with the parent).
+  const configCwd = options.runtimePolicy?.configCwd ?? options.configCwd ?? effectiveCwd;
+  const agentDir = getAgentDir();
+  const projectTrusted = options.runtimePolicy?.projectTrusted ?? resolveProjectTrusted(configCwd, {
+    projectTrusted: options.projectTrusted,
+    context: ctx,
+    agentDir,
+  });
+  const agentConfig = resolveChildAgentConfig(type, options.agentConfig, {
+    configCwd,
+    projectTrusted,
+    disableDefaultAgents: options.runtimePolicy?.settings.disableDefaultAgents,
+  });
+  if (!projectTrusted && !agentConfig) {
+    throw new Error(i18n.t("projectTrust.unknownGlobalAgent", { type }));
+  }
   const config = agentConfig && agentConfig.enabled !== false ? {
     displayName: agentConfig.displayName ?? agentConfig.name,
     color: agentConfig.color,
@@ -564,16 +593,15 @@ export async function runAgent(
     skills: agentConfig.skills,
     promptMode: agentConfig.promptMode,
   } : getConfig(type);
-  const maxTurns = normalizeMaxTurns(options.maxTurns ?? agentConfig?.maxTurns ?? getDefaultMaxTurns());
+  const maxTurns = normalizeMaxTurns(
+    options.maxTurns ?? agentConfig?.maxTurns
+      ?? options.runtimePolicy?.defaultMaxTurns ?? getDefaultMaxTurns(),
+  );
   const invocationPolicy = createEmbeddedInvocationPolicy({
-    maxTurns, graceTurns: maxTurns === undefined ? undefined : getGraceTurns(), structuredOutput: options.structuredOutput,
+    maxTurns,
+    graceTurns: maxTurns === undefined ? undefined : options.runtimePolicy?.graceTurns ?? getGraceTurns(),
+    structuredOutput: options.structuredOutput,
   });
-
-  // Resolve working directory: worktree override > parent cwd
-  const effectiveCwd = options.cwd ?? ctx.cwd;
-  // Filesystem work happens in effectiveCwd; config discovery in configCwd.
-  // They differ only for SpawnOptions.cwd spawns (config stays with the parent).
-  const configCwd = options.configCwd ?? effectiveCwd;
 
   const env = await detectEnv(options.pi, effectiveCwd);
 
@@ -594,7 +622,9 @@ export async function runAgent(
 
   // Skill preloading: when skills is string[], preload their content into prompt
   if (Array.isArray(skills)) {
-    const loaded = preloadSkills(skills, configCwd);
+    // In global-only mode a globally-approved named skill must not be shadowed
+    // by an untrusted project skill of the same name.
+    const loaded = preloadSkills(skills, projectTrusted ? configCwd : agentDir);
     if (loaded.length > 0) {
       extras.skillBlocks = loaded;
     }
@@ -639,8 +669,6 @@ export async function runAgent(
   // Still pass noSkills: true since we don't need the skill loader to load them again.
   const noSkills = skills === false || Array.isArray(skills);
 
-  const agentDir = getAgentDir();
-
   // Extension loading:
   // - true  → all default-discovered extensions
   // - false → none (noExtensions)
@@ -673,9 +701,10 @@ export async function runAgent(
   // suppresses handler binding and tool registration; it is not a sandbox.
   const excludeNames = new Set((excludeExtensions ?? []).map((n) => n.toLowerCase()));
   const hasExcludes = excludeNames.size > 0;
-  // The override filters loaded extensions down to `keepNames` minus `excludeNames`.
-  // It's only needed when we're neither loading everything without excludes
-  // (`extensions: true` or a `"*"` wildcard) nor nothing (`noExtensions`).
+  // The override always removes root orchestration/UI/ambient-observer products
+  // from an ordinary child, then applies the agent's include/exclude policy.
+  // Extension factories may already have run during discovery; this boundary
+  // prevents them from binding session_start ownership or tools to the child.
   const loadAll = extensions === true || extensionsSpec?.wildcard === true;
   const additionalExtensionPaths = extensionsSpec?.paths.length ? extensionsSpec.paths : undefined;
   // Pre-filter discovered set, captured by the override — the exclude-typo warning
@@ -683,14 +712,16 @@ export async function runAgent(
   // an exclude *succeeding*).
   let discoveredNames: Set<string> | undefined;
   const extensionsOverride: ((base: LoadExtensionsResult) => LoadExtensionsResult) | undefined =
-    noExtensions || (loadAll && !hasExcludes)
+    noExtensions
       ? undefined
       : (base) => {
           const discovered = base.extensions.filter((e) => e.path !== TOOL_SCOPE_EXTENSION_PATH);
           discoveredNames = new Set(discovered.flatMap((e) => extensionCanonicalNames(e.path)));
+          const childSafe = withoutOrdinaryChildProducts(base);
+          if (loadAll && !hasExcludes) return childSafe;
           return {
-            ...base,
-            extensions: base.extensions.filter((e) => {
+            ...childSafe,
+            extensions: childSafe.extensions.filter((e) => {
               if (e.path === TOOL_SCOPE_EXTENSION_PATH) return true;
               const canons = extensionCanonicalNames(e.path);
               if (canons.some((n) => excludeNames.has(n))) return false; // exclude wins
@@ -714,9 +745,11 @@ export async function runAgent(
     },
   };
 
+  const settingsManager = SettingsManager.create(configCwd, agentDir, { projectTrusted });
   const loader = new DefaultResourceLoader({
     cwd: configCwd,
     agentDir,
+    settingsManager,
     noExtensions,
     additionalExtensionPaths,
     extensionsOverride,
@@ -815,7 +848,8 @@ export async function runAgent(
   // set `allowed_subagents` and a nestedRuntime was provided — and never when
   // isolated. Their names collide with EXCLUDED_TOOL_NAMES by design, so the
   // scoping below re-admits them explicitly (registry deny + active-set narrow).
-  const effectiveMaxDepth = options.nestedRuntime?.maxSubagentDepth ?? getMaxSubagentDepth();
+  const effectiveMaxDepth = options.nestedRuntime?.maxSubagentDepth
+    ?? options.runtimePolicy?.maxSubagentDepth ?? getMaxSubagentDepth();
   // At (or past) the cap this agent can never spawn, so it can never own a child
   // to fetch from or steer either — inject nothing rather than three tools whose
   // every call is an error. This is also what makes `maxSubagentDepth` 0/1 mean
@@ -832,6 +866,7 @@ export async function runAgent(
         maxSubagentDepth: effectiveMaxDepth,
         allowedSubagents: agentConfig.allowedSubagents,
         configCwd,
+        runtimePolicy: options.runtimePolicy,
       })
     : [];
   const nestedToolNames = new Set(nestedTools.map(tool => tool.name));
@@ -920,13 +955,13 @@ export async function runAgent(
     sessionExcludeTools = [...denyTools];
   }
 
-  const settingsManager = SettingsManager.create(configCwd, agentDir);
   const configuredSessionDir = resolveConfiguredSessionDir(agentConfig?.sessionDir, effectiveCwd);
   const defaultSessionDir = process.env.PI_CODING_AGENT_SESSION_DIR ?? settingsManager.getSessionDir?.();
   // Frontmatter wins when it says anything; otherwise the project default,
   // which `rememberAgents` supplies for top-level agents only. Same precedence
   // as `outputTranscript`.
-  const persistSession = agentConfig?.persistSession ?? (options.nested ? false : rememberAgents);
+  const persistSession = agentConfig?.persistSession
+    ?? (options.nested ? false : options.runtimePolicy?.rememberAgents ?? rememberAgents);
   const sessionManager = options.resumeSessionFile
     // Reopening an existing conversation: the file already carries its own
     // header (cwd, parent) and history, so none of the create-time options

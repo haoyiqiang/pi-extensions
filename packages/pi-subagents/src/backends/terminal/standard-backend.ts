@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { realpathSync } from "node:fs";
+import { realpathSync, statSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { i18n } from "../../i18n.js";
@@ -11,6 +11,7 @@ import type {
   AgentExecutionBackend,
   ExecutionRestoreOptions,
   ExecutionResumeOptions,
+  ExecutionResumeResult,
   ExecutionRunOptions,
   ExecutionRunResult,
 } from "../types.js";
@@ -29,6 +30,7 @@ import {
   createStandardTerminalSession,
   forkStandardTerminalSession,
   openStandardTerminalSession,
+  quarantineStandardTerminalSession,
   readStandardSessionSnapshot,
   removeStandardTerminalSession,
 } from "./standard-session.js";
@@ -53,6 +55,13 @@ export const STANDARD_TERMINAL_BACKEND_CAPABILITIES = Object.freeze({
   crashRecovery: false,
 });
 
+type StandardCallbacks = ExecutionResumeOptions & Pick<ExecutionRunOptions, "onTextDelta" | "onTurnEnd" | "onSessionCreated">;
+
+interface RoundWaiter {
+  resolve(result: ExecutionResumeResult): void;
+  reject(error: unknown): void;
+}
+
 interface StandardState {
   handle: ExecutionSession;
   reference: PersistentSessionReference<"terminal">;
@@ -67,6 +76,16 @@ interface StandardState {
   closed: boolean;
   poisoned: boolean;
   running: boolean;
+  roundQueued: boolean;
+  roundActive: boolean;
+  roundAdmitted: boolean;
+  executionId?: string;
+  roundText: string;
+  callbacks: StandardCallbacks;
+  pendingCallbacks?: StandardCallbacks;
+  activeCallbacks?: StandardCallbacks;
+  roundWaiter?: RoundWaiter;
+  diskStamp?: string;
   controller?: AbortController;
   bridge?: TerminalBridge;
   terminal?: TerminalRun;
@@ -83,6 +102,23 @@ const EMPTY_STATS = Object.freeze({
 
 function safely(action: (() => void) | undefined): void { try { action?.(); } catch { /* observation only */ } }
 function errorText(error: unknown): string { return error instanceof Error ? error.message : String(error); }
+function deferredRound(): { promise: Promise<ExecutionResumeResult>; waiter: RoundWaiter } {
+  let resolve!: RoundWaiter["resolve"];
+  let reject!: RoundWaiter["reject"];
+  const promise = new Promise<ExecutionResumeResult>((yes, no) => { resolve = yes; reject = no; });
+  return { promise, waiter: { resolve, reject } };
+}
+function mergeFailure(primary: string | undefined, cleanup: readonly string[]): string | undefined {
+  if (cleanup.length === 0) return primary;
+  const suffix = cleanup.map((error) => i18n.t("terminalBackend.cleanupFailed", { error })).join("\n");
+  return primary ? `${primary}\n${suffix}` : suffix;
+}
+function fileStamp(path: string): string | undefined {
+  try {
+    const stat = statSync(path, { bigint: true });
+    return `${stat.size}:${stat.mtimeNs}`;
+  } catch { return undefined; }
+}
 
 function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -97,6 +133,27 @@ function exitDeadline<T>(promise: Promise<T>, milliseconds: number): Promise<T> 
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(i18n.t("bridge.retirementTimeout"))), milliseconds);
     promise.then((value) => { clearTimeout(timer); resolve(value); }, (error) => { clearTimeout(timer); reject(error); });
+  });
+}
+
+async function retirementReceipt(
+  wait: (signal: AbortSignal) => Promise<unknown>,
+  milliseconds: number,
+): Promise<void> {
+  const controller = new AbortController();
+  await new Promise<void>((resolve, reject) => {
+    const timeoutError = new Error(i18n.t("bridge.retirementTimeout"));
+    const timer = setTimeout(() => {
+      controller.abort(timeoutError);
+      reject(timeoutError);
+    }, milliseconds);
+    let completion: Promise<unknown>;
+    try { completion = wait(controller.signal); }
+    catch (error) { clearTimeout(timer); reject(error); return; }
+    completion.then(
+      () => { clearTimeout(timer); resolve(); },
+      (error) => { clearTimeout(timer); reject(error); },
+    );
   });
 }
 
@@ -125,6 +182,19 @@ function validateStructuredResult(
     if (state.wireSchema.check(value) !== true || state.structuredCheck?.(value) !== true) return invalid();
     return { json: JSON.stringify(value) };
   } catch { return invalid(); }
+}
+
+function settlementResult(state: StandardState, final: ChildSettlement): ExecutionResumeResult {
+  const structured = validateStructuredResult(state, final);
+  const failure = structured.failure ?? final.failure;
+  return {
+    text: final.text,
+    ...(failure !== undefined ? { failure } : {}),
+    ...(final.aborted ? { aborted: true } : {}),
+    ...(final.steered ? { steered: true } : {}),
+    ...(structured.json !== undefined ? { structuredJson: structured.json } : {}),
+    ...(final.structuredRetried ? { structuredRetried: true } : {}),
+  };
 }
 
 /** Standard profile: normal Pi resources and a real long-lived terminal when requested. */
@@ -156,12 +226,20 @@ export function createStandardTerminalExecutionBackend(
 
   const refreshFromDisk = (state: StandardState): void => {
     try {
+      const stamp = fileStamp(state.reference.sessionFile);
+      if (stamp !== undefined && stamp === state.diskStamp) return;
       const current = readStandardSessionSnapshot(state.reference.sessionFile, state.policy.cwd);
+      state.diskStamp = stamp;
       state.branch = current.branch;
       state.snapshot = {
         ...state.snapshot,
         messages: current.messages,
-        stats: tokenStats(current.messages),
+        stats: {
+          ...tokenStats(current.messages),
+          // The JSONL transcript has no live context-window percentage. Preserve
+          // the authenticated SDK snapshot rather than replacing it with null.
+          contextUsage: state.snapshot.stats?.contextUsage ?? { percent: null },
+        },
       };
     } catch { /* a live append can be between JSONL writes; bridge snapshot remains authoritative */ }
   };
@@ -208,6 +286,12 @@ export function createStandardTerminalExecutionBackend(
       closed: false,
       poisoned: false,
       running: false,
+      roundQueued: false,
+      roundActive: false,
+      roundAdmitted: false,
+      roundText: "",
+      callbacks: {},
+      diskStamp: fileStamp(reference.sessionFile),
     } as StandardState;
     let handle!: ExecutionSession;
     const publicReference = state.exposeSessionFile
@@ -242,67 +326,159 @@ export function createStandardTerminalExecutionBackend(
   const invoke = (
     state: StandardState,
     prompt: string,
-    callbacks: ExecutionResumeOptions & Pick<ExecutionRunOptions, "onTextDelta" | "onTurnEnd" | "onSessionCreated"> = {},
+    callbacks: StandardCallbacks = {},
   ): Promise<ExecutionRunResult> => {
     if (state.running) return Promise.reject(new Error(i18n.t("terminalBackend.busy")));
     if (state.poisoned) return Promise.reject(new Error(i18n.t("terminalBackend.quarantined")));
     const required = snapshotRequiredTools(callbacks.requiredTools);
     state.running = true;
+    state.roundQueued = false;
+    state.roundActive = false;
+    state.roundAdmitted = false;
+    state.executionId = undefined;
+    state.roundText = "";
     state.lastIdle = undefined;
+    state.callbacks = callbacks;
+    state.pendingCallbacks = callbacks;
     const controller = new AbortController();
     state.controller = controller;
     const parentSignal = callbacks.signal;
     const parentAbort = () => controller.abort(parentSignal?.reason);
     if (parentSignal?.aborted) parentAbort(); else parentSignal?.addEventListener("abort", parentAbort, { once: true });
     const runId = randomUUID();
-    let text = "";
 
     const execute = async (): Promise<ExecutionRunResult> => {
       let bridge: TerminalBridge | undefined;
       let terminal: TerminalRun | undefined;
+      let launch: ReturnType<typeof prepareStandardTerminalLaunch> | undefined;
+      let terminalResult: TerminalRunResult | undefined;
+      let retirementProven = false;
+      let outcome: ExecutionRunResult | undefined;
+      let fatalFailure: Error | undefined;
+      const cleanupFailures: string[] = [];
+      const rejectRound = (error: unknown) => {
+        const waiter = state.roundWaiter;
+        state.roundWaiter = undefined;
+        waiter?.reject(error);
+      };
       try {
         controller.signal.throwIfAborted();
         const run = { runId, session: state.reference };
         bridge = await (ports.bridge ?? openTerminalBridge)(run, (event: ChildFeedback) => {
           if (state.closed || controller.signal.aborted) return;
+          const active = state.activeCallbacks ?? state.callbacks;
           switch (event.type) {
             case "ready": publish(state, event.snapshot, { type: "changed" }); break;
             case "snapshot": publish(state, event.snapshot, event.event); break;
-            case "idle":
-              state.lastIdle = event;
-              text = event.text;
-              publish(state, event.snapshot, { type: "changed" });
+            case "execution_request": {
+              if (state.roundActive || state.roundAdmitted) {
+                try { bridge?.admit(event.id, i18n.t("terminalBackend.busy")); } catch { /* bridge teardown owns failure */ }
+                break;
+              }
+              state.roundQueued = false;
+              state.roundActive = true;
+              state.roundAdmitted = false;
+              state.executionId = event.id;
+              state.lastIdle = undefined;
+              state.roundText = "";
+              state.activeCallbacks = state.pendingCallbacks ?? state.callbacks;
+              const { signal: _roundSignal, ...persistentCallbacks } = state.activeCallbacks;
+              state.callbacks = persistentCallbacks;
+              state.pendingCallbacks = undefined;
+              const admission = state.activeCallbacks.acquireExecution;
+              const callbackSignal = state.activeCallbacks.signal;
+              const admissionSignal = callbackSignal && callbackSignal !== controller.signal
+                ? AbortSignal.any([controller.signal, callbackSignal])
+                : controller.signal;
+              void (async () => {
+                try {
+                  await admission?.(admissionSignal);
+                  admissionSignal.throwIfAborted();
+                  state.roundAdmitted = true;
+                  bridge?.admit(event.id);
+                } catch (error) {
+                  // A denied exact request still owns the following terminal
+                  // settlement; keep its id until the child reports that abort.
+                  state.roundAdmitted = true;
+                  rejectRound(error);
+                  try { bridge?.admit(event.id, errorText(error)); }
+                  catch (deliveryError) {
+                    fatalFailure = deliveryError instanceof Error ? deliveryError : new Error(errorText(deliveryError));
+                    state.poisoned = true;
+                    controller.abort(fatalFailure);
+                  }
+                }
+              })();
               break;
+            }
+            case "idle": {
+              if (!state.roundActive || !state.roundAdmitted || event.executionId !== state.executionId) {
+                const error = new Error(i18n.t("bridge.protocol"));
+                fatalFailure = error;
+                state.poisoned = true;
+                rejectRound(error);
+                controller.abort(error);
+                break;
+              }
+              state.lastIdle = event;
+              state.roundText = event.text;
+              publish(state, event.snapshot, { type: "changed" });
+              const result = settlementResult(state, event);
+              state.roundActive = false;
+              state.roundAdmitted = false;
+              state.executionId = undefined;
+              state.activeCallbacks = undefined;
+              safely(() => active.onExecutionIdle?.(result));
+              const waiter = state.roundWaiter;
+              state.roundWaiter = undefined;
+              waiter?.resolve(result);
+              break;
+            }
             case "settled":
+              if (!state.roundActive || !state.roundAdmitted || event.executionId !== state.executionId) {
+                fatalFailure = new Error(i18n.t("bridge.protocol"));
+                state.poisoned = true;
+                controller.abort(fatalFailure);
+                break;
+              }
               state.lastIdle = event;
-              text = event.text;
+              state.roundText = event.text;
+              state.roundActive = false;
+              state.roundAdmitted = false;
+              state.executionId = undefined;
+              state.activeCallbacks = undefined;
               publish(state, event.snapshot, { type: "changed" });
               break;
-            case "text": text = event.fullText; safely(() => callbacks.onTextDelta?.(event.delta, event.fullText)); break;
-            case "tool": safely(() => callbacks.onToolActivity?.(event.activity)); break;
-            case "usage": safely(() => callbacks.onAssistantUsage?.(event.usage)); break;
-            case "turn": safely(() => callbacks.onTurnEnd?.(event.count)); break;
-            case "compaction": safely(() => callbacks.onCompaction?.(event.info)); break;
+            case "text": state.roundText = event.fullText; safely(() => active.onTextDelta?.(event.delta, event.fullText)); break;
+            case "tool": safely(() => active.onToolActivity?.(event.activity)); break;
+            case "usage": safely(() => active.onAssistantUsage?.(event.usage)); break;
+            case "turn": safely(() => active.onTurnEnd?.(event.count)); break;
+            case "compaction": safely(() => active.onCompaction?.(event.info)); break;
             case "ack": case "failure": break;
           }
         }, startupTimeout);
         state.bridge = bridge;
-        const launch = prepareStandardTerminalLaunch(state.policy, state.reference, runId, bridge.endpoint, prompt, required, config);
-        terminal = await launchTerminalRun({ ...launch, signal: controller.signal }, {
+        controller.signal.throwIfAborted();
+        launch = prepareStandardTerminalLaunch(state.policy, state.reference, runId, bridge.endpoint, prompt, required, config);
+        controller.signal.throwIfAborted();
+        // Runtime cancellation is coordinated through the authenticated bridge
+        // first; the lifecycle watcher stays alive long enough to observe the
+        // supervisor receipt. terminal.cancel() is the bounded force fallback.
+        terminal = await launchTerminalRun(launch, {
           ...dependencies,
           transport: {
             ...dependencies.transport,
-            waitForExit: async (_surface, signal) => (ports.waitForExit ?? waitForProcessExit)(launch.processExit, signal),
+            waitForExit: async (_surface, signal) => (ports.waitForExit ?? waitForProcessExit)(launch!.processExit, signal),
           },
         });
         state.terminal = terminal;
+        controller.signal.throwIfAborted();
         const exitedBeforeReady = terminal.completion.then(() => { throw new Error(i18n.t("bridge.exitedBeforeReady")); });
         await abortable(Promise.race([bridge.ready, exitedBeforeReady]), controller.signal);
         callbacks.onSessionCreated?.(state.handle);
         bridge.start();
 
         let final: ChildSettlement;
-        let terminalResult: TerminalRunResult;
         if (state.policy.autoExit) {
           final = await abortable(bridge.settled, controller.signal);
           terminalResult = await exitDeadline(terminal.completion, exitTimeout);
@@ -311,16 +487,15 @@ export function createStandardTerminalExecutionBackend(
           refreshFromDisk(state);
           final = state.lastIdle ?? {
             snapshot: state.snapshot,
-            text,
+            text: state.roundText,
             aborted: false,
             failure: terminalResult.status === "failed" ? terminalResult.error ?? terminalResult.summary : undefined,
           };
         }
-        text = final.text;
-        if (terminalResult.cleanupError) state.poisoned = true;
+        retirementProven = terminalResult.reason === "sentinel";
         refreshFromDisk(state);
         const structured = validateStructuredResult(state, final);
-        return {
+        outcome = {
           session: state.handle,
           responseText: final.text,
           aborted: final.aborted || terminalResult.status === "cancelled",
@@ -328,37 +503,126 @@ export function createStandardTerminalExecutionBackend(
           ...(structured.json !== undefined ? { structuredJson: structured.json } : {}),
           ...(final.structuredRetried ? { structuredRetried: true } : {}),
           failure: structured.failure ?? final.failure ?? (terminalResult.status === "failed"
-            ? terminalResult.error ?? terminalResult.summary
-            : terminalResult.cleanupError ? i18n.t("terminalBackend.cleanupFailed", { error: terminalResult.cleanupError }) : undefined),
+            // Pi print mode uses exit 1 for an acknowledged SDK abort. A proven
+            // exit with that outcome is not a provider/retirement failure.
+            && !(final.aborted && terminalResult.reason === "sentinel" && terminalResult.exitCode === 1)
+            ? terminalResult.error ?? terminalResult.summary : undefined),
         };
+        return outcome;
       } catch (error) {
-        if (controller.signal.aborted) {
+        if (fatalFailure) {
           bridge?.abort();
-          return { session: state.handle, responseText: text, aborted: true, steered: false };
+          outcome = { session: state.handle, responseText: state.roundText, aborted: false, steered: false, failure: fatalFailure.message };
+        } else if (controller.signal.aborted) {
+          bridge?.abort();
+          outcome = { session: state.handle, responseText: state.roundText, aborted: true, steered: false };
+        } else {
+          outcome = { session: state.handle, responseText: state.roundText, aborted: false, steered: false, failure: errorText(error) };
         }
-        return { session: state.handle, responseText: text, aborted: false, steered: false, failure: errorText(error) };
+        return outcome;
       } finally {
-        let retirementError: unknown;
+        if (terminal && controller.signal.aborted && !retirementProven) {
+          try {
+            terminalResult = await exitDeadline(terminal.completion, exitTimeout);
+            if (terminalResult.reason === "sentinel") retirementProven = true;
+            if (terminalResult.cleanupError) cleanupFailures.push(terminalResult.cleanupError);
+          } catch { /* force cancellation below, then independently await receipt */ }
+        }
         if (terminal) {
-          try { await terminal.cancel(); } catch (error) { retirementError = error; }
+          try {
+            terminalResult = await terminal.cancel();
+            if (terminalResult.reason === "sentinel") retirementProven = true;
+            if (terminalResult.cleanupError) cleanupFailures.push(terminalResult.cleanupError);
+          } catch (error) { cleanupFailures.push(errorText(error)); }
         }
+        if (!retirementProven && terminal && launch) {
+          try {
+            await retirementReceipt(
+              (signal) => (ports.waitForExit ?? waitForProcessExit)(launch!.processExit, signal),
+              exitTimeout,
+            );
+            retirementProven = true;
+          } catch (error) { cleanupFailures.push(errorText(error)); }
+        }
+        if (!retirementProven && terminal) state.poisoned = true;
         if (bridge) {
-          try { await bridge.close(); } catch (error) { retirementError ??= error; }
+          try { await exitDeadline(bridge.close(), exitTimeout); }
+          catch (error) { cleanupFailures.push(errorText(error)); }
         }
+        if (state.poisoned) {
+          try { quarantineStandardTerminalSession(state.reference); }
+          catch (error) { cleanupFailures.push(errorText(error)); }
+        }
+        if (cleanupFailures.length > 0) {
+          const uniqueCleanupFailures = [...new Set(cleanupFailures)];
+          state.retirementError = new Error(uniqueCleanupFailures.join("\n"));
+          if (outcome) outcome.failure = mergeFailure(outcome.failure, uniqueCleanupFailures);
+        }
+        rejectRound(new Error(outcome?.failure ?? i18n.t("bridge.notRunning")));
         parentSignal?.removeEventListener("abort", parentAbort);
         state.bridge = undefined;
         state.terminal = undefined;
         state.controller = undefined;
+        state.pendingCallbacks = undefined;
+        state.activeCallbacks = undefined;
+        state.roundQueued = false;
+        state.roundActive = false;
+        state.roundAdmitted = false;
+        state.executionId = undefined;
         state.running = false;
-        if (retirementError !== undefined) {
-          state.retirementError = retirementError;
-          if (!controller.signal.aborted) throw retirementError;
-        }
       }
     };
     const operation = execute();
     state.operation = operation;
     return operation;
+  };
+
+  const resumePersistent = async (
+    state: StandardState,
+    prompt: string,
+    options: ExecutionResumeOptions = {},
+  ): Promise<ExecutionResumeResult> => {
+    if (!state.running || state.policy.autoExit) {
+      const result = await invoke(state, prompt, options);
+      return {
+        text: result.responseText,
+        ...(result.failure !== undefined ? { failure: result.failure } : {}),
+        ...(result.aborted ? { aborted: true } : {}),
+        ...(result.steered ? { steered: true } : {}),
+        ...(result.structuredJson !== undefined ? { structuredJson: result.structuredJson } : {}),
+        ...(result.structuredRetried ? { structuredRetried: true } : {}),
+      };
+    }
+    if (state.poisoned) throw new Error(i18n.t("terminalBackend.quarantined"));
+    if (!state.bridge || !state.lastIdle || state.roundQueued || state.roundActive || state.roundWaiter) {
+      throw new Error(i18n.t("terminalBackend.busy"));
+    }
+    options.signal?.throwIfAborted();
+    const callbacks: StandardCallbacks = {
+      ...state.callbacks,
+      ...options,
+      acquireExecution: options.acquireExecution ?? state.callbacks.acquireExecution,
+      onExecutionIdle: options.onExecutionIdle ?? state.callbacks.onExecutionIdle,
+    };
+    const pending = deferredRound();
+    state.roundQueued = true;
+    state.pendingCallbacks = callbacks;
+    state.roundWaiter = pending.waiter;
+    const onAbort = () => {
+      if (state.roundAdmitted) void state.bridge?.interrupt().catch((error) => pending.waiter.reject(error));
+    };
+    options.signal?.addEventListener("abort", onAbort, { once: true });
+    try {
+      await state.bridge.steer(prompt);
+      return await pending.promise;
+    } catch (error) {
+      if (state.roundWaiter === pending.waiter) state.roundWaiter = undefined;
+      if (state.pendingCallbacks === callbacks) state.pendingCallbacks = undefined;
+      state.roundQueued = false;
+      throw error;
+    } finally {
+      options.signal?.removeEventListener("abort", onAbort);
+    }
   };
 
   const owned = (reference: PersistentSessionReference): StandardState | undefined => {
@@ -399,21 +663,14 @@ export function createStandardTerminalExecutionBackend(
       options.signal?.throwIfAborted();
       const current = owned(reference);
       if (current?.running) throw new Error(i18n.t("terminalBackend.busy"));
+      if (current?.poisoned || current?.closed) throw new Error(i18n.t("terminalBackend.quarantined"));
       const stored = openStandardTerminalSession(reference, options);
       const opened = current ?? { reference: stored.reference, policy: stored.policy };
       const forked = forkStandardTerminalSession(opened.reference, opened.policy, opened.policy.sessionDir ?? sessionDir);
       return adopt(forked, opened.policy, options.structuredOutput).handle;
     },
     async resume(handle, prompt, options) {
-      const result = await invoke(getState(handle), prompt, options);
-      return {
-        text: result.responseText,
-        ...(result.failure !== undefined ? { failure: result.failure } : {}),
-        ...(result.aborted ? { aborted: true } : {}),
-        ...(result.steered ? { steered: true } : {}),
-        ...(result.structuredJson !== undefined ? { structuredJson: result.structuredJson } : {}),
-        ...(result.structuredRetried ? { structuredRetried: true } : {}),
-      };
+      return resumePersistent(getState(handle), prompt, options);
     },
     async steer(handle, message) {
       const state = getState(handle);
@@ -424,8 +681,8 @@ export function createStandardTerminalExecutionBackend(
     },
     async interrupt(handle) {
       const state = getState(handle);
-      if (!state.running || !state.terminal) throw new Error(i18n.t("terminal.notRunning"));
-      await state.terminal.interrupt();
+      if (!state.running || !state.roundAdmitted || !state.bridge) throw new Error(i18n.t("terminal.notRunning"));
+      await state.bridge.interrupt();
     },
     shutdown(handle) {
       if (!handle) return Promise.resolve();
@@ -442,7 +699,9 @@ export function createStandardTerminalExecutionBackend(
         try { canonical = realpathSync(state.reference.sessionFile); } catch { /* cleanup still owns the recorded path */ }
         try { await state.operation; } catch (error) { failure = error; }
         try {
-          if (state.ephemeralOwned) removeStandardTerminalSession(state.reference);
+          if (state.ephemeralOwned && !state.poisoned && state.retirementError === undefined) {
+            removeStandardTerminalSession(state.reference);
+          }
         } finally {
           files.delete(canonical);
         }

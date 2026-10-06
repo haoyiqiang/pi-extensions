@@ -27,6 +27,7 @@ vi.mock("../src/backends/embedded-lifecycle.js", async () => {
 import { runAgent } from "../src/agent-runner.js";
 import { steerEmbeddedSession as steerAgent } from "../src/backends/embedded-lifecycle.js";
 import subagentsExtension from "../src/index.js";
+import { i18n } from "../src/i18n.js";
 import { ctx, flush, makePi, textOf } from "./helpers/boot-extension.js";
 
 // steerAgent and runAgent are module-level mocks shared by every case here, so
@@ -79,7 +80,54 @@ async function spawnBackground(tools: Map<string, any>): Promise<string> {
 }
 
 const steer = (tools: Map<string, any>, agent_id: string, message: string) =>
-  tools.get("steer_subagent").execute("tc-steer", { agent_id, message }, undefined, undefined, ctx());
+  tools.get("steer_subagent").execute(
+    "tc-steer",
+    { agent_id, action: "steer", message },
+    undefined,
+    undefined,
+    ctx(),
+  );
+
+describe("steer_subagent canonical action contract", () => {
+  it("requires exactly steer, interrupt, cancel, or close", async () => {
+    const { pi, tools, lifecycle } = makePi();
+    subagentsExtension(pi);
+    const schema = tools.get("steer_subagent").parameters;
+
+    expect(schema.required).toContain("action");
+    expect(schema.properties.action.anyOf.map((entry: any) => entry.const)).toEqual([
+      "steer", "interrupt", "cancel", "close",
+    ]);
+    await lifecycle.get("session_shutdown")?.();
+  });
+
+  it("reports a repeated close as unchanged instead of a second success", async () => {
+    const session = fakeSession();
+    vi.mocked(runAgent).mockImplementation(async (_ctx, _type, _prompt, opts) => {
+      opts.onSessionCreated?.(session);
+      return { responseText: "done", session, aborted: false, steered: false } as any;
+    });
+    const { pi, tools, lifecycle } = makePi();
+    subagentsExtension(pi);
+
+    const id = await spawnBackground(tools);
+    await flush();
+    const cancelled = await tools.get("steer_subagent").execute(
+      "tc-cancel-settled", { agent_id: id, action: "cancel" }, undefined, undefined, ctx(),
+    );
+    const first = await tools.get("steer_subagent").execute(
+      "tc-close-1", { agent_id: id, action: "close" }, undefined, undefined, ctx(),
+    );
+    const second = await tools.get("steer_subagent").execute(
+      "tc-close-2", { agent_id: id, action: "close" }, undefined, undefined, ctx(),
+    );
+
+    expect(textOf(cancelled)).toBe(i18n.t("product.unchanged", { id, action: "cancel" }));
+    expect(textOf(first)).toBe(i18n.t("product.closed", { id }));
+    expect(textOf(second)).toBe(i18n.t("product.unchanged", { id, action: "close" }));
+    await lifecycle.get("session_shutdown")?.();
+  });
+});
 
 describe("steer_subagent before the session exists", () => {
   it("queues the message on the record and says so", async () => {

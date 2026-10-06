@@ -12,6 +12,7 @@ vi.mock("../src/agent-runner.js", async () => {
 });
 
 import { runAgent } from "../src/agent-runner.js";
+import { i18n } from "../src/i18n.js";
 import subagentsExtension from "../src/index.js";
 
 function makePi() {
@@ -87,16 +88,13 @@ describe("status note reaches the parent through the real handlers", () => {
     const out = textOf(res);
     // Exact lead clause, not just "turn limit": a steered/aborted mix-up would
     // otherwise slip through, and they are different outcomes.
-    expect(out).toContain("aborted before completion");
+    expect(out).toContain(i18n.t("product.abortedInlineNote"));
     expect(out).not.toContain("aborted at the turn limit");
     expect(out).toContain("partial work so far");     // partial result still delivered
     expect(out).not.toContain("STOPPED BY THE USER"); // not mislabelled as a user stop
 
-    // The two answers a foreground parent needs: is this all of it, and is the
-    // task done. The first is what #174 turned on — the parent has no agent id,
-    // so it must not read "partial" as "go fetch the rest".
-    expect(out).toContain("everything the agent produced is above");
-    expect(out).toContain("the task is unfinished");
+    // The localized inline note above carries both facts: all produced output
+    // is inline, and the task is unfinished.
     // State only, never an instruction to act (see getForegroundOutcomeNote):
     // advising a fresh run to save one wasted tool call is a bet nothing here
     // can measure. And naming the tool we steer away from only raises its salience.
@@ -187,12 +185,18 @@ describe("status note reaches the parent through the real handlers", () => {
     expect(registry.getRecord(id)).toBeUndefined();
     for (const [name, params] of [
       ["get_subagent_result", { agent_id: id }],
-      ["steer_subagent", { agent_id: id, message: "stop" }],
       ["Agent", { resume: id, prompt: "continue", description: "resume", subagent_type: "general-purpose" }],
     ] as const) {
       const result = await tools.get(name).execute("tc-nested", params, undefined, undefined, ctx());
       expect(textOf(result)).toContain("Agent not found");
     }
+    await expect(tools.get("steer_subagent").execute(
+      "tc-nested",
+      { agent_id: id, action: "steer", message: "stop" },
+      undefined,
+      undefined,
+      ctx(),
+    )).rejects.toThrow(i18n.t("product.notOwned"));
     expect(pi.events.emit).not.toHaveBeenCalledWith("subagents:started", expect.objectContaining({ id }));
     expect(pi.events.emit).not.toHaveBeenCalledWith("subagents:completed", expect.objectContaining({ id }));
     expect(pi.events.emit).not.toHaveBeenCalledWith("subagents:failed", expect.objectContaining({ id }));
@@ -201,8 +205,15 @@ describe("status note reaches the parent through the real handlers", () => {
   });
 
   it("background user-stop → get_subagent_result flags STOPPED BY THE USER (not completed)", async () => {
-    // A background agent that never settles on its own — only a stop ends it.
-    vi.mocked(runAgent).mockReturnValue(new Promise(() => {}) as any);
+    // The backend observes cancellation and settles; manager.control waits for
+    // that cleanup barrier rather than reporting success early.
+    vi.mocked(runAgent).mockImplementation((_ctx, _type, _prompt, options) =>
+      new Promise(resolve => options.signal.addEventListener("abort", () => resolve({
+        responseText: "",
+        session: { dispose: vi.fn() } as any,
+        aborted: true,
+        steered: false,
+      }), { once: true })) as any);
     const { pi, tools, eventHandlers, lifecycle } = makePi();
     subagentsExtension(pi);
     await bind(lifecycle); // register RPC channels via session_start (#142)
@@ -215,8 +226,12 @@ describe("status note reaches the parent through the real handlers", () => {
     const id = textOf(spawn).match(/Agent ID: (\S+)/)?.[1];
     expect(id, "background spawn should surface an agent id").toBeTruthy();
 
-    // The user stops it — same path the viewer's stop key uses (manager.abort).
-    eventHandlers.get("subagents:rpc:stop")?.({ requestId: "r1", agentId: id });
+    // The user cancels it through the same canonical control path as the viewer.
+    await eventHandlers.get("subagents:rpc:control")?.({
+      requestId: "r1",
+      agentId: id,
+      action: "cancel",
+    });
 
     const res = await tools.get("get_subagent_result").execute(
       "tc3", { agent_id: id }, undefined, undefined, ctx(),

@@ -68,6 +68,9 @@ notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t
     > 默认 zh-CN
 ```
 
+启动语言覆盖属于会话。没有 `--locale` 的子会话启动不会清除根会话覆盖；子会话默认继承
+当前语言，除非显式绑定其他 owner。持久化偏好仍由各会话共享。
+
 选择 `auto` 时会检查 `LC_ALL`、`LC_MESSAGES` 和 `LANG`：中文系统语言解析为 `zh-CN`，其他语言解析为 `en-US`。同时接受 `zh` 和 `en` 简写。
 
 示例：
@@ -81,6 +84,21 @@ PI_EXTENSIONS_LOCALE=en-US pi
 ```
 
 ## 扩展作者 API
+
+提示出口由稳定的 `ctx.sessionManager` owner 标识，不再使用进程中最后加载的扩展 API。
+尽可能保留原始上下文；简化 UI view 或需要明确向启动器转发的子会话可使用：
+
+```ts
+import { bindNoticeOwner, getNoticeOwnerBinding } from "pi-extensions-i18n";
+
+const release = bindNoticeOwner(view, getNoticeOwnerBinding(parentCtx));
+// notifyWithSource({ ctx: view, ... }) 使用明确的父会话租约。
+// view／子会话关闭时释放。
+release();
+```
+
+绑定带有 owner token：根会话关闭或替换会使旧转发失效，回退到自身 UI，而不会向已经关闭
+的会话或新替换的会话追加。仅安装 renderer 不会接管提示归属。
 
 新包可以注册 namespace，并在渲染时查询当前语言：
 

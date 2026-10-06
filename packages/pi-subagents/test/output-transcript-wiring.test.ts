@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ProjectTrustStore } from "@earendil-works/pi-coding-agent";
 
 vi.mock("../src/agent-runner.js", async () => {
   const actual = await vi.importActual<typeof import("../src/agent-runner.js")>("../src/agent-runner.js");
@@ -54,6 +55,8 @@ function makeCtx(cwd: string) {
     hasUI: false,
     ui: { setStatus: vi.fn(), setWidget: vi.fn(), notify: vi.fn() },
     cwd,
+    isProjectTrusted: () => true,
+    mode: "json",
     model: undefined,
     modelRegistry: { find: vi.fn(), getAvailable: vi.fn(() => []) },
     sessionManager: { getSessionId: vi.fn(() => "session-1"), getBranch: vi.fn(() => []) },
@@ -76,6 +79,7 @@ describe("output_transcript agent wiring", () => {
     previousHome = process.env.HOME;
     process.env.PI_CODING_AGENT_DIR = agentDir;
     process.env.HOME = agentDir;
+    new ProjectTrustStore(agentDir).set(cwd, true);
     mkdirSync(join(cwd, ".pi"), { recursive: true });
     writeFileSync(join(cwd, ".pi", "subagents.json"), JSON.stringify({ schedulingEnabled: false }));
     mkdirSync(join(agentDir, "agents"), { recursive: true });
@@ -104,6 +108,7 @@ describe("output_transcript agent wiring", () => {
     writeFileSync(join(agentDir, "agents", "sensitive.md"), `---\ndescription: Sensitive in-memory agent\noutput_transcript: false\n---\n\nKeep data in memory.`);
     const { pi, tools, lifecycle } = makePi();
     subagentsExtension(pi);
+    await lifecycle.get("session_start")?.({}, makeCtx(cwd));
 
     await tools.get("Agent").execute(
       "tool-call",
@@ -123,6 +128,7 @@ describe("output_transcript agent wiring", () => {
     writeFileSync(join(agentDir, "agents", "sensitive.md"), `---\ndescription: Sensitive in-memory agent\noutput_transcript: false\nrun_in_background: true\n---\n\nKeep data in memory.`);
     const { pi, tools, lifecycle } = makePi();
     subagentsExtension(pi);
+    await lifecycle.get("session_start")?.({}, makeCtx(cwd));
 
     await tools.get("Agent").execute(
       "tool-call",
@@ -141,6 +147,7 @@ describe("output_transcript agent wiring", () => {
   it("keeps transcript creation as the default", async () => {
     const { pi, tools, lifecycle } = makePi();
     subagentsExtension(pi);
+    await lifecycle.get("session_start")?.({}, makeCtx(cwd));
 
     await tools.get("Agent").execute(
       "tool-call",
@@ -161,6 +168,7 @@ describe("output_transcript agent wiring", () => {
     writeFileSync(join(cwd, ".pi", "subagents.json"), JSON.stringify({ schedulingEnabled: false, outputTranscript: false }));
     const { pi, tools, lifecycle } = makePi();
     subagentsExtension(pi);
+    await lifecycle.get("session_start")?.({}, makeCtx(cwd));
 
     await tools.get("Agent").execute(
       "tool-call",
@@ -181,6 +189,7 @@ describe("output_transcript agent wiring", () => {
     writeFileSync(join(agentDir, "agents", "audited.md"), `---\ndescription: Always keeps a transcript\noutput_transcript: true\n---\n\nWrite a transcript regardless of the project default.`);
     const { pi, tools, lifecycle } = makePi();
     subagentsExtension(pi);
+    await lifecycle.get("session_start")?.({}, makeCtx(cwd));
 
     await tools.get("Agent").execute(
       "tool-call",

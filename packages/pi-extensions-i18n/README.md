@@ -43,6 +43,10 @@ Reload Pi after installation:
     > default zh-CN
 ```
 
+Launch overrides are session-owned. Starting a child without `--locale` does not
+clear the root override; children inherit the active locale unless explicitly
+bound to another owner. Persisted preference remains shared.
+
 The `auto` preference checks `LC_ALL`, `LC_MESSAGES`, and `LANG`; Chinese system locales resolve to `zh-CN`, and other locales resolve to `en-US`. `zh` and `en` are accepted as short aliases.
 
 Examples:
@@ -72,6 +76,23 @@ notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t
 ```
 
 This renders as a filled background block with `[distill] message` on its first line: the label uses the shared muted `NOTICE_TAG_COLOR`, the body colour follows `level` (`warning` yellow, `error` red, `info` the extension message text colour), and `textColor` overrides the body colour for verdict-style lines that carry their own semantic colour. Level colours are semantic and stay untouched; only the source label gives up colour as an identity channel. In tui mode the notice is written as a Pi custom entry below the message; rpc/print/json keep using `ctx.ui.notify` with plain `[distill] message` text so no ANSI leaks into other frontends. The block is registered once by this package's own extension entry, so a package that uses the helper must load `../pi-extensions-i18n/index.ts` in its `pi.extensions` list. Use `formatNotice({ source, message, mode, theme })` when you only need the rendered string.
+
+Notice delivery is keyed by the stable `ctx.sessionManager` owner, not the last
+extension API loaded in the process. Keep the original context when possible. For
+a reduced UI view or a child that intentionally relays notices to its launcher:
+
+```ts
+import { bindNoticeOwner, getNoticeOwnerBinding } from "pi-extensions-i18n";
+
+const release = bindNoticeOwner(view, getNoticeOwnerBinding(parentCtx));
+// notifyWithSource({ ctx: view, ... }) now uses that explicit parent lease.
+// Release when the view/child shuts down.
+release();
+```
+
+Bindings are token-safe: root shutdown or replacement invalidates an old relay,
+which falls back to its own UI rather than appending to a closed/replacement
+session. Installing the renderer alone never claims notice ownership.
 
 New packages can register a namespace and resolve strings at render time:
 

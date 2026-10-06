@@ -16,6 +16,7 @@
   "command.issueWorkflowPath": "[{layer} config ({path})] workflow \"{workflow}\": {message}",
   "command.issueWorkflowStage": "[{layer} config] workflow \"{workflow}\" — stage \"{stage}\": {message}",
   "command.issueWorkflowStagePath": "[{layer} config ({path})] workflow \"{workflow}\" — stage \"{stage}\": {message}",
+  "config.projectUntrusted": "Project workflow definitions were not loaded because the project is untrusted. Only global and explicitly approved resources are available.",
   "config.invalidJson": "invalid JSON: {error}",
   "config.expectedArray": "expected an array",
   "config.expectedObject": "expected an object",

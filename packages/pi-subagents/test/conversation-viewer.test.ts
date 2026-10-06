@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentRecord } from "../src/types.js";
+import { i18n } from "../src/i18n.js";
 
 // ── Mock wrapTextWithAnsi ──────────────────────────────────────────────
 // We need to control what wrapTextWithAnsi returns to simulate the
@@ -470,32 +471,34 @@ describe("ConversationViewer", () => {
       expect(strip(viewer.render(80).join("\n"))).toContain("# Heading");
     });
 
-    it("`m` disarms a pending stop rather than confirming it", () => {
-      const onStop = vi.fn();
+    it("`m` disarms a pending cancel rather than confirming it", () => {
+      const onControl = vi.fn();
       const viewer = new ConversationViewer(
         mockTui(200, 80), mockSession(assistant("hi")), mockRecord({ status: "running" }), undefined,
-        ansiTheme(), vi.fn(), onStop,
+        ansiTheme(), vi.fn(), onControl,
       );
 
       viewer.handleInput("x");
       viewer.handleInput("m");
       viewer.handleInput("x");
 
-      expect(onStop).not.toHaveBeenCalled();
+      expect(onControl).not.toHaveBeenCalled();
     });
 
-    it("keeps the footer's navigation hints intact at 80 columns", () => {
+    it("keeps distinct control and viewer-close hints discoverable", () => {
       const viewer = new ConversationViewer(
-        mockTui(200, 80), mockSession(assistant("hi")), mockRecord({ status: "running" }), undefined,
+        mockTui(200, 160), mockSession(assistant("hi")), mockRecord({ status: "running" }), undefined,
         ansiTheme(), vi.fn(), vi.fn(), undefined, vi.fn(),
       );
-      const lines = viewer.render(80);
+      const lines = viewer.render(160);
       const footer = strip(lines[lines.length - 2]);
 
       expect(footer).toContain("Enter steer");
-      expect(footer).toContain("x stop");
+      expect(footer).toContain("i ");
+      expect(footer).toContain("x ");
+      expect(footer).toContain("c ");
       expect(footer).toContain("m md");
-      expect(footer).toContain("Esc close");
+      expect(footer).toContain(i18n.t("product.viewerNavigation"));
     });
 
     it("caps a tool result at RESULT_MAX_CHARS, not 500, and says what it dropped", () => {
@@ -760,63 +763,94 @@ describe("ConversationViewer", () => {
     });
   });
 
-  describe("stop key", () => {
-    const W = 80;
+  describe("canonical controls", () => {
+    const W = 160;
 
-    it("two-press x stops a running agent (first arms, second aborts)", () => {
-      const onStop = vi.fn();
+    it("uses distinct interrupt, cancel, and close actions", () => {
+      const onControl = vi.fn();
       const tui = mockTui(30, W);
       const viewer = new ConversationViewer(
-        tui, mockSession(), mockRecord({ status: "running" }), undefined, ansiTheme(), vi.fn(), onStop,
+        tui, mockSession(), mockRecord({ status: "running", activity: "active" }), undefined,
+        ansiTheme(), vi.fn(), onControl,
       );
 
-      // Idle footer offers the stop affordance.
-      expect(viewer.render(W).join("\n")).toContain("x stop");
+      viewer.handleInput("i");
+      expect(onControl).toHaveBeenLastCalledWith({ action: "interrupt" });
 
-      // First press arms (no abort yet) and re-renders.
       viewer.handleInput("x");
-      expect(onStop).not.toHaveBeenCalled();
-      expect(tui.requestRender).toHaveBeenCalled();
-      expect(viewer.render(W).join("\n")).toContain("x again to STOP");
+      expect(onControl).toHaveBeenCalledTimes(1);
+      viewer.handleInput("x");
+      expect(onControl).toHaveBeenLastCalledWith({ action: "cancel" });
 
-      // Second press aborts.
-      viewer.handleInput("x");
-      expect(onStop).toHaveBeenCalledTimes(1);
+      viewer.handleInput("c");
+      expect(onControl).toHaveBeenCalledTimes(2);
+      viewer.handleInput("c");
+      expect(onControl).toHaveBeenLastCalledWith({ action: "close" });
     });
 
-    it("any other key disarms the confirm", () => {
-      const onStop = vi.fn();
+    it("any other key disarms the destructive confirmation", () => {
+      const onControl = vi.fn();
       const viewer = new ConversationViewer(
-        mockTui(30, W), mockSession(), mockRecord({ status: "running" }), undefined, ansiTheme(), vi.fn(), onStop,
+        mockTui(30, W), mockSession(), mockRecord({ status: "running" }), undefined,
+        ansiTheme(), vi.fn(), onControl,
       );
 
-      viewer.handleInput("x");                       // arm
-      viewer.handleInput("j");                       // scroll → disarm
-      expect(viewer.render(W).join("\n")).toContain("x stop");
-      expect(viewer.render(W).join("\n")).not.toContain("x again to STOP");
-
-      viewer.handleInput("x");                       // arms again, does NOT stop
-      expect(onStop).not.toHaveBeenCalled();
+      viewer.handleInput("x");
+      viewer.handleInput("j");
+      viewer.handleInput("x");
+      expect(onControl).not.toHaveBeenCalled();
     });
 
-    it("does not offer or perform stop once the agent is no longer running", () => {
-      const onStop = vi.fn();
+    it("idle activity renders waiting, remains steerable, and cannot interrupt", () => {
+      const onControl = vi.fn();
       const viewer = new ConversationViewer(
-        mockTui(30, W), mockSession(), mockRecord({ status: "completed" }), undefined, ansiTheme(), vi.fn(), onStop,
+        mockTui(30, W), mockSession(), mockRecord({ status: "running", activity: "idle" }), undefined,
+        ansiTheme(), vi.fn(), onControl,
       );
 
-      expect(viewer.render(W).join("\n")).not.toContain("x stop");
-      viewer.handleInput("x");
-      viewer.handleInput("x");
-      expect(onStop).not.toHaveBeenCalled();
+      const out = viewer.render(W).join("\n");
+      expect(out).toContain(i18n.t("product.waitingLabel"));
+      expect(out).not.toContain("thinking…");
+      viewer.handleInput("i");
+      expect(onControl).not.toHaveBeenCalled();
+      viewer.handleInput("\r");
+      expect(viewer.render(W).join("\n")).toContain("Enter send");
     });
 
-    it("no stop affordance when no onStop handler is provided (read-only history)", () => {
+    it("a settled conversation can close but cannot cancel", () => {
+      const onControl = vi.fn();
+      const viewer = new ConversationViewer(
+        mockTui(30, W), mockSession(), mockRecord({ status: "completed" }), undefined,
+        ansiTheme(), vi.fn(), onControl,
+      );
+
+      viewer.handleInput("x");
+      viewer.handleInput("x");
+      expect(onControl).not.toHaveBeenCalled();
+      viewer.handleInput("c");
+      viewer.handleInput("c");
+      expect(onControl).toHaveBeenCalledWith({ action: "close" });
+    });
+
+    it("Escape closes only the viewer", () => {
+      const done = vi.fn();
+      const onControl = vi.fn();
+      const viewer = new ConversationViewer(
+        mockTui(30, W), mockSession(), mockRecord({ status: "running" }), undefined,
+        ansiTheme(), done, onControl,
+      );
+      viewer.handleInput("\x1b");
+      expect(done).toHaveBeenCalledWith(undefined);
+      expect(onControl).not.toHaveBeenCalled();
+    });
+
+    it("is read-only when no control handler is provided", () => {
       const viewer = new ConversationViewer(
         mockTui(30, W), mockSession(), mockRecord({ status: "running" }), undefined, ansiTheme(), vi.fn(),
       );
-      expect(viewer.render(W).join("\n")).not.toContain("x stop");
-      expect(() => { viewer.handleInput("x"); viewer.handleInput("x"); }).not.toThrow();
+      expect(() => {
+        for (const key of ["i", "x", "x", "c", "c"]) viewer.handleInput(key);
+      }).not.toThrow();
     });
   });
 

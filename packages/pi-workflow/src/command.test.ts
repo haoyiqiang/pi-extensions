@@ -848,8 +848,9 @@ describe("/wf — command-run import memoization", () => {
 
 // ---------------------------------------------------------------------------
 // Pre-warm — registerWorkflowCommand schedules the memoized import shortly
-// after registration so the first real /wf finds the graph ready. A failed
-// pre-warm clears the memo (degrades to the pre-warm-less behavior).
+// after session_start so extension factories stay side-effect free and the
+// first real /wf still finds the graph ready. A failed pre-warm clears the
+// memo (degrades to the pre-warm-less behavior).
 // ---------------------------------------------------------------------------
 
 describe("/wf — pre-warm", () => {
@@ -907,11 +908,15 @@ describe("/wf — pre-warm", () => {
 		expect(provider).toHaveBeenCalledTimes(1);
 	});
 
-	it("registerWorkflowCommand pre-warms after PREWARM_DELAY_MS — first /wf shows no toast", async () => {
+	it("registerWorkflowCommand pre-warms only after session_start", async () => {
 		vi.useFakeTimers();
 		try {
 			const { pi, captured } = createMockPi();
-			registerWorkflowCommand(pi);
+			registerWorkflowCommand(pi, pi);
+			expect(vi.getTimerCount()).toBe(0);
+			await vi.advanceTimersByTimeAsync(PREWARM_DELAY_MS);
+
+			for (const start of captured.events.get("session_start") ?? []) await start({ reason: "startup" });
 			await vi.advanceTimersByTimeAsync(PREWARM_DELAY_MS);
 			const ctx = createMockCommandCtx({ hasUI: true });
 			await captured.commands.get("wf")?.handler("mid go", ctx);

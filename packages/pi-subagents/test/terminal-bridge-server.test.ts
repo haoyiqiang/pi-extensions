@@ -117,6 +117,38 @@ describe("explicit ephemeral loopback bridge (no external network)", () => {
     await expect(bridge.steer("too late")).rejects.toThrow(i18n.t("bridge.notRunning"));
   });
 
+  it("matches standard execution admission and interrupt acknowledgements to exact request ids", async () => {
+    const observed: ChildFeedback[] = [];
+    let admitReady!: () => void;
+    const requested = new Promise<void>((resolve) => { admitReady = resolve; });
+    const bridge = await server((event) => {
+      observed.push(event);
+      if (event.type === "execution_request") admitReady();
+    });
+    const child = await connect(bridge);
+    packet(child, 1, { type: "ready", snapshot });
+    await bridge.ready;
+    const starting = once(child, "data");
+    bridge.start();
+    await starting;
+
+    packet(child, 2, { type: "execution_request", id: "round-1" });
+    await requested;
+    const admission = once(child, "data");
+    bridge.admit("round-1");
+    const [admissionBytes] = await admission;
+    expect(new BridgeFrames().push(admissionBytes as Buffer)[0]).toEqual({ type: "execution_admission", id: "round-1" });
+    expect(() => bridge.admit("round-1")).toThrow(i18n.t("bridge.notRunning"));
+
+    const interruptFrame = once(child, "data");
+    const interrupting = bridge.interrupt();
+    const [interruptBytes] = await interruptFrame;
+    const [interrupt] = new BridgeFrames().push(interruptBytes as Buffer) as Array<{ type: "interrupt"; id: string }>;
+    packet(child, 3, { type: "ack", id: interrupt.id });
+    await interrupting;
+    expect(observed).toContainEqual({ type: "execution_request", id: "round-1", seq: 2 });
+  });
+
   it("rejects duplicate/out-of-order frames instead of double-counting usage", async () => {
     const bridge = await server();
     const child = await connect(bridge);

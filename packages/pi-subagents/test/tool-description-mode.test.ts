@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ProjectTrustStore } from "@earendil-works/pi-coding-agent";
 import subagentsExtension from "../src/index.js";
 import { setWorktreeIsolationEnabled } from "../src/worktree.js";
 
@@ -61,6 +62,7 @@ describe("toolDescriptionMode", () => {
     process.env.HOME = hermeticAgentDir;
     prevCwd = process.cwd();
     mkdirSync(join(tmpDir, ".pi"), { recursive: true });
+    new ProjectTrustStore(hermeticAgentDir).set(tmpDir, true);
     if (settings) {
       writeFileSync(join(tmpDir, ".pi", "subagents.json"), JSON.stringify(settings));
     }
@@ -69,6 +71,17 @@ describe("toolDescriptionMode", () => {
 
     const { pi, tools, handlers } = makePi();
     subagentsExtension(pi);
+    // Factory activation is intentionally global-only. Bind the real project
+    // cwd/trust decision before inspecting the session's Agent definition.
+    void handlers.get("session_start")?.({}, {
+      cwd: tmpDir,
+      isProjectTrusted: () => true,
+      mode: "json",
+      hasUI: false,
+      ui: {},
+      modelRegistry: { find: vi.fn(), getAvailable: vi.fn(() => []) },
+      sessionManager: { getSessionId: vi.fn(() => "tool-description-test") },
+    } as any);
     shutdown = async () => {
       await handlers.get("session_shutdown")?.({}, { hasUI: false, ui: {} } as any);
     };
@@ -257,6 +270,15 @@ describe("toolDescriptionMode", () => {
     writeFileSync(join(tmpDir, ".pi", "subagents.json"), JSON.stringify({ toolDescriptionMode: "full" }));
     const second = makePi();
     subagentsExtension(second.pi);
+    void second.handlers.get("session_start")?.({}, {
+      cwd: tmpDir,
+      isProjectTrusted: () => true,
+      mode: "json",
+      hasUI: false,
+      ui: {},
+      modelRegistry: { find: vi.fn(), getAvailable: vi.fn(() => []) },
+      sessionManager: { getSessionId: vi.fn(() => "tool-description-second") },
+    } as any);
     try {
       expect(customDesc).toBe(second.tools.get("Agent").description);
     } finally {

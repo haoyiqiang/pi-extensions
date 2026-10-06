@@ -9,6 +9,7 @@ import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import type { SessionView, TranscriptBlock, TranscriptMessage } from "../backends/session.js";
 import { type Component, Input, Markdown, type MarkdownOptions, type MarkdownTheme, matchesKey, type TUI, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { renderAgentName } from "../agent-color.js";
+import type { AgentControlRequest } from "../agent-manager.js";
 import { extractText } from "../context.js";
 import { i18n } from "../i18n.js";
 import type { AgentRecord, ViewerMarkdownMode } from "../types.js";
@@ -145,8 +146,8 @@ export class ConversationViewer implements Component {
   private unsubscribe: (() => void) | undefined;
   private lastInnerW = 0;
   private closed = false;
-  /** Two-press confirm guard for the stop key, so a stray key can't kill the agent. */
-  private stopArmed = false;
+  /** Two-press guard for destructive task/session controls. */
+  private armedControl: "cancel" | "close" | undefined;
   private keys: ViewerKeys;
   /** Steering composer — present while the user is typing a message to the agent. */
   private composer: Input | undefined;
@@ -169,11 +170,11 @@ export class ConversationViewer implements Component {
     private activity: AgentActivity | undefined,
     private theme: Theme,
     private done: (result: undefined) => void,
-    /** Abort the agent shown here. Omitted → no stop affordance (e.g. read-only history). */
-    private onStop?: () => void,
+    /** Canonical agent control entrance. Omitted → read-only history. */
+    private onControl?: (request: AgentControlRequest) => boolean | void | Promise<boolean | void>,
     /** User keybindings from `ctx.ui.custom()`. Omitted → hardcoded defaults. */
     keybindings?: ViewerKeybindings,
-    /** Send a steering message to the agent. Omitted → no compose affordance. */
+    /** Legacy steer-only hook for older embedders; product UI uses onControl. */
     private onSteer?: (message: string) => void,
     /**
      * Whether the header shows an estimated cost after the token count. Read
@@ -216,27 +217,31 @@ export class ConversationViewer implements Component {
       return;
     }
 
-    // Enter opens the steering composer (only while the agent can still be
-    // steered) — then type + Enter sends, Esc or an empty submit returns. When
-    // not steerable, fall through so the key still disarms a pending stop.
+    // Enter opens the steering composer. Escape inside the composer cancels
+    // only the draft; Escape outside closes only this viewer.
     if (matchesKey(data, "enter") && this.canSteer()) {
-      this.stopArmed = false;
+      this.armedControl = undefined;
       this.openComposer();
       return;
     }
 
-    // Stop/abort the agent (only while it can still be stopped). Two-press:
-    // first "x" arms, second confirms — any other key disarms.
+    // Interrupt is non-destructive: it ends only the active SDK run and keeps
+    // the conversation ready for another prompt. It is unavailable while idle.
+    if (matchesKey(data, "i")) {
+      this.armedControl = undefined;
+      if (this.canInterrupt()) void this.onControl?.({ action: "interrupt" });
+      this.tui.requestRender();
+      return;
+    }
+
+    // Cancel task and close session are intentionally separate controls. Both
+    // require a second press so a navigation typo cannot destroy work/ownership.
     if (matchesKey(data, "x")) {
-      if (this.isStoppable()) {
-        if (this.stopArmed) {
-          this.stopArmed = false;
-          this.onStop?.();
-        } else {
-          this.stopArmed = true;
-        }
-        this.tui.requestRender();
-      }
+      this.confirmControl("cancel");
+      return;
+    }
+    if (matchesKey(data, "c")) {
+      this.confirmControl("close");
       return;
     }
 
@@ -244,14 +249,14 @@ export class ConversationViewer implements Component {
     // Markdown rendering safe to default on: a result the renderer reshapes
     // (a diff, an indented log, a `#`-commented script) is one key from verbatim.
     if (matchesKey(data, "m")) {
-      this.stopArmed = false;
+      this.armedControl = undefined;
       const next = MARKDOWN_MODES[(MARKDOWN_MODES.indexOf(this.markdownMode()) + 1) % MARKDOWN_MODES.length];
       this.markdownModeOverride = next;
       this.onMarkdownMode?.(next);
       this.tui.requestRender();
       return;
     }
-    if (this.stopArmed) this.stopArmed = false;
+    if (this.armedControl) this.armedControl = undefined;
 
     const totalLines = this.buildContentLines(this.lastInnerW).length;
     const viewportHeight = this.viewportHeight();
@@ -299,15 +304,16 @@ export class ConversationViewer implements Component {
     lines.push(hrTop);
     const modeLabel = getPromptModeLabel(this.record.type);
     const modeTag = modeLabel ? ` ${th.fg("dim", `(${modeLabel})`)}` : "";
-    const statusIcon = this.record.status === "running"
+    const waiting = this.isWaiting();
+    const statusIcon = this.record.status === "running" && !waiting
       ? th.fg("accent", "●")
       : this.record.status === "completed"
         ? th.fg("success", "✓")
         : this.record.status === "error"
           ? th.fg("error", "✗")
           : th.fg("dim", "○");
-    const duration = this.record.status === "idle"
-      ? i18n.t("managerRestore.idle")
+    const duration = waiting
+      ? i18n.t(this.record.activity === "queued" || this.record.status === "queued" ? "product.queuedLabel" : "product.waitingLabel")
       : formatDuration(this.record.startedAt, this.record.completedAt);
 
     const headerParts: string[] = [duration];
@@ -363,14 +369,19 @@ export class ConversationViewer implements Component {
       const sep = th.fg("dim", " · ");
       const actions: string[] = [];
       if (this.canSteer()) actions.push(th.fg("dim", "Enter steer"));
-      if (this.isStoppable()) {
-        actions.push(this.stopArmed ? th.fg("error", "x again to STOP") : th.fg("dim", "x stop"));
+      if (this.canInterrupt()) actions.push(th.fg("dim", `i ${i18n.t("product.interruptLabel")}`));
+      if (this.canCancel()) {
+        actions.push(this.armedControl === "cancel"
+          ? th.fg("error", i18n.t("product.confirmControl", { key: "x", action: i18n.t("product.cancelLabel") }))
+          : th.fg("dim", `x ${i18n.t("product.cancelLabel")}`));
       }
-      // Abbreviated (`raw`/`md`/`md+`) because the idle footer is already full
-      // at 80 columns with steer + stop present, and this group has no
-      // degradation step below "drop the line-count readout".
+      if (this.canClose()) {
+        actions.push(this.armedControl === "close"
+          ? th.fg("error", i18n.t("product.confirmControl", { key: "c", action: i18n.t("product.closeLabel") }))
+          : th.fg("dim", `c ${i18n.t("product.closeLabel")}`));
+      }
       actions.push(th.fg("dim", `m ${MARKDOWN_MODE_LABELS[this.markdownMode()]}`));
-      const footerRight = th.fg("dim", "↑↓ scroll · PgUp/PgDn or Shift+↑↓ · Esc close");
+      const footerRight = th.fg("dim", i18n.t("product.viewerNavigation"));
 
       // Prepend the line-count/scroll-% readout only when there's spare width —
       // it's the first thing dropped so it never crowds out the hints.
@@ -391,9 +402,36 @@ export class ConversationViewer implements Component {
     return lines;
   }
 
-  /** Stoppable only when a stop handler exists and the agent is still active. */
-  private isStoppable(): boolean {
-    return !!this.onStop && (this.record.status === "running" || this.record.status === "queued");
+  /** A persistent live conversation may be open but waiting between SDK runs. */
+  private isWaiting(): boolean {
+    return this.record.status === "idle" || this.record.status === "queued"
+      || (this.record.status === "running" && (this.record.activity === "idle" || this.record.activity === "queued"));
+  }
+
+  private canInterrupt(): boolean {
+    return !!this.onControl
+      && this.record.status === "running"
+      && (this.record.activity ?? "active") === "active";
+  }
+
+  private canCancel(): boolean {
+    return !!this.onControl && (this.record.status === "running" || this.record.status === "queued");
+  }
+
+  private canClose(): boolean {
+    return !!this.onControl;
+  }
+
+  private confirmControl(action: "cancel" | "close"): void {
+    const allowed = action === "cancel" ? this.canCancel() : this.canClose();
+    if (!allowed) return;
+    if (this.armedControl === action) {
+      this.armedControl = undefined;
+      void this.onControl?.({ action });
+    } else {
+      this.armedControl = action;
+    }
+    this.tui.requestRender();
   }
 
   /** The mode in force: an `m` press, else the setting, else the default. */
@@ -452,9 +490,10 @@ export class ConversationViewer implements Component {
     }
   }
 
-  /** Steerable only when a steer handler exists and the agent is still active. */
+  /** Active, queued and persistent-idle conversations all accept steering. */
   private canSteer(): boolean {
-    return !!this.onSteer && (this.record.status === "running" || this.record.status === "queued");
+    return (!!this.onControl || !!this.onSteer)
+      && (this.record.status === "running" || this.record.status === "queued");
   }
 
   /** Open the inline steering composer and route subsequent input to it. */
@@ -464,7 +503,10 @@ export class ConversationViewer implements Component {
     input.onSubmit = (value: string) => {
       const message = value.trim();
       this.composer = undefined;
-      if (message) this.onSteer?.(message);
+      if (message) {
+        if (this.onControl) void this.onControl({ action: "steer", message });
+        else this.onSteer?.(message);
+      }
       this.tui.requestRender();
     };
     input.onEscape = () => {
@@ -584,8 +626,9 @@ export class ConversationViewer implements Component {
       needsSeparator = true;
     }
 
-    // Streaming indicator for running agents
-    if (this.record.status === "running" && this.activity) {
+    // Streaming indicator only for an active SDK run. Persistent idle sessions
+    // remain open, but rendering "thinking…" for them would be false.
+    if (this.record.status === "running" && !this.isWaiting() && this.activity) {
       const act = describeActivity(this.activity.activeTools, this.activity.responseText);
       lines.push("");
       lines.push(truncateToWidth(th.fg("accent", "▍ ") + th.fg("dim", act), width));

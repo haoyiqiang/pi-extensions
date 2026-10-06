@@ -49,6 +49,7 @@ interface SessionState {
   terminal?: TerminalRun;
   operation?: Promise<ExecutionRunResult>;
   shutdown?: Promise<void>;
+  retirementError?: unknown;
 }
 
 function validateStructuredResult(state: SessionState, final: Extract<ChildFeedback, { type: "settled" }>): { json?: string; failure?: string } {
@@ -70,6 +71,12 @@ export interface TerminalBackendPorts {
 }
 
 function safely(action: (() => void) | undefined): void { try { action?.(); } catch { /* observational callback */ } }
+function errorText(error: unknown): string { return error instanceof Error ? error.message : String(error); }
+function mergeFailure(primary: string | undefined, cleanup: readonly string[]): string | undefined {
+  if (cleanup.length === 0) return primary;
+  const suffix = cleanup.map((error) => i18n.t("terminalBackend.cleanupFailed", { error })).join("\n");
+  return primary ? `${primary}\n${suffix}` : suffix;
+}
 
 function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -84,6 +91,24 @@ function withExitDeadline<T>(completion: Promise<T>, milliseconds: number): Prom
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(i18n.t("bridge.retirementTimeout"))), milliseconds);
     completion.then((value) => { clearTimeout(timer); resolve(value); }, (error) => { clearTimeout(timer); reject(error); });
+  });
+}
+
+async function retirementReceipt(wait: (signal: AbortSignal) => Promise<unknown>, milliseconds: number): Promise<void> {
+  const controller = new AbortController();
+  await new Promise<void>((resolve, reject) => {
+    const timeoutError = new Error(i18n.t("bridge.retirementTimeout"));
+    const timer = setTimeout(() => {
+      controller.abort(timeoutError);
+      reject(timeoutError);
+    }, milliseconds);
+    let completion: Promise<unknown>;
+    try { completion = wait(controller.signal); }
+    catch (error) { clearTimeout(timer); reject(error); return; }
+    completion.then(
+      () => { clearTimeout(timer); resolve(); },
+      (error) => { clearTimeout(timer); reject(error); },
+    );
   });
 }
 
@@ -143,8 +168,13 @@ export function createManagedTerminalExecutionBackend(
     const execute = async (): Promise<ExecutionRunResult> => {
       let bridge: TerminalBridge | undefined;
       let terminal: TerminalRun | undefined;
+      let launch: ReturnType<typeof prepareTerminalLaunch> | undefined;
       let ready = false;
       let retired = false;
+      let outcome: ExecutionRunResult | undefined;
+      let primaryError: unknown;
+      let cleanupAggregate: AggregateError | undefined;
+      const cleanupFailures: string[] = [];
       try {
         signal.throwIfAborted();
         state.managed.beginRun(run.runId);
@@ -160,18 +190,21 @@ export function createManagedTerminalExecutionBackend(
             case "usage": safely(() => callbacks.onAssistantUsage?.(event.usage)); break;
             case "turn": safely(() => callbacks.onTurnEnd?.(event.count)); break;
             case "compaction": safely(() => callbacks.onCompaction?.(event.info)); break;
+            case "execution_request": case "ack": case "failure": break;
           }
         }, timeout);
         state.bridge = bridge;
         signal.throwIfAborted();
-        const launch = prepareTerminalLaunch(state.policy, run.session, run.runId, bridge.endpoint, prompt, config);
+        launch = prepareTerminalLaunch(state.policy, run.session, run.runId, bridge.endpoint, prompt, config);
         signal.throwIfAborted();
-        terminal = await launchTerminalRun({ ...launch, signal }, {
+        // Keep receipt observation alive while authenticated abort asks Pi to
+        // settle; terminal.cancel() below is only the bounded force fallback.
+        terminal = await launchTerminalRun(launch, {
           ...dependencies,
           transport: {
             ...dependencies.transport,
             waitForExit: async (_surface, transportSignal) => {
-              const exit = await (ports.waitForExit ?? waitForProcessExit)(launch.processExit, transportSignal);
+              const exit = await (ports.waitForExit ?? waitForProcessExit)(launch!.processExit, transportSignal);
               retired = !transportSignal.aborted;
               return exit;
             },
@@ -196,35 +229,83 @@ export function createManagedTerminalExecutionBackend(
           state.policy = state.managed.policy;
         }
         const structured = validateStructuredResult(state, final);
-        return {
+        outcome = {
           session: state.handle,
           responseText: final.text,
           aborted: final.aborted || result.status === "cancelled",
           steered: final.steered === true,
           ...(structured.json !== undefined ? { structuredJson: structured.json } : {}),
           ...(final.structuredRetried ? { structuredRetried: true } : {}),
-          failure: structured.failure ?? final.failure ?? (result.status === "failed" ? result.error ?? result.summary
-            : result.cleanupError ? i18n.t("terminalBackend.cleanupFailed", { error: result.cleanupError }) : undefined),
+          failure: structured.failure ?? final.failure ?? (result.status === "failed"
+            && !(final.aborted && result.reason === "sentinel" && result.exitCode === 1)
+            ? result.error ?? result.summary : undefined),
         };
+        return outcome;
       } catch (error) {
         state.poisoned = true;
         if (signal.aborted) {
           bridge?.abort();
-          return { session: state.handle, responseText: text, aborted: true, steered: false };
+          outcome = { session: state.handle, responseText: text, aborted: true, steered: false };
+          return outcome;
         }
-        if (ready) return { session: state.handle, responseText: text, aborted: false, steered: false,
-          failure: error instanceof Error ? error.message : i18n.t("bridge.failed") };
+        if (ready) {
+          outcome = { session: state.handle, responseText: text, aborted: false, steered: false,
+            failure: error instanceof Error ? error.message : i18n.t("bridge.failed") };
+          return outcome;
+        }
+        primaryError = error;
         throw error;
       } finally {
-        // Lost IPC is also a child shutdown signal. Quarantine on any uncertain process retirement.
-        if (terminal) await terminal.cancel();
-        if (bridge) await bridge.close();
+        // Give authenticated SDK abort one bounded chance to retire naturally
+        // before closing the owned surface, then verify with a fresh watcher.
+        if (terminal && signal.aborted && !retired) {
+          try {
+            const result = await withExitDeadline(terminal.completion, exitTimeout);
+            if (result.reason === "sentinel") retired = true;
+            if (result.cleanupError) cleanupFailures.push(result.cleanupError);
+          } catch { /* force cancellation below */ }
+        }
+        if (terminal) {
+          try {
+            const result = await terminal.cancel();
+            if (result.reason === "sentinel") retired = true;
+            if (result.cleanupError) cleanupFailures.push(result.cleanupError);
+          } catch (error) { cleanupFailures.push(errorText(error)); }
+        }
+        if (!retired && terminal && launch) {
+          try {
+            await retirementReceipt(
+              (retirementSignal) => (ports.waitForExit ?? waitForProcessExit)(launch!.processExit, retirementSignal),
+              exitTimeout,
+            );
+            retired = true;
+          } catch (error) { cleanupFailures.push(errorText(error)); }
+        }
+        if (!retired && terminal) state.poisoned = true;
+        if (bridge) {
+          try { await withExitDeadline(bridge.close(), exitTimeout); }
+          catch (error) { cleanupFailures.push(errorText(error)); state.poisoned = true; }
+        }
+        if (cleanupFailures.length > 0) {
+          const uniqueCleanupFailures = [...new Set(cleanupFailures)];
+          state.poisoned = true;
+          state.retirementError = new Error(uniqueCleanupFailures.join("\n"));
+          if (outcome) outcome.failure = mergeFailure(outcome.failure, uniqueCleanupFailures);
+          else if (primaryError !== undefined) {
+            cleanupAggregate = new AggregateError(
+              [primaryError, ...uniqueCleanupFailures.map((message) => new Error(message))],
+              errorText(primaryError),
+              { cause: primaryError },
+            );
+          }
+        }
         parentSignal?.removeEventListener("abort", parentAbort);
         state.bridge = undefined;
         state.terminal = undefined;
         state.controller = undefined;
         state.running = false;
         if (state.poisoned) state.managed.quarantine();
+        if (cleanupAggregate) throw cleanupAggregate;
       }
     };
     const operation = execute();
@@ -344,8 +425,8 @@ export function createManagedTerminalExecutionBackend(
     },
     async interrupt(handle) {
       const state = getState(handle);
-      if (!state.running || !state.terminal) throw new Error(i18n.t("terminal.notRunning"));
-      await state.terminal.interrupt();
+      if (!state.running || !state.bridge) throw new Error(i18n.t("terminal.notRunning"));
+      await state.bridge.interrupt();
     },
     shutdown(handle) {
       if (!handle) return Promise.resolve();
@@ -362,6 +443,7 @@ export function createManagedTerminalExecutionBackend(
           if (state.poisoned) state.managed.quarantine();
           else state.managed.release();
         } finally { files.delete(state.managed.reference.sessionFile); }
+        if (state.retirementError !== undefined) throw state.retirementError;
       });
       return state.shutdown;
     },

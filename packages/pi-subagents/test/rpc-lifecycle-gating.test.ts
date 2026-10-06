@@ -28,7 +28,7 @@ vi.mock("../src/agent-runner.js", async () => {
 import { runAgent } from "../src/agent-runner.js";
 import subagentsExtension from "../src/index.js";
 
-const RPC_CHANNELS = ["subagents:rpc:ping", "subagents:rpc:spawn", "subagents:rpc:stop"] as const;
+const RPC_CHANNELS = ["subagents:rpc:ping", "subagents:rpc:spawn", "subagents:rpc:control"] as const;
 
 function makePi() {
   const tools = new Map<string, any>();
@@ -67,6 +67,7 @@ function ctx(hasUI = false, setWidget = vi.fn()) {
       custom: vi.fn(),
     },
     cwd: process.cwd(),
+    isProjectTrusted: vi.fn(() => true),
     model: undefined,
     modelRegistry: { find: vi.fn(), getAvailable: vi.fn(() => []) },
     sessionManager: { getSessionId: vi.fn(() => "s1"), getBranch: vi.fn(() => []) },

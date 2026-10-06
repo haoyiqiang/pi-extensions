@@ -1,5 +1,6 @@
 /**
- * custom-agents.ts — Load user-defined agents from project (.pi/agents/, plus the shared .agents/agents/ workspace) and global ($PI_CODING_AGENT_DIR/agents/, default ~/.pi/agent/agents/) locations.
+ * custom-agents.ts — Load user-defined agents from trusted project locations
+ * (.pi/agents/ plus .agents/agents/) and the global agent directory.
  */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -42,15 +43,26 @@ const RESERVED_IN_TYPE = ":";
  * files can claim the same one; the later load wins, as it always has for a
  * filename clash, and `warnSkippedOverride` reports the substitution.
  */
-export function loadCustomAgents(cwd: string, strict = false): Map<string, AgentConfig> {
+export interface LoadCustomAgentsOptions {
+  /** False selects trusted global definitions only. Undefined preserves legacy discovery. */
+  projectTrusted?: boolean;
+}
+
+export function loadCustomAgents(
+  cwd: string,
+  strict = false,
+  options: LoadCustomAgentsOptions = {},
+): Map<string, AgentConfig> {
   const globalDir = join(resolveAgentDir(), "agents");
   const workspaceProjectDir = join(cwd, ".agents", "agents");
   const projectDir = join(cwd, ".pi", "agents");
 
   const agents = new Map<string, AgentConfig>();
-  loadFromDir(globalDir, agents, "global", strict);            // lowest priority
-  loadFromDir(workspaceProjectDir, agents, "project", strict); // shared workspace
-  loadFromDir(projectDir, agents, "project", strict);          // highest priority (overwrites)
+  loadFromDir(globalDir, agents, "global", strict); // lowest priority
+  if (options.projectTrusted !== false) {
+    loadFromDir(workspaceProjectDir, agents, "project", strict); // shared workspace
+    loadFromDir(projectDir, agents, "project", strict);          // highest priority (overwrites)
+  }
 
   warnedLastLoad = warnedThisLoad;
   warnedThisLoad = new Set();

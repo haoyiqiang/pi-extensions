@@ -76,7 +76,7 @@ function fixture(kind: "embedded" | "terminal", structured = false) {
         settled.resolve(final);
         exit.resolve({ reason: "sentinel", exitCode: 0 });
       },
-      steer: async () => {}, abort: () => {}, close: async () => {},
+      admit: () => {}, steer: async () => {}, interrupt: async () => {}, abort: () => {}, close: async () => {},
     };
   });
   const backend: AgentExecutionBackend = kind === "embedded"

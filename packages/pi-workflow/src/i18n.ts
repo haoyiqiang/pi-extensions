@@ -1,5 +1,7 @@
 import {
   NOTICE_TAG_COLOR,
+  bindNoticeOwner,
+  getNoticeOwnerBinding,
   getLocale,
   notifyWithSource,
   scope,
@@ -32,6 +34,7 @@ const NOTICE_COLOR: NoticeColor = NOTICE_TAG_COLOR;
 export const WORKFLOW_NOTICE_SOURCE: NoticeSource = { tag: NOTICE_TAG, color: NOTICE_COLOR };
 
 export interface WorkflowNoticeContext {
+  sessionManager?: object;
   mode?: string;
   ui: {
     notify(message: string, level?: NoticeLevel): void;
@@ -51,6 +54,7 @@ export function workflowNoticeObserver<T extends WorkflowNoticeContext>(ctx: T):
   // The detached run may outlive the launcher's guarded SDK context. Capture
   // only the notice port; model/session fields still come from the live context.
   const noticeContext: WorkflowNoticeContext = { mode: ctx.mode, ui: ctx.ui };
+  bindNoticeOwner(noticeContext, getNoticeOwnerBinding(ctx));
   const ui = Object.create(noticeContext.ui, { notify: { value: (message: string, level: NoticeLevel = "info") => {
     notifyWorkflow(noticeContext, message, level);
   } } });

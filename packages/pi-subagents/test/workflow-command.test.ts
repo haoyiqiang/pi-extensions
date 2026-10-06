@@ -20,6 +20,12 @@ import { ctx, type Hermetic, hermeticDir, makePi } from "./helpers/boot-extensio
 function bootCommand() {
   const booted = makePi();
   subagentsExtension(booted.pi);
+  void booted.lifecycle.get("session_start")?.({}, ctx({
+    cwd: process.cwd(),
+    mode: "json",
+    hasUI: false,
+    sessionManager: { getSessionId: vi.fn(() => undefined), getBranch: vi.fn(() => []) },
+  }));
   const command = booted.commands.get("agents");
   if (!command) throw new Error("the extension did not register /agents");
   return { ...booted, command };

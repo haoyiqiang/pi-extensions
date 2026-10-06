@@ -71,6 +71,7 @@ describe.skipIf(LIVE)("maxConcurrentForeground e2e (real pi agent loop)", () => 
       prompt: "Delegate two independent jobs and report both.",
       cwd: projectDir(settings),
       live: false, // scripted on purpose: a real model may not emit both calls
+      projectTrusted: true,
       respond: async (context: Context) => {
         const isParent = getCurrentTools(context.messages).some(t => t.name === "Agent");
         if (isParent) {

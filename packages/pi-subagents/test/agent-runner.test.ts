@@ -88,6 +88,10 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
   getAgentDir,
   SessionManager: { inMemory: sessionManagerInMemory, create: sessionManagerCreate, open: sessionManagerOpen },
   SettingsManager: { create: settingsManagerCreate },
+  hasTrustRequiringProjectResources: vi.fn(() => false),
+  ProjectTrustStore: class {
+    get() { return null; }
+  },
 }));
 
 vi.mock("../src/agent-types.js", () => ({
@@ -324,7 +328,12 @@ describe("agent-runner final output capture", () => {
       cwd: "/tmp/worktree",
       agentDir: "/mock/agent-dir",
     }));
-    expect(settingsManagerCreate).toHaveBeenCalledWith("/tmp/worktree", "/mock/agent-dir");
+    expect(settingsManagerCreate).toHaveBeenCalledWith(
+      "/tmp/worktree",
+      "/mock/agent-dir",
+      { projectTrusted: true },
+    );
+    expect(lastLoaderOpts().settingsManager).toEqual(expect.objectContaining({ kind: "settings-manager" }));
     // Same claim as before `rememberAgents` flipped the default — the effective
     // cwd reaches the session manager — now via the persistent constructor.
     expect(sessionManagerCreate).toHaveBeenCalledWith("/tmp/worktree", undefined, expect.anything());
@@ -1903,7 +1912,7 @@ describe("agent-runner extension allowlist", () => {
     vi.mocked(getToolNamesForType).mockReturnValueOnce(BUILTINS_7);
   }
 
-  it("['*'] short-circuits — no extensionsOverride, behaves like extensions: true", async () => {
+  it("['*'] keeps all ordinary extensions while retaining the child-product filter", async () => {
     setupArrayAgent(["*"]);
     withExtensions({ "/ext/a.ts": ["tool_a"] });
     const { session } = createSession("OK");
@@ -1912,9 +1921,28 @@ describe("agent-runner extension allowlist", () => {
     await runAgent(ctx, "Explore", "go", { pi });
 
     const opts = lastLoaderOpts();
-    expect(opts.extensionsOverride).toBeUndefined();
+    expect(opts.extensionsOverride).toBeDefined();
     expect(opts.additionalExtensionPaths).toBeUndefined();
     expect(lastToolsPassed()).toContain("tool_a");
+  });
+
+  it("extensions: true removes root workflow/UI products before child binding", async () => {
+    vi.mocked(getConfig).mockReturnValueOnce(makeConfig({ extensions: true }));
+    vi.mocked(getAgentConfig).mockReturnValueOnce(makeAgentConfig({ extensions: true }));
+    vi.mocked(getToolNamesForType).mockReturnValueOnce(BUILTINS_7);
+    withExtensions({
+      "/repo/packages/pi-workflow/extension.ts": ["workflow_owner"],
+      "/repo/packages/pi-spark/index.ts": ["spark_owner"],
+      "/repo/packages/pi-web-search/index.ts": ["web_search"],
+    });
+    const { session } = createSession("OK");
+    createAgentSession.mockResolvedValue({ session });
+
+    await runAgent(ctx, "Explore", "go", { pi });
+
+    expect(lastToolsPassed()).toContain("web_search");
+    expect(lastToolsPassed()).not.toContain("workflow_owner");
+    expect(lastToolsPassed()).not.toContain("spark_owner");
   });
 
   it("['mcp'] keeps only the mcp-named extension, drops others", async () => {
@@ -2347,8 +2375,9 @@ describe("agent-runner ext: tool selectors", () => {
     expect(tools).toContain("foo_tool");
     expect(tools).not.toContain("other_tool"); // loaded but muted
     expect(tools).not.toContain("read"); // tools: ext:foo → no built-ins
-    // both extensions still load — no loader override needed under extensions: true
-    expect(lastLoaderOpts().extensionsOverride).toBeUndefined();
+    // Both ordinary extensions still load; the override is retained solely to
+    // remove root products before this live tool-scope pass.
+    expect(lastLoaderOpts().extensionsOverride).toBeDefined();
   });
 
   it("'*' alongside ext: keeps all built-ins while the flip still applies", async () => {
@@ -2424,7 +2453,7 @@ describe("agent-runner ext: tool selectors", () => {
     );
   });
 
-  it("['*'] short-circuit survives ext: narrowing", async () => {
+  it("['*'] keeps all ordinary extensions alongside ext: narrowing", async () => {
     setupExtAgent({ extensions: ["*"], builtinToolNames: ["read"], extSelectors: ["ext:foo/bar"] });
     withExtensions({ "/ext/foo.ts": ["bar", "baz"], "/ext/other.ts": ["other_tool"] });
     const { session } = createSession("OK");
@@ -2432,7 +2461,7 @@ describe("agent-runner ext: tool selectors", () => {
 
     await runAgent(ctx, "Explore", "go", { pi });
 
-    expect(lastLoaderOpts().extensionsOverride).toBeUndefined(); // pure-["*"] short-circuit holds
+    expect(lastLoaderOpts().extensionsOverride).toBeDefined();
     const tools = lastToolsPassed();
     expect(tools).toContain("bar");
     expect(tools).not.toContain("baz");

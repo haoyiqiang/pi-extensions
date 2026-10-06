@@ -290,6 +290,42 @@ describe("cancellation propagation and late-write exclusion", () => {
 		}
 	});
 
+	it("stops awaiting a held onStageError after cancellation commits the abort row", async () => {
+		const host = createFakeConcurrentHost({ cwd });
+		const controller = new AbortController();
+		const entered = deferred();
+		const release = deferred();
+		controller.abort("cancel before stage entry");
+
+		const running = runWorkflow(host.ctx, {
+			workflow: scriptWorkflow(),
+			input: "x",
+			signal: controller.signal,
+			lifecycle: {
+				onStageError: async () => {
+					entered.resolve();
+					await release.promise;
+				},
+			},
+		});
+		await entered.promise;
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		try {
+			const result = await Promise.race([
+				running,
+				new Promise<never>((_resolve, reject) => {
+					timer = setTimeout(() => reject(new Error("held onStageError blocked cancellation")), 1_000);
+				}),
+			]);
+			expect(result.termination?.status).toBe("aborted");
+			expect(readAllStages(cwd, result.runId!).at(-1)?.status).toBe("aborted");
+		} finally {
+			if (timer !== undefined) clearTimeout(timer);
+			release.resolve();
+		}
+		await running;
+	});
+
 	it("stops awaiting a held onWorkflowEnd after cancellation and returns the already-durable result", async () => {
 		const host = createFakeConcurrentHost({ cwd });
 		const controller = new AbortController();

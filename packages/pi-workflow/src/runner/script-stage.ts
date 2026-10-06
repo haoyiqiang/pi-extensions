@@ -47,16 +47,26 @@ import {
 	nowIso,
 	raceWithWorkflowCancellation,
 	throwIfWorkflowCancelled,
+	withTimeout,
 } from "../internal-utils.js";
-import { FAIL_SCRIPT_THREW, FAIL_VALIDATION_EXHAUSTED, FAIL_WORKFLOW_ABORTED } from "../messages.js";
+import {
+	ERR_SCHEMA_TIMEOUT,
+	FAIL_SCRIPT_THREW,
+	FAIL_VALIDATION_EXHAUSTED,
+	FAIL_WORKFLOW_ABORTED,
+} from "../messages.js";
 import { finalizeOutput, type Output, outputMeta } from "../output.js";
 import type { RunContext, WorkflowHostContext } from "../types.js";
 import {
 	DEFAULT_VALIDATION_RETRIES,
+	DEFAULT_VALIDATION_RETRY_TIMEOUT_MS,
 	describeFailure,
+	MAX_VALIDATION_RETRY_TIMEOUT_MS,
+	MIN_VALIDATION_RETRY_TIMEOUT_MS,
 	runValidationRetryLoop,
 	validateOutputData,
 } from "../validate-output.js";
+import { clampRange } from "../validation-bounds.js";
 import type { AdvanceFn, ChainOutcome } from "./failure.js";
 import type { ResolvedStage } from "./resolve-stage.js";
 
@@ -93,6 +103,12 @@ export async function runScript(
 	// envelope, the success/failure row, and lifecycle bookkeeping share it
 	// (mirrors `produceAndValidateOutput` on the skill path).
 	const stageNumber = allocateStageNumber(run.state);
+	const validateTimeoutMs = clampRange(
+		stage.def.validateTimeoutMs,
+		MIN_VALIDATION_RETRY_TIMEOUT_MS,
+		DEFAULT_VALIDATION_RETRY_TIMEOUT_MS,
+		MAX_VALIDATION_RETRY_TIMEOUT_MS,
+	);
 
 	// `halt: "recorded"` = invokeRun already recorded the terminal failure.
 	const result = await runValidationRetryLoop<Output, "recorded">(
@@ -119,11 +135,19 @@ export async function runScript(
 				const schema = stage.def.kind === "produces" ? stage.def.outputSchema : undefined;
 				if (!schema) return { kind: "ok", result: { valid: true, failures: [] } };
 				// No catch: a throwing author schema propagates to the runner's
-				// single catch site (today's contract). Cancellation stops awaiting an
-				// uncooperative async schema; the run fence excludes its late settlement.
+				// single catch site. Match the skill extraction path's timeout clamp,
+				// while cancellation stops awaiting either the timeout or an uncooperative
+				// schema; the run fence excludes every late settlement.
 				return {
 					kind: "ok",
-					result: await raceWithWorkflowCancellation(() => validateOutputData(schema, output.data), run.signal),
+					result: await withTimeout(
+						raceWithWorkflowCancellation(
+							() => validateOutputData(schema, output.data),
+							run.signal,
+						),
+						validateTimeoutMs,
+						ERR_SCHEMA_TIMEOUT("outputSchema", validateTimeoutMs),
+					),
 				};
 			},
 			onRetry: async (attempt) => {

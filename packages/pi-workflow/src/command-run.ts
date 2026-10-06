@@ -43,8 +43,8 @@ import { isValidName } from "./state/index.js";
  * settled promises. Built-in providers carry the heaviest first-call work
  * (the sibling's authoring-DSL graph builds here); measured ~550ms of the
  * first `/wf`'s `loadWorkflows` is dominated by these flushes. Called by
- * the post-registration pre-warm in `command.ts` right after the module
- * graph import; never from the run path (loadWorkflows flushes on its own).
+ * the session-start pre-warm in `command.ts` right after the module graph
+ * import; never from the run path (loadWorkflows flushes on its own).
  */
 export async function prewarmWorkflowRuntime(): Promise<void> {
 	await flushBuiltInProviders();
@@ -62,7 +62,7 @@ export async function handleWorkflowCommand(host: WorkflowHost, args: string, ct
 		return;
 	}
 
-	const loaded = await loadWorkflows(ctx.cwd);
+	const loaded = await loadWorkflows(ctx.cwd, { projectTrusted: ctx.isProjectTrusted?.() ?? false });
 	ctx.signal?.throwIfAborted();
 	surfaceIssues(ctx, loaded.issues);
 
@@ -168,12 +168,16 @@ export async function handleWorkflowCommand(host: WorkflowHost, args: string, ct
 	}))
 		.then((result) => {
 			// Surface pre-flight rejections (collision, etc.) — no runId means no JSONL on disk.
-			if (!result.success && result.runId === undefined && result.error) {
+			// A cold executor acquisition cancelled through /wf-cancel returns the
+			// same envelope shape after the runner formats its canonical abort error;
+			// the command signal is the authoritative discriminator, so normal user
+			// cancellation does not grow a second, false error notice.
+			if (!ctx.signal?.aborted && !result.success && result.runId === undefined && result.error) {
 				notifyOrDropIfStale(ctx, result.error, "error");
 			}
 		})
 		.catch((e) => {
-			notifyOrDropIfStale(ctx, MSG_WORKFLOW_THREW(formatError(e)), "error");
+			if (!ctx.signal?.aborted) notifyOrDropIfStale(ctx, MSG_WORKFLOW_THREW(formatError(e)), "error");
 		});
 }
 
@@ -200,13 +204,14 @@ async function handleResume(
 			// load error, workflow gone, or an unreconstructable trail) — nothing else
 			// surfaces it, so notify here. An in-run failure carries a runId and was
 			// already notified by the stage machinery via its JSONL failure row;
-			// re-notifying would double up.
-			if (!result.success && result.runId === undefined && result.error) {
+			// re-notifying would double up. A cancelled cold resume is intentionally
+			// quiet for the same reason as the fresh-run arm above.
+			if (!ctx.signal?.aborted && !result.success && result.runId === undefined && result.error) {
 				notifyOrDropIfStale(ctx, result.error, "error");
 			}
 		})
 		.catch((e) => {
-			notifyOrDropIfStale(ctx, MSG_WORKFLOW_THREW(formatError(e)), "error");
+			if (!ctx.signal?.aborted) notifyOrDropIfStale(ctx, MSG_WORKFLOW_THREW(formatError(e)), "error");
 		});
 }
 
@@ -226,7 +231,7 @@ async function handleResume(
 function approvedSkillHostOrNotify(host: WorkflowHost, ctx: WorkflowHostContext): WorkflowHost | undefined {
 	if (!isPiWorkflowExecutionProvider(getWorkflowExecutionProvider())) return host;
 	try {
-		const config = loadWorkflowConfig(ctx.cwd);
+		const config = loadWorkflowConfig(ctx.cwd, { projectTrusted: ctx.isProjectTrusted?.() ?? false });
 		if (config.execution.profile !== "managed") return host;
 		const approved = config.skills;
 		return {

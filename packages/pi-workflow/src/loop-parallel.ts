@@ -109,10 +109,15 @@ export async function runFanoutGeneration(
 		if (run.signal.aborted) genAbort.abort();
 		else run.signal.addEventListener("abort", onRunAbort, { once: true });
 	}
-	const detach = () => run.signal?.removeEventListener("abort", onRunAbort);
+	const detachSignal = () => run.signal?.removeEventListener("abort", onRunAbort);
+	// A fail-fast unit commits the run termination before its terminal lifecycle
+	// observer settles. Abort siblings at that commit boundary rather than after
+	// the worker returns, so a held onStageError callback cannot keep them alive.
+	const detachTerminal = run.scope?.onTerminalClaimed(() => genAbort.abort()) ?? (() => {});
 
 	await dispatchGeneration(hostCtx, e, cursor, run, deps, order, genAbort, idToIndex);
-	detach(); // generation settled — drop the run-lifetime listener BEFORE the tail
+	detachSignal();
+	detachTerminal(); // generation settled — drop run-lifetime observers BEFORE the tail
 
 	// The same two gates the wave loop ran between levels, now once at the end: a
 	// fail-fast halt already terminated state inside the worker and aborted its

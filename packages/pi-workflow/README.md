@@ -178,6 +178,12 @@ standard SDK profile. See [managed resources](../pi-subagents/docs/workflow-reso
 
 ## Cancellation and lifecycle
 
+`/wf` is detached from the launcher. Within each stage, scoped `Agent` calls default
+to foreground regardless of the root `backgroundByDefault`, so dependent results
+arrive before validation/routing. Explicit background delegation remains available,
+but unfinished children are canceled at stage-scope retirement. Running workflows
+capture subagent policy once; changing the launcher cannot rewrite later stages.
+
 - `/wf-cancel` cancels the sole active run, or lists IDs when there are several.
 - `/wf-cancel <id>` selects a run; `/wf-cancel all` cancels all current runs.
 - Cold command loading and pending executor acquisition are cancellable.
@@ -210,6 +216,12 @@ The original layout remains:
 Standard stages use native Pi JSONL and can reopen existing raw stage sessions.
 Managed children stay under each run's `sessions/managed`; orphan pruning is never
 made recursive into their leases and sidecars.
+
+The Pi frontend skips project workflow definitions, packs and `.pi/pi-workflow.json`
+before evaluation when project trust is not granted; global resources remain usable.
+For custom-only workflow resources, Pi 0.87.1's implicit trust is not approval: a
+saved native trust decision or `defaultProjectTrust: "always"` is required. Explicit
+programmatic loading remains the embedder's responsibility.
 
 During config/pack evaluation, jiti aliases both `@maplezzk/pi-workflow` and legacy
 `@juicesharp/rpiv-workflow` public subpaths to this engine. This is not a second

@@ -348,7 +348,22 @@ describe("unified workflow ownership regressions", () => {
       edges: { fan: "stop" },
     });
 
-    const result = await runWorkflow(ctx, { workflow, input: "x" });
+    const stageErrorEntered = deferred();
+    const releaseStageError = deferred();
+    const running = runWorkflow(ctx, {
+      workflow,
+      input: "x",
+      lifecycle: {
+        onStageError: async () => {
+          stageErrorEntered.resolve();
+          await releaseStageError.promise;
+        },
+      },
+    });
+    await stageErrorEntered.promise;
+    await eventually(() => expect(siblingObservedAbort).toBe(true));
+    releaseStageError.resolve();
+    const result = await running;
     const rows = readAllStages(cwd, result.runId!);
 
     expect(result.success).toBe(false);
@@ -366,6 +381,7 @@ describe("unified workflow ownership regressions", () => {
     const createExecution = vi.fn((request: WorkflowExecutorRequest) => executionFor(request, closeExecution));
     registerOffer(h.bus, createExecution);
     workflowExtension(h.pi);
+    await h.fire("session_start", { type: "session_start", reason: "startup" });
     const workflow = defineWorkflow({
       name: "cleanup-marker-refusal",
       start: "effect",
@@ -419,6 +435,7 @@ describe("unified workflow ownership regressions", () => {
     const h = piHarness();
     const runtime = installPiWorkflowExecution(h.pi);
     runtimes.push(runtime);
+    await h.fire("session_start", { type: "session_start", reason: "startup" });
     registerWorkflowCancellationCommand(h.pi, runtime);
     const cold = deferred<typeof CommandRunModule>();
     const host: WorkflowHost = {
@@ -467,18 +484,22 @@ describe("unified workflow ownership regressions", () => {
     });
     const firstRuntime = installPiWorkflowExecution(first.pi);
     runtimes.push(firstRuntime);
+    expect(getWorkflowExecutionProvider()).toBeUndefined();
+    await first.fire("session_start", { type: "session_start", reason: "startup" });
     await provider().createHost(observer(cwd, "first-root"), runOptions(cwd, "standard-handoff"));
     expect(requests[0]?.settings).toMatchObject({ profile: "standard" });
     expect(requests[0]?.settings.backend).toBeUndefined();
 
-    await first.fire("session_shutdown", { type: "session_shutdown", reason: "new" });
-    expect(closeExecution).not.toHaveBeenCalled();
-
     const child = piHarness();
     const childRuntime = installPiWorkflowExecution(child.pi);
     runtimes.push(childRuntime);
-    expect(childRuntime.installed).toBe(false);
     const originalProvider = getWorkflowExecutionProvider();
+    await child.fire("session_start", { type: "session_start", reason: "startup" });
+    expect(childRuntime.installed).toBe(false);
+    expect(getWorkflowExecutionProvider()).toBe(originalProvider);
+
+    await first.fire("session_shutdown", { type: "session_shutdown", reason: "new" });
+    expect(closeExecution).not.toHaveBeenCalled();
 
     const second = piHarness();
     const secondRuntime = installPiWorkflowExecution(second.pi);
@@ -507,6 +528,7 @@ describe("unified workflow ownership regressions", () => {
     registerOffer(h.bus, (request) => executionFor(request, closeExecution));
     const runtime = installPiWorkflowExecution(h.pi);
     runtimes.push(runtime);
+    await h.fire("session_start", { type: "session_start", reason: "startup" });
     await provider().createHost(observer(cwd), runOptions(cwd, `${reason}-run`));
 
     let settled = false;

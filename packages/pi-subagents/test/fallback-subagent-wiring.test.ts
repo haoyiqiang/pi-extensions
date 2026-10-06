@@ -13,6 +13,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ProjectTrustStore } from "@earendil-works/pi-coding-agent";
 
 vi.mock("../src/agent-runner.js", async () => {
   const actual = await vi.importActual<typeof import("../src/agent-runner.js")>("../src/agent-runner.js");
@@ -62,6 +63,8 @@ function ctx() {
     hasUI: false,
     ui: { setStatus: vi.fn(), setWidget: vi.fn(), notify: vi.fn() },
     cwd,
+    isProjectTrusted: () => true,
+    mode: "json",
     model: undefined,
     modelRegistry: { find: vi.fn(), getAvailable: vi.fn(() => []) },
     sessionManager: { getSessionId: vi.fn(() => "s1"), getBranch: vi.fn(() => []) },
@@ -81,8 +84,11 @@ describe("fallbackSubagent gates dispatch through the real Agent tool", () => {
     // setting under the tests, and their global agents would pollute the roster.
     originalAgentDir = process.env.PI_CODING_AGENT_DIR;
     originalHome = process.env.HOME;
-    process.env.PI_CODING_AGENT_DIR = join(cwd, "agent-dir");
+    const agentDir = join(cwd, "agent-dir");
+    mkdirSync(agentDir, { recursive: true });
+    process.env.PI_CODING_AGENT_DIR = agentDir;
     process.env.HOME = cwd;
+    new ProjectTrustStore(agentDir).set(cwd, true);
     vi.mocked(runAgent).mockReset();
   });
 
@@ -101,6 +107,7 @@ describe("fallbackSubagent gates dispatch through the real Agent tool", () => {
   function boot() {
     const { pi, tools, lifecycle } = makePi();
     subagentsExtension(pi);
+    void lifecycle.get("session_start")?.({}, ctx());
     return { pi, tools, lifecycle };
   }
 

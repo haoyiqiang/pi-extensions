@@ -1227,6 +1227,9 @@ describe("workflowsEnabled — the master switch", () => {
   /** Boot the extension against a project whose settings say `settings`. */
   const boot = (settings: Record<string, unknown>, flags: Record<string, string | boolean> = {}) => {
     hermetic = hermeticDir({ settings });
+    // Workflow tool registration is a factory-time/global decision; mirror the
+    // intended bootstrap setting into this fixture's isolated global config.
+    writeFileSync(join(process.env.PI_CODING_AGENT_DIR!, "subagents.json"), JSON.stringify(settings));
     const booted = makePi(flags);
     subagentsExtension(booted.pi);
     return booted;
@@ -1283,6 +1286,9 @@ describe("collisions with another extension", () => {
 
   const boot = (settings: Record<string, unknown> = { workflowsEnabled: true }) => {
     hermetic = hermeticDir({ settings });
+    // Pin factory-time workflow ownership in the isolated global bootstrap
+    // config; project trust is exercised later at session_start/settings UI.
+    writeFileSync(join(process.env.PI_CODING_AGENT_DIR!, "subagents.json"), JSON.stringify(settings));
     const booted = makePi();
     subagentsExtension(booted.pi);
     return booted;

@@ -55,7 +55,8 @@ function fixture(exitTimeoutMs?: number) {
       const bridge: TerminalBridge = {
         endpoint: { host: "127.0.0.1", port: 1, token: "test-only" },
         ready: ready.promise, settled: settled.promise,
-        start: vi.fn(), steer: vi.fn(async () => {}), abort: vi.fn(), close: vi.fn(async () => {}),
+        start: vi.fn(), admit: vi.fn(), steer: vi.fn(async () => {}), interrupt: vi.fn(async () => {}),
+        abort: vi.fn(), close: vi.fn(async () => {}),
       };
       calls.push({ run, feedback, ready, settled, exit, bridge });
       return bridge;
@@ -159,10 +160,12 @@ describe("real terminal backend coordinator port", () => {
     f.calls[0].feedback(final);
     f.calls[0].settled.resolve(final);
     f.calls[0].exit.reject(new Error("invalid receipt"));
-    await expect(run.promise).resolves.toMatchObject({ failure: "invalid receipt" });
+    await expect(run.promise).resolves.toMatchObject({
+      failure: `invalid receipt\n${i18n.t("terminalBackend.cleanupFailed", { error: "invalid receipt" })}`,
+    });
     const record = JSON.parse(readFileSync(`${run.handle.reference.sessionFile}.pi-subagents.json`, "utf8"));
     expect(record.state).toBe("quarantined");
-    await f.backend.shutdown(run.handle);
+    await expect(f.backend.shutdown(run.handle)).rejects.toThrow("invalid receipt");
     await expect(f.backend.reattach!(run.handle.reference as any)).rejects.toThrow(i18n.t("sessionStore.busy"));
   });
 
@@ -172,10 +175,14 @@ describe("real terminal backend coordinator port", () => {
     const final = { type: "settled" as const, snapshot, text: "finished answer", aborted: false };
     f.calls[0].feedback(final);
     f.calls[0].settled.resolve(final);
-    await expect(run.promise).resolves.toMatchObject({ responseText: "finished answer", failure: i18n.t("bridge.retirementTimeout") });
+    const timeout = i18n.t("bridge.retirementTimeout");
+    await expect(run.promise).resolves.toMatchObject({
+      responseText: "finished answer",
+      failure: `${timeout}\n${i18n.t("terminalBackend.cleanupFailed", { error: timeout })}`,
+    });
     expect(f.transport.closeSurface).toHaveBeenCalledOnce();
     await expect(f.backend.resume(run.handle, "unsafe")).rejects.toThrow(i18n.t("terminalBackend.quarantined"));
-    await f.backend.shutdown(run.handle);
+    await expect(f.backend.shutdown(run.handle)).rejects.toThrow(timeout);
   });
 
   it("keeps an owned native-free session view and reuses it across fresh-process resume", async () => {
@@ -219,7 +226,7 @@ describe("real terminal backend coordinator port", () => {
   });
 
   it("cancels, retires feedback and quarantines uncertain process shutdown", async () => {
-    const f = fixture();
+    const f = fixture(20);
     const controller = new AbortController();
     const run = await f.running(controller.signal);
     controller.abort();
@@ -229,7 +236,7 @@ describe("real terminal backend coordinator port", () => {
     await expect(f.backend.resume(run.handle, "unsafe retry")).rejects.toThrow(i18n.t("terminalBackend.quarantined"));
     const first = f.backend.shutdown(run.handle);
     expect(f.backend.shutdown(run.handle)).toBe(first);
-    await first;
+    await expect(first).rejects.toThrow(i18n.t("bridge.retirementTimeout"));
   });
 
   it("does not report success until the child process has exited", async () => {

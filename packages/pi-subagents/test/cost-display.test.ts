@@ -45,6 +45,11 @@ describe("cost display", () => {
     hermetic = hermeticDir({ settings });
     const { pi, tools, lifecycle } = makePi();
     subagentsExtension(pi);
+    void lifecycle.get("session_start")?.({}, ctx({
+      mode: "json",
+      hasUI: false,
+      sessionManager: { getSessionId: vi.fn(() => undefined), getBranch: vi.fn(() => []) },
+    }));
     return { pi, tools, lifecycle };
   }
 

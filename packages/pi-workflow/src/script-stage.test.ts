@@ -18,7 +18,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createMockSessionChain } from "../test/upstream/index.ts";
 import { Type } from "typebox";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { acts, defineWorkflow, produces, type ScriptContext, terminal } from "./api.js";
 import type { LifecycleListeners } from "./events.js";
 import { fs as fsHandle } from "./handle.js";
@@ -157,6 +157,49 @@ describe("runScript", () => {
 		expect(attempt).toBe(2);
 		expect(events).toContain("onStageRetry:compute:1");
 		expect(events).toContain("onStageEnd:compute:script");
+	});
+
+	it("produces.script — bounds a hanging async outputSchema with validateTimeoutMs", async () => {
+		vi.useFakeTimers();
+		try {
+			let entered!: () => void;
+			const validating = new Promise<void>((resolve) => {
+				entered = resolve;
+			});
+			const workflow = defineWorkflow({
+				name: "schema-timeout",
+				start: "compute",
+				stages: {
+					compute: produces.script({
+						validateTimeoutMs: 1_000,
+						outputSchema: {
+							"~standard": {
+								version: 1,
+								vendor: "test",
+								validate: () => {
+									entered();
+									return new Promise<never>(() => {});
+								},
+							},
+						},
+						run: () => ({ kind: "count", artifacts: [], data: { n: 1 } }),
+					}),
+				},
+				edges: { compute: "stop" },
+			});
+			const chain = createMockSessionChain({ cwd: tmpDir, steps: [] });
+			const running = runWorkflow(chain.ctx, { workflow, input: "x" });
+
+			await validating;
+			await vi.advanceTimersByTimeAsync(1_000);
+			const result = await running;
+
+			expect(result.success).toBe(false);
+			expect(result.error).toContain("outputSchema validation exceeded 1000ms");
+			expect(readState(tmpDir).stages.at(-1)).toMatchObject({ stage: "compute", status: "failed" });
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	// 4. produces.script with outputSchema rejecting maxRetries + 1 times:

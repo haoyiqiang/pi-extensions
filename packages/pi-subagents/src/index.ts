@@ -15,10 +15,11 @@ import { isAbsolute, join } from "node:path";
 import { defineTool, type ExtensionAPI, type ExtensionCommandContext, type ExtensionContext, getAgentDir, getSettingsListTheme } from "@earendil-works/pi-coding-agent";
 import { Container, Key, matchesKey, type SettingItem, SettingsList, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
+import { NOTICE_TAG_COLOR, notifyWithSource, type NoticeSource } from "pi-extensions-i18n";
 import { abortable } from "./abortable.js";
 import { hasAgentBadge, renderAgentName } from "./agent-color.js";
 import { buildNewAgentFile, disableInContent, enableInContent, isEmptyStub, locateAgentFile, personalAgentsDir, projectAgentsDir, serializeAgentFile } from "./agent-file-toggle.js";
-import { AgentManager, isTopLevelAgent } from "./agent-manager.js";
+import { AgentManager, isTopLevelAgent, type AgentControlRequest } from "./agent-manager.js";
 import type { ExecutionSession } from "./backends/session.js";
 import type { AgentExecutionBackend } from "./backends/types.js";
 import { initializeSubagentsRuntime } from "./runtime.js";
@@ -40,6 +41,8 @@ import { createOutputFilePath, ensureOutputFile, getOutputTranscriptDefault, ses
 import { SubagentScheduler } from "./schedule.js";
 import { resolveStorePath, ScheduleStore } from "./schedule-store.js";
 import { loadSettings, type SubagentsSettings, saveAndEmitChanged, type ToolDescriptionMode } from "./settings.js";
+import { captureRuntimePolicy, type SubagentsRuntimePolicy } from "./runtime-policy.js";
+import { resolveProjectTrusted } from "./project-trust.js";
 import { getForegroundOutcomeNote, getStatusNote, partialOutputSuffix } from "./status-note.js";
 import { type AgentConfig, type AgentInvocation, type AgentMentionMode, type AgentRecord, type JoinMode, type NotificationDetails, type SubagentType, type ViewerMarkdownMode, type WidgetMode } from "./types.js";
 import { createMentionProvider, mentionRoster, type TypeInfo } from "./ui/agent-mention.js";
@@ -79,6 +82,8 @@ import { completeWorkflowTask, createWorkflowTask, failWorkflowTask, formatWorkf
 import { fullWorkflowToolDescription } from "./workflow/tool-description.js";
 import { isWorktreeIsolationEnabled, setWorktreeIsolationEnabled } from "./worktree.js";
 import { escapeXml } from "./xml.js";
+
+const NOTICE_SOURCE: NoticeSource = { tag: "agents", color: NOTICE_TAG_COLOR };
 
 // ---- Shared helpers ----
 
@@ -315,6 +320,10 @@ export default function (pi: ExtensionAPI, options: SubagentsExtensionOptions = 
   // injected as scoped custom tools by the existing manager instead.
   if (inChildSessionContext()) return;
   let currentCtx: ExtensionContext | undefined;
+  let currentRuntimePolicy: SubagentsRuntimePolicy | undefined;
+
+  const isProjectTrusted = (ctx: Pick<ExtensionContext, "cwd" | "isProjectTrusted">): boolean =>
+    resolveProjectTrusted(ctx.cwd, { context: ctx });
 
   // ---- Register custom notification renderer ----
   pi.registerMessageRenderer<NotificationDetails>(
@@ -402,16 +411,24 @@ export default function (pi: ExtensionAPI, options: SubagentsExtensionOptions = 
 
   // Read directly rather than waiting for applyAndEmitLoaded below: this decides
   // the initial load, which happens hundreds of lines before settings are applied.
-  let strictAgentFiles = loadSettings(process.cwd()).strictAgentFiles === true;
+  // Factory activation is not a trust boundary: Pi may run it before the real
+  // session cwd and project-trust decision exist. Bootstrap from trusted global
+  // resources only; session_start replaces this view with the bound session's.
+  let strictAgentFiles = loadSettings(process.cwd(), { projectTrusted: false }).strictAgentFiles === true;
 
-  /** Reload agents from project/global custom agent dirs and merge with defaults (called on init and each Agent invocation). */
-  const reloadCustomAgents = (strict = false) => {
-    const userAgents = loadCustomAgents(currentCtx?.cwd ?? process.cwd(), strict);
+  /** Reload the registry from one captured config/trust scope. */
+  const reloadCustomAgents = (
+    strict = false,
+    policy: SubagentsRuntimePolicy | undefined = currentRuntimePolicy,
+  ) => {
+    const cwd = policy?.configCwd ?? currentCtx?.cwd ?? process.cwd();
+    const projectTrusted = policy?.projectTrusted ?? false;
+    const userAgents = loadCustomAgents(cwd, strict, { projectTrusted });
     registerAgents(userAgents);
   };
 
-  // Initial load — the only strict one. A bad edit mid-session must not kill the
-  // session on the next unrelated spawn, so every later reload keeps warning.
+  // Initial load is global-only. Strict project definitions are first read only
+  // after session_start has supplied the actual trust decision.
   reloadCustomAgents(strictAgentFiles);
 
   // ---- Agent activity tracking + widget ----
@@ -671,17 +688,22 @@ export default function (pi: ExtensionAPI, options: SubagentsExtensionOptions = 
   const MANAGER_KEY = Symbol.for("pi-subagents:manager");
   // Process-external callers may supply arbitrary options. Nested ownership and
   // config-root metadata are internal capabilities issued only by scoped tools.
+  /** Capture one invocation-owned config/trust view before a spawn can queue. */
+  const captureSpawnPolicy = (ctx: ExtensionContext): SubagentsRuntimePolicy => {
+    const policy = captureRuntimePolicy(ctx.cwd, isProjectTrusted(ctx));
+    reloadCustomAgents(false, policy);
+    return policy;
+  };
+
   /**
    * Resolve the agent type and spawn. Trusts its options — every caller must
    * either be in-process or have gone through `spawnTopLevel` first.
    */
   const spawnResolved = (piRef: any, ctxRef: any, type: string, prompt: string, options: any) => {
-    // Cross-extension callers get the same dispatch contract as the LLM (#183).
-    // The RPC layer already throws for an unresolvable model rather than falling
-    // back silently; a bad agent type should not be quieter. Throws become error
-    // envelopes at the RPC boundary. Reload first so an agent file added mid
-    // session is spawnable here too, not only through the Agent tool.
-    reloadCustomAgents();
+    // Capture policy and the resolved definition BEFORE manager admission: a
+    // queued spawn must not inherit a later session's cwd, trust or settings.
+    const ctx = ctxRef as ExtensionContext;
+    const runtimePolicy = captureSpawnPolicy(ctx);
     const dispatch = resolveSpawnType(type);
     if (!dispatch.ok) throw new Error(dispatch.message);
     // Every programmatic spawn lands here — cross-extension RPC, both `@handle`
@@ -701,8 +723,16 @@ export default function (pi: ExtensionAPI, options: SubagentsExtensionOptions = 
     // leaves the displayed ceiling stale.
     const { state, callbacks } = createActivityTracker(resolveEffectiveMaxTurns(dispatch.type, options?.maxTurns));
     // Repaints are left to the manager's `onStart` callback, which already starts
-    // the widget/fleet timers for agents that enter this way.
-    const id = manager.spawn(piRef, ctxRef, dispatch.type, prompt, { ...options, ...callbacks });
+    // the widget/fleet timers for agents that enter this way. Policy/backend and
+    // definition ownership are written last so no RPC payload can forge them.
+    const id = manager.spawn(piRef, ctxRef, dispatch.type, prompt, {
+      ...options,
+      ...callbacks,
+      agentConfig: getAgentConfig(dispatch.type),
+      configCwd: runtimePolicy.configCwd,
+      runtimePolicy,
+      backend: runtimePolicy.settings.backend ?? "embedded",
+    });
     agentActivity.set(id, state);
     return id;
   };
@@ -711,6 +741,7 @@ export default function (pi: ExtensionAPI, options: SubagentsExtensionOptions = 
     const safeOptions = { ...(options ?? {}) };
     delete safeOptions.agentConfig;
     delete safeOptions.backend;
+    delete safeOptions.runtimePolicy;
     delete safeOptions.parentAgentId;
     // Internal too: a forged value would hide an RPC-spawned agent inside
     // someone else's workflow, and take it out of the concurrency pool with it.
@@ -772,6 +803,8 @@ export default function (pi: ExtensionAPI, options: SubagentsExtensionOptions = 
   // (currentCtx would stay undefined → spawn always "No active session"). Gating
   // here makes a filtered session behave like an absent one (#142).
   let rpcHandle: RpcHandle | undefined;
+  /** Replaced once the Agent definition exists; session_start re-registers it. */
+  let refreshAgentToolRegistration: () => void = () => {};
   /** Whether the `@handle` autocomplete wrapper has been stacked on pi's provider. */
   let mentionProviderRegistered = false;
 
@@ -779,7 +812,7 @@ export default function (pi: ExtensionAPI, options: SubagentsExtensionOptions = 
   // Session-scoped: store is constructed inside session_start once sessionId
   // is available. Mirrors pi-chonky-tasks's session-scoped task store —
   // schedules reset on /new, restore on /resume.
-  const scheduler = new SubagentScheduler();
+  const scheduler = new SubagentScheduler(spawnResolved);
 
   function startScheduler(ctx: ExtensionContext) {
     try {
@@ -801,7 +834,9 @@ export default function (pi: ExtensionAPI, options: SubagentsExtensionOptions = 
   // bound session_start, so a filtered-out activation never advertises (#142).
   pi.on("session_start", async (_event, ctx) => {
     currentCtx = ctx;
-    applyRuntimeSettings(ctx.cwd);
+    currentRuntimePolicy = captureRuntimePolicy(ctx.cwd, isProjectTrusted(ctx));
+    applyRuntimeSettings(currentRuntimePolicy.configCwd, currentRuntimePolicy.projectTrusted);
+    refreshAgentToolRegistration();
     if (ctx.hasUI) {
       widget.setUICtx(ctx.ui);
       fleet.setUICtx(ctx.ui as any);
@@ -818,10 +853,7 @@ export default function (pi: ExtensionAPI, options: SubagentsExtensionOptions = 
           spawn: spawnTopLevel,
           awaitStartup: (id) => manager.awaitStartup(id),
           getRecord: (id) => manager.getRecord(id),
-          // Unguarded on purpose: the stop handler now runs the top-level check
-          // itself off `getRecord`, and reports the refusal instead of the
-          // "Agent not found" a false from here used to be read as.
-          abort: (id) => manager.abort(id),
+          control: (id, request) => manager.control(id, request),
           consumeResult: (id) => {
             const record = resolveAgentRef(id);
             // Same guard as get_subagent_result: a running agent has no result
@@ -834,6 +866,8 @@ export default function (pi: ExtensionAPI, options: SubagentsExtensionOptions = 
             return true;
           },
         },
+        getRuntimePolicy: () => currentRuntimePolicy
+          ?? captureRuntimePolicy(currentCtx?.cwd ?? process.cwd(), currentCtx ? isProjectTrusted(currentCtx) : false),
       });
       // Broadcast readiness so extensions loaded alongside us can discover us.
       // Emitting after all factories have run (rather than at factory time)
@@ -932,9 +966,14 @@ export default function (pi: ExtensionAPI, options: SubagentsExtensionOptions = 
         // steer_subagent tool. Un-consume the result so the agent's reply to
         // this message is still relayed even if the LLM read its last answer.
         record.resultConsumed = false;
-        manager.steer(record.id, mention.message);
-        pi.events.emit("subagents:steered", { id: record.id, message: mention.message });
-        ctx.ui.notify(`Sent to ${target}`, "info");
+        const applied = await manager.control(record.id, { action: "steer", message: mention.message });
+        if (applied) pi.events.emit("subagents:steered", { id: record.id, message: mention.message });
+        notifyWithSource({
+          ctx,
+          source: NOTICE_SOURCE,
+          level: applied ? "info" : "warning",
+          message: applied ? `Sent to ${target}` : i18n.t("product.unchanged", { id: record.id, action: "steer" }),
+        });
         return { action: "handled" };
       }
 
@@ -1111,11 +1150,12 @@ export default function (pi: ExtensionAPI, options: SubagentsExtensionOptions = 
   // If the session is going down, there's nothing left to consume agent results.
   pi.on("session_shutdown", async () => {
     rpcHandle?.unsubSpawn();
-    rpcHandle?.unsubStop();
+    rpcHandle?.unsubControl();
     rpcHandle?.unsubPing();
     rpcHandle?.unsubConsume();
     rpcHandle = undefined;
     currentCtx = undefined;
+    currentRuntimePolicy = undefined;
     // Only release the global slot if this activation claimed it — a child
     // session's shutdown must not delete the root session's registry entry.
     if (ownsManagerRegistry && (globalThis as any)[MANAGER_KEY] === registryEntry) {
@@ -1147,11 +1187,66 @@ export default function (pi: ExtensionAPI, options: SubagentsExtensionOptions = 
   const widget = new AgentWidget(manager, agentActivity, getWidgetMode, isShowCostEnabled, isShowModelEnabled);
   function setWidgetMode(m: WidgetMode): void { widgetMode = m; widget.update(); }
 
+  /** One top-level control entrance for both conversation-viewer entry points. */
+  async function controlAgentFromUI(id: string, request: AgentControlRequest): Promise<boolean> {
+    const record = manager.getRecord(id);
+    if (record && !isTopLevelAgent(record)) {
+      if (currentCtx) notifyWithSource({
+        ctx: currentCtx,
+        source: NOTICE_SOURCE,
+        level: "warning",
+        message: i18n.t("product.notOwned"),
+      });
+      return false;
+    }
+
+    try {
+      const applied = await manager.control(id, request);
+      if (applied && request.action === "steer") {
+        pi.events.emit("subagents:steered", { id, message: request.message });
+      }
+      widget.update();
+      fleet.update();
+      if (currentCtx && request.action !== "steer") {
+        const message = !applied
+          ? i18n.t("product.unchanged", { id, action: request.action })
+          : request.action === "interrupt"
+            ? i18n.t("product.interrupted", { id })
+            : request.action === "cancel"
+              ? i18n.t("product.cancelled", { id })
+              : i18n.t("product.closed", { id });
+        notifyWithSource({
+          ctx: currentCtx,
+          source: NOTICE_SOURCE,
+          level: applied ? "info" : "warning",
+          message,
+        });
+      } else if (currentCtx && !applied) {
+        notifyWithSource({
+          ctx: currentCtx,
+          source: NOTICE_SOURCE,
+          level: "warning",
+          message: i18n.t("product.unchanged", { id, action: request.action }),
+        });
+      }
+      return applied;
+    } catch (error) {
+      if (currentCtx) notifyWithSource({
+        ctx: currentCtx,
+        source: NOTICE_SOURCE,
+        level: "error",
+        message: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
+  }
+
   // Claude Code-style FleetView: navigable list of main + subagents below the editor.
-  // The last two arguments keep a conversation overlay opened here identical to
-  // one opened from `/agents`: same setting on the way in, same persist out.
+  // The last arguments keep a conversation overlay opened here identical to
+  // one opened from `/agents`: same setting, persistence and control entrance.
   const fleet = new FleetList(manager, agentActivity, isShowCostEnabled, getViewerMarkdown,
-    (mode) => chooseViewerMarkdown(mode, currentCtx as unknown as ExtensionCommandContext | undefined));
+    (mode) => chooseViewerMarkdown(mode, currentCtx as unknown as ExtensionCommandContext | undefined),
+    controlAgentFromUI);
   let fleetViewEnabled = true;
   function isFleetViewEnabled(): boolean { return fleetViewEnabled; }
   function setFleetViewEnabled(b: boolean): void { fleetViewEnabled = b; fleet.setEnabled(b); }
@@ -1415,7 +1510,7 @@ export default function (pi: ExtensionAPI, options: SubagentsExtensionOptions = 
   // Apply persisted settings on startup and emit `subagents:settings_loaded`.
   // Global + project merged; missing → defaults; corrupt file emits a warning
   // to stderr and falls back to defaults.
-  const applyRuntimeSettings = (cwd: string) => initializeSubagentsRuntime(cwd, {
+  const applyRuntimeSettings = (cwd: string, projectTrusted: boolean) => initializeSubagentsRuntime(cwd, {
     appliers: {
       setMaxConcurrent: (n) => manager.setMaxConcurrent(n),
       setMaxConcurrentForeground: (n) => manager.setMaxConcurrentForeground(n),
@@ -1443,16 +1538,16 @@ export default function (pi: ExtensionAPI, options: SubagentsExtensionOptions = 
       setViewerMarkdown,
     },
     emit: (event, payload) => pi.events.emit(event, payload),
+    projectTrusted,
   });
-  applyRuntimeSettings(process.cwd());
+  // Activation bootstrap is deliberately global-only; session_start rebuilds
+  // this runtime and the Agent tool from the actual cwd/trust decision.
+  applyRuntimeSettings(process.cwd(), false);
 
   // ---- Agent tool ----
 
-  // Schedule param + its guideline are gated on `schedulingEnabled` (read once
-  // at registration; flipping the setting later requires next pi session for
-  // the schema to update). Defining the shape once and spreading it via Partial
-  // preserves Type.Object's inference when present and produces a
-  // `schedule`-free schema when absent — zero LLM-context cost in disabled mode.
+  // These inputs are rebuilt on session_start, after Pi has supplied the real
+  // cwd and project-trust decision. The factory-time values are global-only.
   const scheduleParamShape = {
     schedule: Type.Optional(
       Type.String({
@@ -1463,32 +1558,29 @@ export default function (pi: ExtensionAPI, options: SubagentsExtensionOptions = 
       }),
     ),
   };
-  const scheduleParam: Partial<typeof scheduleParamShape> =
-    isSchedulingEnabled() ? scheduleParamShape : {};
+  let scheduleParam: Partial<typeof scheduleParamShape> = {};
+  let scheduleGuideline = "";
+  let isolationGuideline = "";
+  let isolationCompactGuideline = "";
 
-  const scheduleGuideline = isSchedulingEnabled()
-    ? `\n- Use \`schedule\` only when the user explicitly asked for scheduled / recurring / delayed execution (e.g. "every Monday", "in an hour"). Don't auto-schedule from vague intent like "monitor X" — run once now or ask.`
-    : "";
-
-  // Same trade as scheduleParam/scheduleGuideline above: `isolationParam` drops
-  // the field from the schema when the project set `worktreeIsolation: false`,
-  // so the prose has to go with it. Left in, it would teach the model to pass a
-  // parameter that isn't declared — accepted (TypeBox sets no
-  // `additionalProperties: false`) and then silently dropped by the resolver.
-  // With no per-result note by design, the model would have every reason to go
-  // on reporting a `pi-agent-*` branch that was never created.
-  const isolationGuideline = isWorktreeIsolationEnabled()
-    ? `\n- Use isolation: "worktree" to give the agent its own git worktree (safe parallel file modifications); leave it unset, or pass "off", for none. The worktree is removed when the agent finishes; if it made changes, they are committed to a branch and the branch is named in the result.`
-    : "";
-
-  const isolationCompactGuideline = isWorktreeIsolationEnabled()
-    ? `\n- isolation: "worktree" gives the agent its own git worktree (removed on completion); changes land on a branch named in the result.`
-    : "";
+  const rebuildAgentToolInputs = (): void => {
+    scheduleParam = isSchedulingEnabled() ? scheduleParamShape : {};
+    scheduleGuideline = isSchedulingEnabled()
+      ? `\n- Use \`schedule\` only when the user explicitly asked for scheduled / recurring / delayed execution (e.g. "every Monday", "in an hour"). Don't auto-schedule from vague intent like "monitor X" — run once now or ask.`
+      : "";
+    isolationGuideline = isWorktreeIsolationEnabled()
+      ? `\n- Use isolation: "worktree" to give the agent its own git worktree (safe parallel file modifications); leave it unset, or pass "off", for none. The worktree is removed when the agent finishes; if it made changes, they are committed to a branch and the branch is named in the result.`
+      : "";
+    isolationCompactGuideline = isWorktreeIsolationEnabled()
+      ? `\n- isolation: "worktree" gives the agent its own git worktree (removed on completion); changes land on a branch named in the result.`
+      : "";
+  };
+  rebuildAgentToolInputs();
 
   // Compact Agent tool description (#91, `toolDescriptionMode: "compact"`) —
   // the same load-bearing facts as the full version at ~75% fewer tokens, for
   // small/local models. Per-option details live in the param descriptions.
-  const compactAgentToolDescription = `Launch an autonomous agent for complex, multi-step tasks. Agent types:
+  const compactAgentToolDescription = () => `Launch an autonomous agent for complex, multi-step tasks. Agent types:
 ${buildCompactTypeListText()}
 
 Custom agents: .pi/agents/<name>.md (project) or ${getAgentDir()}/agents/<name>.md (global).
@@ -1500,7 +1592,7 @@ Notes:
 - The result is not shown to the user — summarize it for them. Verify an agent's claimed code changes before reporting work done.
 - resume continues a previous agent by ID; steer_subagent messages a running one.${isolationCompactGuideline}`;
 
-  const fullAgentToolDescription = `Launch a new agent to handle complex, multi-step tasks autonomously. Each agent type has specific capabilities and tools available to it.
+  const fullAgentToolDescription = () => `Launch a new agent to handle complex, multi-step tasks autonomously. Each agent type has specific capabilities and tools available to it.
 
 Available agent types and the tools they have access to:
 ${buildTypeListText()}
@@ -1564,10 +1656,14 @@ Terse command-style prompts produce shallow, generic work.
   };
 
   const loadCustomToolDescription = (): string | undefined => {
-    for (const path of [
-      join(process.cwd(), ".pi", "agent-tool-description.md"),
+    const policy = currentRuntimePolicy;
+    const paths = [
+      ...(policy?.projectTrusted
+        ? [join(policy.configCwd, ".pi", "agent-tool-description.md")]
+        : []),
       join(getAgentDir(), "agent-tool-description.md"),
-    ]) {
+    ];
+    for (const path of paths) {
       try {
         if (!existsSync(path)) continue;
         const text = readFileSync(path, "utf-8").trim();
@@ -1580,16 +1676,74 @@ Terse command-style prompts produce shallow, generic work.
     return undefined;
   };
 
-  const agentToolDescription = (() => {
+  const buildAgentToolDescription = (): string => {
     const mode = getToolDescriptionMode();
-    if (mode === "compact") return compactAgentToolDescription;
+    if (mode === "compact") return compactAgentToolDescription();
     if (mode === "custom") {
       const custom = loadCustomToolDescription();
       if (custom) return custom;
       console.warn('[pi-subagents] toolDescriptionMode is "custom" but no agent-tool-description.md found — using "full"');
     }
-    return fullAgentToolDescription;
-  })();
+    return fullAgentToolDescription();
+  };
+
+  const buildAgentToolParameters = () => Type.Object({
+    prompt: Type.String({
+      description: "The task for the agent to perform.",
+    }),
+    description: Type.String({
+      description: "A short (3-5 word) description of the task (shown in UI).",
+    }),
+    name: Type.Optional(
+      Type.String({
+        description:
+          'Optional memorable name for this agent, e.g. "auth-audit", so it can be addressed as `@name` at the prompt and by steer_subagent / get_subagent_result. Letters, digits, `_` and `-`. Worth setting when several agents of the same type run at once; omit for one-off work. The agent stays reachable by its type either way.',
+      }),
+    ),
+    subagent_type: Type.String({
+      description: `The type of specialized agent to use. Available types: ${getAvailableTypes().join(", ")}. Custom agents from .pi/agents/*.md (project) or ${getAgentDir()}/agents/*.md (global) are also available.`,
+    }),
+    model: Type.Optional(
+      Type.String({
+        description:
+          'Optional model override. Accepts "provider/modelId" or fuzzy name (e.g. "haiku", "sonnet"). Omit to use the agent type\'s default.',
+      }),
+    ),
+    thinking: Type.Optional(
+      Type.String({
+        description: `Thinking level: ${THINKING_LEVELS.join(", ")}. Overrides agent default.`,
+      }),
+    ),
+    max_turns: Type.Optional(
+      Type.Number({
+        description: "Maximum number of agentic turns before stopping. Omit for unlimited (default).",
+        minimum: 1,
+      }),
+    ),
+    run_in_background: Type.Optional(
+      Type.Boolean({
+        description: "Defaults to true — the agent runs detached, returning its ID immediately, and you are notified on completion. Set false only when your very next action depends on the result; the call then blocks and returns the agent's full output inline.",
+      }),
+    ),
+    resume: Type.Optional(
+      Type.String({
+        description: "Optional agent ID to resume from. Continues from previous context. Resumes detached like any other spawn; pass run_in_background: false to block and get the result inline. An agent can only be resumed once its current run has finished — use steer_subagent to reach one mid-run.",
+      }),
+    ),
+    isolated: Type.Optional(
+      Type.Boolean({
+        description: "If true, agent gets no extension/MCP tools — only built-in tools.",
+      }),
+    ),
+    inherit_context: Type.Optional(
+      Type.Boolean({
+        description: "If true, fork parent conversation into the agent. Default: false (fresh context).",
+      }),
+    ),
+    interactive: Type.Optional(Type.Boolean({ description: i18n.t("product.interactiveParameter") })),
+    ...isolationParam(isWorktreeIsolationEnabled()),
+    ...scheduleParam,
+  });
 
   // Held rather than registered inline: the mention clone reuses this exact
   // definition, so the agent it starts is an ordinary top-level spawn instead
@@ -1597,7 +1751,7 @@ Terse command-style prompts produce shallow, generic work.
   const agentTool = defineTool({
     name: SUBAGENT_TOOL_NAMES.AGENT,
     label: "Agent",
-    description: agentToolDescription,
+    description: buildAgentToolDescription(),
     promptSnippet: "Launch autonomous sub-agents for complex multi-step tasks",
     promptGuidelines: [
       "Use Agent with specialized agents when the task matches an agent type's description. Subagents are valuable for parallelizing independent queries or for protecting the main context window from excessive results, but should not be used excessively when not needed. Importantly, avoid duplicating work that subagents are already doing — if you delegate research to a subagent, do not also perform the same searches yourself.",
@@ -1605,63 +1759,7 @@ Terse command-style prompts produce shallow, generic work.
       "When an agent runs in the background, you will be notified on completion — do not poll or sleep waiting for it. Continue with other work instead.",
       "Trust but verify: an agent's summary describes intent, not outcome. When an agent writes or edits code, check the actual changes before reporting work as done.",
     ],
-    parameters: Type.Object({
-      prompt: Type.String({
-        description: "The task for the agent to perform.",
-      }),
-      description: Type.String({
-        description: "A short (3-5 word) description of the task (shown in UI).",
-      }),
-      name: Type.Optional(
-        Type.String({
-          description:
-            'Optional memorable name for this agent, e.g. "auth-audit", so it can be addressed as `@name` at the prompt and by steer_subagent / get_subagent_result. Letters, digits, `_` and `-`. Worth setting when several agents of the same type run at once; omit for one-off work. The agent stays reachable by its type either way.',
-        }),
-      ),
-      subagent_type: Type.String({
-        description: `The type of specialized agent to use. Available types: ${getAvailableTypes().join(", ")}. Custom agents from .pi/agents/*.md (project) or ${getAgentDir()}/agents/*.md (global) are also available.`,
-      }),
-      model: Type.Optional(
-        Type.String({
-          description:
-            'Optional model override. Accepts "provider/modelId" or fuzzy name (e.g. "haiku", "sonnet"). Omit to use the agent type\'s default.',
-        }),
-      ),
-      thinking: Type.Optional(
-        Type.String({
-          description: `Thinking level: ${THINKING_LEVELS.join(", ")}. Overrides agent default.`,
-        }),
-      ),
-      max_turns: Type.Optional(
-        Type.Number({
-          description: "Maximum number of agentic turns before stopping. Omit for unlimited (default).",
-          minimum: 1,
-        }),
-      ),
-      run_in_background: Type.Optional(
-        Type.Boolean({
-          description: "Defaults to true — the agent runs detached, returning its ID immediately, and you are notified on completion. Set false only when your very next action depends on the result; the call then blocks and returns the agent's full output inline.",
-        }),
-      ),
-      resume: Type.Optional(
-        Type.String({
-          description: "Optional agent ID to resume from. Continues from previous context. Resumes detached like any other spawn; pass run_in_background: false to block and get the result inline. An agent can only be resumed once its current run has finished — use steer_subagent to reach one mid-run.",
-        }),
-      ),
-      isolated: Type.Optional(
-        Type.Boolean({
-          description: "If true, agent gets no extension/MCP tools — only built-in tools.",
-        }),
-      ),
-      inherit_context: Type.Optional(
-        Type.Boolean({
-          description: "If true, fork parent conversation into the agent. Default: false (fresh context).",
-        }),
-      ),
-      interactive: Type.Optional(Type.Boolean({ description: i18n.t("product.interactiveParameter") })),
-      ...isolationParam(isWorktreeIsolationEnabled()),
-      ...scheduleParam,
-    }),
+    parameters: buildAgentToolParameters(),
 
     // ---- Custom rendering: Claude Code style ----
 
@@ -1785,8 +1883,9 @@ Terse command-style prompts produce shallow, generic work.
       // Ensure we have UI context for widget rendering
       widget.setUICtx(ctx.ui as UICtx);
 
-      // Reload custom agents so new project/global .md files are picked up without restart
-      reloadCustomAgents();
+      // Capture settings, trust and definitions before this invocation can enter
+      // either queue. A later session/settings change cannot rewrite its policy.
+      const runtimePolicy = captureSpawnPolicy(ctx);
 
       const rawType = params.subagent_type as SubagentType;
       // Single decision point for dispatch (#183): unknown, disabled and
@@ -1820,8 +1919,8 @@ Terse command-style prompts produce shallow, generic work.
       const customConfig = getAgentConfig(subagentType);
 
       const resolvedConfig = resolveAgentInvocationConfig(customConfig, params, {
-        worktreeAllowed: isWorktreeIsolationEnabled(),
-        defaultRunInBackground: getBackgroundByDefault(),
+        worktreeAllowed: runtimePolicy.worktreeIsolation,
+        defaultRunInBackground: runtimePolicy.settings.backgroundByDefault ?? true,
       });
 
       // Resolve model from agent config first; tool-call params only fill gaps.
@@ -1840,8 +1939,10 @@ Terse command-style prompts produce shallow, generic work.
       // user's enabledModels list. Policy (hard error vs warn-and-proceed) lives
       // in model-scope.ts so the nested delegation tools apply the same rule.
       const scopeVerdict = checkModelScope({
+        enabled: runtimePolicy.scopeModels,
+        projectTrusted: runtimePolicy.projectTrusted,
         model,
-        cwd: ctx.cwd,
+        cwd: runtimePolicy.configCwd,
         modelRegistry: ctx.modelRegistry,
         callerSupplied: resolvedConfig.modelFromParams,
         agentLabel: customConfig?.displayName ?? subagentType,
@@ -1860,7 +1961,7 @@ Terse command-style prompts produce shallow, generic work.
       // default applies. `attachTranscript` below is the SOLE gate — every
       // downstream consumer keys off record.outputFile being set, so no spawn
       // path can re-enable the transcript by accident.
-      const outputTranscript = customConfig?.outputTranscript ?? getOutputTranscriptDefault();
+      const outputTranscript = customConfig?.outputTranscript ?? runtimePolicy.outputTranscript;
       const attachTranscript = (rec: AgentRecord | undefined, agentId: string): void => {
         if (!rec || !outputTranscript) return;
         rec.outputFile = createOutputFilePath(ctx.cwd, agentId, ctx.sessionManager.getSessionId());
@@ -1884,7 +1985,7 @@ Terse command-style prompts produce shallow, generic work.
         if (typeof resolvedAsked === "string") return asked;
         return resolvedAsked.provider === model?.provider && resolvedAsked.id === model?.id ? undefined : asked;
       })(resolvedConfig.overridden?.model);
-      const effectiveMaxTurns = normalizeMaxTurns(resolvedConfig.maxTurns ?? getDefaultMaxTurns());
+      const effectiveMaxTurns = normalizeMaxTurns(resolvedConfig.maxTurns ?? runtimePolicy.defaultMaxTurns);
       const agentInvocation: AgentInvocation = {
         modelName,
         modelId,
@@ -2083,6 +2184,11 @@ Terse command-style prompts produce shallow, generic work.
           isolation,
           invocation: agentInvocation,
           rootSessionId: ctx.sessionManager.getSessionId(),
+          agentConfig: customConfig,
+          configCwd: runtimePolicy.configCwd,
+          runtimePolicy,
+          backend: runtimePolicy.settings.backend ?? "embedded",
+          maxSubagentDepth: runtimePolicy.maxSubagentDepth,
           ...bgCallbacks,
         });
 
@@ -2238,10 +2344,15 @@ Terse command-style prompts produce shallow, generic work.
           invocation: agentInvocation,
           signal,
           rootSessionId: ctx.sessionManager.getSessionId(),
+          agentConfig: customConfig,
+          configCwd: runtimePolicy.configCwd,
+          runtimePolicy,
+          backend: runtimePolicy.settings.backend ?? "embedded",
+          maxSubagentDepth: runtimePolicy.maxSubagentDepth,
           // Deliberately does NOT set fgId: that drives agentActivity, the
           // widget and the `finally` cleanup below, none of which should see an
           // agent that has no session and may never get one.
-          onQueued: (_id, ahead) => { queuedAhead = ahead; streamUpdate(); },
+          onQueued: (_id: string, ahead: number) => { queuedAhead = ahead; streamUpdate(); },
           ...fgCallbacks,
         }, (fgAgentId) => {
           // onSpawned: called synchronously after spawn, before onSessionCreated fires.
@@ -2319,6 +2430,14 @@ Terse command-style prompts produce shallow, generic work.
   // The mention path is handed THIS object, not the bare `agentTool` — see the
   // mention-clone header on why the clone must call the registered tool.
   const registeredAgentTool = withUsageReporting(agentTool);
+  refreshAgentToolRegistration = () => {
+    rebuildAgentToolInputs();
+    registeredAgentTool.description = buildAgentToolDescription();
+    registeredAgentTool.parameters = buildAgentToolParameters();
+    // registerTool replaces this extension's definition by name and refreshes
+    // the bound runtime, so the first model turn sees the session-scoped schema.
+    pi.registerTool(registeredAgentTool);
+  };
   pi.registerTool(registeredAgentTool);
 
   // ---- Workflow tool ----
@@ -2840,65 +2959,78 @@ Terse command-style prompts produce shallow, generic work.
 
   registerToolReportingUsage(defineTool({
     name: SUBAGENT_TOOL_NAMES.STEER,
-    label: "Steer Agent",
+    label: i18n.t("product.controlSnippet"),
     description: i18n.t("product.controlDescription"),
     promptSnippet: i18n.t("product.controlSnippet"),
     parameters: Type.Object({
       agent_id: Type.String({
-        description: "The agent ID to steer (must be currently running). The agent's handle also works — its `name` if you gave it one, otherwise its type (`explore`, `explore-2`).",
+        description: i18n.t("product.controlDescription"),
       }),
-      action: Type.Optional(Type.Union([Type.Literal("steer"), Type.Literal("interrupt"), Type.Literal("stop")], {
+      action: Type.Union([
+        Type.Literal("steer"),
+        Type.Literal("interrupt"),
+        Type.Literal("cancel"),
+        Type.Literal("close"),
+      ], {
         description: i18n.t("product.controlAction"),
-      })),
+      }),
       message: Type.Optional(Type.String({ description: i18n.t("product.controlMessage") })),
     }),
     execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
       const record = resolveAgentRef(params.agent_id);
-      if (!record || !isTopLevelAgent(record)) {
+      // Preserve the top-level ownership boundary before any canonical control.
+      if (record && !isTopLevelAgent(record)) throw new Error(i18n.t("product.notOwned"));
+      // `close` is intentionally idempotent: an already-retired ID reaches
+      // manager.control and returns applied=false instead of claiming success.
+      if (!record && params.action !== "close") {
         return textResult(`Agent not found: "${params.agent_id}". It may have been cleaned up.`);
       }
-      if (params.action === "stop") {
-        await manager.release(record.id);
-        widget.update();
-        fleet.update();
-        return textResult(i18n.t("product.stopped", { id: record.id }));
-      }
-      if (params.action === "interrupt") {
-        if (!await manager.interrupt(record.id)) throw new Error(i18n.t("product.cannotInterrupt", { id: record.id }));
-        return textResult(i18n.t("product.interrupted", { id: record.id }));
-      }
-      if (record.status !== "running") {
-        return textResult(`Agent "${params.agent_id}" is not running (status: ${record.status}). Cannot steer a non-running agent.`);
-      }
-      if (params.message === undefined) throw new Error(i18n.t("product.messageRequired"));
-      if (!record.session) {
-        // Session not ready yet — queue the steer for delivery once initialized
-        manager.steer(record.id, params.message);
-        pi.events.emit("subagents:steered", { id: record.id, message: params.message });
-        return textResult(`Steering message queued for agent ${record.id}. It will be delivered once the session initializes.`);
+      if (params.action === "steer" && (params.message === undefined || !params.message.trim())) {
+        throw new Error(i18n.t("product.messageRequired"));
       }
 
+      const id = record?.id ?? params.agent_id;
+      const request: AgentControlRequest = params.action === "steer"
+        ? { action: "steer", message: params.message! }
+        : { action: params.action };
+      const steerQueued = params.action === "steer" && !record?.session;
+      let applied: boolean;
       try {
-        await manager.steerAndWait(record.id, params.message);
-        pi.events.emit("subagents:steered", { id: record.id, message: params.message });
-        const tokens = formatLifetimeTokens(record);
-        const contextPercent = getSessionContextPercent(record.session);
-        const stateParts: string[] = [];
-        if (tokens) stateParts.push(tokens);
-        if (showCost) {
-          const costText = formatCost(getLifetimeCost(record.lifetimeUsage));
-          if (costText) stateParts.push(costText);
+        applied = await manager.control(id, request);
+      } catch (error) {
+        if (params.action === "steer") {
+          return textResult(`Failed to steer agent: ${error instanceof Error ? error.message : String(error)}`);
         }
-        stateParts.push(`${record.toolUses} tool ${record.toolUses === 1 ? "use" : "uses"}`);
-        if (contextPercent !== null) stateParts.push(`context ${Math.round(contextPercent)}% full`);
-        if (record.compactionCount) stateParts.push(`${record.compactionCount} compaction${record.compactionCount === 1 ? "" : "s"}`);
-        return textResult(
-          `Steering message sent to agent ${record.id}. The agent will process it after its current tool execution.\n` +
-          `Current state: ${stateParts.join(" · ")}`,
-        );
-      } catch (err) {
-        return textResult(`Failed to steer agent: ${err instanceof Error ? err.message : String(err)}`);
+        throw error;
       }
+      widget.update();
+      fleet.update();
+      if (!applied) return textResult(i18n.t("product.unchanged", { id, action: params.action }));
+
+      if (params.action === "interrupt") return textResult(i18n.t("product.interrupted", { id }));
+      if (params.action === "cancel") return textResult(i18n.t("product.cancelled", { id }));
+      if (params.action === "close") return textResult(i18n.t("product.closed", { id }));
+
+      pi.events.emit("subagents:steered", { id, message: params.message! });
+      if (steerQueued) {
+        return textResult(`Steering message queued for agent ${id}. It will be delivered once the session initializes.`);
+      }
+      const live = record!;
+      const tokens = formatLifetimeTokens(live);
+      const contextPercent = getSessionContextPercent(live.session);
+      const stateParts: string[] = [];
+      if (tokens) stateParts.push(tokens);
+      if (showCost) {
+        const costText = formatCost(getLifetimeCost(live.lifetimeUsage));
+        if (costText) stateParts.push(costText);
+      }
+      stateParts.push(`${live.toolUses} tool ${live.toolUses === 1 ? "use" : "uses"}`);
+      if (contextPercent !== null) stateParts.push(`context ${Math.round(contextPercent)}% full`);
+      if (live.compactionCount) stateParts.push(`${live.compactionCount} compaction${live.compactionCount === 1 ? "" : "s"}`);
+      return textResult(
+        `Steering message sent to agent ${id}. The agent will process it after its current tool execution.\n` +
+        `Current state: ${stateParts.join(" · ")}`,
+      );
     },
   }));
 
@@ -2926,6 +3058,23 @@ Terse command-style prompts produce shallow, generic work.
     return `${label} (→ ${resolvedFull.replace(/-\d{8}$/, "")})`;
   }
 
+  function refuseUntrustedProjectWrite(ctx: ExtensionCommandContext): false {
+    currentRuntimePolicy = captureRuntimePolicy(ctx.cwd, false);
+    applyRuntimeSettings(currentRuntimePolicy.configCwd, false);
+    refreshAgentToolRegistration();
+    notifyWithSource({
+      ctx,
+      source: NOTICE_SOURCE,
+      level: "warning",
+      message: i18n.t("product.projectUntrusted"),
+    });
+    return false;
+  }
+
+  function canWriteProject(ctx: ExtensionCommandContext): boolean {
+    return isProjectTrusted(ctx) || refuseUntrustedProjectWrite(ctx);
+  }
+
   async function showAgentsMenu(ctx: ExtensionCommandContext) {
     reloadCustomAgents();
     const allNames = getAllTypes();
@@ -2936,9 +3085,13 @@ Terse command-style prompts produce shallow, generic work.
     // Running agents entry (only if there are active agents)
     const agents = manager.listAgents().filter(isTopLevelAgent);
     if (agents.length > 0) {
-      const running = agents.filter(a => a.status === "running" || a.status === "queued").length;
+      const waiting = agents.filter(a => a.status === "idle" || (a.status === "running" && a.activity === "idle")).length;
+      const running = agents.filter(a => a.status === "running" && a.activity !== "idle" && a.activity !== "queued").length;
+      const queued = agents.filter(a => a.status === "queued" || (a.status === "running" && a.activity === "queued")).length;
       const done = agents.filter(a => a.status === "completed" || a.status === "steered").length;
-      options.push(`Running agents (${agents.length}) — ${running} running, ${done} done`);
+      options.push(
+        `Running agents (${agents.length}) — ${running} running, ${i18n.t("product.waitingCount", { count: waiting })}, ${queued} queued, ${done} done`,
+      );
     }
 
     // Agent types list
@@ -3076,7 +3229,10 @@ Terse command-style prompts produce shallow, generic work.
     const record = await selectItem(ctx.ui, "Running agents", agents, a => {
       const dn = getDisplayName(a.type);
       const dur = formatDuration(a.startedAt, a.completedAt);
-      return `${dn} (${a.description}) · ${a.toolUses} tools · ${a.status} · ${dur}`;
+      const status = a.status === "idle" || (a.status === "running" && a.activity === "idle")
+        ? i18n.t("product.waitingLabel")
+        : a.status;
+      return `${dn} (${a.description}) · ${a.toolUses} tools · ${status} · ${dur}`;
     });
     if (!record) return;
 
@@ -3097,11 +3253,20 @@ Terse command-style prompts produce shallow, generic work.
 
     await ctx.ui.custom<undefined>(
       (tui, theme, keybindings, done) => {
-        return new ConversationViewer(tui, session, record, activity, theme, done, () => {
-          if (manager.abort(record.id)) {
-            ctx.ui.notify(`Stopped "${record.description}".`, "info");
-          }
-        }, keybindings, (message: string) => manager.steer(record.id, message), showCost, getViewerMarkdown, (mode) => chooseViewerMarkdown(mode, ctx));
+        return new ConversationViewer(
+          tui,
+          session,
+          record,
+          activity,
+          theme,
+          done,
+          (request) => controlAgentFromUI(record.id, request),
+          keybindings,
+          undefined,
+          showCost,
+          getViewerMarkdown,
+          (mode) => chooseViewerMarkdown(mode, ctx),
+        );
       },
       {
         overlay: true,
@@ -3117,7 +3282,7 @@ Terse command-style prompts produce shallow, generic work.
       return;
     }
 
-    const file = locateAgentFile(name, cfg.sourcePath);
+    const file = locateAgentFile(name, cfg.sourcePath, ctx.cwd);
     const isDefault = cfg.isDefault === true;
     const disabled = cfg.enabled === false;
 
@@ -3142,6 +3307,7 @@ Terse command-style prompts produce shallow, generic work.
     if (!choice || choice === "Back") return;
 
     if (choice === "Edit" && file) {
+      if (file.location !== "personal" && !canWriteProject(ctx)) return;
       const content = readFileSync(file.path, "utf-8");
       const edited = await ctx.ui.editor(`Edit ${name}`, content);
       if (edited !== undefined && edited !== content) {
@@ -3152,6 +3318,7 @@ Terse command-style prompts produce shallow, generic work.
       }
     } else if (choice === "Delete") {
       if (file) {
+        if (file.location !== "personal" && !canWriteProject(ctx)) return;
         const confirmed = await ctx.ui.confirm("Delete agent", `Delete ${name} from ${file.location} (${file.path})?`);
         if (confirmed) {
           unlinkSync(file.path);
@@ -3160,6 +3327,7 @@ Terse command-style prompts produce shallow, generic work.
         }
       }
     } else if (choice === "Reset to default" && file) {
+      if (file.location !== "personal" && !canWriteProject(ctx)) return;
       const confirmed = await ctx.ui.confirm("Reset to default", `Delete override ${file.path} and restore embedded default?`);
       if (confirmed) {
         unlinkSync(file.path);
@@ -3183,7 +3351,9 @@ Terse command-style prompts produce shallow, generic work.
     ]);
     if (!location) return;
 
-    const targetDir = location.startsWith("Project") ? projectAgentsDir() : personalAgentsDir();
+    const project = location.startsWith("Project");
+    if (project && !canWriteProject(ctx)) return;
+    const targetDir = project ? projectAgentsDir(ctx.cwd) : personalAgentsDir();
     mkdirSync(targetDir, { recursive: true });
 
     const targetPath = join(targetDir, `${name}.md`);
@@ -3202,8 +3372,9 @@ Terse command-style prompts produce shallow, generic work.
 
   /** Disable an agent: set enabled: false in its .md file, or create a stub for built-in defaults. */
   async function disableAgent(ctx: ExtensionCommandContext, name: string) {
-    const file = locateAgentFile(name, getAgentConfig(name)?.sourcePath);
+    const file = locateAgentFile(name, getAgentConfig(name)?.sourcePath, ctx.cwd);
     if (file) {
+      if (file.location !== "personal" && !canWriteProject(ctx)) return;
       // Existing file — set enabled: false in frontmatter (idempotent)
       const content = readFileSync(file.path, "utf-8");
       const { content: updated, outcome } = disableInContent(content);
@@ -3231,7 +3402,9 @@ Terse command-style prompts produce shallow, generic work.
     ]);
     if (!location) return;
 
-    const targetDir = location.startsWith("Project") ? projectAgentsDir() : personalAgentsDir();
+    const project = location.startsWith("Project");
+    if (project && !canWriteProject(ctx)) return;
+    const targetDir = project ? projectAgentsDir(ctx.cwd) : personalAgentsDir();
     mkdirSync(targetDir, { recursive: true });
 
     const targetPath = join(targetDir, `${name}.md`);
@@ -3243,8 +3416,9 @@ Terse command-style prompts produce shallow, generic work.
 
   /** Enable a disabled agent by removing enabled: false from its frontmatter. */
   async function enableAgent(ctx: ExtensionCommandContext, name: string) {
-    const file = locateAgentFile(name, getAgentConfig(name)?.sourcePath);
+    const file = locateAgentFile(name, getAgentConfig(name)?.sourcePath, ctx.cwd);
     if (!file) return;
+    if (file.location !== "personal" && !canWriteProject(ctx)) return;
 
     const content = readFileSync(file.path, "utf-8");
     const { content: updated, changed } = enableInContent(content);
@@ -3275,7 +3449,9 @@ Terse command-style prompts produce shallow, generic work.
     ]);
     if (!location) return;
 
-    const targetDir = location.startsWith("Project") ? projectAgentsDir() : personalAgentsDir();
+    const project = location.startsWith("Project");
+    if (project && !canWriteProject(ctx)) return;
+    const targetDir = project ? projectAgentsDir(ctx.cwd) : personalAgentsDir();
 
     const method = await ctx.ui.select("Creation method", [
       "Generate with Claude (recommended)",
@@ -3355,8 +3531,14 @@ Guidelines for choosing settings:
 
 Write the file using the write tool. Only write the file, nothing else.`;
 
+    const runtimePolicy = captureSpawnPolicy(ctx);
     const { record } = await manager.spawnAndWait(pi, ctx, "general-purpose", generatePrompt, {
       description: `Generate ${name} agent`,
+      agentConfig: getAgentConfig("general-purpose"),
+      configCwd: runtimePolicy.configCwd,
+      runtimePolicy,
+      backend: runtimePolicy.settings.backend ?? "embedded",
+      maxSubagentDepth: runtimePolicy.maxSubagentDepth,
       maxTurns: 5,
       // Exempt from maxConcurrentForeground. This runs from a modal wizard, not
       // a tool call: it passes no signal, and Esc in `ctx.ui` never reaches the
@@ -3523,6 +3705,10 @@ Write the file using the write tool. Only write the file, nothing else.`;
   ]);
 
   async function showSettings(ctx: ExtensionCommandContext) {
+    // This UI owns the project settings file. An untrusted project gets the
+    // global-only view; never reinterpret a rejected project write as global.
+    if (!canWriteProject(ctx)) return;
+
     function buildItems(): SettingItem[] {
       const mc = manager.getMaxConcurrent();
       const mcf = manager.getMaxConcurrentForeground();
@@ -3974,24 +4160,30 @@ Write the file using the write tool. Only write the file, nothing else.`;
    * looking persisted when the next session will not have it.
    */
   function persistSettings(ctx: ExtensionCommandContext | undefined, changeMsg: string): void {
+    if (!ctx || !canWriteProject(ctx)) return;
     const { message, level } = saveAndEmitChanged(
       snapshotSettings(),
       changeMsg,
       (event, payload) => pi.events.emit(event, payload),
+      ctx.cwd,
     );
-    // `ctx` is absent only on the fleet path between sessions, where
-    // `currentCtx` has been cleared and there is no UI to carry the warning to.
-    // The write still happens.
-    if (level === "warning") ctx?.ui.notify(message, level);
+    if (level === "warning") notifyWithSource({
+      ctx,
+      source: NOTICE_SOURCE,
+      level,
+      message,
+    });
   }
 
   function notifyApplied(ctx: ExtensionCommandContext, successMsg: string) {
+    if (!canWriteProject(ctx)) return;
     const { message, level } = saveAndEmitChanged(
       snapshotSettings(),
       successMsg,
       (event, payload) => pi.events.emit(event, payload),
+      ctx.cwd,
     );
-    ctx.ui.notify(message, level);
+    notifyWithSource({ ctx, source: NOTICE_SOURCE, level, message });
   }
 
   pi.registerCommand("agents", {

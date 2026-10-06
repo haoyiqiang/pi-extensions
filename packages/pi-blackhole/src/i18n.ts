@@ -1,5 +1,7 @@
 import {
   NOTICE_TAG_COLOR,
+  bindNoticeOwner,
+  getNoticeOwnerBinding,
   notifyWithSource,
   scope,
   type MessageParams,
@@ -35,11 +37,14 @@ export const NOTICE_SOURCE: NoticeSource = { tag: NOTICE_TAG, color: NOTICE_COLO
 
 /** 把 Blackhole 的轻量运行时上下文接入统一提示出口。 */
 export function notifyBlackhole(
-  ctx: { mode?: string; hasUI?: boolean; ui?: NoticeContext["ui"] },
+  ctx: { sessionManager?: object; mode?: string; hasUI?: boolean; ui?: NoticeContext["ui"] },
   level: NoticeLevel,
   message: string,
 ): void {
   if (!ctx.ui) return;
   const mode = ctx.mode ?? (ctx.hasUI ? "tui" : undefined);
-  notifyWithSource({ ctx: { mode, ui: ctx.ui }, source: NOTICE_SOURCE, level, message });
+  const view: NoticeContext = { mode, ui: ctx.ui };
+  const release = bindNoticeOwner(view, getNoticeOwnerBinding(ctx));
+  try { notifyWithSource({ ctx: view, source: NOTICE_SOURCE, level, message }); }
+  finally { release(); }
 }

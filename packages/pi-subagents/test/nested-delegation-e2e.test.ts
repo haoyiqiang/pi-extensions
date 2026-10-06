@@ -161,6 +161,7 @@ describe("nested delegation e2e (real pi-mono, faux model)", () => {
       cwd,
       respond,
       live: false,
+      projectTrusted: true,
       beforeRun: () => { registerAgents(loadCustomAgents(cwd)); },
     });
 
@@ -227,6 +228,7 @@ describe("nested delegation e2e (real pi-mono, faux model)", () => {
         cwd,
         respond,
         live: false,
+        projectTrusted: true,
         beforeRun: () => { registerAgents(loadCustomAgents(cwd)); },
       });
 

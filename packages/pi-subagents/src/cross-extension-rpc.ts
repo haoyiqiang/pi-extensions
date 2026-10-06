@@ -1,7 +1,7 @@
 /**
  * Cross-extension RPC handlers for the subagents extension.
  *
- * Exposes ping, spawn, stop, and consume RPCs over the pi.events event bus,
+ * Exposes ping, spawn, control, and consume RPCs over the pi.events event bus,
  * using per-request scoped reply channels.
  *
  * Reply envelope follows pi-mono convention:
@@ -10,10 +10,12 @@
  *
  * @see docs/rpc.md — the caller-facing integration reference: spawn options
  * (including the fields spawnTopLevel strips), every error string, the
- * completion-notification race, and what protocol version 2 does not promise.
+ * completion-notification race, and protocol version 3 control ownership.
  */
 
-import { isTopLevelAgent } from "./agent-manager.js";
+import { isTopLevelAgent, type AgentControlRequest } from "./agent-manager.js";
+import { i18n } from "./i18n.js";
+import type { SubagentsRuntimePolicy } from "./runtime-policy.js";
 import { type ModelRegistry, resolveModel } from "./model-resolver.js";
 import { checkModelScope } from "./model-scope.js";
 import type { AgentRecord } from "./types.js";
@@ -30,14 +32,14 @@ export type RpcReply<T = void> =
   | { success: false; error: string };
 
 /** RPC protocol version — bumped when the envelope or method contracts change. */
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 
-/** Minimal AgentManager interface needed by the spawn/stop/consume RPCs. */
+/** Minimal AgentManager interface needed by the spawn/control/consume RPCs. */
 export interface SpawnCapable {
   spawn(pi: unknown, ctx: unknown, type: string, prompt: string, options: any): string;
   /** Resolves once the spawned agent is running; rejects on a startup failure. */
   awaitStartup(id: string): Promise<void>;
-  abort(id: string): boolean;
+  control(id: string, request: AgentControlRequest): Promise<boolean>;
   /**
    * The record behind an id, for the stop handler's ownership check. Narrowed
    * to the two fields `isTopLevelAgent` reads, so the RPC layer keeps its
@@ -57,12 +59,13 @@ export interface RpcDeps {
   pi: unknown;                    // passed through to manager.spawn
   getCtx: () => unknown | undefined;  // returns current ExtensionContext
   manager: SpawnCapable;
+  getRuntimePolicy?: () => SubagentsRuntimePolicy;
 }
 
 export interface RpcHandle {
   unsubPing: () => void;
   unsubSpawn: () => void;
-  unsubStop: () => void;
+  unsubControl: () => void;
   unsubConsume: () => void;
 }
 
@@ -91,14 +94,14 @@ function handleRpc<P extends { requestId: string }>(
 }
 
 /**
- * Register ping, spawn, stop, and consume RPC handlers on the event bus.
+ * Register ping, spawn, control, and consume RPC handlers on the event bus.
  * Returns unsub functions for cleanup.
  */
 export function registerRpcHandlers(deps: RpcDeps): RpcHandle {
   const { events, pi, getCtx, manager } = deps;
 
   const unsubPing = handleRpc(events, "subagents:rpc:ping", () => {
-    return { version: PROTOCOL_VERSION };
+    return { version: PROTOCOL_VERSION, controlActions: ["steer", "interrupt", "cancel", "close"] };
   });
 
   const unsubSpawn = handleRpc<{ requestId: string; type: string; prompt: string; options?: any }>(
@@ -144,7 +147,9 @@ export function registerRpcHandlers(deps: RpcDeps): RpcHandle {
         // resolveModel is fuzzy, so a bare "sonnet" can land on a provider the
         // caller never named. Frontmatter-pinned and parent-inherited models are
         // resolved later, in agent-runner, and keep warn-and-proceed.
+        const policy = deps.getRuntimePolicy?.();
         const verdict = checkModelScope({
+          ...(policy ? { enabled: policy.scopeModels, projectTrusted: policy.projectTrusted } : {}),
           model,
           cwd: cwd ?? process.cwd(),
           modelRegistry,
@@ -164,22 +169,22 @@ export function registerRpcHandlers(deps: RpcDeps): RpcHandle {
     },
   );
 
-  const unsubStop = handleRpc<{ requestId: string; agentId: string }>(
-    events, "subagents:rpc:stop", ({ agentId }) => {
+  const unsubControl = handleRpc<{ requestId: string; agentId: string; action: string; message?: string }>(
+    events, "subagents:rpc:control", async ({ agentId, action, message }) => {
+      if (!["steer", "interrupt", "cancel", "close"].includes(action)) {
+        throw new Error(i18n.t("product.invalidAction"));
+      }
       const record = manager.getRecord(agentId);
-      if (!record) throw new Error("Agent not found");
-      // Only the session's own agents are this RPC's to stop. A nested child or
-      // a workflow's agent is owned by something that is *waiting on it*, and
-      // aborting it out from under that owner turns another extension's stop
-      // into a failed step here. Defence in depth rather than a live hole: no
-      // RPC hands out agent ids, so a caller has no ordinary way to name one it
-      // does not own — but the guard is cheap and the id may leak some other
-      // way. Same refuse-what-we-should-not-touch stance as `consume` below.
-      if (!isTopLevelAgent(record)) throw new Error("Agent is owned by another agent or workflow");
-      // Not "not found" — the lookup above already proved it exists. `abort`
-      // returns false only for a record that is neither running nor queued,
-      // which is an agent that has already finished.
-      if (!manager.abort(agentId)) throw new Error("Agent is not running");
+      if (record && !isTopLevelAgent(record)) throw new Error(i18n.t("product.notOwned"));
+      if (!record && action !== "close") throw new Error(i18n.t("manager.unknownRecord", { id: agentId }));
+      if (action === "steer" && (typeof message !== "string" || !message.trim())) {
+        throw new Error(i18n.t("product.messageRequired"));
+      }
+      const request: AgentControlRequest = action === "steer"
+        ? { action, message: message! }
+        : { action: action as "interrupt" | "cancel" | "close" };
+      const applied = await manager.control(agentId, request);
+      return { action, applied };
     },
   );
 
@@ -194,5 +199,5 @@ export function registerRpcHandlers(deps: RpcDeps): RpcHandle {
     },
   );
 
-  return { unsubPing, unsubSpawn, unsubStop, unsubConsume };
+  return { unsubPing, unsubSpawn, unsubControl, unsubConsume };
 }

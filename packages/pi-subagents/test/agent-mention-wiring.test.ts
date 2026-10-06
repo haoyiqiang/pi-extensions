@@ -86,11 +86,17 @@ function finishedRun(session: any) {
   } as any);
 }
 
+/** Bind the actual project cwd/trust decision; factory activation is global-only. */
+function bindSession(b: ReturnType<typeof makePi>): void {
+  void b.lifecycle.get("session_start")?.({}, ctx({ mode: "json", hasUI: false }));
+}
+
 /** Boot the real extension. `outputTranscript: false` keeps the run off disk. */
 function boot(settings: Record<string, unknown> = {}) {
   hermetic = hermeticDir({ settings: { outputTranscript: false, ...settings } });
   const b = makePi();
   subagentsExtension(b.pi);
+  bindSession(b);
   booted = b.lifecycle;
   return b;
 }
@@ -136,7 +142,7 @@ describe("messaging a running agent", () => {
 
     expect(result).toEqual({ action: "handled" });
     expect(session.steer).toHaveBeenCalledWith("also check the RPC path");
-    expect(uiCtx.ui.notify).toHaveBeenCalledWith("Sent to @explore", "info");
+    expect(uiCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("Sent to @explore"), "info");
     expect(pi.sendMessage).not.toHaveBeenCalled();
 
   });
@@ -212,6 +218,7 @@ describe("messaging a finished agent", () => {
     });
     const b = makePi();
     subagentsExtension(b.pi);
+    bindSession(b);
     booted = b.lifecycle;
     finishedRun(fakeSession());
     vi.mocked(resumeAgent).mockResolvedValue({ text: "second answer", failure: undefined } as any);
@@ -1090,7 +1097,7 @@ describe("resuming an evicted agent by name", () => {
     // Steered, not resumed again — and runAgent was called exactly once.
     expect(resumed.steer).toHaveBeenCalledWith("and one more thing");
     expect(vi.mocked(runAgent)).toHaveBeenCalledTimes(1);
-    expect(uiCtx.ui.notify).toHaveBeenCalledWith("Sent to @explore", "info");
+    expect(uiCtx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("Sent to @explore"), "info");
   });
 
   it("gives a named agent its alias back too", async () => {
@@ -1128,6 +1135,7 @@ describe("resuming an evicted agent by name", () => {
     });
     const b = makePi();
     subagentsExtension(b.pi);
+    bindSession(b);
     booted = b.lifecycle;
     finishedRun(fakeSession());
     await evict(await spawnBackground(b.tools, "scout"));
@@ -1159,6 +1167,7 @@ describe("resuming an evicted agent by name", () => {
     });
     const b = makePi();
     subagentsExtension(b.pi);
+    bindSession(b);
     booted = b.lifecycle;
     // Spawn while it is still enabled, then disable, mention, re-enable.
     const file = join(process.cwd(), ".pi", "agents", "scout.md");
@@ -1247,7 +1256,7 @@ describe("resuming an evicted agent by name", () => {
     await flush();
 
     const steered = await tools.get("steer_subagent").execute(
-      "tc", { agent_id: "explore", message: "hi" }, undefined, undefined, ctx(),
+      "tc", { agent_id: "explore", action: "steer", message: "hi" }, undefined, undefined, ctx(),
     );
     const read = await tools.get("get_subagent_result").execute(
       "tc", { agent_id: "explore" }, undefined, undefined, ctx(),
@@ -1320,7 +1329,7 @@ describe("handles as tool arguments", () => {
     await flush();
 
     const r = await tools.get("steer_subagent").execute(
-      "tc", { agent_id: "explore", message: "look at the RPC path" }, undefined, undefined, ctx(),
+      "tc", { agent_id: "explore", action: "steer", message: "look at the RPC path" }, undefined, undefined, ctx(),
     );
 
     expect(session.steer).toHaveBeenCalledWith("look at the RPC path");
@@ -1339,7 +1348,7 @@ describe("handles as tool arguments", () => {
     await flush();
 
     await tools.get("steer_subagent").execute(
-      "tc", { agent_id: "auth-audit", message: "keep going" }, undefined, undefined, ctx(),
+      "tc", { agent_id: "auth-audit", action: "steer", message: "keep going" }, undefined, undefined, ctx(),
     );
 
     expect(session.steer).toHaveBeenCalledWith("keep going");
@@ -1362,7 +1371,7 @@ describe("handles as tool arguments", () => {
     const { tools } = boot();
 
     const r = await tools.get("steer_subagent").execute(
-      "tc", { agent_id: "nosuchagent", message: "hi" }, undefined, undefined, ctx(),
+      "tc", { agent_id: "nosuchagent", action: "steer", message: "hi" }, undefined, undefined, ctx(),
     );
 
     expect(textOf(r)).toContain("Agent not found");

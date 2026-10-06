@@ -49,6 +49,8 @@ function ctx() {
     hasUI: false,
     ui: { setStatus: vi.fn(), setWidget: vi.fn(), notify: vi.fn() },
     cwd: process.cwd(),
+    isProjectTrusted: () => true,
+    mode: "json",
     model: undefined,
     modelRegistry: { find: vi.fn(), getAvailable: vi.fn(() => []) },
     sessionManager: { getSessionId: vi.fn(() => "s1"), getBranch: vi.fn(() => []) },
@@ -85,6 +87,7 @@ describe("Symbol.for manager registry across activations", () => {
     // Root session activates first and owns the registry.
     const root = makePi();
     subagentsExtension(root.pi);
+    await root.lifecycle.get("session_start")?.({}, ctx());
     const rootEntry = (globalThis as any)[MANAGER_KEY];
     expect(rootEntry).toBeDefined();
 
@@ -95,6 +98,7 @@ describe("Symbol.for manager registry across activations", () => {
     // A child agent session re-activates the extension in-process.
     const child = makePi();
     subagentsExtension(child.pi);
+    await child.lifecycle.get("session_start")?.({}, ctx());
 
     // Registry still points at the root's entry (child did not clobber it) …
     expect((globalThis as any)[MANAGER_KEY]).toBe(rootEntry);
@@ -120,6 +124,7 @@ describe("the registry spawn strips internal capabilities", () => {
     delete (globalThis as any)[MANAGER_KEY];
     const root = makePi();
     subagentsExtension(root.pi);
+    void root.lifecycle.get("session_start")?.({}, ctx());
     vi.mocked(runAgent).mockImplementation(() => new Promise(() => {}) as any);
     const entry = (globalThis as any)[MANAGER_KEY];
     const id = entry.spawn(root.pi, ctx(), "general-purpose", "go", {
@@ -145,7 +150,10 @@ describe("the registry spawn strips internal capabilities", () => {
     const { entry, id, root, runOpts } = forge({ rootSessionId: "../../elsewhere", configCwd: "/etc" });
 
     expect(entry.getRecord(id).rootSessionId).toBeUndefined();
-    expect(runOpts().configCwd).toBeUndefined();
+    // The caller cannot forge /etc; root now captures the real session config
+    // root explicitly rather than leaving it implicit.
+    expect(runOpts().configCwd).toBe(process.cwd());
+    expect(runOpts().configCwd).not.toBe("/etc");
     await root.lifecycle.get("session_shutdown")?.();
   });
 

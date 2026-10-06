@@ -127,6 +127,7 @@ describe("ext: / tools: scoping — template-driven e2e (real pi-mono, headless)
         pi,
         model,
         cwd: FIXTURES_DIR,
+        projectTrusted: true,
         isolated: resolved.isolated,
         inheritContext: resolved.inheritContext,
         onSessionCreated: (s) => {

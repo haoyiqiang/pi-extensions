@@ -2,8 +2,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { type EventBus, PROTOCOL_VERSION, type RpcDeps, registerRpcHandlers, type SpawnCapable } from "../src/cross-extension-rpc.js";
+import { type EventBus, type RpcDeps, registerRpcHandlers, type SpawnCapable } from "../src/cross-extension-rpc.js";
 import { isScopeModelsEnabled, setScopeModelsEnabled } from "../src/model-scope.js";
+import { i18n } from "../src/i18n.js";
 
 /** Simple in-process event bus for testing. */
 function createEventBus(): EventBus {
@@ -31,7 +32,7 @@ describe("cross-extension RPC", () => {
     manager = {
       spawn: vi.fn().mockReturnValue("agent-42"),
       awaitStartup: vi.fn().mockResolvedValue(undefined),
-      abort: vi.fn().mockReturnValue(true),
+      control: vi.fn().mockResolvedValue(true),
       getRecord: vi.fn().mockReturnValue({}),
       consumeResult: vi.fn().mockReturnValue(true),
     };
@@ -49,7 +50,13 @@ describe("cross-extension RPC", () => {
       events.emit("subagents:rpc:ping", { requestId: "req-1" });
 
       await vi.waitFor(() => expect(reply).toHaveBeenCalled());
-      expect(reply).toHaveBeenCalledWith({ success: true, data: { version: PROTOCOL_VERSION } });
+      expect(reply).toHaveBeenCalledWith({
+        success: true,
+        data: {
+          version: 3,
+          controlActions: ["steer", "interrupt", "cancel", "close"],
+        },
+      });
     });
 
     it("scopes replies — other requestIds do not receive it", async () => {
@@ -190,103 +197,148 @@ describe("cross-extension RPC", () => {
     });
   });
 
-  // --- stop ---
+  // --- control ---
 
-  describe("stop RPC", () => {
+  describe("control RPC", () => {
     // The default double reports a record with neither owner field, i.e. one of
     // the session's own agents — the case the ownership guard must let through.
-    it("returns success when agent is aborted", async () => {
+    it("routes all four advertised actions through manager.control", async () => {
       registerRpcHandlers(deps);
-      const reply = vi.fn();
-      events.on("subagents:rpc:stop:reply:req-st1", reply);
-      events.emit("subagents:rpc:stop", { requestId: "req-st1", agentId: "agent-42" });
+      const cases = [
+        { requestId: "req-ctl1", action: "steer", message: "focus on tests", request: { action: "steer", message: "focus on tests" } },
+        { requestId: "req-ctl2", action: "interrupt", request: { action: "interrupt" } },
+        { requestId: "req-ctl3", action: "cancel", request: { action: "cancel" } },
+        { requestId: "req-ctl4", action: "close", request: { action: "close" } },
+      ] as const;
 
-      await vi.waitFor(() => expect(reply).toHaveBeenCalled());
-      expect(reply).toHaveBeenCalledWith({ success: true });
-      expect(manager.abort).toHaveBeenCalledWith("agent-42");
+      for (const item of cases) {
+        const reply = vi.fn();
+        events.on(`subagents:rpc:control:reply:${item.requestId}`, reply);
+        events.emit("subagents:rpc:control", {
+          requestId: item.requestId,
+          agentId: "agent-42",
+          action: item.action,
+          ...(item.action === "steer" ? { message: item.message } : {}),
+        });
+        await vi.waitFor(() => expect(reply).toHaveBeenCalled());
+        expect(reply).toHaveBeenCalledWith({
+          success: true,
+          data: { action: item.action, applied: true },
+        });
+      }
+
+      expect(vi.mocked(manager.control).mock.calls).toEqual(
+        cases.map(item => ["agent-42", item.request]),
+      );
     });
 
-    // `abort` returning false no longer means "no such agent" — the handler's
-    // own lookup covers that, and the only case left is a record that is neither
-    // running nor queued, i.e. one that has already finished.
-    it("says so when the agent exists but has already finished", async () => {
-      (manager.abort as ReturnType<typeof vi.fn>).mockReturnValue(false);
+    it("returns applied=false as control data rather than inventing an error", async () => {
+      (manager.control as ReturnType<typeof vi.fn>).mockResolvedValue(false);
       registerRpcHandlers(deps);
       const reply = vi.fn();
-      events.on("subagents:rpc:stop:reply:req-st2", reply);
-      events.emit("subagents:rpc:stop", { requestId: "req-st2", agentId: "settled" });
+      events.on("subagents:rpc:control:reply:req-ctl5", reply);
+      events.emit("subagents:rpc:control", {
+        requestId: "req-ctl5", agentId: "settled", action: "interrupt",
+      });
 
       await vi.waitFor(() => expect(reply).toHaveBeenCalled());
-      expect(reply).toHaveBeenCalledWith({ success: false, error: "Agent is not running" });
+      expect(reply).toHaveBeenCalledWith({
+        success: true,
+        data: { action: "interrupt", applied: false },
+      });
     });
 
     it("returns error when the agent is unknown to the manager", async () => {
       (manager.getRecord as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
       registerRpcHandlers(deps);
       const reply = vi.fn();
-      events.on("subagents:rpc:stop:reply:req-st5", reply);
-      events.emit("subagents:rpc:stop", { requestId: "req-st5", agentId: "nonexistent" });
+      events.on("subagents:rpc:control:reply:req-ctl6", reply);
+      events.emit("subagents:rpc:control", {
+        requestId: "req-ctl6", agentId: "nonexistent", action: "cancel",
+      });
 
       await vi.waitFor(() => expect(reply).toHaveBeenCalled());
-      expect(reply).toHaveBeenCalledWith({ success: false, error: "Agent not found" });
-      expect(manager.abort).not.toHaveBeenCalled();
+      expect(reply).toHaveBeenCalledWith({
+        success: false,
+        error: i18n.t("manager.unknownRecord", { id: "nonexistent" }),
+      });
+      expect(manager.control).not.toHaveBeenCalled();
     });
 
     // A nested child and a workflow's agent both have an owner that is waiting
-    // on them, so an id that leaked to another extension must not let it abort
+    // on them, so an id that leaked to another extension must not let it control
     // one out from under that owner.
-    it("refuses to stop another agent's nested child", async () => {
+    it("refuses to control another agent's nested child", async () => {
       (manager.getRecord as ReturnType<typeof vi.fn>).mockReturnValue({ parentAgentId: "agent-1" });
       registerRpcHandlers(deps);
       const reply = vi.fn();
-      events.on("subagents:rpc:stop:reply:req-st6", reply);
-      events.emit("subagents:rpc:stop", { requestId: "req-st6", agentId: "agent-child" });
+      events.on("subagents:rpc:control:reply:req-ctl7", reply);
+      events.emit("subagents:rpc:control", {
+        requestId: "req-ctl7", agentId: "agent-child", action: "cancel",
+      });
 
       await vi.waitFor(() => expect(reply).toHaveBeenCalled());
       expect(reply).toHaveBeenCalledWith({
         success: false,
-        error: "Agent is owned by another agent or workflow",
+        error: i18n.t("product.notOwned"),
       });
-      expect(manager.abort).not.toHaveBeenCalled();
+      expect(manager.control).not.toHaveBeenCalled();
     });
 
-    it("refuses to stop a workflow's agent", async () => {
+    it("refuses to control a workflow's agent", async () => {
       (manager.getRecord as ReturnType<typeof vi.fn>).mockReturnValue({ workflowId: "wf-1" });
       registerRpcHandlers(deps);
       const reply = vi.fn();
-      events.on("subagents:rpc:stop:reply:req-st7", reply);
-      events.emit("subagents:rpc:stop", { requestId: "req-st7", agentId: "agent-wf" });
+      events.on("subagents:rpc:control:reply:req-ctl8", reply);
+      events.emit("subagents:rpc:control", {
+        requestId: "req-ctl8", agentId: "agent-wf", action: "interrupt",
+      });
 
       await vi.waitFor(() => expect(reply).toHaveBeenCalled());
       expect(reply).toHaveBeenCalledWith({
         success: false,
-        error: "Agent is owned by another agent or workflow",
+        error: i18n.t("product.notOwned"),
       });
-      expect(manager.abort).not.toHaveBeenCalled();
+      expect(manager.control).not.toHaveBeenCalled();
     });
 
     it("scopes replies — other requestIds do not receive it", async () => {
       registerRpcHandlers(deps);
       const wrongReply = vi.fn();
       const rightReply = vi.fn();
-      events.on("subagents:rpc:stop:reply:req-other", wrongReply);
-      events.on("subagents:rpc:stop:reply:req-st3", rightReply);
-      events.emit("subagents:rpc:stop", { requestId: "req-st3", agentId: "agent-42" });
+      events.on("subagents:rpc:control:reply:req-other", wrongReply);
+      events.on("subagents:rpc:control:reply:req-ctl9", rightReply);
+      events.emit("subagents:rpc:control", {
+        requestId: "req-ctl9", agentId: "agent-42", action: "cancel",
+      });
 
       await vi.waitFor(() => expect(rightReply).toHaveBeenCalled());
       expect(wrongReply).not.toHaveBeenCalled();
     });
 
-    it("unsub stops responding to stop requests", async () => {
-      const { unsubStop } = registerRpcHandlers(deps);
-      unsubStop();
+    it("unsub stops responding to control requests", async () => {
+      const { unsubControl } = registerRpcHandlers(deps);
+      unsubControl();
 
       const reply = vi.fn();
-      events.on("subagents:rpc:stop:reply:req-st4", reply);
-      events.emit("subagents:rpc:stop", { requestId: "req-st4", agentId: "agent-42" });
+      events.on("subagents:rpc:control:reply:req-ctl10", reply);
+      events.emit("subagents:rpc:control", {
+        requestId: "req-ctl10", agentId: "agent-42", action: "cancel",
+      });
 
       await new Promise((r) => setTimeout(r, 20));
       expect(reply).not.toHaveBeenCalled();
+    });
+
+    it("does not register the removed rpc:stop channel", async () => {
+      registerRpcHandlers(deps);
+      const reply = vi.fn();
+      events.on("subagents:rpc:stop:reply:req-legacy", reply);
+      events.emit("subagents:rpc:stop", { requestId: "req-legacy", agentId: "agent-42" });
+
+      await new Promise((r) => setTimeout(r, 20));
+      expect(reply).not.toHaveBeenCalled();
+      expect(manager.control).not.toHaveBeenCalled();
     });
   });
 

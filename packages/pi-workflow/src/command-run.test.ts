@@ -128,6 +128,21 @@ describe("handleWorkflowCommand — float boundary", () => {
 		expect(ctx.ui.notify).toHaveBeenCalledWith("name collision", "error");
 	});
 
+	it("does not report a cold-acquisition cancellation envelope as an error", async () => {
+		const controller = new AbortController();
+		const ctx = { ...makeCtx(), signal: controller.signal } as WorkflowHostContext;
+		const d = deferred<Awaited<ReturnType<typeof runWorkflow>>>();
+		vi.mocked(runWorkflow).mockReturnValue(d.promise);
+
+		await handleWorkflowCommand(HOST, "ship do the thing", ctx);
+		controller.abort("user cancelled cold admission");
+		d.resolve({ stagesCompleted: 0, success: false, error: "aborted" });
+		await flush();
+
+		expect(ctx.ui.notify).not.toHaveBeenCalledWith("aborted", "error");
+		expect(ctx.ui.notify).not.toHaveBeenCalledWith(expect.stringContaining("failed unexpectedly"), "error");
+	});
+
 	it("does NOT double-notify an in-run failure that carries a runId", async () => {
 		const ctx = makeCtx();
 		vi.mocked(runWorkflow).mockResolvedValue({

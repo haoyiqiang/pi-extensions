@@ -22,6 +22,7 @@ import {
   createAgentSessionRuntime,
   createAgentSessionServices,
   ModelRuntime,
+  ProjectTrustStore,
   SessionManager,
   SettingsManager,
   type AgentSession,
@@ -187,10 +188,10 @@ test("real SDK root profile runs, cancels and resumes file workflows through com
         requestedModels.push(requestedModel);
         assert.ok(getCurrentTools(context.messages).some((tool) => tool.name === "Agent"));
         return fauxAssistantMessage(fauxToolCall("Agent", {
+          outputRequest: "RAW",
           prompt: "ROOT_PROFILE_DELEGATED_TASK",
           description: "root profile delegate",
           subagent_type: "general-purpose",
-          run_in_background: false,
         }), { stopReason: "toolUse" });
       },
       (context, _options, _state, requestedModel) => {
@@ -330,6 +331,9 @@ test("real SDK root profile runs, cancels and resumes file workflows through com
       });
       assert.equal(header?.identity?.promptBinding.resolverId, "pi-subagents/workflow-standard@1");
       assert.equal(requests.length, 3);
+      const delegated = requests[2]!.messages.find((message) => message.role === "toolResult" && message.toolName === "Agent");
+      assert.match(JSON.stringify(delegated?.content), /ROOT_PROFILE_DELEGATE_OK/, "workflow Agent must default to an inline result");
+      assert.ok(getWorkflowExecutionProvider(), "installed child discovery must not retire the root workflow provider");
       assert.ok(requestedModels.every((requested) =>
         requested.provider === model.provider && requested.id === model.id));
       assert.equal((globalThis as Record<PropertyKey, unknown>)[MANAGER_KEY], rootManager);
@@ -416,7 +420,9 @@ function writeSdkFixture(options: { cwd: string; agentDir: string; provider: str
   const { cwd, agentDir, provider, modelId } = options;
   mkdirSync(join(cwd, ".pi"), { recursive: true });
   mkdirSync(join(cwd, ".rpiv", "workflows"), { recursive: true });
+  new ProjectTrustStore(agentDir).set(cwd, true);
   writeFileSync(join(agentDir, "settings.json"), `${JSON.stringify({
+    packages: [ROOT],
     defaultProvider: provider,
     defaultModel: modelId,
     defaultThinkingLevel: "off",

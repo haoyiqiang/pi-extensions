@@ -12,6 +12,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { vi } from "vitest";
+import { ProjectTrustStore } from "@earendil-works/pi-coding-agent";
 
 export interface BootedPi {
   pi: any;
@@ -85,6 +86,7 @@ export function ctx(overrides: Record<string, unknown> = {}) {
     hasUI: false,
     ui: { setStatus: vi.fn(), setWidget: vi.fn(), notify: vi.fn(), addAutocompleteProvider: vi.fn() },
     cwd: process.cwd(),
+    isProjectTrusted: vi.fn(() => true),
     model: undefined,
     modelRegistry: { find: vi.fn(), getAvailable: vi.fn(() => []) },
     sessionManager: { getSessionId: vi.fn(() => "s1"), getBranch: vi.fn(() => []) },
@@ -133,6 +135,7 @@ export function hermeticDir(opts: {
     }
   }
 
+  new ProjectTrustStore(agentDir).set(dir, true);
   process.env.PI_CODING_AGENT_DIR = agentDir;
   process.env.HOME = agentDir;
   process.chdir(dir);

@@ -18,9 +18,11 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Container, type Component, type TUI } from "@earendil-works/pi-tui";
 import {
+	bindNoticeOwner,
 	installNoticeRenderer,
 	notifyWithSource,
 	type NoticeColor,
+	type NoticeOwnerRelease,
 } from "pi-extensions-i18n";
 import { loadConfig, saveConfig } from "./config-store.js";
 import { parseToggleValue, withBooleanConfigField } from "./config-fields.js";
@@ -132,6 +134,8 @@ const PLAIN_PAINTER: ThemePainter = {
 interface Runtime {
 	state: CleanModeState;
 	config: CleanModeConfig;
+	/** 只有真正的 TUI session 才能安装进程级组件补丁或占用 root UI。 */
+	ownsTui: boolean;
 	/** 当前一次运行的开始时间戳（毫秒）。 */
 	runStartedAtMs?: number;
 	/** 取得 TUI 句柄后用于触发重绘。 */
@@ -247,6 +251,7 @@ function createRuntime(): Runtime {
 	return {
 		state: createInitialState(),
 		config: { ...DEFAULT_CLEAN_MODE_CONFIG },
+		ownsTui: false,
 		styler: createHeaderStyler(PLAIN_PAINTER),
 		actionGroups: createActionGroupState(),
 		activity: createActivitySnapshot(),
@@ -260,7 +265,7 @@ function createRuntime(): Runtime {
 
 /** 活动区当前是否应当工作：总开关与活动区开关都打开才启用。 */
 function isActivityEnabled(runtime: Runtime): boolean {
-	return runtime.config.enabled && runtime.config.showActivityArea;
+	return runtime.ownsTui && runtime.config.enabled && runtime.config.showActivityArea;
 }
 
 /** 累加一个分类计数，返回新的计数值。 */
@@ -489,6 +494,10 @@ function requestRender(runtime: Runtime): void {
 /** 安装渲染补丁；重复调用是幂等的。 */
 function installPatches(runtime: Runtime): void {
 	runtime.restorePatches?.();
+	runtime.restorePatches = undefined;
+	if (!runtime.ownsTui) {
+		return;
+	}
 	const restoreComponentPatches = installComponentPatches({
 		getState: () => runtime.state,
 		getConfig: () => runtime.config,
@@ -685,11 +694,16 @@ function handleToggleCommand(
 /** 扩展工厂：注册事件、快捷键与命令。 */
 export default function registerCleanMode(pi: ExtensionAPI): void {
 	const runtime = createRuntime();
-	installNoticeRenderer(pi);
+	const noticeOwner = installNoticeRenderer(pi);
+	let releaseNoticeOwner: NoticeOwnerRelease | undefined;
 
 	pi.on("session_start", async (event, ctx) => {
+		releaseNoticeOwner?.();
+		releaseNoticeOwner = bindNoticeOwner(ctx, noticeOwner);
+
 		const loaded = loadConfig(ctx);
 		runtime.config = loaded.config;
+		runtime.ownsTui = ctx.mode === "tui";
 		runtime.styler = createHeaderStyler(ctx.ui.theme);
 
 		// 历史消息不会重放 agent_start / agent_settled，不主动处理就会整段原样展开。
@@ -697,14 +711,19 @@ export default function registerCleanMode(pi: ExtensionAPI): void {
 		// 历史扩展条目同样不会重放事件，开一个恢复窗口直到本轮真正开始运行。
 		runtime.historyRestoreWindow = true;
 
-		// 通过一个不渲染内容的 widget 工厂取得 TUI 句柄，用于后续触发重绘。
-		ctx.ui.setWidget(PROBE_WIDGET_KEY, (tui: TUI): Component => {
-			runtime.tui = tui;
-			return NO_CONTENT_COMPONENT;
-		});
+		if (runtime.ownsTui) {
+			// 通过一个不渲染内容的 widget 工厂取得 TUI 句柄，用于后续触发重绘。
+			ctx.ui.setWidget(PROBE_WIDGET_KEY, (tui: TUI): Component => {
+				runtime.tui = tui;
+				return NO_CONTENT_COMPONENT;
+			});
 
-		// 宿主在这里装配一次，之后事件回调只做取值与复用。
-		runtime.activityHost = createActivityHost(runtime, ctx);
+			// 宿主在这里装配一次，之后事件回调只做取值与复用。
+			runtime.activityHost = createActivityHost(runtime, ctx);
+		} else {
+			runtime.activityHost = undefined;
+			runtime.tui = undefined;
+		}
 
 		installPatches(runtime);
 		requestRender(runtime);
@@ -809,7 +828,9 @@ export default function registerCleanMode(pi: ExtensionAPI): void {
 		runtime.runStartedAtMs = undefined;
 		runtime.activity = { ...runtime.activity, active: false };
 		runtime.runDurations.bindRun(runtime.state.runDurationMs, runtime.runToolCount);
-		clearActivityArea(runtime.activityArea, requireActivityHost(runtime));
+		if (runtime.activityHost) {
+			clearActivityArea(runtime.activityArea, runtime.activityHost);
+		}
 		requestRender(runtime);
 	});
 
@@ -841,11 +862,16 @@ export default function registerCleanMode(pi: ExtensionAPI): void {
 
 	pi.on("session_shutdown", async () => {
 		// 清理要先于置空：clearActivityArea 还需要宿主去恢复 Pi 的内置提示。
-		clearActivityArea(runtime.activityArea, requireActivityHost(runtime));
+		if (runtime.activityHost) {
+			clearActivityArea(runtime.activityArea, runtime.activityHost);
+		}
 		runtime.restorePatches?.();
 		runtime.restorePatches = undefined;
 		runtime.activityHost = undefined;
 		runtime.tui = undefined;
+		runtime.ownsTui = false;
+		releaseNoticeOwner?.();
+		releaseNoticeOwner = undefined;
 	});
 
 	pi.registerShortcut(TOGGLE_SHORTCUT, {

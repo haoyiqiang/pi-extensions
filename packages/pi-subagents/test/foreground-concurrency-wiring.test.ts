@@ -48,6 +48,7 @@ function boot(settings: Record<string, unknown> = {}) {
   });
   const b = makePi();
   subagentsExtension(b.pi);
+  void b.lifecycle.get("session_start")?.({}, ctx({ mode: "json", hasUI: false }));
   booted = b.lifecycle;
   return b;
 }

@@ -48,11 +48,14 @@ export function checkModelScope(args: {
   agentLabel: string;
   /** The raw `model:` input, when there was one. */
   modelInput?: string;
+  /** Scoped actors retain their own policy across launcher replacement. */
+  enabled?: boolean;
+  projectTrusted?: boolean;
 }): ModelScopeVerdict {
   const { model, cwd, modelRegistry, callerSupplied, agentLabel, modelInput } = args;
-  if (!scopeModelsEnabled || !model) return { kind: "ok" };
+  if (!(args.enabled ?? scopeModelsEnabled) || !model) return { kind: "ok" };
 
-  const allowed = resolveEnabledModels(readEnabledModels(cwd), modelRegistry, cwd);
+  const allowed = resolveEnabledModels(readEnabledModels(cwd, { projectTrusted: args.projectTrusted }), modelRegistry, cwd);
   if (!allowed || isModelInScope(model, allowed)) return { kind: "ok" };
 
   if (callerSupplied) {

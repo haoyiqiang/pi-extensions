@@ -6,12 +6,21 @@ import type { CompiledSchema } from "../workflow/json-schema.js";
 import type { ExecutionSession, SessionBranchEntry } from "./session.js";
 import type { ManagedPolicy } from "./managed-policy.js";
 import type { PromptBinding } from "./prompt-binding.js";
+import type { SubagentsRuntimePolicy } from "../runtime-policy.js";
 
-export type ExecutionRunOptions = Omit<RunOptions, "onSessionCreated"> & {
+/** Persistent terminals reacquire an existing manager pool slot for each active run.
+ * Idle keeps conversation ownership, not execution capacity. */
+export interface ExecutionActivityOptions {
+  acquireExecution?: (signal: AbortSignal) => Promise<void>;
+  onExecutionIdle?: (result: ExecutionResumeResult) => void;
+}
+
+export type ExecutionRunOptions = Omit<RunOptions, "onSessionCreated"> & ExecutionActivityOptions & {
   onSessionCreated?: (session: ExecutionSession) => void;
+  runtimePolicy?: SubagentsRuntimePolicy;
 };
 export type ExecutionRunResult = Omit<RunResult, "session"> & { session: ExecutionSession };
-export type ExecutionResumeOptions = Parameters<typeof resumeAgent>[2];
+export type ExecutionResumeOptions = Parameters<typeof resumeAgent>[2] & ExecutionActivityOptions;
 export interface ExecutionRestoreOptions {
   /** Expected saved resolver/resource identity. Presence must also match. */
   promptBinding?: PromptBinding;

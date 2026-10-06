@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createConnection, type Socket } from "node:net";
 import { isAbsolute, resolve } from "node:path";
@@ -74,11 +75,14 @@ export function registerTerminalChild(
   let shutdownRequested = false;
   let settledFlushed = false;
   let pendingWrites = 0;
+  let pendingAdmission: { id: string; resolve(error?: string): void } | undefined;
   let resolveSessionStart: (() => void) | undefined;
   let connectListener: SocketListener | undefined;
   let finalAssistant: AssistantMessage | undefined;
   let authenticationTimer: ReturnType<typeof setTimeout> | undefined;
   let policyFailure: string | undefined;
+  let interruptRequested = false;
+  let currentExecutionId: string | undefined;
   const frames = new BridgeFrames();
 
   const safeAbort = (ctx: ExtensionContext): void => {
@@ -157,6 +161,8 @@ export function registerTerminalChild(
     if (authenticationTimer) clearTimeout(authenticationTimer);
     resolveSessionStart?.();
     resolveSessionStart = undefined;
+    pendingAdmission?.resolve(error);
+    pendingAdmission = undefined;
     safeAbort(ctx);
 
     if (options.report !== false && connected && socket) {
@@ -215,6 +221,33 @@ export function registerTerminalChild(
     }
   };
 
+  const requestExecutionAdmission = async (): Promise<string | undefined> => {
+    if (pendingAdmission) return i18n.t("bridge.protocol");
+    const id = randomUUID();
+    const error = await new Promise<string | undefined>((resolveAdmission) => {
+      pendingAdmission = { id, resolve: resolveAdmission };
+      if (!sendFeedback({ type: "execution_request", id })) {
+        pendingAdmission = undefined;
+        resolveAdmission(i18n.t("bridge.disconnected"));
+      }
+    });
+    if (state !== "running" || abortRequested) return error ?? i18n.t("bridge.notRunning");
+    return error;
+  };
+
+  const beginStandardRound = (): void => {
+    turnCount = 0;
+    softLimitReached = false;
+    hardLimitReached = false;
+    structuredRetried = false;
+    if (manifest?.structuredSchema !== undefined) structuredCapture = createStructuredCapture();
+    finalAssistant = undefined;
+    policyFailure = undefined;
+    interruptRequested = false;
+    currentExecutionId = undefined;
+    interactiveIdle = false;
+  };
+
   const enforceTools = (ctx: ExtensionContext, allowed: readonly string[]): boolean => {
     try {
       pi.setActiveTools([...allowed]);
@@ -263,6 +296,38 @@ export function registerTerminalChild(
       return;
     }
 
+    if (value.type === "execution_admission") {
+      if (state !== "running" || !pendingAdmission || pendingAdmission.id !== value.id) {
+        failClosed(i18n.t("bridge.protocol"), ctx);
+        return;
+      }
+      const pending = pendingAdmission;
+      pendingAdmission = undefined;
+      currentExecutionId = value.id;
+      pending.resolve(value.error);
+      return;
+    }
+
+    if (value.type === "interrupt") {
+      if (state !== "running" || abortRequested || interactiveIdle || !agentStarted || ctx.isIdle()) {
+        writeFrame(nextPacket({ type: "ack", id: value.id, error: i18n.t("bridge.notRunning") }), {
+          allowTerminalState: true,
+        });
+        return;
+      }
+      try {
+        interruptRequested = true;
+        ctx.abort();
+        if (!sendFeedback({ type: "ack", id: value.id })) failClosed(i18n.t("bridge.disconnected"), ctx, { report: false });
+      } catch {
+        interruptRequested = false;
+        writeFrame(nextPacket({ type: "ack", id: value.id, error: i18n.t("bridge.notRunning") }), {
+          allowTerminalState: true,
+        });
+      }
+      return;
+    }
+
     if (value.type === "abort") {
       if (state !== "running") {
         failClosed(i18n.t("bridge.protocol"), ctx);
@@ -273,6 +338,8 @@ export function registerTerminalChild(
       if (authenticationTimer) clearTimeout(authenticationTimer);
       resolveSessionStart?.();
       resolveSessionStart = undefined;
+      pendingAdmission?.resolve(i18n.t("bridge.notRunning"));
+      pendingAdmission = undefined;
       safeAbort(ctx);
       if (ctx.isIdle()) safeShutdown(ctx);
       return;
@@ -331,6 +398,8 @@ export function registerTerminalChild(
     connected = false;
     resolveSessionStart?.();
     resolveSessionStart = undefined;
+    pendingAdmission?.resolve(i18n.t("bridge.disconnected"));
+    pendingAdmission = undefined;
     if (!ctx || state === "settling" || state === "failed" || state === "closed") return;
     failClosed(i18n.t("bridge.disconnected"), ctx, { report: false });
   };
@@ -341,6 +410,8 @@ export function registerTerminalChild(
     if (authenticationTimer) clearTimeout(authenticationTimer);
     resolveSessionStart?.();
     resolveSessionStart = undefined;
+    pendingAdmission?.resolve(i18n.t("bridge.notRunning"));
+    pendingAdmission = undefined;
     state = "closed";
     connected = false;
     const target = socket;
@@ -389,10 +460,15 @@ export function registerTerminalChild(
         const compiled = compileTerminalSchema(manifest.structuredSchema);
         if (pi.getAllTools().some((tool) => tool.name === STRUCTURED_OUTPUT_TOOL_NAME)) throw invalidManifest();
         structuredCapture = createStructuredCapture();
-        const tool = createStructuredOutputTool(compiled, structuredCapture);
-        pi.registerTool({ ...tool, execute: async (id, params, signal, onUpdate, toolCtx) => {
-          if (state !== "running" || !permitted || abortRequested || signal?.aborted) throw new Error(i18n.t("bridge.notRunning"));
-          return tool.execute(id, params, signal, onUpdate, toolCtx);
+        const definition = createStructuredOutputTool(compiled, structuredCapture);
+        pi.registerTool({ ...definition, execute: async (id, params, signal, onUpdate, toolCtx) => {
+          if (state !== "running" || !permitted || abortRequested || signal?.aborted || !structuredCapture) {
+            throw new Error(i18n.t("bridge.notRunning"));
+          }
+          // Standard persistent runs replace capture once per agent_settled
+          // boundary. Dispatch through the current capture, not the one that
+          // existed when this stable SDK tool definition was registered.
+          return createStructuredOutputTool(compiled, structuredCapture).execute(id, params, signal, onUpdate, toolCtx);
         } });
       } catch {
         failClosed(i18n.t("bridge.invalidManifest"), ctx, { report: false });
@@ -473,7 +549,7 @@ export function registerTerminalChild(
     for (const pending of pendingSteers.splice(0)) dispatchSteer(pending, ctx);
   });
 
-  pi.on("before_agent_start", (event, ctx) => {
+  pi.on("before_agent_start", async (event, ctx) => {
     if (!manifest || state !== "running" || !permitted || abortRequested) {
       if (state !== "failed" && state !== "closed") failClosed(i18n.t("bridge.notRunning"), ctx);
       event.systemPromptOptions.selectedTools = [];
@@ -488,6 +564,19 @@ export function registerTerminalChild(
       event.systemPromptOptions.selectedTools = [];
       failClosed(i18n.t("bridge.modelMismatch"), ctx);
       return;
+    }
+    if (!isManaged() && currentExecutionId === undefined) {
+      // before_agent_start also fires for SDK-internal continuations (tool-use,
+      // wrap-up and StructuredOutput retry). Those remain inside the same
+      // agent_settled boundary and must retain one admission, budget and capture.
+      beginStandardRound();
+      const admissionError = await requestExecutionAdmission();
+      if (admissionError !== undefined) {
+        policyFailure = admissionError;
+        event.systemPromptOptions.selectedTools = [];
+        safeAbort(ctx);
+        return;
+      }
     }
     if (isManaged()) {
       if (!enforceTools(ctx, allowedTools())) {
@@ -568,7 +657,7 @@ export function registerTerminalChild(
 
   pi.on("agent_before_settle", (event) => {
     if (event.outcome === "aborted" && !isPersistentInteractive()) abortRequested = true;
-    if (state !== "running" || !permitted || abortRequested || policyFailure || !structuredCapture
+    if (state !== "running" || !permitted || abortRequested || interruptRequested || policyFailure || !structuredCapture
       || structuredCapture.json !== undefined || structuredRetried || event.outcome !== "completed") return;
     structuredRetried = true;
     return policyContinuation(structuredRetryPrompt(structuredCapture));
@@ -619,10 +708,11 @@ export function registerTerminalChild(
       return;
     }
 
-    const aborted = abortRequested || finalAssistant?.stopReason === "aborted";
+    const aborted = abortRequested || interruptRequested || finalAssistant?.stopReason === "aborted";
     const feedback: ChildFeedback = {
       type: persistent ? "idle" : "settled",
       snapshot: finalSnapshot,
+      ...(currentExecutionId ? { executionId: currentExecutionId } : {}),
       witness,
       text: finalAssistant ? assistantText(finalAssistant).trim() : "",
       aborted,
@@ -636,10 +726,13 @@ export function registerTerminalChild(
 
     if (persistent) {
       if (!sendFeedback(feedback)) failClosed(i18n.t("bridge.disconnected"), ctx, { report: false });
+      currentExecutionId = undefined;
       agentStarted = false;
       interactiveIdle = true;
       return;
     }
+
+    currentExecutionId = undefined;
 
     const sent = writeFrame(nextPacket(feedback), {
       allowTerminalState: true,
@@ -779,7 +872,7 @@ function settledFailure(
   finalAssistant: AssistantMessage | undefined,
   aborted: boolean,
 ): { failure?: string } {
-  if (aborted) return { failure: i18n.t("bridge.aborted") };
+  if (aborted) return {};
   if (!finalAssistant) return { failure: i18n.t("bridge.failed") };
   if (finalAssistant.stopReason === "error") {
     return { failure: finalAssistant.errorMessage?.trim() || i18n.t("bridge.failed") };
@@ -794,6 +887,10 @@ function isParentControl(value: unknown): value is ParentControl {
   if (!isRecord(value)) return false;
   if (value.type === "abort" || value.type === "start") return true;
   if (value.type === "accepted") return value.version === BRIDGE_VERSION && nonEmptyString(value.runId) && nonEmptyString(value.sessionId);
+  if (value.type === "execution_admission") {
+    return nonEmptyString(value.id) && (value.error === undefined || typeof value.error === "string");
+  }
+  if (value.type === "interrupt") return nonEmptyString(value.id);
   return value.type === "steer" && nonEmptyString(value.id) && nonEmptyString(value.message);
 }
 

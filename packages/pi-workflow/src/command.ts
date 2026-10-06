@@ -7,11 +7,11 @@
  * here would re-evaluate the entire graph on EVERY `/wf` — a recurring ~0.9s
  * stall. The closure is held by Pi's command registry and survives across
  * invocations; `/reload` re-registers and resets the memo, so edit pickup is
- * preserved. A post-registration pre-warm kicks the same memoized import
- * shortly after startup: jiti evaluation yields between modules (measured
- * max event-loop stall ~0ms at 5ms sampling), so the warm-up causes no
- * perceptible jank and the first real `/wf` finds the graph ready.
- * `parseArgs` stays here (pure, exported for tests).
+ * preserved. A session-start pre-warm kicks the same memoized import shortly
+ * after a real session begins: extension factories remain registration-only,
+ * while jiti evaluation still yields between modules and the first real `/wf`
+ * normally finds the graph ready. `parseArgs` stays here (pure, exported for
+ * tests).
  */
 
 import type { WorkflowHost, WorkflowHostContext, WorkflowLauncherContext } from "./host.js";
@@ -97,17 +97,35 @@ export function makeWfHandler(
 	});
 }
 
-export function registerWorkflowCommand(host: WorkflowHost): void {
+export interface WorkflowCommandLifecycle {
+	on(event: "session_start", handler: () => void): unknown;
+	on(event: "session_shutdown", handler: () => void): unknown;
+}
+
+export function registerWorkflowCommand(
+	host: WorkflowHost,
+	lifecycle?: WorkflowCommandLifecycle,
+): void {
 	const handler = makeWfHandler(host);
 	host.registerCommand("wf", {
 		description: i18n.t("command.description"),
 		handler,
 	});
-	// Swallowed rejection is safe: load() already cleared the memo, so the
-	// first real /wf retries and surfaces the error through its own path.
-	// unref keeps the timer from holding a non-TUI embedder's process open.
-	const timer = setTimeout(() => void handler.prewarm().catch(() => undefined), PREWARM_DELAY_MS);
-	timer.unref?.();
+	if (!lifecycle) return;
+
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	lifecycle.on("session_start", () => {
+		if (timer !== undefined) clearTimeout(timer);
+		// Swallowed rejection is safe: load() already cleared the memo, so the
+		// first real /wf retries and surfaces the error through its own path.
+		// unref keeps the timer from holding a non-TUI embedder's process open.
+		timer = setTimeout(() => void handler.prewarm().catch(() => undefined), PREWARM_DELAY_MS);
+		timer.unref?.();
+	});
+	lifecycle.on("session_shutdown", () => {
+		if (timer !== undefined) clearTimeout(timer);
+		timer = undefined;
+	});
 }
 
 // ---------------------------------------------------------------------------

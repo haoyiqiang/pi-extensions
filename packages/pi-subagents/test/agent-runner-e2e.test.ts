@@ -23,7 +23,7 @@
  * provider registers in a different `pi-ai` module instance than the one
  * pi-coding-agent streams through, which is brittle and orthogonal to gating.)
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -68,26 +68,23 @@ describe("agent-runner end-to-end (real pi-mono session + real extension)", () =
    * Register `cfg` as agent type "e2e", run it through the REAL runAgent, and
    * return the real session's active tool names captured at construction time.
    */
-  async function activeToolsFor(cfg: Partial<AgentConfig>): Promise<string[]> {
-    registerAgents(
-      new Map([
-        [
-          "e2e",
-          {
-            name: "e2e",
-            description: "e2e",
-            builtinToolNames: BUILTINS,
-            skills: false,
-            systemPrompt: "You are e2e.",
-            promptMode: "replace",
-            inheritContext: false,
-            runInBackground: false,
-            isolated: false,
-            ...cfg,
-          } as AgentConfig,
-        ],
-      ]),
-    );
+  async function activeToolsFor(
+    cfg: Partial<AgentConfig>,
+    runOptions: { projectTrusted?: boolean; contextTrusted?: boolean; agentConfig?: AgentConfig } = {},
+  ): Promise<string[]> {
+    const registeredConfig: AgentConfig = {
+      name: "e2e",
+      description: "e2e",
+      builtinToolNames: BUILTINS,
+      skills: false,
+      systemPrompt: "You are e2e.",
+      promptMode: "replace",
+      inheritContext: false,
+      runInBackground: false,
+      isolated: false,
+      ...cfg,
+    } as AgentConfig;
+    registerAgents(new Map([["e2e", registeredConfig]]));
     const model = faux.getModel();
     const modelRegistry: any = {
       find: () => model,
@@ -99,13 +96,21 @@ describe("agent-runner end-to-end (real pi-mono session + real extension)", () =
       registerProvider: () => {},
       unregisterProvider: () => {},
     };
-    const ctx: any = { cwd, getSystemPrompt: () => "PARENT", model, modelRegistry };
+    const ctx: any = {
+      cwd,
+      getSystemPrompt: () => "PARENT",
+      isProjectTrusted: () => runOptions.contextTrusted ?? true,
+      model,
+      modelRegistry,
+    };
 
     let active: string[] = [];
     try {
       await runAgent(ctx, "e2e", "go", {
         pi: makePi(),
         model,
+        ...(runOptions.projectTrusted !== undefined ? { projectTrusted: runOptions.projectTrusted } : {}),
+        agentConfig: runOptions.agentConfig ?? registeredConfig,
         onSessionCreated: (s) => {
           active = s.getActiveToolNames();
         },
@@ -157,5 +162,58 @@ describe("agent-runner end-to-end (real pi-mono session + real extension)", () =
     expect(active).toContain(EXT_TOOL); // selected → surfaces despite the flip
     expect(active).toContain("read");
     expect(active).not.toContain("bash"); // builtinToolNames: ["read"] only
+  });
+
+  it("does not load native project extensions after project trust is denied", async () => {
+    const marker = join(cwd, "project-extension-ran");
+    const extensionDir = join(cwd, ".pi", "extensions");
+    mkdirSync(extensionDir, { recursive: true });
+    writeFileSync(join(extensionDir, "tripwire.mjs"), `
+import { writeFileSync } from "node:fs";
+export default function (pi) {
+  writeFileSync(${JSON.stringify(marker)}, "ran");
+  pi.registerTool({ name: "project_tripwire", description: "tripwire", parameters: { type: "object", properties: {} }, execute: async () => ({ content: [], details: undefined }) });
+}
+`);
+
+    const active = await activeToolsFor({ extensions: true }, { contextTrusted: false });
+    expect(active).not.toContain("project_tripwire");
+    expect(existsSync(marker)).toBe(false);
+  });
+
+  it("does not let a captured project agent path bypass denied trust", async () => {
+    const marker = join(cwd, "captured-project-path-ran");
+    const tripwire = join(cwd, "project-agent-extension.mjs");
+    writeFileSync(tripwire, `
+import { writeFileSync } from "node:fs";
+writeFileSync(${JSON.stringify(marker)}, "ran");
+export default function () {}
+`);
+    const projectAgent: AgentConfig = {
+      name: "e2e",
+      description: "untrusted project definition",
+      builtinToolNames: ["read"],
+      extensions: [tripwire],
+      skills: false,
+      systemPrompt: "untrusted",
+      promptMode: "replace",
+      source: "project",
+      sourcePath: join(cwd, ".pi", "agents", "e2e.md"),
+    };
+
+    await activeToolsFor({ extensions: false }, {
+      projectTrusted: false,
+      contextTrusted: false,
+      agentConfig: projectAgent,
+    });
+    expect(existsSync(marker)).toBe(false);
+  });
+
+  it("keeps an explicitly approved global path available in global-only mode", async () => {
+    const active = await activeToolsFor({ extensions: [FIXTURE] }, {
+      projectTrusted: false,
+      contextTrusted: false,
+    });
+    expect(active).toContain(EXT_TOOL);
   });
 });

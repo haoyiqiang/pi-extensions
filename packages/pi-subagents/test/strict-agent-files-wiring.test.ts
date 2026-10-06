@@ -12,22 +12,39 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ProjectTrustStore } from "@earendil-works/pi-coding-agent";
 import { registerAgents } from "../src/agent-types.js";
 import subagentsExtension from "../src/index.js";
 
 function makePi() {
   const tools = new Map<string, any>();
-  return {
+  const lifecycle = new Map<string, any>();
+  const pi = {
     registerMessageRenderer: vi.fn(),
     registerTool: vi.fn((t: any) => tools.set(t.name, t)),
     registerCommand: vi.fn(),
     registerEntryRenderer: vi.fn(),
     registerFlag: vi.fn(),
     getFlag: vi.fn(),
-    on: vi.fn(),
+    on: vi.fn((event: string, handler: any) => lifecycle.set(event, handler)),
     events: { emit: vi.fn(), on: vi.fn(() => vi.fn()) },
     appendEntry: vi.fn(),
     sendMessage: vi.fn(),
+  } as any;
+  return { pi, tools, lifecycle };
+}
+
+function sessionCtx() {
+  return {
+    cwd,
+    isProjectTrusted: () => true,
+    mode: "json",
+    hasUI: false,
+    ui: { setStatus: vi.fn(), setWidget: vi.fn(), notify: vi.fn() },
+    model: undefined,
+    modelRegistry: { find: vi.fn(), getAvailable: vi.fn(() => []) },
+    sessionManager: { getSessionId: vi.fn(() => undefined), getBranch: vi.fn(() => []) },
+    getSystemPrompt: vi.fn(() => "parent"),
   } as any;
 }
 
@@ -63,8 +80,11 @@ describe("strictAgentFiles gates extension activation", () => {
     // setting under the tests, and their global agents would pollute the roster.
     originalAgentDir = process.env.PI_CODING_AGENT_DIR;
     originalHome = process.env.HOME;
-    process.env.PI_CODING_AGENT_DIR = join(cwd, "agent-dir");
+    const agentDir = join(cwd, "agent-dir");
+    mkdirSync(agentDir, { recursive: true });
+    process.env.PI_CODING_AGENT_DIR = agentDir;
     process.env.HOME = cwd;
+    new ProjectTrustStore(agentDir).set(cwd, true);
     warn = vi.spyOn(console, "warn").mockImplementation(() => {});
   });
 
@@ -80,18 +100,24 @@ describe("strictAgentFiles gates extension activation", () => {
     rmSync(cwd, { recursive: true, force: true });
   });
 
-  it("aborts activation naming the file when enabled", () => {
+  it("aborts trusted session binding naming the file when enabled", async () => {
     const path = writeBrokenAgent();
     writeSettings({ strictAgentFiles: true });
+    const booted = makePi();
+    subagentsExtension(booted.pi);
 
-    expect(() => subagentsExtension(makePi())).toThrow(path);
+    await expect(booted.lifecycle.get("session_start")?.({}, sessionCtx())).rejects.toThrow(path);
+    await booted.lifecycle.get("session_shutdown")?.();
   });
 
-  it("skips the file and activates when disabled (the default)", () => {
+  it("skips the file and binds when disabled (the default)", async () => {
     writeBrokenAgent();
+    const booted = makePi();
+    subagentsExtension(booted.pi);
 
-    expect(() => subagentsExtension(makePi())).not.toThrow();
+    await expect(booted.lifecycle.get("session_start")?.({}, sessionCtx())).resolves.not.toThrow();
     expect(String(warn.mock.calls[0]?.[0])).toContain("Skipping agent file");
+    await booted.lifecycle.get("session_shutdown")?.();
   });
 
   it("is a startup decision: a later reload of the same file does not throw", async () => {
@@ -100,13 +126,12 @@ describe("strictAgentFiles gates extension activation", () => {
 
     // Start clean, so the session exists — then break the file underneath it.
     writeFileSync(path, "---\ndescription: Fixed\n---\n\nFixed.\n");
-    const pi = makePi();
-    expect(() => subagentsExtension(pi)).not.toThrow();
+    const booted = makePi();
+    expect(() => subagentsExtension(booted.pi)).not.toThrow();
+    await booted.lifecycle.get("session_start")?.({}, sessionCtx());
     writeFileSync(path, BROKEN);
 
-    const agentTool = (pi.registerTool as any).mock.calls
-      .map((c: any[]) => c[0])
-      .find((t: any) => t.name === "Agent");
+    const agentTool = booted.tools.get("Agent");
     expect(agentTool).toBeDefined();
 
     // The Agent tool reloads the registry per call. That reload must be
@@ -115,6 +140,8 @@ describe("strictAgentFiles gates extension activation", () => {
       hasUI: false,
       ui: { setStatus: vi.fn(), setWidget: vi.fn(), notify: vi.fn() },
       cwd,
+      isProjectTrusted: () => true,
+      mode: "json",
       model: undefined,
       modelRegistry: { find: vi.fn(), getAvailable: vi.fn(() => []) },
       sessionManager: { getSessionId: vi.fn(() => "s1"), getBranch: vi.fn(() => []) },
@@ -123,5 +150,6 @@ describe("strictAgentFiles gates extension activation", () => {
 
     const result = await agentTool.execute("call-1", { subagent_type: "nope", prompt: "x" }, undefined, vi.fn(), uiCtx);
     expect(JSON.stringify(result)).not.toContain("Nested mappings");
+    await booted.lifecycle.get("session_shutdown")?.();
   });
 });

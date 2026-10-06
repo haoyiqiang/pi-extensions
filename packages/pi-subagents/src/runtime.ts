@@ -40,8 +40,8 @@ import { setWorktreeIsolationEnabled } from "./worktree.js";
 let configuredBackend: SubagentBackend = "embedded";
 
 /** Backend preference for one cwd, or the initialized fallback when cwd is absent. */
-export function getConfiguredBackend(cwd?: string): SubagentBackend {
-  return cwd ? loadSettings(cwd).backend ?? "embedded" : configuredBackend;
+export function getConfiguredBackend(cwd?: string, options?: { projectTrusted?: boolean }): SubagentBackend {
+  return cwd ? loadSettings(cwd, options).backend ?? "embedded" : configuredBackend;
 }
 
 /** Update the no-cwd fallback; owned sessions are unaffected. */
@@ -54,6 +54,7 @@ export interface InitializeSubagentsRuntimeOptions {
   appliers?: Partial<SettingsAppliers>;
   /** Optional lifecycle outlet. Initialization itself does not load or require UI. */
   emit?: SettingsEmit;
+  projectTrusted?: boolean;
 }
 
 export interface InitializedSubagentsRuntime {
@@ -99,7 +100,7 @@ export function initializeSubagentsRuntime(
   options: InitializeSubagentsRuntimeOptions = {},
 ): InitializedSubagentsRuntime {
   const runtimeCwd = resolve(cwd);
-  const settings = loadSettings(runtimeCwd);
+  const settings = loadSettings(runtimeCwd, { projectTrusted: options.projectTrusted });
 
   resetCommonState();
   applySettings(settings, COMMON_APPLIERS);
@@ -107,7 +108,7 @@ export function initializeSubagentsRuntime(
   setConfiguredBackend(settings.backend ?? "embedded");
 
   const strict = settings.strictAgentFiles === true;
-  const userAgents = loadCustomAgents(runtimeCwd, strict);
+  const userAgents = loadCustomAgents(runtimeCwd, strict, { projectTrusted: options.projectTrusted });
   registerAgents(userAgents);
   const agents = buildAgentRegistry(userAgents);
 

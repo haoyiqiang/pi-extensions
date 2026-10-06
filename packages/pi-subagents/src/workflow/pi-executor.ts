@@ -10,6 +10,7 @@ import { snapshotRequiredTools } from "../backends/tool-requirements.js";
 import type { AgentExecutionBackend } from "../backends/types.js";
 import { inChildSessionContext } from "../child-context.js";
 import { i18n } from "../i18n.js";
+import { resolveProjectTrusted } from "../project-trust.js";
 import { getConfiguredBackend, initializeSubagentsRuntime } from "../runtime.js";
 import { createWorkflowExecutionProvider } from "./execution-provider.js";
 import {
@@ -91,12 +92,14 @@ export function registerWorkflowExecutor(pi: ExtensionAPI, options: WorkflowExec
     return settleAll(retiring);
   }
 
-  function configuredBackendFor(cwd: string): ExecutionBackendKind {
-    if (!initializedCwds.has(cwd)) {
-      if (!options.runtimeInitialized) initializeSubagentsRuntime(cwd);
-      initializedCwds.add(cwd);
+  function configuredBackendFor(ctx: ExtensionContext): ExecutionBackendKind {
+    const projectTrusted = resolveProjectTrusted(ctx.cwd, { context: ctx });
+    const key = `${ctx.cwd}\0${projectTrusted}`;
+    if (!initializedCwds.has(key)) {
+      if (!options.runtimeInitialized) initializeSubagentsRuntime(ctx.cwd, { projectTrusted });
+      initializedCwds.add(key);
     }
-    return getConfiguredBackend(cwd);
+    return getConfiguredBackend(ctx.cwd, { projectTrusted });
   }
 
   function createManagedProvider(
@@ -138,7 +141,7 @@ export function registerWorkflowExecutor(pi: ExtensionAPI, options: WorkflowExec
         if (closed || owner !== generation || owner.controller.signal.aborted) throw failure("closed");
         validateRequest(request);
         const settings = request.settings;
-        const configuredBackend = configuredBackendFor(request.observer.cwd);
+        const configuredBackend = configuredBackendFor(request.observer as unknown as ExtensionContext);
         const requiredTools = snapshotRequiredTools(settings.requiredTools) ?? Object.freeze([]);
         const previous = request.identity;
         if (previous && (previous.version !== 1 || previous.executor !== SUBAGENT_EXECUTOR_ID

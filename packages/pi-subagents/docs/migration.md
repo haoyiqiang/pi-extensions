@@ -75,7 +75,8 @@ terminal descendants stay on their saved terminal branch.
 | `subagent` | `Agent`, with `prompt`, `description`, `subagent_type`, and optional `run_in_background` |
 | `subagent_resume` | `Agent` with `resume` referencing a **new manager-owned** agent ID |
 | `subagent_interrupt` | `steer_subagent` with `action: "interrupt"` |
-| Permanent stop | `steer_subagent` with `action: "stop"` |
+| End the task, retain the session | `steer_subagent` with `action: "cancel"` |
+| Retire ownership after cleanup | `steer_subagent` with `action: "close"` |
 | Background result | `get_subagent_result` |
 | `subagents_list` / old management command | `/agents` and the common Fleet/widget |
 | `/plan`, `/iterate` | Explicit workflow definitions run through `/wf`; no aliases |
@@ -110,7 +111,7 @@ for a minimal two-stage definition and model/thinking tiers.
 
 ## Acceptance
 
-Check one new Agent task, its result, and interrupt/stop before long jobs. Then
+Check one new Agent task, its result, and interrupt/cancel/close before long jobs. Then
 run a small file-defined workflow, inspect its journal, cancel a run, and resume a
 failed stage. Confirm that required skills, tools and models exist in your setup.
 

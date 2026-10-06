@@ -23,10 +23,21 @@ export interface I18nState {
   readonly namespaces: Readonly<Record<string, TranslationMap>>;
 }
 
+export interface LocaleOverrideOwner {
+  /** 仅用于类型区分；owner 的身份由对象引用本身决定。 */
+  readonly localeOverrideOwner?: never;
+}
+
+interface OwnedLocaleOverride {
+  owner: LocaleOverrideOwner;
+  preference: LocalePreference;
+}
+
 interface I18nRuntime {
   registry: Map<string, Map<Locale, TranslationMap>>;
   overrideSet: boolean;
   overridePreference?: LocalePreference;
+  ownerOverrides: OwnedLocaleOverride[];
 }
 
 function runtime(): I18nRuntime {
@@ -35,9 +46,13 @@ function runtime(): I18nRuntime {
     global[I18N_RUNTIME_KEY] = {
       registry: new Map(),
       overrideSet: false,
+      ownerOverrides: [],
     };
   }
-  return global[I18N_RUNTIME_KEY];
+  const state = global[I18N_RUNTIME_KEY];
+  // 兼容同进程里先加载的旧版本 runtime；新增 owner 栈不应要求所有包同时升级。
+  if (!Array.isArray(state.ownerOverrides)) state.ownerOverrides = [];
+  return state;
 }
 
 export function parseLocalePreference(value: string): LocalePreference | undefined {
@@ -74,6 +89,8 @@ function readPersistedPreference(agentDir = resolveAgentDir()): LocalePreference
 
 export function getLocalePreference(): LocalePreference {
   const state = runtime();
+  const owned = state.ownerOverrides.at(-1);
+  if (owned) return owned.preference;
   if (state.overrideSet && state.overridePreference) return state.overridePreference;
 
   const envValue = process.env[LOCALE_ENV];
@@ -101,7 +118,7 @@ export function getLocale(): Locale {
 
 export const getActiveLocale = getLocale;
 
-/** Applies a process-local locale override, used by the --locale startup flag. */
+/** Applies the legacy process-local locale override. */
 export function applyLocale(preference: LocalePreference): void {
   const state = runtime();
   state.overrideSet = true;
@@ -109,6 +126,7 @@ export function applyLocale(preference: LocalePreference): void {
   publishSnapshot();
 }
 
+/** Clears only the legacy process-local override, never another runtime's owned override. */
 export function clearLocaleOverride(): void {
   const state = runtime();
   state.overrideSet = false;
@@ -116,11 +134,47 @@ export function clearLocaleOverride(): void {
   publishSnapshot();
 }
 
+/** Creates an opaque owner for one extension/runtime lifecycle. This does not change the locale. */
+export function createLocaleOverrideOwner(): LocaleOverrideOwner {
+  return Object.freeze({});
+}
+
+/** Removes this owner's current override without touching parent/root owners. */
+function removeOwnedLocaleOverride(state: I18nRuntime, owner: LocaleOverrideOwner): boolean {
+  const next = state.ownerOverrides.filter((entry) => entry.owner !== owner);
+  if (next.length === state.ownerOverrides.length) return false;
+  state.ownerOverrides = next;
+  return true;
+}
+
+/** Applies an override owned by one runtime; reapplying moves that owner to the active position. */
+export function applyLocaleForOwner(owner: LocaleOverrideOwner, preference: LocalePreference): void {
+  const state = runtime();
+  removeOwnedLocaleOverride(state, owner);
+  state.ownerOverrides.push({ owner, preference });
+  publishSnapshot();
+}
+
+/**
+ * Makes this runtime explicitly inherit the currently active parent/process preference.
+ * A child with no --locale flag should use this instead of clearLocaleOverride().
+ */
+export function inheritLocaleForOwner(owner: LocaleOverrideOwner): void {
+  const state = runtime();
+  if (removeOwnedLocaleOverride(state, owner)) publishSnapshot();
+}
+
+/** Idempotent lifecycle cleanup for an owned override. */
+export function releaseLocaleOverrideOwner(owner: LocaleOverrideOwner): void {
+  inheritLocaleForOwner(owner);
+}
+
 export function resetLocaleState(): void {
   const state = runtime();
   state.registry.clear();
   state.overrideSet = false;
   state.overridePreference = undefined;
+  state.ownerOverrides = [];
   publishSnapshot();
 }
 

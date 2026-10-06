@@ -166,7 +166,7 @@ export default function (pi: ExtensionAPI, options: TurnElapsedOptions = {}) {
   pi.on("turn_start", async (_event, ctx) => {
     stopTick();
     if (resolveDisplay(options.display, ctx) === false) {
-      setElapsedLabel(undefined);
+      setElapsedLabel(ctx.sessionManager, undefined);
       return;
     }
     tracker.startTurn();
@@ -177,7 +177,7 @@ export default function (pi: ExtensionAPI, options: TurnElapsedOptions = {}) {
       const elapsed = tracker.runElapsed();
       if (elapsed <= 0) return;
       const label = i18n.t("elapsedWorking", { value: formatTick(elapsed) });
-      setElapsedLabel(label);
+      setElapsedLabel(ctx.sessionManager, label);
       ctx.ui.setWorkingMessage(label);
     };
     tick();
@@ -185,7 +185,7 @@ export default function (pi: ExtensionAPI, options: TurnElapsedOptions = {}) {
   });
 
   const clearWorking = (ctx: ExtensionContext) => {
-    setElapsedLabel(undefined);
+    setElapsedLabel(ctx.sessionManager, undefined);
     if (ctx.hasUI) ctx.ui.setWorkingMessage(undefined);
   };
 
@@ -217,5 +217,11 @@ export default function (pi: ExtensionAPI, options: TurnElapsedOptions = {}) {
         message: i18n.t("elapsedTotal", { value: formatDone(settlement.elapsedMs) }),
       });
     }
+  });
+
+  pi.on("session_shutdown", async (_event, ctx) => {
+    stopTick();
+    tracker.resetRun();
+    setElapsedLabel(ctx.sessionManager, undefined);
   });
 }

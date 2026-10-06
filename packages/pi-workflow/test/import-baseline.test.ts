@@ -79,6 +79,31 @@ describe("portable paths without storage migration", () => {
   });
 });
 
+describe("project workflow approval", () => {
+  it("excludes untrusted executable definitions before import, including previously cached ones", async () => {
+    const cwd = tempDirectory();
+    const marker = join(cwd, "project-code-ran");
+    const { configFile } = projectOverlayPaths(cwd);
+    mkdirSync(dirname(configFile), { recursive: true });
+    writeFileSync(configFile, `import { writeFileSync } from "node:fs";
+import { defineWorkflow, acts } from "@maplezzk/pi-workflow";
+writeFileSync(${JSON.stringify(marker)}, "executed");
+export default defineWorkflow({ name: "project-only", start: "step",
+  stages: { step: acts.prompt({ prompt: "approved prompt" }) }, edges: { step: "stop" } });`);
+
+    const rejected = await loadWorkflows(cwd, { projectTrusted: false });
+    expect(existsSync(marker)).toBe(false);
+    expect(rejected.workflows).toEqual([]);
+    expect(rejected.issues).toContainEqual(expect.objectContaining({ layer: "project", severity: "warning" }));
+
+    expect((await loadWorkflows(cwd, { projectTrusted: true })).workflows.map(({ name }) => name)).toEqual(["project-only"]);
+    expect(existsSync(marker)).toBe(true);
+    rmSync(marker);
+    expect((await loadWorkflows(cwd, { projectTrusted: false })).workflows).toEqual([]);
+    expect(existsSync(marker)).toBe(false);
+  });
+});
+
 describe("scoped workflow package aliases", () => {
   it.each(["@maplezzk/pi-workflow", "@juicesharp/rpiv-workflow"])("loads config authored against %s outside the workspace", async (name) => {
     const cwd = tempDirectory();

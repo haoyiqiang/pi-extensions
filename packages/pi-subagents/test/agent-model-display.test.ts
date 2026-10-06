@@ -11,6 +11,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ProjectTrustStore } from "@earendil-works/pi-coding-agent";
 
 vi.mock("../src/agent-runner.js", async () => {
   const actual = await vi.importActual<typeof import("../src/agent-runner.js")>("../src/agent-runner.js");
@@ -23,6 +24,7 @@ import subagentsExtension from "../src/index.js";
 
 function agentTool() {
   const tools = new Map<string, any>();
+  const lifecycle = new Map<string, any>();
   const pi = {
     registerMessageRenderer: vi.fn(),
     registerEntryRenderer: vi.fn(),
@@ -32,12 +34,13 @@ function agentTool() {
     getFlag: vi.fn(),
     getAllTools: vi.fn(() => [] as any[]),
     setActiveTools: vi.fn(),
-    on: vi.fn(),
+    on: vi.fn((event: string, handler: any) => lifecycle.set(event, handler)),
     events: { emit: vi.fn(), on: vi.fn(() => vi.fn()) },
     appendEntry: vi.fn(),
     sendMessage: vi.fn(),
   } as any;
   subagentsExtension(pi);
+  void lifecycle.get("session_start")?.({}, ctx());
   return tools.get("Agent");
 }
 
@@ -46,7 +49,9 @@ function ctx() {
   return {
     hasUI: false,
     ui: { setStatus: vi.fn(), setWidget: vi.fn(), notify: vi.fn() },
-    cwd: "/tmp",
+    cwd,
+    isProjectTrusted: () => true,
+    mode: "json",
     model: { provider: "anthropic", id: "claude-opus-4-6", name: "Claude Opus 4.6" },
     modelRegistry: {
       find: vi.fn((provider: string, id: string) =>
@@ -104,8 +109,11 @@ beforeEach(() => {
   // A developer's own ~/.pi agents and settings would otherwise leak in.
   originalAgentDir = process.env.PI_CODING_AGENT_DIR;
   originalHome = process.env.HOME;
-  process.env.PI_CODING_AGENT_DIR = join(cwd, "agent-dir");
+  const agentDir = join(cwd, "agent-dir");
+  mkdirSync(agentDir, { recursive: true });
+  process.env.PI_CODING_AGENT_DIR = agentDir;
   process.env.HOME = cwd;
+  new ProjectTrustStore(agentDir).set(cwd, true);
 });
 
 afterEach(() => {

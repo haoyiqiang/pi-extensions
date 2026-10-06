@@ -6,13 +6,17 @@ import test from "node:test";
 import { withTempAgentDir } from "@maplezzk/pi-test-utils";
 import piI18n, {
   applyLocale,
+  applyLocaleForOwner,
+  createLocaleOverrideOwner,
   createTranslator,
   getLocale,
   getLocaleConfigPath,
   I18N_STATE_KEY,
+  inheritLocaleForOwner,
   loadCatalog,
   parseLocalePreference,
   registerStrings,
+  releaseLocaleOverrideOwner,
   resetLocaleState,
   saveLocalePreference,
   scope,
@@ -74,6 +78,28 @@ test("namespaced registry switches at render time and falls back to English", as
   });
 });
 
+test("child locale owners explicitly inherit without clearing the root override", async () => {
+  await withAgentDir(() => {
+    const root = createLocaleOverrideOwner();
+    const child = createLocaleOverrideOwner();
+
+    applyLocaleForOwner(root, "en-US");
+    assert.equal(getLocale(), "en-US");
+
+    inheritLocaleForOwner(child);
+    assert.equal(getLocale(), "en-US", "a child without --locale inherits the root owner");
+
+    applyLocaleForOwner(child, "zh-CN");
+    assert.equal(getLocale(), "zh-CN");
+    releaseLocaleOverrideOwner(child);
+    releaseLocaleOverrideOwner(child);
+    assert.equal(getLocale(), "en-US", "child cleanup restores the still-live root owner");
+
+    releaseLocaleOverrideOwner(root);
+    assert.equal(getLocale(), "zh-CN");
+  });
+});
+
 test("locale directory loader registers flat locale files and reports missing files", async () => {
   await withAgentDir((agentDir) => {
     const localeDir = join(agentDir, "locales");
@@ -84,6 +110,35 @@ test("locale directory loader registers flat locale files and reports missing fi
     assert.equal(result.diagnostics.length, 1);
     applyLocale("zh-CN");
     assert.equal(scope("loader-example")("saved", "fallback"), "Saved");
+  });
+});
+
+test("a child extension runtime without a locale flag inherits the root startup owner", async () => {
+  await withAgentDir(() => {
+    const createRuntime = (flag: string | undefined) => {
+      const handlers = new Map<string, (...args: any[]) => any>();
+      piI18n({
+        registerFlag() {},
+        getFlag() { return flag; },
+        on(name: string, handler: (...args: any[]) => any) { handlers.set(name, handler); },
+        registerCommand() {},
+        registerEntryRenderer() {},
+        appendEntry() {},
+      } as any);
+      return handlers;
+    };
+
+    const root = createRuntime("en-US");
+    const child = createRuntime(undefined);
+    root.get("session_start")?.({}, { mode: "rpc", sessionManager: {}, ui: { notify() {} } });
+    assert.equal(getLocale(), "en-US");
+    child.get("session_start")?.({}, { mode: "rpc", sessionManager: {}, ui: { notify() {} } });
+    assert.equal(getLocale(), "en-US", "child startup must not clear the root CLI override");
+
+    child.get("session_shutdown")?.();
+    assert.equal(getLocale(), "en-US");
+    root.get("session_shutdown")?.();
+    assert.equal(getLocale(), "zh-CN");
   });
 });
 
@@ -126,7 +181,8 @@ test("extension registers locale flag, aliases, and applies the startup override
       ui: { select: async () => undefined, notify() {} },
     });
     assert.equal(JSON.parse(readFileSync(getLocaleConfigPath(agentDir), "utf8")).locale, "zh-CN");
-    assert.equal(getLocale(), "en-US", "startup flag remains the highest-priority override");
+    applyLocale("zh-CN");
+    assert.equal(getLocale(), "en-US", "startup flag owner remains above the legacy public override");
   });
 });
 

@@ -4,5 +4,5 @@ import { registerWorkflowExecutor } from "./src/workflow/pi-executor.js";
 import { createWorkflowAgentRuntime } from "./src/workflow/agent-runtime.js";
 
 export default function workflowExecutor(pi: ExtensionAPI): void {
-  registerWorkflowExecutor(pi, { createRuntime: ({ backend }) => createWorkflowAgentRuntime({ backend }) });
+  registerWorkflowExecutor(pi, { createRuntime: ({ backend, runtimePolicy }) => createWorkflowAgentRuntime({ backend, runtimePolicy }) });
 }

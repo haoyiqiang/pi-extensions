@@ -423,9 +423,10 @@ describe.skipIf(process.platform === "win32")("standard terminal backend with a 
     expect(after).toEqual(before);
     expect(observed.branch.length).toBeGreaterThan(0);
 
-    expect(f.manager.abort(id)).toBe(true);
-    await within(record.promise!, 10_000, "standard child did not retire after stop");
+    await expect(within(f.manager.control(id, { action: "cancel" }), 10_000, "standard child did not retire after cancel")).resolves.toBe(true);
+    await record.promise;
     expect(record.status).toBe("stopped");
+    expect(record.error).toBeUndefined();
     expect(record.session).toBe(session);
     const reference = session.reference;
     const branchBefore = session.getBranch?.() ?? [];

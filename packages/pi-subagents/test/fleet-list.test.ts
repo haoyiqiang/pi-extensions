@@ -2,6 +2,7 @@ import { Editor, visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it, vi } from "vitest";
 import type { AgentManager } from "../src/agent-manager.js";
 import { registerAgents } from "../src/agent-types.js";
+import { i18n } from "../src/i18n.js";
 import type { AgentConfig, AgentRecord, ViewerMarkdownMode } from "../src/types.js";
 import { type AgentActivity, getDisplayName } from "../src/ui/agent-widget.js";
 import {
@@ -68,8 +69,7 @@ function makeRecord(over: Partial<AgentRecord> = {}): AgentRecord {
 function fakeManager(agents: AgentRecord[]): AgentManager {
   return {
     listAgents: () => agents,
-    abort: () => true,
-    steer: vi.fn(() => true),
+    control: vi.fn(async () => true),
   } as unknown as AgentManager;
 }
 
@@ -342,7 +342,7 @@ describe("FleetList navigation", () => {
     try {
       const agents = [makeRecord({ id: "a1" })];
       const listAgents = vi.fn(() => agents);
-      const manager = { listAgents, abort: () => true } as unknown as AgentManager;
+      const manager = { listAgents, control: vi.fn(async () => true) } as unknown as AgentManager;
       const fleet = new FleetList(manager, new Map());
       fleet.setUICtx({
         setWidget: () => {}, onTerminalInput: () => () => {}, getEditorText: () => "",
@@ -425,6 +425,13 @@ describe("FleetList rendering", () => {
     expect(agentLine).toContain(getDisplayName("general-purpose"));
     expect(agentLine).toContain("↓ 13.1k tokens");
     expect(agentLine).toMatch(/\d+s · ↓/); // "<seconds>s · ↓ ..." (timing-agnostic)
+  });
+
+  it("renders a live idle conversation as waiting rather than running", () => {
+    const h = harness([makeRecord({ status: "running", activity: "idle", description: "open terminal" })]);
+    const row = plain(h.render(120).find(line => line.includes("open terminal"))!);
+    expect(row).toContain(i18n.t("product.waitingLabel"));
+    expect(row).not.toContain("tokens");
   });
 
   it("orders agents earliest-launched first (top)", () => {
@@ -511,7 +518,7 @@ describe("FleetList overlay lifecycle", () => {
     expect(h.render().find(l => l.includes("three"))).toContain("○");
   });
 
-  it("wires the viewer's steer composer to manager.steer with the agent id", () => {
+  it("wires the viewer's steer composer through manager.control", () => {
     const agents = [makeRecord({ id: "live", description: "the one" })];
     const h = harness(agents);
     h.press(DOWN);  // activate (main)
@@ -524,7 +531,7 @@ describe("FleetList overlay lifecycle", () => {
     for (const ch of "go left") viewer!.handleInput(ch);
     viewer!.handleInput("\r");                       // Enter → send
 
-    expect(h.manager.steer).toHaveBeenCalledWith("live", "go left");
+    expect(h.manager.control).toHaveBeenCalledWith("live", { action: "steer", message: "go left" });
   });
 
   it("hands the viewer the user's markdown setting, and persists a mode chosen with m", () => {

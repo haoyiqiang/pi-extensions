@@ -7,12 +7,15 @@ import { loadCustomAgents } from "../src/custom-agents.js";
 import { setScopeModelsEnabled } from "../src/model-scope.js";
 import { createNestedSubagentTools, getMaxSubagentDepth, type NestedAgentManager, setMaxSubagentDepth } from "../src/nested-tools.js";
 import { encodeCwd } from "../src/output-file.js";
+import { i18n } from "../src/i18n.js";
+import type { SubagentsRuntimePolicy } from "../src/runtime-policy.js";
 
 let cwd: string;
 let manager: NestedAgentManager;
 let records: Map<string, any>;
 let spawn: ReturnType<typeof vi.fn>;
 let spawnAndWait: ReturnType<typeof vi.fn>;
+let control: ReturnType<typeof vi.fn>;
 
 function writeAgent(name: string, extra = "") {
   const dir = join(cwd, ".pi", "agents");
@@ -42,6 +45,7 @@ function tools(
   depth = 1,
   maxSubagentDepth = 2,
   configCwd = cwd,
+  runtimePolicy?: SubagentsRuntimePolicy,
 ) {
   return createNestedSubagentTools({
     manager,
@@ -51,6 +55,7 @@ function tools(
     maxSubagentDepth,
     allowedSubagents,
     configCwd,
+    runtimePolicy,
   });
 }
 
@@ -75,21 +80,26 @@ beforeEach(() => {
     records.set(id, record);
     return { id, record };
   });
+  control = vi.fn(async (
+    id: string,
+    request: { action: "steer"; message: string } | { action: "interrupt" | "cancel" | "close" },
+  ) => {
+    const record = records.get(id);
+    if (!record) return false;
+    if (request.action === "steer") {
+      if (record.session) await record.session.steer(request.message);
+      else (record.pendingSteers ??= []).push(request.message);
+    }
+    if (request.action === "close") records.delete(id);
+    return true;
+  });
   manager = {
     spawn,
     spawnAndWait,
     awaitStartup: vi.fn(async () => {}),
     getRecord: (id: string) => records.get(id),
     resume: vi.fn(),
-    interrupt: vi.fn(async () => true),
-    release: vi.fn(async (id: string) => { records.delete(id); }),
-    steerAndWait: vi.fn(async (id: string, message: string) => {
-      const record = records.get(id);
-      if (!record || record.status !== "running") return false;
-      if (record.session) await record.session.steer(message);
-      else (record.pendingSteers ??= []).push(message);
-      return true;
-    }),
+    control,
   } as any;
 });
 
@@ -99,24 +109,39 @@ afterEach(() => {
 });
 
 describe("child-safe nested Agent tools", () => {
-  it("forwards interactive mode and exposes owned turn-interrupt and stop controls", async () => {
-    const [agent, , control] = tools();
+  it("forwards interactive mode and routes explicit controls through manager.control", async () => {
+    const [agent, , controlTool] = tools();
     await execute(agent, {
       subagent_type: "reviewer", description: "interactive review", prompt: "Discuss it",
       run_in_background: true, interactive: true,
     });
     expect(spawn).toHaveBeenCalledWith(expect.anything(), expect.anything(), "reviewer", "Discuss it",
       expect.objectContaining({ interactive: true }));
-    await execute(control, { agent_id: "child-1", action: "interrupt" });
-    expect(manager.interrupt).toHaveBeenCalledWith("child-1");
-    expect(records.has("child-1")).toBe(true);
-    await expect(execute(control, { agent_id: "child-1" })).rejects.toThrow("steering message");
+
+    await expect(execute(controlTool, { agent_id: "child-1" })).rejects.toThrow(/stop is not a supported action/);
+    await expect(execute(controlTool, { agent_id: "child-1", action: "stop" })).rejects.toThrow(/stop is not a supported action/);
     records.set("foreign", { id: "foreign", parentAgentId: "other", status: "running" });
-    await expect(execute(control, { agent_id: "foreign", action: "stop" })).rejects.toThrow("not owned");
-    expect(manager.release).not.toHaveBeenCalled();
-    await execute(control, { agent_id: "child-1", action: "stop" });
-    expect(manager.release).toHaveBeenCalledWith("child-1");
+    await expect(execute(controlTool, { agent_id: "foreign", action: "cancel" })).rejects.toThrow("not owned");
+
+    for (const params of [
+      { agent_id: "child-1", action: "steer", message: "focus on tests" },
+      { agent_id: "child-1", action: "interrupt" },
+      { agent_id: "child-1", action: "cancel" },
+      { agent_id: "child-1", action: "close" },
+    ]) {
+      await execute(controlTool, params);
+    }
+
+    expect(control.mock.calls).toEqual([
+      ["child-1", { action: "steer", message: "focus on tests" }],
+      ["child-1", { action: "interrupt" }],
+      ["child-1", { action: "cancel" }],
+      ["child-1", { action: "close" }],
+    ]);
     expect(records.has("child-1")).toBe(false);
+    const repeated = await execute(controlTool, { agent_id: "child-1", action: "close" });
+    expect(repeated.content[0].text).toBe(i18n.t("product.unchanged", { id: "child-1", action: "close" }));
+    expect(control.mock.calls.at(-1)).toEqual(["child-1", { action: "close" }]);
   });
 
   it("allows any enabled agent when allowed_subagents is omitted", async () => {
@@ -238,9 +263,11 @@ describe("child-safe nested Agent tools", () => {
     };
     records.set("child-1", record);
 
-    const result = await execute(steer, { agent_id: "child-1", message: "focus on tests" });
+    const result = await execute(steer, {
+      agent_id: "child-1", action: "steer", message: "focus on tests",
+    });
 
-    expect(result.content[0].text).toContain("queued");
+    expect(result.content[0].text).toContain("Guidance delivered");
     expect(record.pendingSteers).toEqual(["focus on tests"]);
   });
 
@@ -293,7 +320,9 @@ describe("child-safe nested Agent tools", () => {
       session: { steer: vi.fn() },
     });
     await expect(execute(getResult, { agent_id: "foreign" })).rejects.toThrow(/not owned/);
-    await expect(execute(steer, { agent_id: "foreign", message: "stop" })).rejects.toThrow(/not owned/);
+    await expect(execute(steer, {
+      agent_id: "foreign", action: "steer", message: "stop",
+    })).rejects.toThrow(/not owned/);
     await expect(execute(agent, {
       resume: "foreign",
       subagent_type: "scout",

@@ -21,6 +21,10 @@ export interface RunScope {
 	/** Claim the run's single terminal transition. Signal abortion does not bar
 	 *  this claim: the abort writer itself must still persist the terminal row. */
 	claimTerminal(): boolean;
+	/** Register a synchronous terminal-claim observer. Fanout generations use
+	 *  this to abort siblings as soon as the durable terminal owner is chosen,
+	 *  before any lifecycle observer is awaited. */
+	onTerminalClaimed(listener: () => void): () => void;
 	/** Permanently close the logical run after the runner's retirement barrier. */
 	seal(): void;
 }
@@ -28,6 +32,7 @@ export interface RunScope {
 class LogicalRunScope implements RunScope {
 	private terminalClaimed = false;
 	private sealed = false;
+	private readonly terminalListeners = new Set<() => void>();
 	activeStage?: string;
 
 	constructor(readonly signal?: AbortSignal) {}
@@ -43,11 +48,36 @@ class LogicalRunScope implements RunScope {
 	claimTerminal(): boolean {
 		if (this.sealed || this.terminalClaimed) return false;
 		this.terminalClaimed = true;
+		const listeners = [...this.terminalListeners];
+		this.terminalListeners.clear();
+		for (const listener of listeners) {
+			try {
+				listener();
+			} catch {
+				// Terminal ownership is already committed. An internal observer must
+				// never replace or roll back that outcome.
+			}
+		}
 		return true;
+	}
+
+	onTerminalClaimed(listener: () => void): () => void {
+		if (this.sealed) return () => {};
+		if (this.terminalClaimed) {
+			try {
+				listener();
+			} catch {
+				// Same fail-soft observer posture as the claim-time dispatch above.
+			}
+			return () => {};
+		}
+		this.terminalListeners.add(listener);
+		return () => this.terminalListeners.delete(listener);
 	}
 
 	seal(): void {
 		this.sealed = true;
+		this.terminalListeners.clear();
 	}
 }
 

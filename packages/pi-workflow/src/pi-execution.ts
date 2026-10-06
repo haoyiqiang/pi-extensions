@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { EventBus, ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { resolveWorkflowProjectTrusted } from "./pi-project-trust.js";
 import { loadWorkflowConfig, resolveWorkflowModel, workflowExecutorSettings } from "./config.js";
 import { COMMAND_LIFETIME } from "./command-lifetime.js";
 import {
@@ -44,11 +45,15 @@ interface OwnedProvider extends WorkflowExecutionProvider {
     events: EventBus;
     runtime?: PiWorkflowExecutionRuntime;
     relinquish?: () => void;
+    handoff?: boolean;
   };
 }
 
+type RunPhase = "admitting" | "running" | "retiring" | "settled";
+
 interface RunControl {
   runId: string;
+  phase: RunPhase;
   readonly controller: AbortController;
   cancellationError: (signal: AbortSignal) => Error;
   commandRun?: Promise<unknown>;
@@ -93,12 +98,10 @@ export function isPiWorkflowExecutionProvider(value: unknown): value is Workflow
 export function installPiWorkflowExecution(
   pi: Pick<ExtensionAPI, "events" | "on">,
 ): PiWorkflowExecutionRuntime {
-  // Resource discovery also evaluates factories later filtered from SDK children.
-  // A different bus becomes the root owner only if session_start actually fires.
-  const existing = getWorkflowExecutionProvider();
-  const deferActivation = isPiWorkflowExecutionProvider(existing)
-    && (existing as OwnedProvider)[PROVIDER_OWNER].events !== pi.events;
-
+  // Extension discovery may evaluate this factory in SDK children that later
+  // filter the frontend out. Registration is factory-safe; global ownership is
+  // claimed only from session_start, and a different bus may replace the current
+  // owner only after that owner explicitly opened a root-session handoff.
   let closed = false;
   let activated = false;
   let closing: Promise<void> | undefined;
@@ -124,12 +127,14 @@ export function installPiWorkflowExecution(
       const admissionSignal = run.signal ?? observer.signal;
       const control: RunControl = (admissionSignal && commandAdmissions.get(admissionSignal)) || {
         runId: run.runId,
+        phase: "admitting",
         controller: new AbortController(),
         cancellationError: run.cancellationError,
       };
       if (control.controller.signal.aborted) return Promise.reject(run.cancellationError(control.controller.signal));
       runs.delete(control.runId);
       control.runId = run.runId;
+      control.phase = "admitting";
       control.cancellationError = run.cancellationError;
       runs.set(run.runId, control);
       // Defer acquisition by one microtask so the complete operation is
@@ -155,6 +160,7 @@ export function installPiWorkflowExecution(
   function relinquish(): void {
     closed = true;
     activated = false;
+    provider[PROVIDER_OWNER].handoff = false;
     unregister();
     offStart?.();
     offShutdown?.();
@@ -163,14 +169,18 @@ export function installPiWorkflowExecution(
   }
 
   function activate(): void {
-    if (closed) return;
+    if (closed || activated) return;
     const previous = getWorkflowExecutionProvider();
     if (previous !== provider && isPiWorkflowExecutionProvider(previous)) {
       const owner = (previous as OwnedProvider)[PROVIDER_OWNER];
+      // A filtered SDK child has its own event bus but no root handoff. Its
+      // session_start must not evict the launcher-owned provider.
+      if (owner.events !== pi.events && owner.handoff !== true) return;
       if (owner.runtime) inherited.add(owner.runtime);
       owner.relinquish?.();
     }
     unregister = registerWorkflowExecutionHost(provider);
+    provider[PROVIDER_OWNER].handoff = false;
     activated = true;
   }
 
@@ -178,6 +188,7 @@ export function installPiWorkflowExecution(
   offShutdown = pi.on("session_shutdown", async (event) => {
     if (["new", "resume", "fork"].includes(event.reason)) {
       // The next root adopts cancellation controls for already-admitted runs.
+      provider[PROVIDER_OWNER].handoff = activated;
       for (const control of runs.values()) if (!control.active) control.controller.abort();
       return;
     }
@@ -193,7 +204,7 @@ export function installPiWorkflowExecution(
     if (signal.aborted) throw cancellationFor(control, signal);
     if (closed) throw failure("provider.closed");
 
-    const config = loadWorkflowConfig(observer.cwd);
+    const config = loadWorkflowConfig(observer.cwd, { projectTrusted: observer.isProjectTrusted?.() ?? false });
     const identity = protocolIdentity(run.identity);
     if (identity !== undefined && identity.executor !== config.execution.executor) {
       throw failure("execution.executorMismatch", {
@@ -243,6 +254,7 @@ export function installPiWorkflowExecution(
 
     const record: ActiveExecution = { execution, control };
     control.active = record;
+    control.phase = "running";
     active.add(record);
     if (signal.aborted || closed) {
       await retire(record);
@@ -305,6 +317,7 @@ export function installPiWorkflowExecution(
   function retire(record: ActiveExecution): Promise<void> {
     if (record.closePromise) return record.closePromise;
     active.delete(record);
+    record.control.phase = "retiring";
     const retirement = prepareRetirement();
     // Publish every owner-visible reference before calling executor code:
     // close() is allowed to reenter both wrapper and root retirement.
@@ -325,12 +338,14 @@ export function installPiWorkflowExecution(
       close = (value as { close?: unknown }).close;
     } catch (error) {
       const retirement = prepareRetirement();
+      control.phase = "retiring";
       control.retirement = retirement.promise;
       retirement.start(() => { throw error; });
       return retirement.promise;
     }
     if (typeof close !== "function") return undefined;
     const retirement = prepareRetirement();
+    control.phase = "retiring";
     control.retirement = retirement.promise;
     retirement.start(() => close.call(value));
     return retirement.promise;
@@ -346,6 +361,7 @@ export function installPiWorkflowExecution(
     });
     // Publish before aborting: abort listeners and close callbacks may reenter.
     control.cancellation = barrier;
+    control.phase = "retiring";
     try {
       control.controller.abort();
     } catch (error) {
@@ -362,6 +378,7 @@ export function installPiWorkflowExecution(
       }
       // The runner's signal fence blocks late writes immediately. Opaque user
       // callbacks may outlive cancellation; do not await them after retirement.
+      control.phase = "settled";
       if (runs.get(control.runId) === control) runs.delete(control.runId);
     })().then(finish, fail);
     return barrier;
@@ -369,7 +386,10 @@ export function installPiWorkflowExecution(
 
   function activeRunIds(): readonly string[] {
     return Object.freeze([...new Set([
-      ...runs.keys(), ...[...inherited].flatMap((runtime) => [...runtime.activeRunIds()]),
+      ...[...runs.values()]
+        .filter((control) => control.phase === "admitting" || control.phase === "running")
+        .map((control) => control.runId),
+      ...[...inherited].flatMap((runtime) => [...runtime.activeRunIds()]),
     ])].sort());
   }
 
@@ -405,10 +425,12 @@ export function installPiWorkflowExecution(
     closing = barrier;
     closed = true;
     activated = false;
+    provider[PROVIDER_OWNER].handoff = false;
     const sideEffectErrors: unknown[] = [];
     try { unregister(); } catch (error) { recordUnique(sideEffectErrors, error); }
     try { offStart?.(); offShutdown?.(); } catch (error) { recordUnique(sideEffectErrors, error); }
     for (const control of runs.values()) {
+      control.phase = "retiring";
       try { control.controller.abort(); } catch (error) { recordUnique(sideEffectErrors, error); }
     }
     void (async () => {
@@ -426,6 +448,7 @@ export function installPiWorkflowExecution(
   }
 
   function removeRun(control: RunControl): void {
+    control.phase = "settled";
     if (!control.commandRun && runs.get(control.runId) === control) runs.delete(control.runId);
   }
 
@@ -433,6 +456,7 @@ export function installPiWorkflowExecution(
     if (closed) throw failure("provider.closed");
     const control: RunControl = {
       runId: `pending-${randomUUID().slice(0, 8)}`,
+      phase: "admitting",
       controller: new AbortController(),
       cancellationError: () => new DOMException("Aborted", "AbortError"),
     };
@@ -446,14 +470,19 @@ export function installPiWorkflowExecution(
         void run.then(settled, settled);
       },
     };
-    const observer = new Proxy(ctx, {
-      get(target, key) {
-        if (key === "signal") return signal;
-        if (key === COMMAND_LIFETIME) return lifetime;
-        return Reflect.get(target, key, target);
-      },
-    });
     try {
+      const projectTrusted = await resolveWorkflowProjectTrusted(ctx);
+      // A cold native import may finish after cancellation/close. Never begin
+      // project loading or emit command errors from that retired admission.
+      if (signal.aborted) return;
+      const observer = new Proxy(ctx, {
+        get(target, key) {
+          if (key === "signal") return signal;
+          if (key === "isProjectTrusted") return () => projectTrusted;
+          if (key === COMMAND_LIFETIME) return lifetime;
+          return Reflect.get(target, key, target);
+        },
+      });
       await handler(observer);
     } catch (error) {
       if (!signal.aborted) throw error;
@@ -467,7 +496,6 @@ export function installPiWorkflowExecution(
     runCommand, activeRunIds, cancelRun, cancelAll, close,
   };
   Object.assign(provider[PROVIDER_OWNER], { runtime, relinquish });
-  if (!deferActivation) activate();
   return runtime;
 }
 

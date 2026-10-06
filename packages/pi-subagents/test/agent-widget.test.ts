@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { renderRunningAgentStatus } from "../src/index.js";
+import { i18n } from "../src/i18n.js";
 import type { WidgetMode } from "../src/types.js";
 import { type AgentActivity, AgentWidget, fgPreservingNestedStyles, formatCost, formatSessionTokens } from "../src/ui/agent-widget.js";
 
@@ -145,6 +146,17 @@ describe("AgentWidget", () => {
     const lines = renderLines(manager, "background", () => "background");
     expect(lines).toContain("Agents");
     expect(lines).toContain("background description");
+  });
+
+  it("renders a live idle conversation as waiting, never thinking or running", () => {
+    const record = makeRecord("idle", { isBackground: true });
+    record.activity = "idle";
+    const manager = { listAgents: () => [record] };
+    const lines = renderLines(manager, "idle", () => "background");
+
+    expect(lines).toContain("idle description");
+    expect(lines).toContain(i18n.t("product.waitingLabel"));
+    expect(lines).not.toContain("thinking…");
   });
 
   // 'background' excludes only agents *known* to be foreground; one with no

@@ -9,6 +9,7 @@ import { truncateToWidth } from "@earendil-works/pi-tui";
 import { renderAgentName } from "../agent-color.js";
 import { type AgentManager, isTopLevelAgent } from "../agent-manager.js";
 import { getConfig } from "../agent-types.js";
+import { i18n } from "../i18n.js";
 import type { AgentInvocation, AgentRecord, SubagentType, WidgetMode } from "../types.js";
 import { getLifetimeCost, getLifetimeTotal, getSessionContextPercent, type LifetimeUsage, type SessionLike } from "../usage.js";
 
@@ -416,14 +417,16 @@ export class AgentWidget {
    */
   private renderWidget(tui: any, theme: Theme): string[] {
     const allAgents = this.widgetAgents();
-    const running = allAgents.filter(a => a.status === "running");
-    const queued = allAgents.filter(a => a.status === "queued");
+    const waiting = allAgents.filter(a =>
+      a.status === "idle" || (a.status === "running" && a.activity === "idle"));
+    const running = allAgents.filter(a => a.status === "running" && a.activity !== "idle" && a.activity !== "queued");
+    const queued = allAgents.filter(a => a.status === "queued" || (a.status === "running" && a.activity === "queued"));
     const finished = allAgents.filter(a =>
-      a.status !== "running" && a.status !== "queued" && a.completedAt
+      a.status !== "idle" && a.status !== "running" && a.status !== "queued" && a.completedAt
       && this.shouldShowFinished(a.id, a.status),
     );
 
-    const hasActive = running.length > 0 || queued.length > 0;
+    const hasActive = running.length > 0 || waiting.length > 0 || queued.length > 0;
     const hasFinished = finished.length > 0;
 
     // Nothing to show — return empty (widget will be unregistered by update())
@@ -435,8 +438,8 @@ export class AgentWidget {
     const headingIcon = hasActive ? "●" : "○";
     const frame = SPINNER[this.widgetFrame % SPINNER.length];
 
-    // Build sections separately for overflow-aware assembly.
-    // Each running agent = 2 lines (header + activity), finished = 1 line, queued = 1 line.
+    // Build sections separately for overflow-aware assembly. Active SDK runs
+    // get two lines; open-but-idle conversations get one truthful waiting row.
 
     const finishedLines: string[] = [];
     for (const a of finished) {
@@ -485,13 +488,17 @@ export class AgentWidget {
       ]);
     }
 
+    const waitingLines = waiting.map(a => truncate(
+      theme.fg("dim", "├─") + ` ${theme.fg("muted", "◦")} ${renderAgentName(a.type, theme, { fallbackColor: "muted" })}  ${theme.fg("muted", a.description)} ${theme.fg("dim", `· ${i18n.t("product.waitingLabel")}`)}`,
+    ));
+
     const queuedLine = queued.length > 0
       ? truncate(theme.fg("dim", "├─") + ` ${theme.fg("muted", "◦")} ${theme.fg("dim", `${queued.length} queued`)}`)
       : undefined;
 
     // Assemble with overflow cap (heading + overflow indicator = 2 reserved lines).
     const maxBody = MAX_WIDGET_LINES - 1; // heading takes 1 line
-    const totalBody = finishedLines.length + runningLines.length * 2 + (queuedLine ? 1 : 0);
+    const totalBody = finishedLines.length + runningLines.length * 2 + waitingLines.length + (queuedLine ? 1 : 0);
 
     const lines: string[] = [truncate(theme.fg(headingColor, headingIcon) + " " + theme.fg(headingColor, "Agents"))];
 
@@ -499,6 +506,7 @@ export class AgentWidget {
       // Everything fits — add all lines and fix up connectors for the last item.
       lines.push(...finishedLines);
       for (const pair of runningLines) lines.push(...pair);
+      lines.push(...waitingLines);
       if (queuedLine) lines.push(queuedLine);
 
       // Fix last connector: swap ├─ → └─ and │ → space for activity lines.
@@ -507,7 +515,7 @@ export class AgentWidget {
         lines[last] = lines[last].replace("├─", "└─");
         // If last item is a running agent activity line, fix indent of that line
         // and fix the header line above it.
-        if (runningLines.length > 0 && !queuedLine) {
+        if (runningLines.length > 0 && waitingLines.length === 0 && !queuedLine) {
           // The last two lines are the last running agent's header + activity.
           if (last >= 2) {
             lines[last - 1] = lines[last - 1].replace("├─", "└─");
@@ -520,10 +528,11 @@ export class AgentWidget {
       // Reserve 1 line for overflow indicator.
       let budget = maxBody - 1;
       let hiddenRunning = 0;
+      let hiddenWaiting = 0;
       let hiddenFinished = 0;
 
       // Reserve the queued line's row up front. It is a single summary of N
-      // waiting agents, so it cannot be folded into the "+N more" count (which
+      // queued agents, so it cannot be folded into the "+N more" count (which
       // is denominated in agents) without either under-reporting it as 1 or
       // inflating the total with agents that were never getting their own rows.
       // Reserving costs at most one running agent — which IS counted below —
@@ -542,14 +551,24 @@ export class AgentWidget {
         }
       }
 
-      // 2. Queued line (always fits — its row was reserved above)
+      // 2. Open idle conversations (one row each, no fake spinner).
+      for (const line of waitingLines) {
+        if (budget >= 1) {
+          lines.push(line);
+          budget--;
+        } else {
+          hiddenWaiting++;
+        }
+      }
+
+      // 3. Queued line (always fits — its row was reserved above)
       if (queuedLine) {
         budget += queuedReserve;
         lines.push(queuedLine);
         budget--;
       }
 
-      // 3. Finished agents
+      // 4. Finished agents
       for (const fl of finishedLines) {
         if (budget >= 1) {
           lines.push(fl);
@@ -562,9 +581,10 @@ export class AgentWidget {
       // Overflow summary
       const overflowParts: string[] = [];
       if (hiddenRunning > 0) overflowParts.push(`${hiddenRunning} running`);
+      if (hiddenWaiting > 0) overflowParts.push(i18n.t("product.waitingCount", { count: hiddenWaiting }));
       if (hiddenFinished > 0) overflowParts.push(`${hiddenFinished} finished`);
       const overflowText = overflowParts.join(", ");
-      lines.push(truncate(theme.fg("dim", "└─") + ` ${theme.fg("dim", `+${hiddenRunning + hiddenFinished} more (${overflowText})`)}`)
+      lines.push(truncate(theme.fg("dim", "└─") + ` ${theme.fg("dim", `+${hiddenRunning + hiddenWaiting + hiddenFinished} more (${overflowText})`)}`)
       );
     }
 
@@ -578,14 +598,16 @@ export class AgentWidget {
 
     // Lightweight existence checks — full categorization happens in renderWidget()
     let runningCount = 0;
+    let waitingCount = 0;
     let queuedCount = 0;
     let hasFinished = false;
     for (const a of allAgents) {
-      if (a.status === "running") { runningCount++; }
-      else if (a.status === "queued") { queuedCount++; }
-      else if (a.completedAt && this.shouldShowFinished(a.id, a.status)) { hasFinished = true; }
+      if (a.status === "idle" || (a.status === "running" && a.activity === "idle")) waitingCount++;
+      else if (a.status === "queued" || (a.status === "running" && a.activity === "queued")) queuedCount++;
+      else if (a.status === "running") runningCount++;
+      else if (a.completedAt && this.shouldShowFinished(a.id, a.status)) hasFinished = true;
     }
-    const hasActive = runningCount > 0 || queuedCount > 0;
+    const hasActive = runningCount > 0 || waitingCount > 0 || queuedCount > 0;
 
     // Nothing to show — clear widget
     if (!hasActive && !hasFinished) {
@@ -611,8 +633,9 @@ export class AgentWidget {
     if (hasActive) {
       const statusParts: string[] = [];
       if (runningCount > 0) statusParts.push(`${runningCount} running`);
+      if (waitingCount > 0) statusParts.push(i18n.t("product.waitingCount", { count: waitingCount }));
       if (queuedCount > 0) statusParts.push(`${queuedCount} queued`);
-      const total = runningCount + queuedCount;
+      const total = runningCount + waitingCount + queuedCount;
       newStatusText = `${statusParts.join(", ")} agent${total === 1 ? "" : "s"}`;
     }
     if (newStatusText !== this.lastStatusText) {

@@ -439,6 +439,94 @@ describe("terminal child extension", () => {
     await harness.emit("session_shutdown");
   });
 
+  it("admits every standard SDK round and acknowledges interrupt without retiring a persistent CLI", async () => {
+    const target = manifest({ profile: "standard", interactive: true, autoExit: false, requiredTools: ["read"] });
+    const harness = createHarness({ manifest: target, idle: false });
+    await start(harness);
+    await harness.emit("agent_start");
+    const options = promptOptions();
+    const preparing = harness.emit("before_agent_start", {
+      prompt: "first", systemPrompt: "base", systemPromptOptions: options,
+    });
+    await flushMicrotasks();
+    const firstRequest = packets(harness.socket, "execution_request").at(-1);
+    expect(firstRequest?.id).toBeTypeOf("string");
+    harness.socket.receive({ type: "execution_admission", id: firstRequest.id });
+    await preparing;
+
+    harness.socket.receive({ type: "interrupt", id: "interrupt-1" });
+    expect(harness.abort).toHaveBeenCalledOnce();
+    expect(packets(harness.socket, "ack").at(-1)).toMatchObject({ id: "interrupt-1" });
+    const aborted = assistant("partial", { stopReason: "aborted" });
+    await harness.emit("message_end", { message: aborted });
+    harness.projection.messages = [aborted];
+    await harness.emit("turn_end", { outcome: "aborted", context: { canContinue: false } });
+    harness.state.idle = true;
+    await harness.emit("agent_settled");
+    expect(packets(harness.socket, "idle").at(-1)).toMatchObject({ executionId: firstRequest.id, text: "partial", aborted: true });
+    expect(packets(harness.socket, "settled")).toHaveLength(0);
+    expect(harness.shutdown).not.toHaveBeenCalled();
+
+    harness.state.idle = false;
+    await harness.emit("agent_start");
+    const secondPreparing = harness.emit("before_agent_start", {
+      prompt: "second", systemPrompt: "base", systemPromptOptions: promptOptions(),
+    });
+    await flushMicrotasks();
+    const secondRequest = packets(harness.socket, "execution_request").at(-1);
+    expect(secondRequest.id).not.toBe(firstRequest.id);
+    harness.socket.receive({ type: "execution_admission", id: secondRequest.id });
+    await secondPreparing;
+    const completed = assistant("fresh answer");
+    await harness.emit("message_end", { message: completed });
+    await harness.emit("turn_end", { outcome: "completed", context: { canContinue: false } });
+    harness.state.idle = true;
+    await harness.emit("agent_settled");
+    expect(packets(harness.socket, "idle").at(-1)).toMatchObject({ executionId: secondRequest.id, text: "fresh answer", aborted: false });
+    expect(packets(harness.socket, "turn").map((packet) => packet.count)).toEqual([1, 1]);
+  });
+
+  it("keeps one standard admission, budget and structured capture across SDK continuations", async () => {
+    const target = manifest({
+      profile: "standard", interactive: true, autoExit: false,
+      structuredSchema, requiredTools: ["read"], maxTurns: 3, graceTurns: 2,
+    });
+    const harness = createHarness({ manifest: target, idle: false });
+    await start(harness);
+    await harness.emit("agent_start");
+    const firstStart = harness.emit("before_agent_start", {
+      prompt: "first", systemPrompt: "base", systemPromptOptions: promptOptions(),
+    });
+    await flushMicrotasks();
+    const request = packets(harness.socket, "execution_request").at(-1);
+    harness.socket.receive({ type: "execution_admission", id: request.id });
+    await firstStart;
+    await harness.tools.get(STRUCTURED_OUTPUT_TOOL_NAME).execute(
+      "capture", { ok: true, count: 1, empty: null }, undefined, undefined, harness.ctx,
+    );
+    await harness.emit("message_end", { message: assistant("first turn") });
+    await harness.emit("turn_end", { outcome: "completed", context: { canContinue: true } });
+
+    await harness.emit("agent_start");
+    await harness.emit("before_agent_start", {
+      prompt: "internal continuation", systemPrompt: "base", systemPromptOptions: promptOptions(),
+    });
+    expect(packets(harness.socket, "execution_request")).toHaveLength(1);
+    await harness.emit("message_end", { message: assistant("final continuation") });
+    await harness.emit("turn_end", { outcome: "completed", context: { canContinue: false } });
+    harness.state.idle = true;
+    await harness.emit("agent_settled");
+
+    expect(packets(harness.socket, "turn").map((packet) => packet.count)).toEqual([1, 2]);
+    expect(packets(harness.socket, "idle").at(-1)).toMatchObject({
+      executionId: request.id,
+      text: "final continuation",
+      structuredJson: '{"ok":true,"count":1,"empty":null}',
+      aborted: false,
+    });
+    expect(packets(harness.socket, "idle").at(-1).structuredRetried).toBeUndefined();
+  });
+
   it("queues pre-prompt steering and acknowledges it only after SDK dispatch at agent_start", async () => {
     const socket = new FakeSocket();
     socket.autoStart = false;
@@ -741,8 +829,8 @@ describe("terminal child extension", () => {
     expect(packets(socket, "settled").at(-1)).toMatchObject({
       text: "partial",
       aborted: true,
-      failure: i18n.t("bridge.aborted"),
     });
+    expect(packets(socket, "settled").at(-1)).not.toHaveProperty("failure");
     expect(harness.shutdown).not.toHaveBeenCalled();
 
     socket.flush(settledIndex);

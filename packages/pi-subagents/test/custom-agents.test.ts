@@ -101,6 +101,33 @@ Workspace prompt.`);
     expect(result.get("dupe")?.systemPrompt).toBe("Workspace prompt.");
   });
 
+  it("loads global agents only when project trust is denied", () => {
+    const globalAgentDir = join(tmpDir, "global-agent-dir");
+    process.env.PI_CODING_AGENT_DIR = globalAgentDir;
+    const globalAgents = join(globalAgentDir, "agents");
+    mkdirSync(globalAgents, { recursive: true });
+    writeFileSync(join(globalAgents, "dupe.md"), `---
+description: Global
+---
+
+Global prompt.`);
+    writeWorkspaceAgent("dupe", `---
+description: Workspace Project
+---
+
+Workspace prompt.`);
+    writeAgent("project-only", `---
+description: Project only
+---
+
+Project prompt.`);
+
+    const result = loadCustomAgents(tmpDir, false, { projectTrusted: false });
+    expect([...result.keys()]).toEqual(["dupe"]);
+    expect(result.get("dupe")?.description).toBe("Global");
+    expect(result.get("dupe")?.source).toBe("global");
+  });
+
   it("loads a basic agent with all frontmatter fields", () => {
     writeAgent("auditor", `---
 description: Security Auditor

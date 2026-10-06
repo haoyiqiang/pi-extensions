@@ -1,24 +1,23 @@
 import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   BUILTIN_TOOL_NAMES,
-  getAgentConfig,
   getMemoryToolNames,
   getReadOnlyMemoryToolNames,
-  isDefaultsDisabled,
 } from "../../agent-types.js";
 import { buildParentContext } from "../../context.js";
-import { DEFAULT_AGENTS } from "../../default-agents.js";
+import { resolveChildAgentConfig } from "../../child-resource-policy.js";
+import { resolveProjectTrusted } from "../../project-trust.js";
+import { captureRuntimePolicy, type SubagentsRuntimePolicy } from "../../runtime-policy.js";
 import { detectEnv } from "../../env.js";
 import { i18n } from "../../i18n.js";
 import { buildMemoryBlock, buildReadOnlyMemoryBlock } from "../../memory.js";
-import { getMaxSubagentDepth } from "../../nested-tools.js";
 import { buildAgentPrompt, type PromptExtras } from "../../prompts.js";
 import { resolveAgentLaunchBehavior } from "../../invocation-config.js";
 import { preloadSkills } from "../../skill-loader.js";
 import type { AgentConfig, EffectiveThinkingLevel, SubagentType } from "../../types.js";
-import { getDefaultMaxTurns, getGraceTurns, getRememberAgents, normalizeMaxTurns, resolveDefaultModel } from "../embedded.js";
+import { normalizeMaxTurns, resolveDefaultModel } from "../embedded.js";
 import { compileInvocationSchema, validTurnBudget } from "../invocation-policy.js";
 import { modelFingerprint } from "../model-identity.js";
 import { snapshotPromptBinding, type PromptBinding } from "../prompt-binding.js";
@@ -38,6 +37,7 @@ export interface StandardTerminalPolicy {
   readonly agent: AgentConfig;
   readonly isolated: boolean;
   readonly projectTrusted: boolean;
+  readonly runtimePolicy?: SubagentsRuntimePolicy;
   readonly persistSession: boolean;
   readonly sessionDir?: string;
   readonly model?: Readonly<{ provider: string; id: string }>;
@@ -58,21 +58,6 @@ export interface StandardTerminalPolicy {
   }>;
 }
 
-function resolveAgent(type: SubagentType, captured?: AgentConfig): AgentConfig {
-  if (captured?.enabled === false) throw new Error(i18n.t("terminalBackend.invalidConfig"));
-  if (captured) return captured;
-  const registered = getAgentConfig(type);
-  if (registered?.enabled === false) throw new Error(i18n.t("terminalBackend.invalidConfig"));
-  if (registered) return registered;
-  if (!isDefaultsDisabled()) {
-    const lower = type.toLowerCase();
-    for (const [name, agent] of DEFAULT_AGENTS) {
-      if (name.toLowerCase() === lower && agent.enabled !== false) return agent;
-    }
-  }
-  throw new Error(i18n.t("terminalBackend.invalidConfig"));
-}
-
 function configuredSessionDir(value: string | undefined, cwd: string): string | undefined {
   if (!value) return undefined;
   if (value === "~" || value.startsWith("~/")) return resolve(homedir(), value.slice(2));
@@ -85,14 +70,22 @@ export async function prepareStandardTerminalPolicy(
   type: SubagentType,
   options: ExecutionRunOptions,
 ): Promise<{ policy: StandardTerminalPolicy; prompt: (prompt: string) => string }> {
-  const agent = resolveAgent(type, options.agentConfig);
+  const cwd = options.cwd ?? ctx.cwd;
+  const configCwd = options.runtimePolicy?.configCwd ?? options.configCwd ?? cwd;
+  const projectTrusted = options.runtimePolicy?.projectTrusted ?? resolveProjectTrusted(configCwd, {
+    context: ctx, projectTrusted: options.projectTrusted,
+  });
+  const runtimePolicy = options.runtimePolicy ?? captureRuntimePolicy(configCwd, projectTrusted);
+  const agent = resolveChildAgentConfig(type, options.agentConfig, {
+    configCwd, projectTrusted,
+    disableDefaultAgents: runtimePolicy.settings.disableDefaultAgents,
+  });
+  if (!agent) throw new Error(i18n.t("terminalBackend.invalidConfig"));
   const launch = resolveAgentLaunchBehavior(agent, options);
   if (options.structuredOutput !== undefined && (!options.structuredOutput || typeof options.structuredOutput.check !== "function")) {
     throw new Error(i18n.t("terminalBackend.invalidConfig"));
   }
 
-  const cwd = options.cwd ?? ctx.cwd;
-  const configCwd = options.configCwd ?? cwd;
   const isolated = options.isolated ?? agent.isolated ?? false;
   const inheritContext = options.inheritContext ?? agent.inheritContext ?? false;
   if (!isAbsolute(cwd) || !isAbsolute(configCwd)) throw new Error(i18n.t("terminalBackend.invalidConfig"));
@@ -100,8 +93,8 @@ export async function prepareStandardTerminalPolicy(
   const structuredSchema = options.structuredOutput === undefined
     ? undefined
     : compileInvocationSchema(options.structuredOutput.schema).schema;
-  const maxTurns = normalizeMaxTurns(options.maxTurns ?? agent.maxTurns ?? getDefaultMaxTurns());
-  const graceTurns = maxTurns === undefined ? undefined : getGraceTurns();
+  const maxTurns = normalizeMaxTurns(options.maxTurns ?? agent.maxTurns ?? runtimePolicy.defaultMaxTurns);
+  const graceTurns = maxTurns === undefined ? undefined : runtimePolicy.graceTurns;
   if (!validTurnBudget(maxTurns, graceTurns)) throw new Error(i18n.t("terminalBackend.invalidConfig"));
 
   let tools = agent.builtinToolNames ?? [...BUILTIN_TOOL_NAMES];
@@ -124,7 +117,7 @@ export async function prepareStandardTerminalPolicy(
   tools = [...new Set(tools)].filter((name) => !agent.disallowedTools?.includes(name));
 
   if (!isolated && Array.isArray(agent.skills)) {
-    const loaded = preloadSkills(agent.skills, configCwd);
+    const loaded = preloadSkills(agent.skills, projectTrusted ? configCwd : getAgentDir());
     if (loaded.length > 0) extras.skillBlocks = loaded;
   }
 
@@ -132,13 +125,13 @@ export async function prepareStandardTerminalPolicy(
   const systemPrompt = buildAgentPrompt(agent, cwd, env, ctx.getSystemPrompt(), extras);
   const selectedModel = options.model ?? resolveDefaultModel(ctx.model, ctx.modelRegistry, agent.model);
   const thinkingLevel = options.thinkingLevel ?? agent.thinking;
-  const persistSession = agent.persistSession ?? (options.nested ? false : getRememberAgents());
+  const persistSession = agent.persistSession ?? (options.nested ? false : runtimePolicy.rememberAgents);
   const nested = !isolated && agent.allowedSubagents ? Object.freeze({
     // This policy is created only after the terminal backend owns the branch.
     // Persist that fact so a later config edit cannot reroute descendants.
     backend: "terminal" as const,
     depth: options.nestedRuntime?.depth ?? 1,
-    maxSubagentDepth: options.nestedRuntime?.maxSubagentDepth ?? getMaxSubagentDepth(),
+    maxSubagentDepth: options.nestedRuntime?.maxSubagentDepth ?? runtimePolicy.maxSubagentDepth,
   }) : undefined;
 
   const policy: StandardTerminalPolicy = Object.freeze({
@@ -151,7 +144,8 @@ export async function prepareStandardTerminalPolicy(
     cli: "pi",
     agent: Object.freeze({ ...agent }),
     isolated,
-    projectTrusted: typeof ctx.isProjectTrusted === "function" ? ctx.isProjectTrusted() : false,
+    projectTrusted,
+    runtimePolicy,
     persistSession,
     ...(configuredSessionDir(agent.sessionDir, cwd) ? { sessionDir: configuredSessionDir(agent.sessionDir, cwd) } : {}),
     ...(selectedModel ? { model: Object.freeze({ provider: selectedModel.provider, id: selectedModel.id }), modelFingerprint: modelFingerprint(selectedModel) } : {}),

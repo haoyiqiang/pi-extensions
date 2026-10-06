@@ -1,7 +1,11 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+  getAgentDir,
+  ProjectTrustStore,
+  type ExtensionAPI,
+} from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { registerWorkflowCommand } from "../src/command.js";
 import { getWorkflowExecutionProvider, registerWorkflowExecutionHost } from "../src/execution-host.js";
@@ -83,6 +87,7 @@ function installed(bus = createEventBus(), skills: readonly string[] = []) {
   const { pi, captured } = createMockPi({ skills, events: bus as ExtensionAPI["events"] });
   const runtime = installPiWorkflowExecution(pi);
   runtimes.push(runtime);
+  for (const start of captured.events.get("session_start") ?? []) start({ reason: "startup" });
   const provider = getWorkflowExecutionProvider();
   if (!provider) throw new Error("installPiWorkflowExecution did not register its public provider");
   return { pi, captured, bus, runtime, provider };
@@ -90,6 +95,12 @@ function installed(bus = createEventBus(), skills: readonly string[] = []) {
 
 function observer(cwd: string): WorkflowHostContext {
   return createMockCommandCtx({ cwd, hasUI: true }) as unknown as WorkflowHostContext;
+}
+
+function trustedCommandCtx(cwd: string): ReturnType<typeof createMockCommandCtx> {
+  return Object.assign(createMockCommandCtx({ cwd, hasUI: true }), {
+    isProjectTrusted: () => true,
+  });
 }
 
 function runOptions(cwd: string) {
@@ -405,11 +416,13 @@ function commandHarness(stageSkill: string, ambientSkills: readonly string[]): C
     skills: [{ name: "approved", filePath: join(skillDir, "SKILL.md"), baseDir: skillDir, format: "pi" }],
     requiredTools: [],
   }));
+  new ProjectTrustStore(getAgentDir()).set(cwd, true);
 
   const bus = createEventBus();
   const mock = createMockPi({ skills: ambientSkills, events: bus as ExtensionAPI["events"] });
   const runtime = installPiWorkflowExecution(mock.pi);
   runtimes.push(runtime);
+  for (const start of mock.captured.events.get("session_start") ?? []) start({ reason: "startup" });
   const chain = createMockSessionChain({
     cwd,
     steps: [{ branch: [mockAssistantMessage("done", "stop")] }],
@@ -427,7 +440,7 @@ function commandHarness(stageSkill: string, ambientSkills: readonly string[]): C
 async function invokeWf(f: CommandHarness, workflow: string): Promise<void> {
   const command = f.captured.commands.get("wf");
   if (!command) throw new Error("/wf was not registered");
-  const ctx = createMockCommandCtx({ cwd: f.cwd, hasUI: true });
+  const ctx = trustedCommandCtx(f.cwd);
   await command.handler(`${workflow} task`, ctx);
   await within(f.finished, 10_000, "floated /wf run did not retire");
 }
@@ -441,7 +454,7 @@ describe("actual /wf approved-skill preflight boundary", () => {
     });
     try {
       const command = f.captured.commands.get("wf")!;
-      await command.handler("ambient-unapproved-flow task", createMockCommandCtx({ cwd: f.cwd, hasUI: true }));
+      await command.handler("ambient-unapproved-flow task", trustedCommandCtx(f.cwd));
       await within(done.promise, 10_000, "generic provider did not retire");
       expect(f.requests).toEqual([]);
       expect(f.chain.ctx.spawnChild).toHaveBeenCalledOnce();

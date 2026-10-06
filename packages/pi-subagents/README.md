@@ -43,7 +43,7 @@ This command does not rewrite your installed extension profile.
 Canonical configuration is layered from:
 
 - `<agentDir>/subagents.json`;
-- `<cwd>/.pi/subagents.json`, whose fields override global defaults.
+- `<cwd>/.pi/subagents.json`, whose fields override global defaults **only for an approved project**.
 
 Agent-directory resolution honors `PI_CODING_AGENT_DIR`. See
 [`config.example.json`](./config.example.json) for the existing operational settings.
@@ -69,15 +69,21 @@ falling back to embedded.
   context-inheritance interface. `run_in_background: false` waits for the result;
   background calls return an ID and use the existing completion notification.
 - `get_subagent_result`: inspect or collect the same manager-owned records.
-- `steer_subagent`: `action` defaults to `steer`, with a required `message`.
-  `action: "interrupt"` stops only the current turn; `action: "stop"` retires the
-  agent and closes its terminal. Both accept the existing `agent_id`/handle.
-- `/agents`, Fleet/widget, mentions and RPC v2 remain the common control plane.
+- `steer_subagent`: requires an explicit `action` and accepts `agent_id`/handle.
+  `steer` requires a nonempty `message`; `interrupt` stops only the active turn;
+  `cancel` ends the task and its owned children, retaining healthy resumable sessions;
+  `close` retires ownership after confirmed cleanup without deleting persisted history.
+- `/agents`, Fleet/widget, mentions and **RPC v3** use the same manager controls.
+  The ambiguous `stop` action/channel is removed; callers must choose an explicit verb.
+
+Concurrency limits count active execution, not open terminal sessions. Interactive
+idle sessions release their slot and reacquire it before the next turn; a queued
+turn is shown as waiting, not as an active model request.
 
 `Agent({ ..., interactive: true })` requests a human-driven terminal session.
 It requires the terminal backend and applies only to a fresh, unscheduled agent.
 The terminal can remain open across model settlement and turn interruption.
-Exit through the child CLI or use the parent's stop action when the conversation
+Exit through the child CLI or use the parent's `close` action when the conversation
 is finished; do not poll for background completion.
 
 An agent definition can set the same preference:
@@ -111,6 +117,18 @@ workflow/configuration root cannot substitute another agent's tools at execution
 time. `cwd` defaults are relative to the parent project's directory; configuration
 origin remains separate from the directory where tools operate.
 
+Project agents, subagents settings and executable resources obey Pi project trust.
+An unapproved project uses global definitions/settings only; children inherit the
+captured decision rather than discovering the project again as implicitly trusted.
+Run policy is captured at admission, so changing the root session cannot change a
+running actor's defaults or permissions.
+
+For custom-only resources, Pi 0.87.1 can report implicit trust without asking for
+approval. These extensions require a saved Pi trust decision or native
+`defaultProjectTrust: "always"`; an unrecorded session-only approval is not enough
+in that case. Programmatic hosts can supply an explicit approved trust decision.
+This uses Pi's trust store, not a second extension approval database.
+
 The terminal backend is a process boundary, **not an OS sandbox**. Extensions and
 workflow definitions are executable code; install only trusted resources. Optional
 terminal integrations are detected by `pi-terminal-mux`. Visible interactive use
@@ -133,6 +151,11 @@ pi-workflow DSL / runner
       → scoped Agent tools
         → the same embedded/terminal subagent factory
 ```
+
+`/wf` remains detached, but stage-local `Agent` delegation defaults to foreground
+so the stage waits for its result. Explicit `run_in_background: true` still works;
+unfinished background children are canceled when the owning stage scope ends.
+Ordinary root Agent calls retain `backgroundByDefault`.
 
 Stage sessions themselves remain SDK sessions. Choosing terminal in `subagents.json`
 changes their delegated `Agent` work; it does not silently relocate the whole stage

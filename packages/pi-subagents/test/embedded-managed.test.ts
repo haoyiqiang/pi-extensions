@@ -123,7 +123,7 @@ describe("managed embedded sessions (offline real SDK)", () => {
   }
   async function run(backend: AgentExecutionBackend, options: Partial<ExecutionRunOptions> = {}, prompt = "Initial task") {
     return track(backend.run(ctx, TYPE, prompt, {
-      pi, isolated: true, ...options,
+      pi, isolated: true, projectTrusted: true, ...options,
       onSessionCreated: (session) => { own(backend, session); options.onSessionCreated?.(session); },
     }));
   }

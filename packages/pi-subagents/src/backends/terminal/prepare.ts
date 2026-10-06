@@ -3,7 +3,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import { isHeadlessSurface } from "pi-terminal-mux";
+import { createSurfaceRenameContext, isHeadlessSurface, TERMINAL_RENAME_CONTEXT_ENV } from "pi-terminal-mux";
 import { i18n } from "../../i18n.js";
 import { STRUCTURED_OUTPUT_TOOL_NAME } from "../../structured-output.js";
 import { validateManagedPolicy as validatePolicy, type ManagedPolicy } from "../managed-policy.js";
@@ -137,6 +137,11 @@ export function prepareTerminalLaunch(
     processExit,
     env: {
       PI_CODING_AGENT_DIR: resolved.agentDir,
+      PI_SUBAGENT_NAME: policy.name,
+      PI_SUBAGENT_SESSION: session.sessionFile,
+      PI_SUBAGENT_ID: runId,
+      PI_SUBAGENT_AUTO_EXIT: "1",
+      PI_SUBAGENT_INTERACTIVE: "",
       [TERMINAL_MANIFEST_ENV]: manifestFile,
     },
   };
@@ -160,7 +165,10 @@ export function prepareTerminalLaunch(
     name: policy.name,
     launchScriptFile,
     interpreter: resolved.interpreter,
-    buildCommand: () => command,
+    buildCommand: (surface) => {
+      writeLaunchConfigForSurface(launchConfigFile, launchConfig, surface);
+      return command;
+    },
     processExit,
   };
 }
@@ -224,8 +232,10 @@ export function prepareStandardTerminalLaunch(
       PI_SUBAGENT_NAME: policy.name,
       PI_SUBAGENT_SESSION: session.sessionFile,
       PI_SUBAGENT_ID: runId,
-      ...(policy.autoExit ? { PI_SUBAGENT_AUTO_EXIT: "1" } : {}),
-      ...(policy.interactive ? { PI_SUBAGENT_INTERACTIVE: "1" } : {}),
+      // Explicit empty values override ancestor subagent flags inherited by the
+      // supervisor; consumers treat only "1" as enabled.
+      PI_SUBAGENT_AUTO_EXIT: policy.autoExit ? "1" : "",
+      PI_SUBAGENT_INTERACTIVE: policy.interactive ? "1" : "",
       [TERMINAL_MANIFEST_ENV]: manifestFile,
       [STANDARD_TERMINAL_CONFIG_ENV]: standardConfigFile,
     },
@@ -254,6 +264,7 @@ export function prepareStandardTerminalLaunch(
       if ((policy.interactive || !policy.autoExit) && isHeadlessSurface(surface)) {
         throw new Error(i18n.t("terminalBackend.unsupported", { feature: "interactive/headless" }));
       }
+      writeLaunchConfigForSurface(launchConfigFile, launchConfig, surface);
       return command;
     },
     processExit,
@@ -349,6 +360,14 @@ function validEndpoint(endpoint: TerminalChildManifest["endpoint"]): boolean {
 
 function writePrivateFile(path: string, content: string): void {
   writeFileSync(path, content, { encoding: "utf8", flag: "wx", mode: 0o600 });
+}
+
+function writeLaunchConfigForSurface(path: string, config: LaunchProcessConfig, surface: string): void {
+  const renameContext = JSON.stringify(createSurfaceRenameContext(surface));
+  writeFileSync(path, `${JSON.stringify({
+    ...config,
+    env: { ...config.env, [TERMINAL_RENAME_CONTEXT_ENV]: renameContext },
+  })}\n`, { encoding: "utf8", flag: "w", mode: 0o600 });
 }
 
 function quoteBash(value: string): string {

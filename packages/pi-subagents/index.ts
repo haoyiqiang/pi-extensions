@@ -13,6 +13,6 @@ export default function (pi: ExtensionAPI): void {
   registerBackendCommand(pi);
   registerWorkflowExecutor(pi, {
     runtimeInitialized: true,
-    createRuntime: ({ backend }) => createWorkflowAgentRuntime({ backend }),
+    createRuntime: ({ backend, runtimePolicy }) => createWorkflowAgentRuntime({ backend, runtimePolicy }),
   });
 }

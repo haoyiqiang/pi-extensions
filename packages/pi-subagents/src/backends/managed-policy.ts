@@ -1,10 +1,11 @@
 import { isAbsolute } from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { BUILTIN_TOOL_NAMES, getAgentConfig, isDefaultsDisabled } from "../agent-types.js";
-import { DEFAULT_AGENTS } from "../default-agents.js";
+import { BUILTIN_TOOL_NAMES } from "../agent-types.js";
+import { resolveChildAgentConfig } from "../child-resource-policy.js";
 import { detectEnv } from "../env.js";
 import { i18n } from "../i18n.js";
 import { buildAgentPrompt, type PromptExtras } from "../prompts.js";
+import { resolveProjectTrusted } from "../project-trust.js";
 import { STRUCTURED_OUTPUT_TOOL_NAME } from "../structured-output.js";
 import type { AgentConfig, EffectiveThinkingLevel, SubagentType } from "../types.js";
 import { getDefaultMaxTurns, getGraceTurns, normalizeMaxTurns, resolveDefaultModel } from "./embedded.js";
@@ -41,7 +42,20 @@ export async function prepareManagedPolicy(
   const promptBinding = snapshotPromptBinding(options.promptBinding);
   const invalidConfig = (): never => { throw new Error(i18n.t(`${diagnosticPrefix}.invalidConfig`)); };
   const unsupported = (feature: string): never => { throw new Error(i18n.t(`${diagnosticPrefix}.unsupported`, { feature })); };
-  const agent = resolveAgent(type, options.agentConfig, invalidConfig);
+  const cwd = options.cwd ?? ctx.cwd;
+  const configCwd = options.runtimePolicy?.configCwd ?? options.configCwd ?? cwd;
+  if (!nonEmpty(cwd) || !isAbsolute(cwd) || !nonEmpty(configCwd) || !isAbsolute(configCwd)) invalidConfig();
+  const projectTrusted = options.runtimePolicy?.projectTrusted ?? resolveProjectTrusted(configCwd, {
+    projectTrusted: options.projectTrusted,
+    context: ctx,
+  });
+  const resolvedAgent = resolveChildAgentConfig(type, options.agentConfig, {
+    configCwd,
+    projectTrusted,
+    disableDefaultAgents: options.runtimePolicy?.settings.disableDefaultAgents,
+  });
+  if (!resolvedAgent || resolvedAgent.enabled === false) invalidConfig();
+  const agent = resolvedAgent as AgentConfig;
 
   // Managed execution is deliberately narrower than the legacy embedded backend.
   // Keep these checks ahead of detectEnv(), the first operation that may spawn a process.
@@ -49,8 +63,13 @@ export async function prepareManagedPolicy(
   if (options.structuredOutput !== undefined && (!options.structuredOutput || typeof options.structuredOutput.check !== "function")) invalidConfig();
   const structuredSchema = options.structuredOutput === undefined ? undefined
     : compileInvocationSchema(options.structuredOutput.schema).schema;
-  const maxTurns = normalizeMaxTurns(options.maxTurns ?? agent.maxTurns ?? getDefaultMaxTurns());
-  const graceTurns = maxTurns === undefined ? undefined : getGraceTurns();
+  const maxTurns = normalizeMaxTurns(
+    options.maxTurns ?? agent.maxTurns
+      ?? options.runtimePolicy?.defaultMaxTurns ?? getDefaultMaxTurns(),
+  );
+  const graceTurns = maxTurns === undefined
+    ? undefined
+    : options.runtimePolicy?.graceTurns ?? getGraceTurns();
   if (!validTurnBudget(maxTurns, graceTurns)) invalidConfig();
 
   const tools = resolveTools(agent, unsupported);
@@ -59,9 +78,6 @@ export async function prepareManagedPolicy(
   if (!selectedModel || !nonEmpty(selectedModel.provider) || !nonEmpty(selectedModel.id)) {
     throw new Error(i18n.t(`${diagnosticPrefix}.noModel`));
   }
-
-  const cwd = options.cwd ?? ctx.cwd;
-  if (!nonEmpty(cwd) || !isAbsolute(cwd)) invalidConfig();
 
   const env = await detectEnv(options.pi, cwd);
   const extras: PromptExtras = {};
@@ -97,21 +113,6 @@ export function validateManagedPolicy(value: unknown): asserts value is ManagedP
     || !validTurnBudget(policy.maxTurns, policy.graceTurns)) invalidConfig();
   snapshotPromptBinding(policy.promptBinding);
   if (policy.structuredSchema !== undefined) compileInvocationSchema(policy.structuredSchema);
-}
-
-function resolveAgent(type: SubagentType, captured: AgentConfig | undefined, invalidConfig: () => never): AgentConfig {
-  if (captured?.enabled === false) invalidConfig();
-  if (captured) return captured;
-  const registered = getAgentConfig(type);
-  if (registered?.enabled === false) invalidConfig();
-  if (registered) return registered;
-
-  if (isDefaultsDisabled()) invalidConfig();
-  const lower = type.toLowerCase();
-  for (const [name, agent] of DEFAULT_AGENTS) {
-    if (name.toLowerCase() === lower && agent.enabled !== false) return agent;
-  }
-  invalidConfig();
 }
 
 function rejectUnsupportedOptions(

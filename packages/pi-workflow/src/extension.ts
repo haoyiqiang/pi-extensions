@@ -18,6 +18,6 @@ export default function (pi: ExtensionAPI): void {
 			...command,
 			handler: (args, ctx) => execution.runCommand(ctx, (observer) => command.handler(args, observer)),
 		}),
-	});
+	}, pi);
 	registerDocsProtocol(pi);
 }

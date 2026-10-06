@@ -1,6 +1,6 @@
 // Persistence for pi-subagents operational settings.
 // - Global:  <agentDir>/subagents.json (via resolveAgentDir()) — manual defaults, never written here
-// - Project: <cwd>/.pi/subagents.json — written by /agents → Settings; overrides global on load
+// - Project: <cwd>/.pi/subagents.json — written by /agents → Settings; overrides global only when trusted
 
 import { join } from "node:path";
 import {
@@ -525,10 +525,21 @@ function readSettingsFile(path: string): SubagentsConfig {
   return {};
 }
 
-/** Load merged settings: global provides defaults, project overrides. */
-export function loadSettings(cwd: string = process.cwd()): SubagentsConfig {
+export interface LoadSettingsOptions {
+  /** False selects the trusted global file only. Undefined preserves legacy merged loading. */
+  projectTrusted?: boolean;
+}
+
+/** Load settings: global provides defaults; a trusted project may override them. */
+export function loadSettings(
+  cwd: string = process.cwd(),
+  options: LoadSettingsOptions = {},
+): SubagentsConfig {
   const paths = getSubagentsConfigPaths(cwd);
-  return { ...readSettingsFile(paths.global), ...readSettingsFile(paths.project) };
+  const global = readSettingsFile(paths.global);
+  return options.projectTrusted === false
+    ? global
+    : { ...global, ...readSettingsFile(paths.project) };
 }
 
 /**

@@ -178,6 +178,7 @@ describe.skipIf(LIVE)("subagents print-mode e2e (scripted faux, real pi-mono)", 
     run = await runPrintMode({
       prompt: "Delegate to the echo-spy agent.",
       cwd, // runner chdir's here so the extension discovers echo-spy.md
+      projectTrusted: true,
       respond: routeBySession({
         parentInitial: agentCall({
           subagent_type: "echo-spy",
@@ -213,6 +214,7 @@ describe.skipIf(LIVE)("subagents print-mode e2e (scripted faux, real pi-mono)", 
     run = await runPrintMode({
       prompt: "Delegate to the agents-spy agent.",
       cwd,
+      projectTrusted: true,
       respond: routeBySession({
         parentInitial: agentCall({
           subagent_type: "agents-spy",
@@ -248,6 +250,7 @@ describe.skipIf(LIVE)("subagents print-mode e2e (scripted faux, real pi-mono)", 
     run = await runPrintMode({
       prompt: "Delegate to the painted agent.",
       cwd,
+      projectTrusted: true,
       respond: routeBySession({
         parentInitial: agentCall({
           subagent_type: "painted",

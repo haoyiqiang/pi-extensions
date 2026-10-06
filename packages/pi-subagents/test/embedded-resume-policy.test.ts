@@ -228,6 +228,7 @@ describe("embedded owned-session resume policy (offline real SDK)", () => {
       modelRegistry: runtime.modelRegistry,
       sessionManager: SessionManager.inMemory(cwd),
       getSystemPrompt: () => "Offline parent",
+      isProjectTrusted: () => true,
     } as ExtensionContext;
     pi = { exec: async () => ({ code: 1, stdout: "", stderr: "" }) } as unknown as ExtensionAPI;
     backend = createEmbeddedExecutionBackend();

@@ -1095,6 +1095,24 @@ describe("AgentManager — worktreeIsolation: false refuses worktrees", () => {
     expect(manager.getRecord(id)!.worktree).toBeUndefined();
   });
 
+  it("uses the invocation policy instead of a changed root-global worktree switch", async () => {
+    const { createWorktree } = await import("../src/worktree.js");
+    vi.mocked(createWorktree).mockClear();
+    vi.mocked(isWorktreeIsolationEnabled).mockReturnValue(true);
+    resolvedRun();
+
+    manager = new AgentManager();
+    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
+      description: "test",
+      isolation: "worktree",
+      runtimePolicy: { worktreeIsolation: false } as any,
+    });
+    await manager.getRecord(id)!.promise;
+
+    expect(createWorktree).not.toHaveBeenCalled();
+    expect(manager.getRecord(id)!.worktree).toBeUndefined();
+  });
+
   it("does not mask a genuine worktree failure while enabled", async () => {
     const { createWorktree } = await import("../src/worktree.js");
     vi.mocked(createWorktree).mockResolvedValueOnce(undefined);

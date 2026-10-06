@@ -903,7 +903,7 @@ describe("malformed restore input and disposed launch guards", () => {
 });
 
 describe("idle restore UI observations", () => {
-  it("shows idle and historical conversation without running/success/error decoration or leaked child ownership", async () => {
+  it("shows waiting and historical conversation without running/success/error decoration or leaked child ownership", async () => {
     const f = fixture();
     const { record } = await f.manager.restore(reference(), metadata);
     await f.manager.restore(reference("nested"), { ...metadata, description: "hidden nested", parentAgentId: "parent" });
@@ -923,23 +923,28 @@ describe("idle restore UI observations", () => {
       fleet.update();
       const list = factory?.(tui, theme).render(120).join("\n");
       expect(list).toContain(metadata.description);
-      expect(list).toContain(i18n.t("managerRestore.idle"));
+      expect(list).toContain(i18n.t("product.waitingLabel"));
       expect(list).not.toContain("hidden nested");
       expect(list).not.toContain("hidden workflow");
       const text = viewer.render(120).join("\n");
       expect(text).toContain("historical answer");
-      expect(text).toContain(i18n.t("managerRestore.idle"));
+      expect(text).toContain(i18n.t("product.waitingLabel"));
       expect(text).toContain("faux/saved-model");
       expect(text).not.toContain("(running)");
       expect(text).not.toContain("✓");
       expect(text).not.toContain("✗");
       expect(text).not.toContain("x stop");
-      // The activity widget does not announce restoration as a completed invocation.
+      // The activity widget presents retained ownership as waiting, not as a
+      // completed invocation or an active SDK run.
       const widget = new AgentWidget(f.manager, new Map());
-      const setWidget = vi.fn();
+      let widgetFactory: any;
+      const setWidget = vi.fn((_key: string, content: any) => { if (content) widgetFactory = content; });
       widget.setUICtx({ setWidget, setStatus: vi.fn() });
       widget.update();
-      expect(setWidget).not.toHaveBeenCalled();
+      const widgetText = widgetFactory(tui, theme).render().join("\n");
+      expect(widgetText).toContain(metadata.description);
+      expect(widgetText).toContain(i18n.t("product.waitingLabel"));
+      expect(widgetText).not.toContain("thinking…");
       widget.dispose();
     } finally {
       fleet.dispose();

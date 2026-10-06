@@ -36,7 +36,7 @@ pi --no-extensions \
 规范配置按顺序读取：
 
 - `<agentDir>/subagents.json`；
-- `<cwd>/.pi/subagents.json`，项目字段覆盖全局字段。
+- `<cwd>/.pi/subagents.json`，**仅在项目获准时**由项目字段覆盖全局字段。
 
 agent 目录支持 `PI_CODING_AGENT_DIR`。已有运行设置见
 [`config.example.json`](./config.example.json)。
@@ -58,14 +58,19 @@ agent 目录支持 `PI_CODING_AGENT_DIR`。已有运行设置见
 - `Agent`：保留前台/后台、代理类型、模型、思考等级、恢复和上下文继承接口。
   `run_in_background: false` 等待结果；后台调用返回 ID，并通过原有完成通知交付结果。
 - `get_subagent_result`：查看或读取同一 manager 管理的记录。
-- `steer_subagent`：`action` 默认为 `steer`，此时必须提供 `message`。
-  `action: "interrupt"` 仅中断当前轮次，`action: "stop"` 退役代理并关闭终端。
-  两者都使用原来的 `agent_id`/handle。
-- `/agents`、Fleet/widget、mentions 和 RPC v2 仍为统一控制入口。
+- `steer_subagent`：必须显式指定 `action`，使用 `agent_id`/handle。
+  `steer` 要求非空 `message`；`interrupt` 仅中断活跃轮次；
+  `cancel` 结束任务及所属子任务，保留健康、可恢复的会话；
+  `close` 确认清理成功后结束管理关系，不删除持久化历史。
+- `/agents`、Fleet/widget、mentions 和 **RPC v3** 使用同一套 manager 控制。
+  不再提供含义模糊的 `stop` action/channel；调用方必须选择明确动词。
+
+并发限制统计活跃执行，不统计打开的终端数量。交互会话 idle 时释放槽位，下一轮执行前
+重新获取；排队轮次显示为等待，不被误报为模型正在运行。
 
 `Agent({ ..., interactive: true })` 请求由用户操作的交互终端，需要 terminal 后端，
 仅适用于新建的非定时代理。终端可在模型一轮结束或当前轮次中断后继续保留。
-对话结束时通过子 CLI 的正常退出入口或父会话的 stop 操作结束，不要轮询后台任务是否完成。
+对话结束时通过子 CLI 的正常退出入口或父会话的 `close` 操作结束，不要轮询后台任务是否完成。
 
 代理定义也可以声明交互模式：
 
@@ -92,6 +97,14 @@ terminal 会话的嵌套 Agent 也固定使用 terminal，包括默认后端配�
 解析，避免另一个工作流/配置目录在执行时替换代理的工具权限。定义中的 `cwd` 相对于父项目
 目录解析，配置来源与工具实际工作的目录仍然分开。
 
+项目代理、subagents 配置及可执行资源遵从 Pi project trust。未获准时只使用全局定义和
+设置；子会话继承已经捕获的决定，不会重新发现项目并将其误当成已信任。策略在准入时
+固定，替换根会话不会改变正在执行的代理默认值或权限。
+
+对于只有扩展自有资源的项目，Pi 0.87.1 可能未经询问就返回隐含信任。本产品要求 Pi 已保存
+的信任决定或原生 `defaultProjectTrust: "always"`；此时未记录的单会话批准不足以放行。
+程序化宿主可显式传入已确认的授权决定。使用的是 Pi 原生信任库，不另建审批数据库。
+
 terminal 是进程边界，**不是操作系统沙箱**。扩展和工作流定义是可执行代码，只应安装可信
 资源。可选终端依赖由 `pi-terminal-mux` 检测；可见交互需要合适的终端环境。目前不支持原生
 Windows 进程监督。
@@ -111,6 +124,10 @@ pi-workflow DSL / runner
       → 作用域内 Agent 工具
         → 同一个 embedded/terminal 子代理工厂
 ```
+
+`/wf` 整体仍在后台运行，但阶段内的 `Agent` 默认前台委派，阶段会等待结果。
+显式 `run_in_background: true` 仍然有效；阶段作用域结束时，会取消尚未完成的后台子任务。
+根会话普通 Agent 继续遵从 `backgroundByDefault`。
 
 阶段会话本身仍使用 SDK。在 `subagents.json` 选择 terminal，改变的是阶段内委派的
 `Agent` 工作，不会静默搬迁整个阶段或关闭它的扩展与技能。首次提示、continuation 分叉、

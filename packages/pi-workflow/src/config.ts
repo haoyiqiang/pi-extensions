@@ -59,6 +59,8 @@ export interface WorkflowConfigPaths {
 
 export interface LoadWorkflowConfigOptions {
   agentDir?: string;
+  /** Explicit launcher decision; rejected projects cannot replace approved policy. */
+  projectTrusted?: boolean;
 }
 
 const TOP_LEVEL_KEYS = new Set(["execution", "skills", "requiredTools", "models"]);
@@ -108,7 +110,7 @@ export function getWorkflowConfigPaths(cwd: string, agentDir = resolveAgentDir()
 export function loadWorkflowConfig(cwd: string, options: LoadWorkflowConfigOptions = {}): WorkflowConfig {
   const paths = getWorkflowConfigPaths(cwd, options.agentDir);
   const global = readLayer(paths.global);
-  const project = readLayer(paths.project);
+  const project = options.projectTrusted === false ? {} : readLayer(paths.project);
   const execution: WorkflowExecutionConfig = {
     ...DEFAULT_WORKFLOW_EXECUTION,
     ...global.execution,

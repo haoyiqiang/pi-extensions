@@ -51,6 +51,8 @@ export interface TerminalChildManifest {
 
 export interface ChildSettlement {
   snapshot: TerminalSnapshot;
+  /** Authenticated standard-profile SDK round; omitted by managed compatibility runs. */
+  executionId?: string;
   text: string;
   aborted: boolean;
   failure?: string;
@@ -68,6 +70,7 @@ export type ChildFeedback =
   | { type: "usage"; usage: LifetimeUsage }
   | { type: "turn"; count: number }
   | { type: "compaction"; info: { reason: "manual" | "threshold" | "overflow"; tokensBefore: number } }
+  | { type: "execution_request"; id: string }
   | ({ type: "idle" } & ChildSettlement)
   | ({ type: "settled" } & ChildSettlement)
   | { type: "ack"; id: string; error?: string }
@@ -76,7 +79,9 @@ export type ChildFeedback =
 export type ParentControl =
   | { type: "accepted"; version: 1; runId: string; sessionId: string }
   | { type: "start" }
+  | { type: "execution_admission"; id: string; error?: string }
   | { type: "steer"; id: string; message: string }
+  | { type: "interrupt"; id: string }
   | { type: "abort" };
 export type ChildPacket = ChildFeedback & { seq: number };
 export interface ChildHello {

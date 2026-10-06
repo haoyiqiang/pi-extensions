@@ -85,7 +85,7 @@ class Editor extends CustomEditor {
 
     const spinner = this.spinner.getFrame();
     const workingMessage = this.workingMessage;
-    const elapsed = getElapsedLabel();
+    const elapsed = getElapsedLabel(this.ctx.sessionManager);
     const workingText = [
       spinner ? theme.fg("accent", spinner) : undefined,
       workingMessage ? theme.fg("dim", workingMessage) : undefined,
@@ -123,9 +123,19 @@ class Editor extends CustomEditor {
 export function registerEditor(pi: ExtensionAPI, events: EventCollector): void {
   let editor: Editor | undefined = undefined;
   let spinner: Spinner | undefined = undefined;
+  let elapsedOwner: object | undefined;
+  let releaseElapsedListener: (() => void) | undefined;
   let runningToolCallIds = new Set<string>();
 
   pi.on("session_start", (_event, ctx) => {
+    if (elapsedOwner !== undefined) setElapsedLabel(elapsedOwner, undefined);
+    releaseElapsedListener?.();
+    releaseElapsedListener = undefined;
+    elapsedOwner = undefined;
+    editor = undefined;
+    spinner?.dispose();
+    spinner = undefined;
+
     const config = loadConfig(ctx).editor;
     if (ctx.mode !== "tui") return;
 
@@ -142,6 +152,8 @@ export function registerEditor(pi: ExtensionAPI, events: EventCollector): void {
     }
 
     spinner = new Spinner(config.spinner);
+    elapsedOwner = ctx.sessionManager;
+    releaseElapsedListener = setElapsedLabelListener(elapsedOwner, () => editor?.refresh());
 
     ctx.ui.setWorkingVisible(false);
     ctx.ui.setEditorComponent((tui, theme, keybindings) => {
@@ -208,12 +220,12 @@ export function registerEditor(pi: ExtensionAPI, events: EventCollector): void {
     spinner?.stop();
   });
 
-  setElapsedLabelListener(() => editor?.refresh());
-
   pi.on("session_shutdown", () => {
     runningToolCallIds.clear();
-    setElapsedLabel(undefined);
-    setElapsedLabelListener(undefined);
+    if (elapsedOwner !== undefined) setElapsedLabel(elapsedOwner, undefined);
+    releaseElapsedListener?.();
+    releaseElapsedListener = undefined;
+    elapsedOwner = undefined;
     editor = undefined;
     spinner?.dispose();
     spinner = undefined;

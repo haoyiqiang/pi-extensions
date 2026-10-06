@@ -1,7 +1,12 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import type { EventBus, ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+  getAgentDir,
+  ProjectTrustStore,
+  type EventBus,
+  type ExtensionAPI,
+} from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { acts, defineWorkflow } from "./api.js";
 import { registerBuiltIns } from "./built-ins.js";
@@ -38,6 +43,7 @@ interface FakePi {
   pi: ExtensionAPI;
   bus: SyncBus;
   commands: Map<string, { handler(args: string, ctx: WorkflowLauncherContext): Promise<void> }>;
+  start(): Promise<void>;
   shutdown(): Promise<void>;
 }
 
@@ -64,6 +70,11 @@ function fakePi(): FakePi {
     pi,
     bus,
     commands,
+    async start() {
+      for (const handler of [...(lifecycle.get("session_start") ?? [])]) {
+        await handler({ type: "session_start", reason: "startup" });
+      }
+    },
     async shutdown() {
       for (const handler of [...(lifecycle.get("session_shutdown") ?? [])]) await handler({ type: "session_shutdown" });
     },
@@ -74,6 +85,7 @@ function observer(cwd: string, id: string, mode?: string): WorkflowHostContext {
   return {
     cwd,
     hasUI: true,
+    isProjectTrusted: () => true,
     mode,
     ui: { notify: vi.fn() },
     sessionManager: {
@@ -151,6 +163,7 @@ function runOptions(root: string) {
 function workspace(): string {
   const root = mkdtempSync(join(tmpdir(), "pi-workflow-wiring-"));
   projectConfig(root, { execution: { profile: "managed", backend: "embedded" } });
+  new ProjectTrustStore(getAgentDir()).set(root, true);
   roots.push(root);
   return root;
 }
@@ -180,6 +193,8 @@ describe("Pi executor discovery", () => {
     const root = workspace();
     const host = fakePi();
     const runtime = installPiWorkflowExecution(host.pi);
+    expect(getWorkflowExecutionProvider()).toBeUndefined();
+    await host.start();
     await expect(provider().createHost(observer(root, "a"), runOptions(root))).rejects.toThrow(/No compatible workflow executor/);
     await runtime.close();
   });
@@ -191,6 +206,7 @@ describe("Pi executor discovery", () => {
     registerOffer(host.bus, candidate);
     registerOffer(host.bus, candidate);
     const runtime = installPiWorkflowExecution(host.pi);
+    await host.start();
     await expect(provider().createHost(observer(root, "a"), runOptions(root))).rejects.toThrow(/offered 2 times/);
     await runtime.close();
   });
@@ -263,6 +279,7 @@ describe("Pi executor forwarding and ownership", () => {
     const requests: WorkflowExecutorRequest[] = [];
     registerOffer(host.bus, offer((request) => { requests.push(request); return executionFor(request); }));
     const runtime = installPiWorkflowExecution(host.pi);
+    await host.start();
     const current = observer(root, "current");
     const signal = new AbortController().signal;
     const cancellationError = (input: AbortSignal) => Object.assign(new Error("stop"), { input });
@@ -297,6 +314,7 @@ describe("Pi executor forwarding and ownership", () => {
     const createExecution = vi.fn((request: WorkflowExecutorRequest) => executionFor(request));
     registerOffer(host.bus, offer(createExecution));
     const runtime = installPiWorkflowExecution(host.pi);
+    await host.start();
     await expect(provider().createHost(observer(root, "mismatch"), {
       ...runOptions(root),
       identity: { version: 1, executor: "pi-subagents", backend: "embedded", promptBinding },
@@ -308,6 +326,8 @@ describe("Pi executor forwarding and ownership", () => {
   it("identifies only the Pi workflow adapter provider", async () => {
     const host = fakePi();
     const runtime = installPiWorkflowExecution(host.pi);
+    expect(getWorkflowExecutionProvider()).toBeUndefined();
+    await host.start();
     expect(isPiWorkflowExecutionProvider(getWorkflowExecutionProvider())).toBe(true);
     expect(isPiWorkflowExecutionProvider({ createHost: vi.fn() })).toBe(false);
     await runtime.close();
@@ -316,8 +336,11 @@ describe("Pi executor forwarding and ownership", () => {
   it("an old reload unregister cannot remove the newer same-bus provider", async () => {
     const host = fakePi();
     const first = installPiWorkflowExecution(host.pi);
+    await host.start();
     const oldProvider = getWorkflowExecutionProvider();
     const second = installPiWorkflowExecution(host.pi);
+    expect(getWorkflowExecutionProvider()).toBe(oldProvider);
+    await host.start();
     const newProvider = getWorkflowExecutionProvider();
     expect(newProvider).toBeDefined();
     expect(newProvider).not.toBe(oldProvider);
@@ -332,8 +355,10 @@ describe("Pi executor forwarding and ownership", () => {
     const root = fakePi();
     const child = fakePi();
     const rootRuntime = installPiWorkflowExecution(root.pi);
+    await root.start();
     const rootProvider = getWorkflowExecutionProvider();
     const childRuntime = installPiWorkflowExecution(child.pi);
+    await child.start();
     expect(childRuntime.installed).toBe(false);
     expect(getWorkflowExecutionProvider()).toBe(rootProvider);
     await childRuntime.close();
@@ -349,6 +374,7 @@ describe("Pi executor forwarding and ownership", () => {
     const closeExecution = vi.fn(async () => {});
     registerOffer(host.bus, offer((input) => { request = input; return pending; }));
     const runtime = installPiWorkflowExecution(host.pi);
+    await host.start();
     const creation = provider().createHost(observer(root, "a"), runOptions(root));
     await tick();
     expect(request).toBeDefined();
@@ -378,7 +404,8 @@ describe("actual /wf command wiring", () => {
     })]);
     registerOffer(host.bus, offer((request) => executionFor(request, closeExecution)));
     const runtime = installPiWorkflowExecution(host.pi);
-    registerWorkflowCommand(host.pi);
+    registerWorkflowCommand(host.pi, host.pi);
+    await host.start();
     const handler = host.commands.get("wf")?.handler;
     expect(handler).toBeDefined();
 

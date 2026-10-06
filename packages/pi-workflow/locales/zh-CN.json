@@ -16,6 +16,7 @@
   "command.issueWorkflowPath": "[{layer} 配置（{path}）] 工作流“{workflow}”：{message}",
   "command.issueWorkflowStage": "[{layer} 配置] 工作流“{workflow}”——阶段“{stage}”：{message}",
   "command.issueWorkflowStagePath": "[{layer} 配置（{path}）] 工作流“{workflow}”——阶段“{stage}”：{message}",
+  "config.projectUntrusted": "项目尚未获信任，未加载项目工作流定义；仅使用全局及明确批准的资源。",
   "config.invalidJson": "JSON 无效：{error}",
   "config.expectedArray": "应为数组",
   "config.expectedObject": "应为对象",

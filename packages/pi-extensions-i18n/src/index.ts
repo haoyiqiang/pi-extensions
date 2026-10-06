@@ -1,21 +1,25 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { registerLocalesFromDir } from "./loader.ts";
 import {
-  applyLocale,
-  clearLocaleOverride,
+  applyLocaleForOwner,
+  createLocaleOverrideOwner,
   getLocalePreference,
+  inheritLocaleForOwner,
   LOCALE_ENV,
   parseLocalePreference,
+  releaseLocaleOverrideOwner,
   saveLocalePreference,
   scope,
   type LocalePreference,
   type MessageParams,
 } from "./runtime.ts";
 import {
+  bindNoticeOwner,
   NOTICE_TAG_COLOR,
   installNoticeRenderer,
   notifyWithSource,
   type NoticeColor,
+  type NoticeOwnerRelease,
   type NoticeSource,
 } from "./notice.ts";
 
@@ -120,9 +124,11 @@ function registerLocaleCommand(
 }
 
 export default function piI18n(pi: ExtensionAPI): void {
-  installNoticeRenderer(pi);
+  const noticeOwner = installNoticeRenderer(pi);
+  const localeOwner = createLocaleOverrideOwner();
   const commandI18n = loadCommandI18n();
   let flagPreference: LocalePreference | undefined;
+  let releaseNoticeOwner: NoticeOwnerRelease | undefined;
 
   pi.registerFlag(FLAG_NAME, {
     type: "string",
@@ -130,10 +136,13 @@ export default function piI18n(pi: ExtensionAPI): void {
   });
 
   pi.on("session_start", (_event, ctx) => {
+    releaseNoticeOwner?.();
+    releaseNoticeOwner = bindNoticeOwner(ctx, noticeOwner);
+
     const rawFlag = pi.getFlag(FLAG_NAME);
     flagPreference = typeof rawFlag === "string" ? parseLocalePreference(rawFlag) : undefined;
     if (typeof rawFlag === "string" && rawFlag.trim() && !flagPreference) {
-      clearLocaleOverride();
+      inheritLocaleForOwner(localeOwner);
       notifyWithSource({
         ctx,
         source: NOTICE_SOURCE,
@@ -142,15 +151,23 @@ export default function piI18n(pi: ExtensionAPI): void {
       });
       return;
     }
-    if (flagPreference) applyLocale(flagPreference);
-    else clearLocaleOverride();
+    if (flagPreference) applyLocaleForOwner(localeOwner, flagPreference);
+    else inheritLocaleForOwner(localeOwner);
+  });
+
+  pi.on("session_shutdown", () => {
+    releaseNoticeOwner?.();
+    releaseNoticeOwner = undefined;
+    releaseLocaleOverrideOwner(localeOwner);
   });
 
   registerLocaleCommand(pi, () => flagPreference, commandI18n);
 }
 
 export {
+  bindNoticeOwner,
   formatNotice,
+  getNoticeOwnerBinding,
   notifyWithSource,
   NOTICE_TAG_COLOR,
   installNoticeRenderer,
@@ -167,6 +184,9 @@ export {
   type NoticeEntryData,
   type NoticeEntryTheme,
   type NoticeLevel,
+  type NoticeOwnerBinding,
+  type NoticeOwnerContext,
+  type NoticeOwnerRelease,
   type NoticeRenderOptions,
   type NoticeSendOptions,
   type NoticeSource,

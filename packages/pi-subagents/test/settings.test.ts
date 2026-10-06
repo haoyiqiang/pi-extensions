@@ -82,6 +82,20 @@ describe("settings persistence", () => {
     });
   });
 
+  it("loads global settings only when project trust is denied", () => {
+    writeGlobal({ maxConcurrent: 16, graceTurns: 10 });
+    writeProject({ maxConcurrent: 4, defaultMaxTurns: 50 });
+    expect(loadSettings(projectDir, { projectTrusted: false })).toEqual({
+      maxConcurrent: 16,
+      graceTurns: 10,
+    });
+    expect(loadSettings(projectDir, { projectTrusted: true })).toEqual({
+      maxConcurrent: 4,
+      graceTurns: 10,
+      defaultMaxTurns: 50,
+    });
+  });
+
   it("round-trips values: saveSettings then loadSettings", () => {
     const settings = {
       maxConcurrent: 7,

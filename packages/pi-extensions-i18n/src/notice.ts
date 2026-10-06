@@ -58,7 +58,12 @@ export interface NoticeSource {
 }
 
 /** 渲染提示所需的最小 UI 上下文。 */
-export interface NoticeContext {
+export interface NoticeOwnerContext {
+  /** Pi 同一会话内稳定的 session manager；事件 ctx 自身会按事件重建，不能拿来标识会话。 */
+  sessionManager?: object;
+}
+
+export interface NoticeContext extends NoticeOwnerContext {
   /** 运行模式；只有 tui 会渲染成带底色的消息块。 */
   mode?: string;
   ui: {
@@ -153,6 +158,20 @@ export interface NoticeApi {
   ): void;
 }
 
+/**
+ * 一个可显式转接的提示写入 owner。
+ *
+ * SDK/子会话若要把提示明确 relay 到父会话，应从父 ctx 读取这个 binding，
+ * 再把它绑定到 relay ctx；不需要读取任何产品包私有 Symbol。
+ */
+export interface NoticeOwnerBinding {
+  /** 把一条提示写入这个 owner 所属的会话。 */
+  appendNotice(data: NoticeEntryData): void;
+}
+
+/** 解除一次 owner 绑定；重复调用安全，且不会误删后来替换它的绑定。 */
+export type NoticeOwnerRelease = () => void;
+
 /** 判断一个未知值是不是普通对象。 */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -169,26 +188,55 @@ function isNoticeLevel(value: unknown): value is NoticeLevel {
 }
 
 /**
- * 当前会话的提示出口。
+ * 提示运行时只保存「会话 owner → 写入 binding」映射，不保存 latest API。
  *
- * 这是本模块唯一的可变状态，注入点是扩展入口的 installNoticeRenderer：
- * 提示调用点分散在多个包的几十处（含 tps、turn-elapsed 等拿不到 pi 的模块），
- * 逐个传参会把 Pi 的写入能力扩散到所有业务函数里，因此只在入口注入一次。
- * 扩展重载会重新执行入口，这里始终保存最近一次的 Pi 实例。
+ * Pi 会为每个事件创建新的 ctx，但同一会话的 sessionManager 稳定，因此 owner 以
+ * sessionManager 为键。多个原生 Pi runtime 共处一个进程时也不会因 factory 执行顺序
+ * 把父会话出口替换成最后加载的子会话 API。
  */
-const NOTICE_RUNTIME_KEY = Symbol.for("pi-extensions-i18n.notice-runtime.v1");
+const NOTICE_RUNTIME_KEY = Symbol.for("pi-extensions-i18n.notice-runtime.v2");
+
+interface NoticeOwnerRegistration {
+  token: object;
+  binding: NoticeOwnerBinding;
+  /** 只在本 registration 仍是 source owner 时可写的公开 lease。 */
+  lease: NoticeOwnerBinding;
+}
 
 interface NoticeRuntime {
-  api?: NoticeApi;
+  bindings: WeakMap<object, NoticeOwnerBinding>;
+  owners: WeakMap<object, NoticeOwnerRegistration>;
   registeredApis: WeakSet<object>;
+  rendererInstalled: boolean;
+}
+
+function createNoticeRuntime(): NoticeRuntime {
+  return {
+    bindings: new WeakMap(),
+    owners: new WeakMap(),
+    registeredApis: new WeakSet(),
+    rendererInstalled: false,
+  };
 }
 
 function noticeRuntime(): NoticeRuntime {
   const global = globalThis as unknown as { [NOTICE_RUNTIME_KEY]?: NoticeRuntime };
   if (!global[NOTICE_RUNTIME_KEY]) {
-    global[NOTICE_RUNTIME_KEY] = { registeredApis: new WeakSet() };
+    global[NOTICE_RUNTIME_KEY] = createNoticeRuntime();
   }
   return global[NOTICE_RUNTIME_KEY];
+}
+
+/** 取同一会话稳定的 owner key；简化测试上下文没有 sessionManager 时退回 ctx 本身。 */
+function noticeOwnerKey(ctx: NoticeOwnerContext): object {
+  try {
+    if (typeof ctx.sessionManager === "object" && ctx.sessionManager !== null) {
+      return ctx.sessionManager;
+    }
+  } catch {
+    // 旧 runtime 已关闭时 guarded getter 可能抛错；退回 ctx，让提示走 notify fallback。
+  }
+  return ctx;
 }
 
 /** 提示块的水平内边距：让文字不贴边。 */
@@ -197,13 +245,15 @@ const NOTICE_PADDING_X = 1;
 const NOTICE_PADDING_Y = 0;
 
 /**
- * 注册提示条目渲染器，并记下用于写入条目的 Pi 实例。
- * 由 pi-extensions-i18n 的扩展入口调用；依赖它的扩展会自动带上这个入口。
- * 老版本 Pi 没有这两个能力时直接不注入，提示会退回 ui.notify（仍然可见，只是没有底色）。
+ * 注册提示条目渲染器，并返回该 API 的写入 binding。
+ *
+ * 注册 renderer 与选择当前会话写入 owner 是两步：本函数不会把 API 设成进程级 latest，
+ * 调用方应在 session_start 用 bindNoticeOwner() 绑定真实 ctx，并在 session_shutdown 释放。
+ * 老版本 Pi 没有这两个能力时返回 undefined，提示会退回 ui.notify。
  */
-export function installNoticeRenderer(api: NoticeApi): void {
+export function installNoticeRenderer(api: NoticeApi): NoticeOwnerBinding | undefined {
   if (typeof api.appendEntry !== "function" || typeof api.registerEntryRenderer !== "function") {
-    return;
+    return undefined;
   }
   const runtime = noticeRuntime();
   if (!runtime.registeredApis.has(api as object)) {
@@ -211,18 +261,74 @@ export function installNoticeRenderer(api: NoticeApi): void {
       renderNoticeEntry(entry, theme, isExpanded(options)));
     runtime.registeredApis.add(api as object);
   }
-  runtime.api = api;
+  runtime.rendererInstalled = true;
+
+  let binding = runtime.bindings.get(api as object);
+  if (binding === undefined) {
+    binding = Object.freeze({
+      appendNotice: (data: NoticeEntryData) => api.appendEntry(NOTICE_ENTRY_TYPE, data),
+    });
+    runtime.bindings.set(api as object, binding);
+  }
+  return binding;
 }
 
-/** 当前是否已具备把提示画成带底色消息块的能力。 */
-export function hasNoticeRenderer(): boolean {
-  return noticeRuntime().api !== undefined;
+/**
+ * 把一个 ctx/session 明确绑定到提示 owner。
+ *
+ * 返回的 cleanup 由本次 token 持有：旧 runtime 较晚清理时，如果同一 session 已由新
+ * runtime 接管，它不会删除新 binding。
+ */
+export function bindNoticeOwner(
+  ctx: NoticeOwnerContext,
+  binding: NoticeOwnerBinding | undefined,
+): NoticeOwnerRelease {
+  if (binding === undefined) return () => {};
+  const runtime = noticeRuntime();
+  const key = noticeOwnerKey(ctx);
+  const token = {};
+  const registration: NoticeOwnerRegistration = {
+    token,
+    binding,
+    lease: Object.freeze({
+      appendNotice: (data: NoticeEntryData) => {
+        if (runtime.owners.get(key)?.token !== token) {
+          throw new Error("notice owner is no longer active");
+        }
+        binding.appendNotice(data);
+      },
+    }),
+  };
+  runtime.owners.set(key, registration);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    if (runtime.owners.get(key)?.token === registration.token) {
+      runtime.owners.delete(key);
+    }
+  };
 }
 
-/** 测试与重载用：清掉已注入的提示出口。 */
+/**
+ * 读取 ctx 当前所属的 owner lease，供 SDK UI relay 显式继承父会话出口。
+ * source owner 被 release 或 replacement 后，该 lease 会拒绝继续写旧会话。
+ */
+export function getNoticeOwnerBinding(ctx: NoticeOwnerContext): NoticeOwnerBinding | undefined {
+  return noticeRuntime().owners.get(noticeOwnerKey(ctx))?.lease;
+}
+
+/** 当前是否已安装 renderer；传 ctx 时进一步检查该会话是否已有写入 owner。 */
+export function hasNoticeRenderer(ctx?: NoticeOwnerContext): boolean {
+  return ctx === undefined
+    ? noticeRuntime().rendererInstalled
+    : getNoticeOwnerBinding(ctx) !== undefined;
+}
+
+/** 测试与重载用：清掉 renderer 注册记录与 owner 映射。 */
 export function resetNoticeRenderer(): void {
   const global = globalThis as unknown as { [NOTICE_RUNTIME_KEY]?: NoticeRuntime };
-  global[NOTICE_RUNTIME_KEY] = { registeredApis: new WeakSet() };
+  global[NOTICE_RUNTIME_KEY] = createNoticeRuntime();
 }
 
 /** 正文默认颜色：warning 黄、error 红、info 用扩展消息正文色。 */
@@ -410,8 +516,8 @@ export function formatNotice(options: NoticeRenderOptions): string {
  */
 export function notifyWithSource(options: NoticeSendOptions): void {
   const { ctx, source, level, message, textColor, details } = options;
-  const noticeApi = noticeRuntime().api;
-  if (ctx.mode === NOTICE_COLOR_MODE && noticeApi !== undefined) {
+  const noticeOwner = getNoticeOwnerBinding(ctx);
+  if (ctx.mode === NOTICE_COLOR_MODE && noticeOwner !== undefined) {
     const data: NoticeEntryData = {
       tag: source.tag,
       color: source.color,
@@ -421,10 +527,10 @@ export function notifyWithSource(options: NoticeSendOptions): void {
       details,
     };
     try {
-      noticeApi.appendEntry(NOTICE_ENTRY_TYPE, data);
+      noticeOwner.appendNotice(data);
       return;
     } catch {
-      // 落到下面的 ui.notify：提示照常可见，只是没有底色。
+      // owner 已关闭或会话不可写时落到 ui.notify；绝不改投其它会话。
     }
   }
   const text = formatNotice({ source, message, mode: ctx.mode, theme: ctx.ui.theme });

@@ -31,15 +31,10 @@
  * failures (file throws on import, exports the wrong shape) are captured as
  * `LoadIssue`s; the loader itself never throws to its caller.
  *
- * SECURITY NOTE — `jiti.import` synchronously evaluates every overlay
- * file's top-level code on first load and on every edit (mtime-driven
- * invalidation via `cache.ts`). The threat boundary is the same as
- * `npm install` (post-install scripts), `tsx some-script.ts`, or any
- * tool that respects `<cwd>` configuration: Pi already operates in a
- * context that implicitly trusts the current working directory. Users
- * running Pi in a freshly-cloned untrusted repo should diff
- * `.rpiv/workflows/config.ts` and `.rpiv/workflows/packs/*.ts`
- * (the config file + pack files) before running `/wf`.
+ * SECURITY NOTE — `jiti.import` evaluates overlay top-level code. Pi callers
+ * supply the launcher's project-trust decision; an untrusted project layer is
+ * excluded before imports, even if it was previously cached. Programmatic
+ * callers loading definitions explicitly retain control through the same option.
  *
  * Module map:
  *   ./issues.ts           — LoadIssue + Issue (the layer/path-attributed wrapper)
@@ -53,7 +48,9 @@
  *   ./cache.ts            — mtime-keyed jiti import cache + __resetLoadCache
  */
 
+import { existsSync } from "node:fs";
 import type { Workflow } from "../api.js";
+import { i18n } from "../i18n.js";
 import { drainBuiltInProviderErrors, flushBuiltInProviders, getBuiltIns } from "../built-ins.js";
 import { formatError } from "../internal-utils.js";
 import type { ConfigLayer } from "../layers.js";
@@ -129,7 +126,10 @@ export function findWorkflow(loaded: LoadedWorkflows, name: string): Workflow | 
  * Load every active layer, merge by workflow name, validate, and return the
  * resolved set. Never throws — load + validation errors flow through `issues`.
  */
-export async function loadWorkflows(cwd: string): Promise<LoadedWorkflows> {
+export async function loadWorkflows(
+	cwd: string,
+	options: { projectTrusted?: boolean } = {},
+): Promise<LoadedWorkflows> {
 	// Flush lazy built-in providers before reading the registry — lets siblings
 	// defer constructing definitions to first `/wf` (the earliest reader).
 	await flushBuiltInProviders();
@@ -165,7 +165,14 @@ export async function loadWorkflows(cwd: string): Promise<LoadedWorkflows> {
 	const userOutcome = await loadLayer(userPaths, "user", acc);
 	if (userOutcome.contributed) layers.push("user");
 
-	const projectOutcome = await loadLayer(projectOverlayPaths(cwd), "project", acc);
+	const projectPaths = projectOverlayPaths(cwd);
+	if (options.projectTrusted === false && (existsSync(projectPaths.configFile) || existsSync(projectPaths.packsDir))) {
+		acc.issues.push({ kind: "load", layer: "project", severity: "warning",
+			path: projectPaths.configFile, message: i18n.t("config.projectUntrusted") });
+	}
+	const projectOutcome = options.projectTrusted === false
+		? { contributed: false, configDefault: undefined, skillAliases: undefined }
+		: await loadLayer(projectPaths, "project", acc);
 	if (projectOutcome.contributed) layers.push("project");
 
 	// One-time legacy migration advisories — each independent, each a warning

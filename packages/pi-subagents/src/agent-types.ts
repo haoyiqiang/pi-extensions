@@ -59,9 +59,12 @@ export function setFallbackSubagent(v: string | undefined): void { fallbackSubag
  * Pure — callers that must not disturb the process-wide registry (nested
  * delegation resolving agents from its own config root) build their own map.
  */
-export function buildAgentRegistry(userAgents: Map<string, AgentConfig>): Map<string, AgentConfig> {
+export function buildAgentRegistry(
+  userAgents: Map<string, AgentConfig>,
+  options?: { disableDefaultAgents?: boolean },
+): Map<string, AgentConfig> {
   const registry = new Map<string, AgentConfig>();
-  if (!disableDefaults) {
+  if (!(options ? options.disableDefaultAgents === true : disableDefaults)) {
     for (const [name, config] of DEFAULT_AGENTS) registry.set(name, config);
   }
   for (const [name, config] of userAgents) registry.set(name, config);
@@ -174,6 +177,7 @@ export type SpawnTypeResolution =
 export function resolveSpawnTypeIn(
   registry: Map<string, AgentConfig>,
   requested: unknown,
+  options?: { fallbackSubagent?: string },
 ): SpawnTypeResolution {
   const raw = typeof requested === "string" ? requested.trim() : "";
   const available = () => getAvailableTypesIn(registry).join(", ") || "(none)";
@@ -188,7 +192,8 @@ export function resolveSpawnTypeIn(
 
   // Trimmed like `requested`: a padded value set programmatically would
   // otherwise be reported as a missing agent.
-  const configured = typeof fallbackSubagent === "string" ? fallbackSubagent.trim() : undefined;
+  const preference = options ? options.fallbackSubagent : fallbackSubagent;
+  const configured = typeof preference === "string" ? preference.trim() : undefined;
 
   if (configured !== undefined && configured.toLowerCase() === NO_FALLBACK) {
     return { ok: false, message: `${reason} Available: ${available()}.` };

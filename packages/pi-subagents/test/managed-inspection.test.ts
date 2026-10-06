@@ -277,7 +277,7 @@ describe("managed backend branch observation ports", () => {
     const exited = new Promise<{ reason: "sentinel"; exitCode: number }>(resolve => { exit = resolve; });
     const snapshot: TerminalSnapshot = { messages: [], stats: { tokens: { input: 0, output: 0, cacheWrite: 0 }, contextUsage: { percent: null } } };
     const bridge: TerminalBridge = { endpoint: { host: "127.0.0.1", port: 1, token: "test-only" }, ready: Promise.resolve(snapshot), settled,
-      start: () => {}, steer: async () => {}, abort: () => {}, close: async () => {} };
+      start: () => {}, admit: () => {}, steer: async () => {}, interrupt: async () => {}, abort: () => {}, close: async () => {} };
     const subject = createTerminalExecutionBackend({ sessionDir: f.root, artifactDir: join(f.root, "runs") }, {
       bridge: async (_run, listener) => { feedback = listener; return bridge; },
       waitForExit: () => exited,

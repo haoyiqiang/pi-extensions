@@ -26,6 +26,7 @@ export interface StandardWorkflowExecutionProviderOptions {
   maxConcurrency?: number;
   maxTurns?: number;
   requiredTools?: readonly string[];
+  projectTrusted?: boolean;
   cancellationError: (signal: AbortSignal) => Error;
 }
 
@@ -61,6 +62,7 @@ export function createStandardWorkflowExecutionProvider(
         maxConcurrency: options.maxConcurrency,
         maxTurns: options.maxTurns,
         requiredTools: options.requiredTools,
+        projectTrusted: options.projectTrusted,
         initializeRuntime: options.initializeRuntime,
         createRuntime: options.createRuntime,
         signal: observer.signal,

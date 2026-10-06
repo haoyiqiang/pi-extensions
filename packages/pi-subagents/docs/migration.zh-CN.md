@@ -67,7 +67,8 @@ pi --no-extensions \
 | `subagent` | `Agent`，使用 `prompt`、`description`、`subagent_type`，可设置 `run_in_background` |
 | `subagent_resume` | `Agent` 的 `resume`，引用**新管理器拥有的**代理 ID |
 | `subagent_interrupt` | `steer_subagent` 的 `action: "interrupt"` |
-| 永久停止 | `steer_subagent` 的 `action: "stop"` |
+| 结束任务、保留会话 | `steer_subagent` 的 `action: "cancel"` |
+| 确认清理后结束管理 | `steer_subagent` 的 `action: "close"` |
 | 后台结果 | `get_subagent_result` |
 | `subagents_list`／旧管理命令 | `/agents` 及统一 Fleet/widget |
 | `/plan`、`/iterate` | 显式定义工作流并使用 `/wf`，不提供别名 |
@@ -98,7 +99,7 @@ pi --no-extensions \
 
 ## 验收
 
-先检查一个新 Agent 任务、结果读取及 interrupt／stop，再运行一个小型文件工作流，
+先检查一个新 Agent 任务、结果读取及 interrupt／cancel／close，再运行一个小型文件工作流，
 检查日志、取消任务并恢复失败阶段。确认本机具备定义所需的技能、工具和模型。
 
 仓库测试覆盖组合加载及真实的离线 SDK／子进程链路，不代表已经运行每一份个人工作流

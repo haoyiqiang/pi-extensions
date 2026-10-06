@@ -172,6 +172,7 @@ describe("worktree isolation e2e (real git, real pi-mono, faux model)", () => {
       cwd: repo,
       respond: respondSpawning("worktree"),
       live: false,
+      projectTrusted: true,
     });
 
     const result = agentResultText(run.parentSession);

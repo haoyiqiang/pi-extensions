@@ -93,6 +93,7 @@ function harness(factory: WorkflowExecutorOffer["createExecution"]) {
   const mock = createMockPi({ events: bus as ExtensionAPI["events"] });
   const runtime = installPiWorkflowExecution(mock.pi);
   runtimes.push(runtime);
+  for (const start of mock.captured.events.get("session_start") ?? []) start({ reason: "startup" });
   registerWorkflowCancellationCommand(mock.pi, runtime);
   registerOffer(bus, factory);
   const provider = getWorkflowExecutionProvider();
@@ -166,6 +167,26 @@ describe("workflow runtime cancellation", () => {
     await f.provider.createHost(observer(cwd), options(cwd, "known"));
     await expect(f.runtime.cancelRun("missing")).resolves.toBe(false);
     expect(close).not.toHaveBeenCalled();
+  });
+
+  it("hides naturally retiring runs from cancellation while still awaiting close", async () => {
+    const cwd = root();
+    const release = deferred();
+    const close = vi.fn(() => release.promise);
+    const f = harness((request) => validExecution(request, close));
+    const execution = await f.provider.createHost(observer(cwd), options(cwd, "retiring"));
+    expect(f.runtime.activeRunIds()).toEqual(["retiring"]);
+
+    const retirement = execution.close!();
+    expect(f.runtime.activeRunIds()).toEqual([]);
+    const command = f.captured.commands.get("wf-cancel")!;
+    const ctx = createMockCommandCtx({ cwd, hasUI: true });
+    await command.handler("", ctx);
+    expect(ctx.ui.notify).toHaveBeenCalledWith(i18n.t("cancel.none"), "info");
+
+    release.resolve();
+    await retirement;
+    expect(close).toHaveBeenCalledOnce();
   });
 });
 

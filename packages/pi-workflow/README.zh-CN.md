@@ -160,6 +160,11 @@ managed 仍只接入内置工具，不自动激活环境资源；保留已存策
 
 ## 取消与生命周期
 
+`/wf` 与启动会话分离，在后台运行。每个阶段内的 scoped `Agent` 默认前台委派，不继承
+根会话的 `backgroundByDefault`，确保依赖结果先于校验和路由到达。仍可显式后台委派，
+但未完成的子任务会随阶段作用域退役而取消。运行时一次捕获子代理策略，替换启动会话
+不会改写后续阶段的策略。
+
 - `/wf-cancel` 取消唯一活动运行，存在多个时列出 ID。
 - `/wf-cancel <id>` 选择一个，`/wf-cancel all` 取消当前全部运行。
 - 冷启动命令加载和等待获取执行器的阶段也可取消。
@@ -186,6 +191,11 @@ managed 仍只接入内置工具，不自动激活环境资源；保留已存策
 
 标准阶段使用原生 Pi JSONL，可以打开已有原始阶段会话。受管子会话继续位于各运行的
 `sessions/managed`，不会把 orphan 清理扩展成递归删除租约和 sidecar。
+
+Pi 前端在项目未获准时，于求值之前跳过项目 workflow 定义、packs 和
+`.pi/pi-workflow.json`，全局资源仍可使用。对于仅含 workflow 自有资源的项目，Pi 0.87.1
+返回的隐含信任不等于批准，需要原生保存的信任决定或 `defaultProjectTrust: "always"`。
+显式程序化加载仍由嵌入方负责授权。
 
 配置/包求值期间，jiti 把 `@maplezzk/pi-workflow` 和旧
 `@juicesharp/rpiv-workflow` 公开子路径解析到本引擎，而不是安装第二套上游运行时。

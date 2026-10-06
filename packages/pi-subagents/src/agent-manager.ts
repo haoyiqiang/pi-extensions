@@ -32,6 +32,7 @@ import { resolveAgentLaunchBehavior } from "./invocation-config.js";
 import { assignHandle, handleBase } from "./mention.js";
 import { describeModel } from "./model-resolver.js";
 import type { AgentConfig, AgentInvocation, AgentRecord, AgentTombstone, IsolationMode, MentionResolution, SubagentType, EffectiveThinkingLevel } from "./types.js";
+import type { SubagentsRuntimePolicy } from "./runtime-policy.js";
 import { addUsage, type LifetimeUsage } from "./usage.js";
 import type { CompiledSchema } from "./workflow/json-schema.js";
 import { cleanupWorktree, createWorktree, isWorktreeIsolationEnabled, pruneWorktrees, } from "./worktree.js";
@@ -166,6 +167,35 @@ function occupiesForegroundSlot(
 
 /** Which concurrency pool a spawn is charged to, if any. */
 type Pool = "background" | "foreground";
+
+interface QueueEntry {
+  id: string;
+  pool: Pool;
+  /** Rechecked after removal because cancellation can leave a stale queue node. */
+  ready: () => boolean;
+  /** Must claim its pool slot synchronously before returning. */
+  start: () => Promise<void>;
+  /** Releases a blocked caller or rejects an execution-admission waiter. */
+  discard: () => void;
+}
+
+interface ExecutionActivityState {
+  pool: Pool | undefined;
+  charged: boolean;
+  firstAcquire: boolean;
+  closed: boolean;
+  pending?: QueueEntry;
+  pendingPromise?: Promise<void>;
+}
+
+interface CurrentOperation {
+  controller: AbortController;
+  promise: Promise<void>;
+}
+
+export type AgentControlRequest =
+  | { action: "steer"; message: string }
+  | { action: "interrupt" | "cancel" | "close" };
 
 interface SpawnArgs {
   pi: ExtensionAPI;
@@ -316,6 +346,8 @@ export interface SpawnOptions {
   maxSubagentDepth?: number;
   /** Config-discovery root inherited by nested launches when it differs from the working directory. */
   configCwd?: string;
+  /** Invocation-owned project trust and runtime defaults captured by the caller. */
+  runtimePolicy?: SubagentsRuntimePolicy;
   /** Root session id, inherited by nested launches so transcripts stay grouped. */
   rootSessionId?: string;
 }
@@ -441,6 +473,15 @@ export class AgentManager {
   private retirementFailures: unknown[] = [];
   private sessionRetirementFailures = new WeakMap<ExecutionSession, unknown[]>();
   private recordRetirementFailures = new WeakMap<AgentRecord, unknown[]>();
+  /** Per-job activity lease; persistent jobs reuse it across SDK rounds. */
+  private executionActivities = new WeakMap<AgentRecord, ExecutionActivityState>();
+  /** A live persistent job keeps its original promise; resumed rounds live here. */
+  private currentOperations = new Map<string, CurrentOperation>();
+  /** Canonical cancellation retains the record but closes further admission. */
+  private cancellations = new Map<string, Promise<boolean>>();
+  /** Canonical close is a shared cleanup barrier and deletes only after retirement. */
+  private closes = new Map<string, Promise<boolean>>();
+  private retiring = new WeakSet<AgentRecord>();
 
   /**
    * Startup phases, keyed by agent id. `spawn()` still returns synchronously,
@@ -475,7 +516,7 @@ export class AgentManager {
    * promise to await, and pi has no tool-execution timeout to bail the caller
    * out.
    */
-  private queue: { id: string; pool: Pool; start: () => Promise<void>; release: () => void }[] = [];
+  private queue: QueueEntry[] = [];
   /** Number of currently running background agents. */
   private runningBackground = 0;
   /** Number of currently running foreground (blocking) agents. */
@@ -548,6 +589,154 @@ export class AgentManager {
       : this.maxConcurrentForeground === 0 || this.runningForeground < this.maxConcurrentForeground;
   }
 
+  private claimPool(pool: Pool | undefined): void {
+    if (pool === "background") this.runningBackground++;
+    else if (pool === "foreground") this.runningForeground++;
+  }
+
+  private releasePool(pool: Pool | undefined): void {
+    if (pool === "background") this.runningBackground--;
+    else if (pool === "foreground") this.runningForeground--;
+  }
+
+  private createExecutionActivity(
+    record: AgentRecord,
+    pool: Pool | undefined,
+    initiallyCharged: boolean,
+  ): ExecutionActivityState {
+    const state: ExecutionActivityState = {
+      pool,
+      charged: initiallyCharged,
+      firstAcquire: true,
+      closed: false,
+    };
+    this.executionActivities.set(record, state);
+    record.activity = "active";
+    return state;
+  }
+
+  private ownsExecutionActivity(record: AgentRecord, state: ExecutionActivityState): boolean {
+    return this.executionActivities.get(record) === state;
+  }
+
+  private releaseExecutionActivity(record: AgentRecord, state: ExecutionActivityState): void {
+    if (!state.charged) return;
+    state.charged = false;
+    this.releasePool(state.pool);
+    if (this.ownsExecutionActivity(record, state)) record.activity = "idle";
+    this.drainQueue();
+  }
+
+  private finishExecutionActivity(record: AgentRecord, state: ExecutionActivityState): void {
+    state.closed = true;
+    if (state.pending) this.dequeue(entry => entry === state.pending);
+    this.releaseExecutionActivity(record, state);
+    if (this.ownsExecutionActivity(record, state)) record.activity = "idle";
+  }
+
+  private acquireExecutionActivity(
+    id: string,
+    record: AgentRecord,
+    state: ExecutionActivityState,
+    signal: AbortSignal,
+  ): Promise<void> {
+    if (state.closed || !this.ownsExecutionActivity(record, state) || this.disposed || this.retiring.has(record) || this.agents.get(id) !== record) {
+      return Promise.reject(abortError(signal.reason));
+    }
+    if (signal.aborted) return Promise.reject(abortError(signal.reason));
+
+    // Launch/startResume charged the first round before dispatch. The child still
+    // asks permission for that exact round, so the first acquire is idempotent.
+    if (state.firstAcquire) {
+      state.firstAcquire = false;
+      record.activity = "active";
+      return Promise.resolve();
+    }
+    if (state.charged) {
+      record.activity = "active";
+      return Promise.resolve();
+    }
+    if (state.pending) return state.pendingPromise!;
+    if (state.pool === undefined) {
+      record.activity = "active";
+      return Promise.resolve();
+    }
+
+    record.activity = "queued";
+    const admission = new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const finish = (error?: unknown) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener("abort", onAbort);
+        if (state.pending === entry) {
+          state.pending = undefined;
+          state.pendingPromise = undefined;
+        }
+        if (error !== undefined) {
+          if (!state.closed && this.ownsExecutionActivity(record, state) && this.agents.get(id) === record && record.activity === "queued") record.activity = "idle";
+          reject(error);
+        } else {
+          resolve();
+        }
+      };
+      const onAbort = () => this.dequeue(candidate => candidate === entry);
+      const entry: QueueEntry = {
+        id,
+        pool: state.pool!,
+        ready: () => !settled && !signal.aborted && !state.closed && this.ownsExecutionActivity(record, state) && !this.retiring.has(record) && this.agents.get(id) === record,
+        start: () => {
+          if (!entry.ready()) {
+            finish(abortError(signal.reason));
+            return Promise.resolve();
+          }
+          this.claimPool(state.pool);
+          state.charged = true;
+          record.activity = "active";
+          finish();
+          return Promise.resolve();
+        },
+        discard: () => finish(abortError(signal.reason)),
+      };
+      state.pending = entry;
+      this.queue.push(entry);
+      signal.addEventListener("abort", onAbort, { once: true });
+      if (signal.aborted) onAbort();
+      else this.drainQueue();
+    });
+    if (state.pending) state.pendingPromise = admission;
+    return admission;
+  }
+
+  private executionIdle(
+    id: string,
+    record: AgentRecord,
+    state: ExecutionActivityState,
+    result: ExecutionResumeResult,
+  ): void {
+    if (state.closed || !this.ownsExecutionActivity(record, state) || this.agents.get(id) !== record) return;
+    // Round results remain observable without declaring a persistent conversation complete.
+    state.firstAcquire = false;
+    record.result = result.text;
+    record.structuredJson = result.structuredJson;
+    record.structuredRetried = result.structuredRetried;
+    if (result.failure !== undefined) record.error = result.failure;
+    else if (!result.aborted) record.error = undefined;
+    this.releaseExecutionActivity(record, state);
+    record.activity = "idle";
+  }
+
+  private activityCallbacks(id: string, record: AgentRecord, state: ExecutionActivityState) {
+    return {
+      acquireExecution: (signal: AbortSignal) => this.acquireExecutionActivity(id, record, state, signal),
+      onExecutionIdle: (result: ExecutionResumeResult) => this.executionIdle(id, record, state, result),
+    };
+  }
+
+  private shouldRetireSession(id: string, record: AgentRecord): boolean {
+    return this.closes.has(id) || (this.retiring.has(record) && !this.cancellations.has(id));
+  }
+
   /**
    * Spawn an agent and return its ID immediately (for background use).
    * If the concurrency limit is reached, the agent is queued.
@@ -600,6 +789,7 @@ export class AgentManager {
       // that queues flips to "queued" there rather than being guessed at here,
       // since the pool decision needs the finished record.
       status: options.isBackground ? "queued" : "running",
+      activity: options.isBackground ? "queued" : "active",
       toolUses: 0,
       startedAt: Date.now(),
       abortController,
@@ -646,8 +836,9 @@ export class AgentManager {
       this.queue.push({
         id,
         pool,
-        start: () => this.launch(id, record, args, pool),
-        release: () => release(),
+        ready: () => this.agents.get(id) === record && record.status === "queued",
+        start: () => this.launch(id, record, args, pool).finally(release),
+        discard: release,
       });
       options.onQueued?.(id, this.queue.filter(e => e.pool === pool).length - 1);
       return id;
@@ -734,6 +925,7 @@ export class AgentManager {
         description: options.description,
         handle: isTopLevelAgent(options) ? assignHandle(handleBase(options.type), this.takenHandles()) : undefined,
         status: "idle",
+        activity: "idle",
         session,
         sessionFile: restored.sessionFile,
         startedAt: Date.now(),
@@ -815,6 +1007,7 @@ export class AgentManager {
       const record = this.agents.get(id);
       if (record) {
         record.status = "stopped";
+        record.activity = "idle";
         record.completedAt = Date.now();
       }
       return false;
@@ -934,15 +1127,12 @@ export class AgentManager {
     // every later blocking spawn queues forever). The two startup exits below
     // never reach `settleRun`, so they hand the slot back themselves.
     const pool = this.poolFor(record);
-    const releaseSlot = () => {
-      if (pool === "background") this.runningBackground--;
-      else if (pool === "foreground") this.runningForeground--;
-    };
+    this.claimPool(pool);
+    const activity = this.createExecutionActivity(record, pool, pool !== undefined);
+    const releaseSlot = () => this.finishExecutionActivity(record, activity);
     record.status = "running";
     record.startedAt = Date.now();
     record.startGate = undefined;
-    if (pool === "background") this.runningBackground++;
-    else if (pool === "foreground") this.runningForeground++;
 
     // Worktree isolation: try to create a temporary git worktree. Strict —
     // fail loud if not possible (no silent fallback to main tree). Done BEFORE
@@ -951,7 +1141,7 @@ export class AgentManager {
     // because cross-extension RPC forwards its options unvalidated — a schema
     // that omits the field can't stop a caller that never saw the schema.
     let worktreeCwd: string | undefined;
-    if (options.isolation === "worktree" && isWorktreeIsolationEnabled()) {
+    if (options.isolation === "worktree" && (options.runtimePolicy?.worktreeIsolation ?? isWorktreeIsolationEnabled())) {
       let wt: Awaited<ReturnType<typeof createWorktree>>;
       try { wt = await createWorktree(pi, baseCwd, id); }
       catch (error) { releaseSlot(); throw error; }
@@ -993,7 +1183,7 @@ export class AgentManager {
       }
       throw error;
     }
-    if (this.disposed || this.agents.get(id) !== record) {
+    if (this.disposed || this.retiring.has(record) || this.agents.get(id) !== record) {
       releaseSlot();
       if (record.worktree) record.worktreeResult = await cleanupWorktree(pi, baseCwd, record.worktree, options.description);
       this.drainQueue();
@@ -1044,6 +1234,7 @@ export class AgentManager {
       // copy came from, so the prompt can tell the agent not to work there.
       worktreeBase: worktreeCwd ? baseCwd : undefined,
       configCwd: options.configCwd ?? (customCwd !== undefined ? ctx.cwd : undefined),
+      runtimePolicy: options.runtimePolicy,
       signal: record.abortController!.signal,
       onToolActivity: (activity) => {
         if (activity.type === "end") record.toolUses++;
@@ -1067,6 +1258,7 @@ export class AgentManager {
         depth: record.depth ?? 1,
         maxSubagentDepth: record.maxSubagentDepth,
       },
+      ...this.activityCallbacks(id, record, activity),
       onSessionCreated: (session) => {
         if (this.disposed || this.agents.get(id) !== record) {
           void this.shutdownRecordSession(record, session);
@@ -1101,14 +1293,16 @@ export class AgentManager {
             }
           }
         }
-        // Flush any steers that arrived before the session was ready
-        if (record.pendingSteers?.length) {
+        // Flush any steers that arrived before the session was ready.
+        const retireSession = this.shouldRetireSession(id, record);
+        if (!retireSession && record.pendingSteers?.length) {
           for (const msg of record.pendingSteers) {
             this.execution.steer(session, msg).catch(() => {});
           }
           record.pendingSteers = undefined;
         }
-        options.onSessionCreated?.(session);
+        if (retireSession) void this.shutdownRecordSession(record, session);
+        else options.onSessionCreated?.(session);
       },
     };
     let running: Promise<ExecutionRunResult>;
@@ -1140,14 +1334,22 @@ export class AgentManager {
             record.status = steered ? "steered" : "completed";
           }
         }
-        record.result = responseText;
+        // A persistent close can return no new terminal text after its last
+        // authoritative idle event; do not erase that round's observable result.
+        if (!this.retiring.has(record) || responseText || record.result === undefined) record.result = responseText;
         // Kept beside `result`, never inside it: `result` is prose meant for a
         // reader — it is previewed, transcribed, and appended to below — while
         // this is a machine-readable payload one caller asked for by schema.
-        record.structuredJson = structuredJson;
-        record.structuredRetried = structuredRetried;
-        if (this.disposed || this.agents.get(id) !== record) await this.shutdownRecordSession(record, session);
-        else record.session = session;
+        if (!this.retiring.has(record) || structuredJson !== undefined || record.structuredJson === undefined) {
+          record.structuredJson = structuredJson;
+          record.structuredRetried = structuredRetried;
+        }
+        if (this.disposed || this.agents.get(id) !== record) {
+          await this.shutdownRecordSession(record, session);
+        } else {
+          record.session = session;
+          if (this.shouldRetireSession(id, record)) await this.shutdownRecordSession(record, session);
+        }
         record.completedAt ??= Date.now();
 
         detach();
@@ -1184,7 +1386,7 @@ export class AgentManager {
 
         this.abortOwnedChildren(id);
 
-        this.settleRun(record, true, pool);
+        this.settleRun(record, true, activity);
         return responseText;
       })
       .catch(async (err) => {
@@ -1214,7 +1416,7 @@ export class AgentManager {
 
         this.abortOwnedChildren(id);
 
-        this.settleRun(record, false, pool);
+        this.settleRun(record, false, activity);
         return "";
       }).finally(finishInvocation);
 
@@ -1245,14 +1447,12 @@ export class AgentManager {
    *
    * @param guardCallback swallow a throwing `onComplete` (the success path does;
    *   the error path historically did not, and keeps not doing so).
-   * @param pool the pool this run was CHARGED TO at start time — passed in, not
-   *   recomputed, so a mid-run change to `maxConcurrentForeground` can't make
-   *   the release disagree with the acquire.
+   * @param activity the job's stable activity lease, including its original
+   *   pool. Persistent jobs may already have released it on an idle callback.
    */
-  private settleRun(record: AgentRecord, guardCallback: boolean, pool: Pool | undefined): void {
+  private settleRun(record: AgentRecord, guardCallback: boolean, activity: ExecutionActivityState): void {
     if (!record.isBackground) record.resultConsumed = true;
-    if (pool === "background") this.runningBackground--;
-    else if (pool === "foreground") this.runningForeground--;
+    this.finishExecutionActivity(record, activity);
 
     if (!this.disposed && this.agents.get(record.id) === record) {
       if (guardCallback) {
@@ -1268,7 +1468,7 @@ export class AgentManager {
     // on. The `pool` half only adds the drain a freed FOREGROUND slot needs.
     // A drain with nothing freed is a no-op anyway, but "no-op" is a claim
     // about reachability, and matching the old condition needs no such claim.
-    if (record.isBackground || pool !== undefined) this.drainQueue();
+    if (record.isBackground || activity.pool !== undefined) this.drainQueue();
   }
 
   /**
@@ -1297,19 +1497,13 @@ export class AgentManager {
       const i = this.queue.findIndex(e => this.poolHasRoom(e.pool));
       if (i === -1) return;
       const [next] = this.queue.splice(i, 1);
-      const record = this.agents.get(next.id);
-      // Stale entries (aborted while queued) are not started — but are still
-      // released, since nothing else will.
-      if (!record || record.status !== "queued") { next.release(); continue; }
-      // Detached, and never rejects: a late failure (e.g. strict worktree
-      // isolation) lands on the record inside `launch`, exactly as the
-      // synchronous throw did here before, and draining continues either way.
-      //
-      // The release waits for that startup to SETTLE rather than firing here.
-      // Startup is async now, so a release at drain time would wake a blocked
-      // `spawnAndWait` while `record.promise` was still undefined, and it would
-      // read a perfectly healthy agent as one that never ran.
-      void next.start().then(() => next.release(), () => next.release());
+      // Stale entries (cancelled launches or aborted SDK admissions) are never
+      // started, but their blocked caller still needs a deterministic wakeup.
+      if (!next.ready()) { next.discard(); continue; }
+      // Each entry owns its own settlement behavior: launch entries release the
+      // foreground start gate after startup, while admission entries resolve as
+      // soon as they synchronously claim the slot.
+      void next.start().catch(() => {});
     }
   }
 
@@ -1318,10 +1512,10 @@ export class AgentManager {
    * that enforces "leaving the queue releases the waiter" — a missed release is
    * an unbounded hang, not a failed call.
    */
-  private dequeue(pred: (entry: { id: string; pool: Pool }) => boolean): void {
+  private dequeue(pred: (entry: QueueEntry) => boolean): void {
     const kept: typeof this.queue = [];
     for (const entry of this.queue) {
-      if (pred(entry)) entry.release();
+      if (pred(entry)) entry.discard();
       else kept.push(entry);
     }
     this.queue = kept;
@@ -1399,10 +1593,19 @@ export class AgentManager {
   ): Promise<AgentRecord | undefined> {
     options = { ...options, requiredTools: snapshotRequiredTools(options?.requiredTools) };
     const record = this.agents.get(id);
-    if (this.disposed || !record?.session) return undefined;
+    if (this.disposed || !record?.session || this.retiring.has(record)) return undefined;
+    const activity = this.executionActivities.get(record);
+    const liveIdle = this.invocations.has(id) && record.status === "running" &&
+      record.activity === "idle" && activity !== undefined && !activity.closed;
+    // A persistent live CLI owns one long-lived job promise. An idle SDK round
+    // may resume through that SAME session without overwriting its cleanup barrier.
+    if (liveIdle) {
+      if (this.currentOperations.has(id)) return undefined;
+      return this.resumeLiveIdle(id, record, activity, prompt, signal, options);
+    }
     // Abort changes the visible status immediately, not backend/settlement ownership.
     // A refused resume must not replace a live controller or clear its result fields.
-    if (this.invocations.has(id) || record.status === "running" || record.status === "queued") return undefined;
+    if (this.invocations.has(id) || this.currentOperations.has(id) || record.status === "running" || record.status === "queued") return undefined;
 
     // Background resume: settle asynchronously and notify on completion exactly
     // like a background spawn, returning immediately with the record still
@@ -1428,6 +1631,7 @@ export class AgentManager {
       record.error = undefined;
       record.completedAt = undefined;
       record.status = "queued";
+      record.activity = "queued";
 
       const start = () => this.startResume(id, record, prompt, signal, options);
       if (occupiesPoolSlot(record) && !this.poolHasRoom("background")) {
@@ -1439,16 +1643,18 @@ export class AgentManager {
         this.queue.push({
           id,
           pool: "background",
+          ready: () => this.agents.get(id) === record && record.status === "queued" && !this.retiring.has(record),
           start: async () => {
             try {
               start();
             } catch (err) {
               applyResumeError(record, err);
+              record.activity = "idle";
               record.completedAt ??= Date.now();
               this.onComplete?.(record);
             }
           },
-          release: () => {},
+          discard: () => {},
         });
       } else {
         start();
@@ -1459,6 +1665,7 @@ export class AgentManager {
     // Foreground resume: run inline and return the settled record, without a pool slot.
     const finishInvocation = this.beginInvocation(id);
     const session = record.session;
+    const resumeActivity = this.createExecutionActivity(record, undefined, false);
     record.status = "running";
     record.startedAt = Date.now();
     record.completedAt = undefined;
@@ -1492,6 +1699,7 @@ export class AgentManager {
             options?.onCompaction?.(info);
           },
           signal: abortController.signal,
+          ...this.activityCallbacks(id, record, resumeActivity),
         });
         applyResumeResult(record, result);
         return result.text;
@@ -1500,6 +1708,7 @@ export class AgentManager {
         return "";
       } finally {
         record.completedAt ??= Date.now();
+        this.finishExecutionActivity(record, resumeActivity);
         signal?.removeEventListener("abort", onParentAbort);
         // The exposed promise includes metadata, signal teardown and owned-child cleanup.
         this.abortOwnedChildren(id);
@@ -1507,6 +1716,81 @@ export class AgentManager {
     })().finally(finishInvocation);
 
     await record.promise;
+    return record;
+  }
+
+  /** Resume one SDK round inside an already-live persistent job. */
+  private async resumeLiveIdle(
+    id: string,
+    record: AgentRecord,
+    activity: ExecutionActivityState,
+    prompt: string,
+    parentSignal: AbortSignal | undefined,
+    options: ResumeOptions,
+  ): Promise<AgentRecord> {
+    const session = record.session!;
+    const controller = new AbortController();
+    record.result = undefined;
+    record.structuredJson = undefined;
+    record.structuredRetried = undefined;
+    record.error = undefined;
+
+    const onParentAbort = () => {
+      if (!controller.signal.aborted) controller.abort(parentSignal?.reason);
+      this.abort(id);
+    };
+    if (parentSignal?.aborted) onParentAbort();
+    else parentSignal?.addEventListener("abort", onParentAbort, { once: true });
+    const onJobAbort = () => {
+      if (!controller.signal.aborted) controller.abort(record.abortController?.signal.reason);
+    };
+    record.abortController?.signal.addEventListener("abort", onJobAbort, { once: true });
+
+    let tracked!: Promise<void>;
+    const round = Promise.resolve().then(async () => {
+      try {
+        this.onStart?.(record);
+        if (this.disposed || this.retiring.has(record) || record.status !== "running" || this.agents.get(id) !== record) return;
+        try { options.onStarted?.(); } catch { /* observational wiring */ }
+        const result = await this.execution.resume(session, prompt, {
+          requiredTools: options.requiredTools,
+          onToolActivity: (toolActivity) => {
+            if (toolActivity.type === "end") record.toolUses++;
+            options.onToolActivity?.(toolActivity);
+          },
+          onAssistantUsage: (usage) => {
+            addUsage(record.lifetimeUsage, usage);
+            this.onUsage?.(record, usage);
+            options.onAssistantUsage?.(usage);
+          },
+          onCompaction: (info) => {
+            record.compactionCount++;
+            this.onCompact?.(record, info);
+            options.onCompaction?.(info);
+          },
+          signal: controller.signal,
+          ...this.activityCallbacks(id, record, activity),
+        });
+        // Backends emit this authoritatively; the fallback is idempotent and
+        // covers adapters that return a round without the optional callback.
+        this.executionIdle(id, record, activity, result);
+      } catch (error) {
+        if (record.status !== "stopped") {
+          record.error = error instanceof Error ? error.message : String(error);
+        }
+        this.releaseExecutionActivity(record, activity);
+        if (this.ownsExecutionActivity(record, activity)) record.activity = "idle";
+      } finally {
+        parentSignal?.removeEventListener("abort", onParentAbort);
+        record.abortController?.signal.removeEventListener("abort", onJobAbort);
+      }
+    });
+    tracked = round.finally(() => {
+      if (this.currentOperations.get(id)?.promise === tracked) this.currentOperations.delete(id);
+    });
+    this.currentOperations.set(id, { controller, promise: tracked });
+    if (!options.isBackground) await tracked;
+    else void tracked.catch(() => {});
     return record;
   }
 
@@ -1524,13 +1808,14 @@ export class AgentManager {
     parentSignal: AbortSignal | undefined,
     options: ResumeOptions,
   ) {
-    if (this.disposed || !record.session || this.agents.get(id) !== record) return;
+    if (this.disposed || this.retiring.has(record) || !record.session || this.agents.get(id) !== record) return;
     const session = record.session;
     const finishInvocation = this.beginInvocation(id);
-    const holdsSlot = occupiesPoolSlot(record);
+    const pool: Pool | undefined = occupiesPoolSlot(record) ? "background" : undefined;
+    this.claimPool(pool);
+    const activity = this.createExecutionActivity(record, pool, pool !== undefined);
     record.status = "running";
     record.startedAt = Date.now();
-    if (holdsSlot) this.runningBackground++;
 
     // Fresh abort controller so /agents stop and steering target THIS run rather
     // than the previous one's settled controller.
@@ -1558,7 +1843,7 @@ export class AgentManager {
       }
       // Children spawned during the resumed turn must not outlive it.
       this.abortOwnedChildren(id);
-      if (holdsSlot) this.runningBackground--;
+      this.finishExecutionActivity(record, activity);
       if (!this.disposed && this.agents.get(id) === record) {
         try { this.onComplete?.(record); } catch { /* ignore completion side-effect errors */ }
       }
@@ -1569,9 +1854,9 @@ export class AgentManager {
       try {
         this.onStart?.(record);
         // Per-run output wiring runs under the reservation and fresh controller.
-        if (this.disposed || this.agents.get(id) !== record) return "";
+        if (this.disposed || this.retiring.has(record) || this.agents.get(id) !== record) return "";
         try { options.onStarted?.(); } catch { /* ignore caller wiring errors */ }
-        if (this.disposed || this.agents.get(id) !== record) return "";
+        if (this.disposed || this.retiring.has(record) || this.agents.get(id) !== record) return "";
         const result = await this.execution.resume(session, prompt, {
           requiredTools: options.requiredTools,
           onToolActivity: (activity) => {
@@ -1589,6 +1874,7 @@ export class AgentManager {
             options.onCompaction?.(info);
           },
           signal: abortController.signal,
+          ...this.activityCallbacks(id, record, activity),
         });
         applyResumeResult(record, result);
         return result.text;
@@ -1718,25 +2004,188 @@ export class AgentManager {
     if (record.status === "queued") {
       this.dequeue(q => q.id === id);
       record.status = "stopped";
+      record.activity = "idle";
       record.completedAt = Date.now();
       return true;
     }
 
     if (record.status !== "running") return false;
+    this.dequeue(q => q.id === id);
+    this.currentOperations.get(id)?.controller.abort();
     record.abortController?.abort();
     record.status = "stopped";
     record.completedAt = Date.now();
     return true;
   }
 
-  /** Stop only the current turn; retain the session for a later prompt or human input. */
+  /** Stop only the active SDK round; queued and idle conversations are not interrupted. */
   async interrupt(id: string): Promise<boolean> {
     const record = this.agents.get(id);
-    if (!record || record.status !== "running") return false;
+    if (!record || record.status !== "running" || record.activity !== "active") return false;
     await this.awaitStartup(id);
-    if (!record.session || !this.execution.interrupt) return false;
+    if (record.activity !== "active" || !record.session || !this.execution.interrupt) return false;
     await this.execution.interrupt(record.session);
     return true;
+  }
+
+  /** Canonical frontend dispatch; no ambiguous stop alias. */
+  async control(id: string, request: AgentControlRequest): Promise<boolean> {
+    switch (request.action) {
+      case "steer": return this.steerAndWait(id, request.message);
+      case "interrupt": return this.interrupt(id);
+      case "cancel": return this.cancel(id);
+      case "close": return this.close(id);
+    }
+  }
+
+  private hasLiveJob(id: string, record: AgentRecord): boolean {
+    return record.status === "running" || record.status === "queued" ||
+      this.invocations.has(id) || this.currentOperations.has(id);
+  }
+
+  private hasLifecycleBarrier(id: string, record: AgentRecord): boolean {
+    return this.hasLiveJob(id, record) || this.retiring.has(record) || this.cancellations.has(id) || this.closes.has(id);
+  }
+
+  private async awaitRecordBarrier(id: string, record: AgentRecord): Promise<void> {
+    for (;;) {
+      const pending = new Set<Promise<unknown>>();
+      const startup = this.startups.get(id);
+      const invocation = this.invocations.get(id);
+      const operation = this.currentOperations.get(id)?.promise;
+      if (startup) pending.add(startup);
+      if (invocation) pending.add(invocation);
+      if (operation) pending.add(operation);
+      for (const shutdown of this.recordShutdowns.get(record) ?? []) pending.add(shutdown);
+      if (pending.size === 0) return;
+      await Promise.allSettled([...pending]);
+    }
+  }
+
+  private ownedRecords(parentId: string): AgentRecord[] {
+    return [...this.agents.values()].filter(record => record.parentAgentId === parentId);
+  }
+
+  /** Cancel a live job and all owned children, retaining its record and history. */
+  cancel(id: string): Promise<boolean> {
+    const pending = this.cancellations.get(id);
+    if (pending) return pending;
+    const record = this.agents.get(id);
+    if (!record || !this.hasLiveJob(id, record)) return Promise.resolve(false);
+
+    let resolve!: (cancelled: boolean) => void;
+    let reject!: (error: unknown) => void;
+    const cancellation = new Promise<boolean>((done, fail) => { resolve = done; reject = fail; });
+    void cancellation.catch(() => {});
+    this.cancellations.set(id, cancellation);
+    this.retiring.add(record);
+    const wasQueued = record.status === "queued";
+    const priorError = record.error;
+    let cancelledCleanly = false;
+
+    void (async () => {
+      try {
+        const children = this.ownedRecords(id).map(child => this.cancel(child.id));
+        this.dequeue(entry => entry.id === id);
+        this.currentOperations.get(id)?.controller.abort();
+        record.abortController?.abort();
+        if (record.status === "running" || record.status === "queued") {
+          if (record.status === "queued") record.activity = "idle";
+          record.status = "stopped";
+          record.completedAt ??= Date.now();
+        }
+        const childSettlements = await Promise.allSettled(children);
+        const cleanupFailures = childSettlements
+          .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+          .map(result => result.reason);
+        // Cancellation retires the current job through its AbortSignal, but the
+        // healthy conversation handle remains owned and resumable by this record.
+        await this.awaitRecordBarrier(id, record);
+        if (wasQueued && this.agents.get(id) === record) {
+          try { this.onComplete?.(record); } catch { /* terminal notification is observational */ }
+        }
+        const failures = [...cleanupFailures, ...(this.recordRetirementFailures.get(record) ?? [])];
+        if (record.error !== undefined && record.error !== priorError) failures.push(new Error(record.error));
+        if (failures.length) {
+          const failure = retirementFailure(failures);
+          record.status = "error";
+          record.error = failures.map(error => error instanceof Error ? error.message : String(error)).join("; ") || failure.message;
+          record.completedAt ??= Date.now();
+          reject(failure);
+        } else {
+          cancelledCleanly = true;
+          resolve(true);
+        }
+      } catch (error) {
+        reject(error);
+      } finally {
+        this.cancellations.delete(id);
+        if (cancelledCleanly && !this.closes.has(id)) this.retiring.delete(record);
+      }
+    })();
+    return cancellation;
+  }
+
+  /**
+   * Retire and forget one record. Concurrent callers share the same barrier;
+   * ownership is unlinked only after all manager cleanup and backend shutdowns settle.
+   */
+  close(id: string): Promise<boolean> {
+    const pending = this.closes.get(id);
+    if (pending) return pending;
+    const record = this.agents.get(id);
+    if (!record) return Promise.resolve(false);
+
+    let resolve!: (closed: boolean) => void;
+    let reject!: (error: unknown) => void;
+    const closed = new Promise<boolean>((done, fail) => { resolve = done; reject = fail; });
+    void closed.catch(() => {});
+    this.closes.set(id, closed);
+    this.retiring.add(record);
+
+    void (async () => {
+      try {
+        let cancellationFailure: unknown;
+        if (this.hasLiveJob(id, record)) {
+          try { await this.cancel(id); } catch (error) { cancellationFailure = error; }
+        }
+        const childSettlements = await Promise.allSettled(this.ownedRecords(id).map(child => this.close(child.id)));
+        const cleanupFailures = childSettlements
+          .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+          .map(result => result.reason);
+        if (record.session) await this.shutdownRecordSession(record, record.session);
+        await this.awaitRecordBarrier(id, record);
+
+        const state = this.executionActivities.get(record);
+        if (state) this.finishExecutionActivity(record, state);
+
+        const failures = [...cleanupFailures, ...(this.recordRetirementFailures.get(record) ?? [])];
+        if (cancellationFailure !== undefined && !failures.includes(cancellationFailure)) failures.unshift(cancellationFailure);
+        if (failures.length) {
+          const failure = retirementFailure(failures);
+          record.status = "error";
+          record.error = failures.map(error => error instanceof Error ? error.message : String(error)).join("; ") || failure.message;
+          record.completedAt ??= Date.now();
+          reject(failure);
+          return;
+        }
+
+        this.tombstone(record);
+        if (this.agents.get(id) === record) this.agents.delete(id);
+        this.retained.delete(record);
+        record.session = undefined;
+        record.pendingSteers = undefined;
+        this.startups.delete(id);
+        this.dequeue(entry => entry.id === id);
+        this.drainQueue();
+        resolve(true);
+      } catch (error) {
+        reject(error);
+      } finally {
+        this.closes.delete(id);
+      }
+    })();
+    return closed;
   }
 
   /** Pin this record against timed GC, not explicit release/reset/disposal. */
@@ -1785,7 +2234,10 @@ export class AgentManager {
       record.status = "stopped";
       record.completedAt ??= Date.now();
     }
-    if (active || invocation) record.abortController?.abort();
+    if (active || invocation) {
+      this.currentOperations.get(id)?.controller.abort();
+      record.abortController?.abort();
+    }
     this.dequeue(entry => entry.id === id);
     this.abortOwnedChildren(id);
     if (!invocation) this.startups.delete(id);
@@ -1832,8 +2284,7 @@ export class AgentManager {
   }
 
   private recordRetirementFailure(error: unknown, session?: ExecutionSession, record?: AgentRecord): void {
-    if (!this.strictRetirement) return;
-    this.retirementFailures.push(error);
+    if (this.strictRetirement) this.retirementFailures.push(error);
     if (session) {
       let failures = this.sessionRetirementFailures.get(session);
       if (!failures) this.sessionRetirementFailures.set(session, failures = []);
@@ -1847,7 +2298,7 @@ export class AgentManager {
     if (session) {
       const closed = this.closedSessions.get(session);
       if (closed) {
-        if (this.strictRetirement && record) void closed.then(() => {
+        if (record) void closed.then(() => {
           for (const error of this.sessionRetirementFailures.get(session) ?? []) {
             this.associateRecordRetirementFailure(record, error);
           }
@@ -1903,7 +2354,7 @@ export class AgentManager {
   private cleanup() {
     const cutoff = Date.now() - 10 * 60_000;
     for (const [id, record] of this.agents) {
-      if (record.status === "running" || record.status === "queued") continue;
+      if (this.hasLifecycleBarrier(id, record)) continue;
       if (this.retained.has(record)) continue;
       if ((record.status === "idle" ? record.startedAt : record.completedAt ?? 0) >= cutoff) continue;
       this.removeRecord(id, record);
@@ -1922,7 +2373,7 @@ export class AgentManager {
     // handle yet. Their late handles are closed, never inserted into the new session.
     for (const controller of this.restorations.keys()) controller.abort();
     for (const [id, record] of this.agents) {
-      if (record.status === "running" || record.status === "queued") continue;
+      if (this.hasLifecycleBarrier(id, record)) continue;
       if (skipUnconsumed && !record.resultConsumed) continue;
       this.removeRecord(id, record);
     }
@@ -1938,7 +2389,7 @@ export class AgentManager {
   /** Whether any agents are still running or queued. */
   hasRunning(): boolean {
     return [...this.agents.values()].some(
-      r => r.status === "running" || r.status === "queued",
+      record => record.status === "running" || record.status === "queued",
     );
   }
 
@@ -1950,6 +2401,7 @@ export class AgentManager {
       const record = this.agents.get(queued.id);
       if (record) {
         record.status = "stopped";
+        record.activity = "idle";
         record.completedAt = Date.now();
         count++;
       }
@@ -1958,6 +2410,7 @@ export class AgentManager {
     // Abort running agents
     for (const record of this.agents.values()) {
       if (record.status === "running") {
+        this.currentOperations.get(record.id)?.controller.abort();
         record.abortController?.abort();
         record.status = "stopped";
         record.completedAt = Date.now();
@@ -1975,9 +2428,12 @@ export class AgentManager {
       this.drainQueue();
       // Includes stopped runs still draining, foreground resumes, and startup
       // callbacks before record.promise exists. Never waits on an old fulfilled run.
-      const pending = [...this.invocations.values()];
-      if (pending.length === 0) break;
-      await Promise.allSettled(pending);
+      const pending = new Set<Promise<void>>([
+        ...this.invocations.values(),
+        ...[...this.currentOperations.values()].map(operation => operation.promise),
+      ]);
+      if (pending.size === 0) break;
+      await Promise.allSettled([...pending]);
     }
   }
 
@@ -1999,6 +2455,7 @@ export class AgentManager {
       return { record, session };
     });
     const startups = [...this.startups.values()];
+    const operations = [...this.currentOperations.values()].map(operation => operation.promise);
     this.agents.clear();
     this.retained = new WeakMap();
     if (pi) {
@@ -2016,11 +2473,26 @@ export class AgentManager {
     // separate readiness promise: opaque backend preflight is cancelled by its signal;
     // late handle callbacks/results are closed above, without awaiting an unbounded run.
     const closing = sessions.map(({ record, session }) => this.shutdownSession(session, record));
-    await Promise.allSettled([...closing, ...this.shutdowns.values(), ...this.restorations.values(), ...this.releases.values(), ...startups]);
+    await Promise.allSettled([
+      ...closing,
+      ...this.shutdowns.values(),
+      ...this.restorations.values(),
+      ...this.releases.values(),
+      ...this.cancellations.values(),
+      ...this.closes.values(),
+      ...operations,
+      ...startups,
+    ]);
     // Startup may finish a worktree copy or hand back a late session while we wait.
     await Promise.allSettled([...this.shutdowns.values()]);
     if (this.strictRetirement && this.retirementFailures.length) throw retirementFailure(this.retirementFailures);
   }
+}
+
+function abortError(cause?: unknown): Error {
+  const error = new Error(i18n.t("managerRestore.cancelled"), cause === undefined ? undefined : { cause });
+  error.name = "AbortError";
+  return error;
 }
 
 function retirementFailure(errors: readonly unknown[]): Error {

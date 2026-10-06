@@ -63,6 +63,7 @@ import {
   createAgentSession,
   DefaultResourceLoader,
   getAgentDir,
+  ProjectTrustStore,
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
@@ -129,6 +130,13 @@ export interface RunPrintModeOptions {
    * false in live mode (so real auth/config resolve). Restored on `dispose()`.
    */
   isolateGlobals?: boolean;
+  /**
+   * Explicit host decision for project-owned test resources. Faux fixtures that
+   * create `.pi/agents` or `.pi/subagents.json` must opt in with `true`; negative
+   * trust tests pass `false`. Written only to the isolated temporary Pi trust
+   * store, never to the developer's real agent directory.
+   */
+  projectTrusted?: boolean;
   /** Wall-clock guard for the whole run. Default 30_000ms. */
   timeoutMs?: number;
   /** Abort the parent (and forwarded children) externally. */
@@ -254,6 +262,9 @@ export async function runPrintMode(options: RunPrintModeOptions): Promise<PrintM
   const live = isLive(options);
   const isolateGlobals = options.isolateGlobals ?? !live;
   const timeoutMs = options.timeoutMs ?? 30_000;
+  if (options.projectTrusted !== undefined && !isolateGlobals) {
+    throw new Error("runPrintMode: explicit project trust requires isolated globals");
+  }
 
   // --- working dir (own it only if we created it) ---
   const ownsCwd = options.cwd == null;
@@ -336,9 +347,23 @@ export async function runPrintMode(options: RunPrintModeOptions): Promise<PrintM
   // --- build the parent host session with the extension loaded ---
   // Resolved after globals are isolated, so it honors the hermetic dir.
   const agentDir = getAgentDir();
+  if (options.projectTrusted !== undefined) {
+    // Pi 0.87 does not raise project_trust for custom-only subagents resources.
+    // Reuse its real public trust store so the extension observes the same
+    // explicit host approval it would receive from `/trust`.
+    new ProjectTrustStore(agentDir).set(cwd, options.projectTrusted);
+  }
+  const settingsManager = live
+    ? SettingsManager.create(cwd, agentDir,
+        options.projectTrusted === undefined ? undefined : { projectTrusted: options.projectTrusted })
+    : SettingsManager.inMemory(
+        { compaction: { enabled: false }, retry: { enabled: false } },
+        options.projectTrusted === undefined ? undefined : { projectTrusted: options.projectTrusted },
+      );
   const loader = new DefaultResourceLoader({
     cwd,
     agentDir,
+    settingsManager,
     additionalExtensionPaths: [EXTENSION_PATH],
     systemPromptOverride: () => options.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
     appendSystemPromptOverride: () => [],
@@ -360,12 +385,9 @@ export async function runPrintMode(options: RunPrintModeOptions): Promise<PrintM
     modelRuntime: modelRuntime as any,
     resourceLoader: loader,
     sessionManager: SessionManager.inMemory(cwd),
-    // Live: real settings so an omitted model resolves to your local default
-    // (settingsManager.getDefaultModel) and retries/compaction match your config.
-    // Faux: in-memory, deterministic, no disk.
-    settingsManager: live
-      ? SettingsManager.create(cwd, agentDir)
-      : SettingsManager.inMemory({ compaction: { enabled: false }, retry: { enabled: false } }),
+    // Shared with the loader: the same explicit project trust decision governs
+    // both resource discovery and extension/session settings.
+    settingsManager,
   });
   session.setSessionName("print-mode-host");
 

@@ -81,6 +81,8 @@ export interface ModelSelection {
 export interface WorkflowHostContext {
 	cwd: string;
 	hasUI: boolean;
+	/** Resource approval belongs to the launcher, not a newly created child. */
+	isProjectTrusted?(): boolean;
 	ui: {
 		notify(message: string, level?: "info" | "warning" | "error"): void;
 	};

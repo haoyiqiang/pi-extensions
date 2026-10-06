@@ -17,6 +17,8 @@ import { createAgentRuntime } from "../../agent-runtime.js";
 import { runInChildSessionContext } from "../../child-context.js";
 import { i18n } from "../../i18n.js";
 import { initializeSubagentsRuntime } from "../../runtime.js";
+import { captureRuntimePolicy } from "../../runtime-policy.js";
+import { isOrdinaryChildProduct } from "../../child-resource-policy.js";
 import { BUILTIN_TOOL_NAMES } from "../../agent-types.js";
 import { SUBAGENT_TOOL_NAMES, extensionCanonicalNames, parseExtensionsSpec } from "../embedded.js";
 import { STRUCTURED_OUTPUT_TOOL_NAME } from "../../structured-output.js";
@@ -30,7 +32,6 @@ import { createStandardToolScope } from "./standard-tool-scope.js";
 import { validateStandardTerminalPolicy } from "./standard-policy.js";
 
 const PRIVATE_INLINE_PREFIX = "<inline:pi-subagents-terminal-";
-const ORCHESTRATION_EXTENSION_NAMES = new Set(["pi-subagents", "pi-interactive-subagents"]);
 
 function readConfig(): StandardTerminalChildConfig {
   const path = process.env[STANDARD_TERMINAL_CONFIG_ENV];
@@ -68,7 +69,7 @@ function resourceOptions(
       if (extension.path.startsWith(PRIVATE_INLINE_PREFIX)) return true;
       if (providerPaths.has(resolve(extension.resolvedPath))) return true;
       const canons = extensionCanonicalNames(extension.path);
-      if (canons.some((name) => ORCHESTRATION_EXTENSION_NAMES.has(name))) return false;
+      if (isOrdinaryChildProduct(extension)) return false;
       if (canons.some((name) => excludes.has(name))) return false;
       return loadAll || canons.some((name) => keep.has(name));
     }).map((extension) => providerPaths.has(resolve(extension.resolvedPath))
@@ -83,19 +84,22 @@ function resourceOptions(
     extensionFactories: privateFactories,
     extensionsOverride,
     noSkills: policy.isolated || policy.agent.skills === false || Array.isArray(policy.agent.skills),
-    noPromptTemplates: policy.isolated,
+    // Agent prompt_mode is resolved by buildAgentPrompt before launch. Match the
+    // embedded backend by suppressing a second template/context/append layer;
+    // standard workflow stages use their separate SDK resource host unchanged.
+    noPromptTemplates: true,
     noThemes: policy.isolated,
-    noContextFiles: policy.isolated,
+    noContextFiles: true,
     systemPromptOverride: () => policy.systemPrompt,
-    // Keep normal configured append prompts and project context from configCwd.
-    appendSystemPromptOverride: (base: string[]) => base,
+    appendSystemPromptOverride: () => [],
   };
 }
 
 async function createRuntimeFactory(config: StandardTerminalChildConfig): Promise<CreateAgentSessionRuntimeFactory> {
   return async ({ cwd, sessionManager, sessionStartEvent }) => {
-    const settingsManager = SettingsManager.create(config.policy.configCwd, config.agentDir);
-    settingsManager.setProjectTrusted(config.policy.projectTrusted);
+    const settingsManager = SettingsManager.create(config.policy.configCwd, config.agentDir, {
+      projectTrusted: config.policy.projectTrusted,
+    });
 
     let servicesRef: AgentSessionServices | undefined;
     const readmit = new Set<string>(config.policy.structuredSchema ? [STRUCTURED_OUTPUT_TOOL_NAME] : []);
@@ -126,6 +130,7 @@ async function createRuntimeFactory(config: StandardTerminalChildConfig): Promis
           depth: config.policy.nested.depth,
           maxSubagentDepth: config.policy.nested.maxSubagentDepth,
           configCwd: config.policy.configCwd,
+          runtimePolicy: config.policy.runtimePolicy ?? captureRuntimePolicy(config.policy.configCwd, config.policy.projectTrusted),
         }),
       });
     }
@@ -166,7 +171,7 @@ async function main(): Promise<void> {
   const config = readConfig();
   // This is a fresh OS process: initialize canonical non-UI settings once before
   // any scoped Agent runtime reads process-local defaults.
-  initializeSubagentsRuntime(config.policy.configCwd);
+  initializeSubagentsRuntime(config.policy.configCwd, { projectTrusted: config.policy.projectTrusted });
   const createRuntime = await createRuntimeFactory(config);
   const manifestPath = process.env[TERMINAL_MANIFEST_ENV];
   if (!manifestPath) throw new Error(i18n.t("bridge.invalidManifest"));

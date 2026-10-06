@@ -13,9 +13,9 @@
 
 import { Editor, isKeyRelease, Key, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { hasAgentBadge, renderAgentName } from "../agent-color.js";
-import { type AgentManager, isTopLevelAgent } from "../agent-manager.js";
-import { i18n } from "../i18n.js";
+import { type AgentControlRequest, type AgentManager, isTopLevelAgent } from "../agent-manager.js";
 import type { AgentRecord, ViewerMarkdownMode } from "../types.js";
+import { i18n } from "../i18n.js";
 import { getLifetimeCost, getLifetimeTotal } from "../usage.js";
 import { type AgentActivity, formatCost, type Theme } from "./agent-widget.js";
 import { ConversationViewer, VIEWPORT_HEIGHT_PCT } from "./conversation-viewer.js";
@@ -145,6 +145,9 @@ export class FleetList {
      * point. Omitted → `m` still cycles, viewer-locally.
      */
     private onViewerMarkdown?: (mode: ViewerMarkdownMode) => void,
+    /** Shared root control entrance; defaults to this manager for embedders/tests. */
+    private controlAgent: (id: string, request: AgentControlRequest) => boolean | void | Promise<boolean | void>
+      = (id, request) => this.manager.control(id, request),
   ) {}
 
   // ---- Lifecycle ----
@@ -418,11 +421,9 @@ export class FleetList {
           activity,
           theme,
           done,
-          () => {
-            if (this.manager.abort(record.id)) this.ui?.notify(`Stopped "${record.description}".`, "info");
-          },
+          (request) => this.controlAgent(record.id, request),
           keybindings,
-          (message: string) => this.manager.steer(record.id, message),
+          undefined,
           this.showCost(),
           this.viewerMarkdown,
           this.onViewerMarkdown,
@@ -537,8 +538,11 @@ export class FleetList {
     const tokens = getLifetimeTotal(record.lifetimeUsage);
     const elapsedMs = (record.completedAt ?? Date.now()) - record.startedAt; // freezes once finished
     const cost = this.showCost() ? formatCost(getLifetimeCost(record.lifetimeUsage)) : "";
-    const stats = record.status === "idle"
-      ? i18n.t("managerRestore.idle")
+    const waiting = record.status === "idle"
+      || (record.status === "running" && record.activity === "idle");
+    const queued = record.status === "queued" || (record.status === "running" && record.activity === "queued");
+    const stats = queued ? i18n.t("product.queuedLabel") : waiting
+      ? i18n.t("product.waitingLabel")
       : `${formatFleetElapsed(elapsedMs)} · ${formatFleetTokens(tokens)}${cost ? ` · ${cost}` : ""}`;
     const right = selected ? theme.fg("text", stats) : theme.fg("dim", stats);
     return rightAlign(left, right, width);

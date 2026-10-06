@@ -10,10 +10,12 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { assertRequiredTools } from "../backends/tool-requirements.js";
 import { createEmbeddedInvocationPolicy, invokeEmbeddedSession, rememberEmbeddedPolicy } from "../backends/embedded-invocation.js";
-import { getGraceTurns } from "../agent-runner.js";
+import { getNoticeOwnerBinding, type NoticeOwnerBinding } from "pi-extensions-i18n";
+import { captureRuntimePolicy, type SubagentsRuntimePolicy } from "../runtime-policy.js";
 import type { ExecutionBackendKind } from "../backends/session-reference.js";
 import { runInChildSessionContext } from "../child-context.js";
 import { i18n } from "../i18n.js";
+import { resolveProjectTrusted } from "../project-trust.js";
 import type {
   WorkflowChildOptions,
   WorkflowHostContext,
@@ -44,6 +46,8 @@ export interface StandardWorkflowExecutionHostOptions {
   maxConcurrency?: number;
   maxTurns?: number;
   requiredTools?: readonly string[];
+  /** Explicit host approval for SDK/programmatic composition. */
+  projectTrusted?: boolean;
   initializeRuntime?: StandardWorkflowRuntimeInitializer;
   createRuntime?: StandardWorkflowRuntimeFactory;
   signal?: AbortSignal;
@@ -81,6 +85,8 @@ export class StandardWorkflowExecutionHost implements WorkflowHostContext {
   private readonly modelRuntime: ModelRuntime;
   private readonly parentModel: Model<any> | undefined;
   private readonly parentThinking: ThinkingLevel;
+  private readonly runtimePolicy: SubagentsRuntimePolicy;
+  private readonly noticeOwner: NoticeOwnerBinding | undefined;
   private disposed = false;
   private closing?: Promise<void>;
 
@@ -101,7 +107,9 @@ export class StandardWorkflowExecutionHost implements WorkflowHostContext {
     this.parentThinking = options.ctx.thinkingLevel ?? "off";
 
     // Snapshot guarded launcher values before detached work outlives that context.
-    const projectTrusted = options.ctx.isProjectTrusted();
+    const projectTrusted = resolveProjectTrusted(this.cwd, { context: options.ctx, projectTrusted: options.projectTrusted });
+    this.runtimePolicy = captureRuntimePolicy(this.cwd, projectTrusted);
+    this.noticeOwner = getNoticeOwnerBinding(options.ctx);
     const id = options.observer.sessionManager.getSessionId();
     const file = options.observer.sessionManager.getSessionFile();
     const branch = structuredClone(options.observer.sessionManager.getBranch());
@@ -209,6 +217,8 @@ export class StandardWorkflowExecutionHost implements WorkflowHostContext {
         modelRuntime: this.modelRuntime,
         initializeRuntime: this.options.initializeRuntime,
         createRuntime: this.options.createRuntime,
+        runtimePolicy: this.runtimePolicy,
+        noticeOwner: this.noticeOwner,
       });
       this.assertScope(scope);
 
@@ -228,7 +238,7 @@ export class StandardWorkflowExecutionHost implements WorkflowHostContext {
       this.assertScope(scope);
       rememberEmbeddedPolicy(session, createEmbeddedInvocationPolicy({
         maxTurns: this.options.maxTurns,
-        graceTurns: this.options.maxTurns === undefined ? undefined : getGraceTurns(),
+        graceTurns: this.options.maxTurns === undefined ? undefined : this.runtimePolicy.graceTurns,
       }));
       scope.watchdog = armStandardBashWatchdog(session, error => {
         scope.abortFailure ??= error;
@@ -241,7 +251,7 @@ export class StandardWorkflowExecutionHost implements WorkflowHostContext {
       if (scope.controller.signal.aborted) onAbort();
       try {
         await session.bindExtensions({
-          uiContext: createStandardWorkflowUi(this.options.ctx.ui, scope.controller.signal, this.options.ctx.mode),
+          ...(this.hasUI ? { uiContext: createStandardWorkflowUi(this.options.ctx.ui, scope.controller.signal, this.options.ctx.mode) } : {}),
           mode: this.options.ctx.mode,
           abortHandler: () => { this.startSessionAbort(scope); },
           shutdownHandler: () => { scope.controller.abort(); },

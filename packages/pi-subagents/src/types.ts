@@ -182,6 +182,14 @@ export interface AgentRecord {
   description: string;
   /** Restored sessions start idle: history is readable, but no invocation has run here. */
   status: "idle" | "queued" | "running" | "completed" | "steered" | "aborted" | "stopped" | "error";
+  /**
+   * Current SDK execution activity, independent of the conversation/job status.
+   * A persistent terminal can remain `status: "running"` while `activity` is
+   * `"idle"`; only `"active"` consumes a manager concurrency slot.
+   * Optional for compatibility with records supplied by external consumers;
+   * every record created by AgentManager sets it.
+   */
+  activity?: "queued" | "active" | "idle";
   result?: string;
   error?: string;
   toolUses: number;

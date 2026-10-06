@@ -48,6 +48,8 @@ export interface NewJobInput {
 }
 
 export class SubagentScheduler {
+  constructor(private readonly spawnDispatcher?: AgentManager["spawn"]) {}
+
   private jobs = new Map<string, Cron>();
   private intervals = new Map<string, NodeJS.Timeout>();
   private store: ScheduleStore | undefined;
@@ -246,9 +248,12 @@ export class SubagentScheduler {
       // an Agent call — not a file deleted directly from a shell. The catch below turns
       // this into lastStatus: "error" plus an error event, like any other
       // fire-time failure.
-      const dispatch = resolveSpawnType(job.subagent_type);
+      const dispatch = this.spawnDispatcher
+        ? { ok: true as const, type: job.subagent_type }
+        : resolveSpawnType(job.subagent_type);
       if (!dispatch.ok) throw new Error(dispatch.message);
-      agentId = manager.spawn(pi, ctx, dispatch.type, job.prompt, {
+      const spawn = this.spawnDispatcher ?? manager.spawn.bind(manager);
+      agentId = spawn(pi, ctx, dispatch.type, job.prompt, {
         description: job.description,
         isBackground: true,
         bypassQueue: true,

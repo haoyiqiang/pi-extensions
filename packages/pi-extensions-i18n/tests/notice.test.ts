@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Component, TuiMouseEvent } from "@earendil-works/pi-tui";
 import {
+  bindNoticeOwner,
   formatNotice,
+  getNoticeOwnerBinding,
   hasNoticeRenderer,
   installNoticeRenderer,
   notifyWithSource,
@@ -13,6 +15,7 @@ import {
   type NoticeColor,
   type NoticeContext,
   type NoticeEntryTheme,
+  type NoticeOwnerBinding,
   type NoticeSource,
 } from "../src/index.ts";
 
@@ -55,6 +58,10 @@ interface FakeApiHandle {
   entries(): unknown[];
   /** 已注册的渲染器数量。 */
   rendererCount(): number;
+  /** 把一个测试 ctx 显式绑定到这套 API。 */
+  bind(ctx: NoticeContext): () => void;
+  /** installNoticeRenderer 返回的公开 owner binding。 */
+  binding(): NoticeOwnerBinding;
 }
 
 /**
@@ -74,13 +81,18 @@ function withFakeApi(run: (handle: FakeApiHandle) => void): void {
       renderers.set(customType, renderer);
     },
   };
-  installNoticeRenderer(api);
+  const binding = installNoticeRenderer(api);
+  assert.ok(binding);
   try {
     run({
       /** 已写入的提示条目。 */
       entries: () => entries,
       /** 已注册的渲染器数量。 */
       rendererCount: () => renderers.size,
+      /** 显式选择这个 ctx 的写入 owner。 */
+      bind: (ctx) => bindNoticeOwner(ctx, binding),
+      /** 暴露公开 binding，模拟 SDK relay 接线。 */
+      binding: () => binding,
     });
   } finally {
     resetNoticeRenderer();
@@ -94,6 +106,7 @@ function createFakeCtx(mode: string): { ctx: NoticeContext; notices: Array<{ mes
     notices,
     ctx: {
       mode,
+      sessionManager: {},
       ui: {
         /** 记录提示调用，替代真实的 UI 输出。 */
         notify: (message, level) => notices.push({ message, level }),
@@ -132,6 +145,7 @@ test("非 TUI 模式与缺少主题时输出纯文本，避免 ANSI 乱码", () 
 test("TUI 下提示写进会话条目，不再是一行纯文本", () => {
   withFakeApi((handle) => {
     const { ctx, notices } = createFakeCtx("tui");
+    handle.bind(ctx);
     notifyWithSource({
       ctx,
       source: SOURCE,
@@ -157,6 +171,130 @@ test("TUI 下提示写进会话条目，不再是一行纯文本", () => {
     assert.equal(hasNoticeRenderer(), true);
     assert.equal(handle.rendererCount(), 1);
   });
+});
+
+test("安装 renderer 本身不选择写入 owner，未绑定 ctx 仍安全退回 notify", () => {
+  withFakeApi((handle) => {
+    const { ctx, notices } = createFakeCtx("tui");
+    notifyWithSource({ ctx, source: SOURCE, level: "info", message: "尚未绑定" });
+
+    assert.deepEqual(handle.entries(), []);
+    assert.deepEqual(notices, [{ message: "<accent>[naming]</> 尚未绑定", level: "info" }]);
+    assert.equal(hasNoticeRenderer(), true);
+    assert.equal(hasNoticeRenderer(ctx), false);
+  });
+});
+
+test("父子会话按 session owner 各写各的，SDK relay 可显式继承父 binding", () => {
+  resetNoticeRenderer();
+  const parentEntries: unknown[] = [];
+  const childEntries: unknown[] = [];
+  const parentBinding = installNoticeRenderer({
+    appendEntry: (customType, data) => parentEntries.push({ customType, data }),
+    registerEntryRenderer: () => {},
+  });
+  const childBinding = installNoticeRenderer({
+    appendEntry: (customType, data) => childEntries.push({ customType, data }),
+    registerEntryRenderer: () => {},
+  });
+  assert.ok(parentBinding);
+  assert.ok(childBinding);
+
+  const parent = createFakeCtx("tui");
+  const child = createFakeCtx("tui");
+  const relay = createFakeCtx("tui");
+  bindNoticeOwner(parent.ctx, parentBinding);
+  bindNoticeOwner(child.ctx, childBinding);
+  const inherited = getNoticeOwnerBinding(parent.ctx);
+  assert.ok(inherited);
+  assert.notEqual(inherited, parentBinding, "relay receives a token-bound lease, not the raw API binding");
+  bindNoticeOwner(relay.ctx, inherited);
+
+  notifyWithSource({ ctx: parent.ctx, source: SOURCE, level: "info", message: "parent" });
+  notifyWithSource({ ctx: child.ctx, source: SOURCE, level: "info", message: "child" });
+  notifyWithSource({ ctx: relay.ctx, source: SOURCE, level: "info", message: "relay" });
+
+  assert.deepEqual(parentEntries.map((entry: any) => entry.data.message), ["parent", "relay"]);
+  assert.deepEqual(childEntries.map((entry: any) => entry.data.message), ["child"]);
+  resetNoticeRenderer();
+});
+
+test("explicit relay lease 在 source release/replacement 后失效，即使旧 API 仍可写", () => {
+  resetNoticeRenderer();
+  const rootEntries: Array<{ customType: string; data?: unknown }> = [];
+  const replacementEntries: Array<{ customType: string; data?: unknown }> = [];
+  const rootApi: NoticeApi = {
+    appendEntry: (customType, data) => rootEntries.push({ customType, data }),
+    registerEntryRenderer: () => {},
+  };
+  const replacementApi: NoticeApi = {
+    appendEntry: (customType, data) => replacementEntries.push({ customType, data }),
+    registerEntryRenderer: () => {},
+  };
+  const rootBinding = installNoticeRenderer(rootApi);
+  const replacementBinding = installNoticeRenderer(replacementApi);
+  assert.ok(rootBinding);
+  assert.ok(replacementBinding);
+
+  const root = createFakeCtx("tui");
+  const releasedRelay = createFakeCtx("tui");
+  const releaseRoot = bindNoticeOwner(root.ctx, rootBinding);
+  bindNoticeOwner(releasedRelay.ctx, getNoticeOwnerBinding(root.ctx));
+  releaseRoot();
+
+  // 模拟 Pi API 本身未 guarded：source release 后 raw appendEntry 仍然能写。
+  rootApi.appendEntry("control", { message: "api-still-open" });
+  notifyWithSource({ ctx: releasedRelay.ctx, source: SOURCE, level: "info", message: "after-release" });
+  assert.deepEqual(rootEntries, [{ customType: "control", data: { message: "api-still-open" } }]);
+  assert.deepEqual(releasedRelay.notices, [
+    { message: "<accent>[naming]</> after-release", level: "info" },
+  ]);
+
+  const replacedRelay = createFakeCtx("tui");
+  const releaseReopenedRoot = bindNoticeOwner(root.ctx, rootBinding);
+  bindNoticeOwner(replacedRelay.ctx, getNoticeOwnerBinding(root.ctx));
+  const releaseReplacement = bindNoticeOwner(root.ctx, replacementBinding);
+  notifyWithSource({ ctx: replacedRelay.ctx, source: SOURCE, level: "info", message: "after-replacement" });
+  assert.deepEqual(rootEntries, [{ customType: "control", data: { message: "api-still-open" } }]);
+  assert.deepEqual(replacementEntries, []);
+  assert.deepEqual(replacedRelay.notices, [
+    { message: "<accent>[naming]</> after-replacement", level: "info" },
+  ]);
+
+  releaseReopenedRoot();
+  releaseReplacement();
+  resetNoticeRenderer();
+});
+
+test("旧 owner cleanup 不会删除 replacement，关闭后的 ctx 不会串到其它会话", () => {
+  resetNoticeRenderer();
+  const oldEntries: unknown[] = [];
+  const replacementEntries: unknown[] = [];
+  const oldBinding = installNoticeRenderer({
+    appendEntry: (_customType, data) => oldEntries.push(data),
+    registerEntryRenderer: () => {},
+  });
+  const replacementBinding = installNoticeRenderer({
+    appendEntry: (_customType, data) => replacementEntries.push(data),
+    registerEntryRenderer: () => {},
+  });
+  assert.ok(oldBinding);
+  assert.ok(replacementBinding);
+
+  const target = createFakeCtx("tui");
+  const releaseOld = bindNoticeOwner(target.ctx, oldBinding);
+  const releaseReplacement = bindNoticeOwner(target.ctx, replacementBinding);
+  releaseOld();
+  notifyWithSource({ ctx: target.ctx, source: SOURCE, level: "info", message: "replacement" });
+  assert.deepEqual(oldEntries, []);
+  assert.deepEqual((replacementEntries as any[]).map((entry) => entry.message), ["replacement"]);
+
+  releaseReplacement();
+  releaseReplacement();
+  notifyWithSource({ ctx: target.ctx, source: SOURCE, level: "info", message: "closed" });
+  assert.deepEqual((replacementEntries as any[]).map((entry) => entry.message), ["replacement"]);
+  assert.deepEqual(target.notices, [{ message: "<accent>[naming]</> closed", level: "info" }]);
+  resetNoticeRenderer();
 });
 
 test("提示条目渲染成带底色的消息块：标签带来源色、正文按级别上色", () => {
@@ -341,9 +479,10 @@ test("条目写入失败时退回 ui.notify，而不是抛给调用方", () => {
     /** 注册在这里没有意义，留空实现。 */
     registerEntryRenderer: () => {},
   };
-  installNoticeRenderer(failing);
+  const binding = installNoticeRenderer(failing);
   try {
     const { ctx, notices } = createFakeCtx("tui");
+    bindNoticeOwner(ctx, binding);
     notifyWithSource({ ctx, source: SOURCE, level: "info", message: "已重命名" });
     assert.deepEqual(notices, [{ message: "<accent>[naming]</> 已重命名", level: "info" }]);
   } finally {

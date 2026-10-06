@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } fr
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { TERMINAL_RENAME_CONTEXT_ENV } from "pi-terminal-mux";
 import {
   registerAgents,
   setDefaultsDisabled,
@@ -348,6 +349,11 @@ describe("terminal session and launch preparation", () => {
     expect(launch.cwd).toBe(root);
     expect(launch.env).toEqual({
       PI_CODING_AGENT_DIR: join(root, "agent"),
+      PI_SUBAGENT_NAME: "Terminal Test",
+      PI_SUBAGENT_SESSION: reference.sessionFile,
+      PI_SUBAGENT_ID: "run-one",
+      PI_SUBAGENT_AUTO_EXIT: "1",
+      PI_SUBAGENT_INTERACTIVE: "",
       [TERMINAL_MANIFEST_ENV]: join(firstDirectory, "manifest.json"),
     });
     expect(launch.args.slice(0, 2)).toEqual(["cli-entry.js", "--runtime-flag"]);
@@ -420,14 +426,22 @@ describe("terminal session and launch preparation", () => {
     const bashConfig = config(root);
     const bashReference = createTerminalSession(selectedPolicy, bashConfig);
     const bashPlan = prepareTerminalLaunch(selectedPolicy, bashReference, "bash-run", endpoint(), "task", bashConfig);
-    const bashCommand = bashPlan.buildCommand("surface; touch /tmp/nope");
+    const bashSurface = "surface; touch /tmp/nope";
+    const bashCommand = bashPlan.buildCommand(bashSurface);
+    expect(JSON.parse(json(join(dirname(bashPlan.launchScriptFile), "launch.json")).env[TERMINAL_RENAME_CONTEXT_ENV])).toMatchObject({
+      version: 1, surface: bashSurface,
+    });
     expect(bashCommand).toContain("'\\''");
     expect(bashCommand).not.toContain("surface; touch");
     expect(bashCommand.startsWith("exec '")).toBe(true);
 
     const powerShellConfig = config(root, { interpreter: "powershell" });
     const psPlan = prepareTerminalLaunch(selectedPolicy, bashReference, "ps-run", endpoint(), "task", powerShellConfig);
-    const psCommand = psPlan.buildCommand("$env:BAD='yes'");
+    const psSurface = "$env:BAD='yes'";
+    const psCommand = psPlan.buildCommand(psSurface);
+    expect(JSON.parse(json(join(dirname(psPlan.launchScriptFile), "launch.json")).env[TERMINAL_RENAME_CONTEXT_ENV])).toMatchObject({
+      version: 1, surface: psSurface,
+    });
     expect(psPlan.launchScriptFile).toMatch(/launch\.ps1$/);
     expect(psCommand.startsWith("& '")).toBe(true);
     expect(psCommand).toContain("'' quote");

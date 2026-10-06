@@ -63,9 +63,9 @@ function readField(path: string): string[] | undefined {
  * (and matches our own loadSettings precedence in src/settings.ts).
  * Returns undefined when neither file has the field.
  */
-export function readEnabledModels(cwd: string): string[] | undefined {
+export function readEnabledModels(cwd: string, options: { projectTrusted?: boolean } = {}): string[] | undefined {
   const [project, global] = settingsPaths(cwd);
-  return readField(project) ?? readField(global);
+  return (options.projectTrusted === false ? undefined : readField(project)) ?? readField(global);
 }
 
 /**

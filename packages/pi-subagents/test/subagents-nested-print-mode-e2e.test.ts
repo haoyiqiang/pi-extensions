@@ -139,6 +139,7 @@ async function runWithAgents(
     // Pinned faux: every case here scripts exact tool calls, so the pre-publish
     // smoke's global `PI_E2E_LIVE=1` must not swap a real model in.
     live: false,
+    projectTrusted: true,
     beforeRun: () => registerAgents(loadCustomAgents(cwd)),
   });
   return { run, cwd };
@@ -376,7 +377,7 @@ describe("PR #164 nested agents through the real print-mode boundary", () => {
             if (steers.length === 0) {
               return toolCall(
                 "steer_subagent",
-                { agent_id: id, message: "foreign guidance" },
+                { agent_id: id, action: "steer", message: "foreign guidance" },
                 "foreign-steer",
               );
             }

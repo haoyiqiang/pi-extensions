@@ -8,6 +8,8 @@ import {
 import { Type } from "@sinclair/typebox";
 import { abortable } from "./abortable.js";
 import type { ExecutionSession } from "./backends/session.js";
+import type { AgentControlRequest } from "./agent-manager.js";
+import type { SubagentsRuntimePolicy } from "./runtime-policy.js";
 import {
   buildAgentRegistry,
   getAgentConfigIn,
@@ -70,6 +72,7 @@ interface NestedSpawnOptions {
   maxSubagentDepth: number;
   configCwd?: string;
   rootSessionId?: string;
+  runtimePolicy?: SubagentsRuntimePolicy;
 }
 
 export interface NestedAgentManager {
@@ -93,9 +96,7 @@ export interface NestedAgentManager {
   ): Promise<{ id: string; record: AgentRecord }>;
   getRecord(id: string): AgentRecord | undefined;
   resume(id: string, prompt: string, signal?: AbortSignal): Promise<AgentRecord | undefined>;
-  steerAndWait(id: string, message: string): Promise<boolean>;
-  interrupt(id: string): Promise<boolean>;
-  release(id: string): Promise<void>;
+  control(id: string, request: AgentControlRequest): Promise<boolean>;
 }
 
 export interface NestedToolContext {
@@ -110,6 +111,7 @@ export interface NestedToolContext {
   allowedSubagents: "all" | string[];
   /** Root used for agent/config discovery; may differ from the agent's working directory. */
   configCwd: string;
+  runtimePolicy?: SubagentsRuntimePolicy;
 }
 
 function textResult(text: string) {
@@ -159,7 +161,12 @@ export function createNestedSubagentTools(context: NestedToolContext): ToolDefin
   // Agents resolve from a registry built for THIS branch's config root (under
   // worktree isolation, the copy). Never via registerAgents — that is
   // process-global state shared with the main session and every other agent.
-  const loadRegistry = () => buildAgentRegistry(loadCustomAgents(context.configCwd));
+  const policy = context.runtimePolicy;
+  const loadRegistry = () => buildAgentRegistry(
+    loadCustomAgents(context.configCwd, false, { projectTrusted: policy?.projectTrusted }),
+    policy?.settings,
+  );
+  const worktreeAllowed = policy?.worktreeIsolation ?? isWorktreeIsolationEnabled();
   const allowedTypesIn = (registry: Map<string, AgentConfig>): Set<string> | undefined =>
     context.allowedSubagents === "all"
       ? undefined
@@ -191,7 +198,7 @@ export function createNestedSubagentTools(context: NestedToolContext): ToolDefin
       resume: Type.Optional(Type.String({ description: "Resume a nested agent owned by this parent." })),
       isolated: Type.Optional(Type.Boolean()),
       inherit_context: Type.Optional(Type.Boolean()),
-      ...isolationParam(isWorktreeIsolationEnabled()),
+      ...isolationParam(worktreeAllowed),
     }),
     execute: async (_toolCallId, params, signal, _onUpdate, ctx) => {
       if (params.resume) {
@@ -234,7 +241,7 @@ export function createNestedSubagentTools(context: NestedToolContext): ToolDefin
       const config = getAgentConfigIn(registry, resolvedType);
       // Nested actors default to foreground; a stage-scoped root can use its configured default.
       const invocation = resolveAgentInvocationConfig(config, params, {
-        worktreeAllowed: isWorktreeIsolationEnabled(),
+        worktreeAllowed,
         defaultRunInBackground: context.defaultRunInBackground ?? false,
       });
       let model = ctx.model;
@@ -251,6 +258,7 @@ export function createNestedSubagentTools(context: NestedToolContext): ToolDefin
       // must not escape the allowlist. A "warn" verdict proceeds silently:
       // child sessions have no UI surface to toast to.
       const scopeVerdict = checkModelScope({
+        ...(policy ? { enabled: policy.scopeModels, projectTrusted: policy.projectTrusted } : {}),
         model,
         cwd: context.configCwd,
         modelRegistry: ctx.modelRegistry,
@@ -270,7 +278,7 @@ export function createNestedSubagentTools(context: NestedToolContext): ToolDefin
         description: params.description,
         agentConfig: config,
         model,
-        maxTurns: invocation.maxTurns,
+        maxTurns: invocation.maxTurns ?? policy?.defaultMaxTurns,
         interactive: params.interactive,
         isolated: invocation.isolated,
         inheritContext: invocation.inheritContext,
@@ -305,6 +313,7 @@ export function createNestedSubagentTools(context: NestedToolContext): ToolDefin
         parentAgentId: context.parentAgentId,
         maxSubagentDepth: context.maxSubagentDepth,
         configCwd: context.configCwd,
+        runtimePolicy: policy,
         rootSessionId,
       };
 
@@ -317,7 +326,7 @@ export function createNestedSubagentTools(context: NestedToolContext): ToolDefin
       // root, so a nested transcript lands in the same `tasks/` directory as its
       // ancestors' rather than in a directory of its own.
       const transcriptSessionId =
-        rootSessionId !== undefined && (config?.outputTranscript ?? getOutputTranscriptDefault())
+        rootSessionId !== undefined && (config?.outputTranscript ?? policy?.outputTranscript ?? getOutputTranscriptDefault())
           ? rootSessionId
           : undefined;
       let childId: string | undefined;
@@ -410,40 +419,30 @@ export function createNestedSubagentTools(context: NestedToolContext): ToolDefin
     description: i18n.t("product.controlDescription"),
     parameters: Type.Object({
       agent_id: Type.String(),
-      action: Type.Optional(Type.Union([Type.Literal("steer"), Type.Literal("interrupt"), Type.Literal("stop")], {
+      action: Type.Union([Type.Literal("steer"), Type.Literal("interrupt"), Type.Literal("cancel"), Type.Literal("close")], {
         description: i18n.t("product.controlAction"),
-      })),
+      }),
       message: Type.Optional(Type.String({ description: i18n.t("product.controlMessage") })),
     }),
     execute: async (_toolCallId, params) => {
       const record = context.manager.getRecord(params.agent_id);
-      if (!ownsRecord(record, context.parentAgentId)) {
+      if ((record && !ownsRecord(record, context.parentAgentId)) || (!record && params.action !== "close")) {
         return toolError(`Running nested agent not found or not owned by this parent: "${params.agent_id}".`);
       }
-      if (params.action === "stop") {
-        await context.manager.release(record.id);
-        return textResult(i18n.t("product.stopped", { id: record.id }));
+      if (!["steer", "interrupt", "cancel", "close"].includes(params.action)) return toolError(i18n.t("product.invalidAction"));
+      if (params.action === "steer" && (typeof params.message !== "string" || !params.message.trim())) {
+        return toolError(i18n.t("product.messageRequired"));
       }
-      if (params.action === "interrupt") {
-        if (!await context.manager.interrupt(record.id)) return toolError(i18n.t("product.cannotInterrupt", { id: record.id }));
-        return textResult(i18n.t("product.interrupted", { id: record.id }));
-      }
-      if (record.status !== "running") {
-        return toolError(`Running nested agent not found or not owned by this parent: "${params.agent_id}".`);
-      }
-      if (params.message === undefined) return toolError(i18n.t("product.messageRequired"));
-      // Session not ready yet — queue the steer. The manager flushes pending
-      // steers when the session is created (same contract as the top-level tool).
-      if (!record.session) {
-        await context.manager.steerAndWait(record.id, params.message);
-        return textResult(`Steering message queued for nested agent ${params.agent_id}.`);
-      }
-      try {
-        await context.manager.steerAndWait(record.id, params.message);
-      } catch (err) {
-        return toolError(`Failed to steer nested agent: ${err instanceof Error ? err.message : String(err)}`);
-      }
-      return textResult(`Steering message sent to nested agent ${params.agent_id}.`);
+      const request: AgentControlRequest = params.action === "steer"
+        ? { action: "steer", message: params.message! }
+        : { action: params.action };
+      const id = record?.id ?? params.agent_id;
+      const applied = await context.manager.control(id, request);
+      if (!applied) return textResult(i18n.t("product.unchanged", { id, action: params.action }));
+      const key = params.action === "close" ? "product.closed"
+        : params.action === "cancel" ? "product.cancelled"
+        : params.action === "interrupt" ? "product.interrupted" : "product.steered";
+      return textResult(i18n.t(key, { id }));
     },
   });
 

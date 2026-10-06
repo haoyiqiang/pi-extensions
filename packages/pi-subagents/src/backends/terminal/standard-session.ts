@@ -18,6 +18,7 @@ interface StandardTerminalRecord {
   version: 1;
   reference: PersistentSessionReference<"terminal">;
   policy: StandardTerminalPolicy;
+  quarantined?: true;
 }
 
 export interface StandardSessionSnapshot {
@@ -110,6 +111,12 @@ export function adoptStandardTerminalSession(
   catch { return fail("sessionStore.invalidFile"); }
   const header = readHeader(canonical);
   if (resolve(header.cwd) !== resolve(policy.cwd)) fail("sessionStore.invalidFile");
+  if (existsSync(recordPath(canonical))) {
+    let previous: unknown;
+    try { previous = JSON.parse(readFileSync(recordPath(canonical), "utf8")); }
+    catch { return fail("sessionStore.invalidRecord"); }
+    if (object(previous) && previous.quarantined === true) fail("terminalBackend.quarantined");
+  }
   const reference = Object.freeze({ backend: "terminal" as const, sessionId: header.id, sessionFile: canonical });
   writeRecord(reference, policy);
   return reference;
@@ -124,6 +131,7 @@ export function openStandardTerminalSession(
   try { raw = JSON.parse(readFileSync(recordPath(canonical.sessionFile), "utf8")); }
   catch { return fail("sessionStore.invalidRecord"); }
   if (!object(raw) || raw.version !== 1 || !object(raw.reference)) fail("sessionStore.invalidRecord");
+  if (raw.quarantined === true) fail("terminalBackend.quarantined");
   const stored = canonicalReference(raw.reference as unknown as PersistentSessionReference);
   if (stored.sessionFile !== canonical.sessionFile || stored.sessionId !== canonical.sessionId) fail("sessionStore.invalidRecord");
   const policy = snapshotPolicy(raw.policy);
@@ -163,6 +171,21 @@ export function readStandardSessionSnapshot(sessionFile: string, cwd?: string): 
     const snapshot = readSessionSnapshot(sessionFile, cwd);
     return { branch: Object.freeze(snapshot.branch), messages: Object.freeze(snapshot.messages) };
   } catch { return fail("sessionStore.invalidFile"); }
+}
+
+/** Persist fail-closed writer uncertainty so another backend cannot reattach or fork it. */
+export function quarantineStandardTerminalSession(reference: PersistentSessionReference<"terminal">): void {
+  const canonical = canonicalReference(reference);
+  let raw: unknown;
+  try { raw = JSON.parse(readFileSync(recordPath(canonical.sessionFile), "utf8")); }
+  catch { return fail("sessionStore.invalidRecord"); }
+  if (!object(raw) || raw.version !== 1 || !object(raw.reference)) fail("sessionStore.invalidRecord");
+  const stored = canonicalReference(raw.reference as unknown as PersistentSessionReference);
+  if (stored.sessionFile !== canonical.sessionFile || stored.sessionId !== canonical.sessionId) fail("sessionStore.invalidRecord");
+  const policy = snapshotPolicy(raw.policy);
+  writeFileSync(recordPath(canonical.sessionFile), `${JSON.stringify({
+    version: 1, reference: canonical, policy, quarantined: true,
+  } satisfies StandardTerminalRecord)}\n`, { mode: 0o600 });
 }
 
 /** Remove only backend-owned ephemeral artifacts after the handle retires. */

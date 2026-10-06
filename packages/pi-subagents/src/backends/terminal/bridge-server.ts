@@ -13,7 +13,9 @@ export interface TerminalBridge {
   readonly ready: Promise<TerminalSnapshot>;
   readonly settled: Promise<Settled>;
   start(): void;
+  admit(id: string, error?: string): void;
   steer(message: string): Promise<void>;
+  interrupt(): Promise<void>;
   abort(): void;
   close(): Promise<void>;
 }
@@ -54,8 +56,10 @@ function feedback(value: unknown): value is ChildPacket {
       && (value.usage.cacheRead === undefined || number(value.usage.cacheRead));
     case "turn": return Number.isSafeInteger(value.count) && value.count > 0;
     case "compaction": return object(value.info) && ["manual", "threshold", "overflow"].includes(value.info.reason) && number(value.info.tokensBefore);
+    case "execution_request": return typeof value.id === "string" && value.id.trim().length > 0;
     case "idle":
     case "settled": return snapshot(value.snapshot) && typeof value.text === "string" && typeof value.aborted === "boolean"
+      && (value.executionId === undefined || (typeof value.executionId === "string" && value.executionId.trim().length > 0))
       && (value.failure === undefined || typeof value.failure === "string")
       && (value.structuredJson === undefined || typeof value.structuredJson === "string")
       && (value.structuredRetried === undefined || typeof value.structuredRetried === "boolean")
@@ -82,6 +86,7 @@ export async function openTerminalBridge(
   const settled = deferred<Settled>();
   const peers = new Set<Socket>();
   const acknowledgements = new Map<string, { resolve(): void; reject(error: unknown): void; timer: ReturnType<typeof setTimeout> }>();
+  const admissions = new Set<string>();
   let active: Socket | undefined;
   let closed = false;
   let finished = false;
@@ -99,6 +104,7 @@ export async function openTerminalBridge(
     settled.reject(error);
     for (const pending of acknowledgements.values()) { clearTimeout(pending.timer); pending.reject(error); }
     acknowledgements.clear();
+    admissions.clear();
     for (const peer of peers) peer.destroy();
     if (server.listening) server.close(); else stopped.resolve();
   };
@@ -153,6 +159,13 @@ export async function openTerminalBridge(
               receivedReady = true;
               if (startupTimer) clearTimeout(startupTimer);
             }
+            if (value.type === "execution_request") {
+              if (!started || admissions.size > 0) { fail(new Error(i18n.t("bridge.protocol"))); return; }
+              admissions.add(value.id);
+            }
+            if ((value.type === "idle" || value.type === "settled") && admissions.size > 0) {
+              fail(new Error(i18n.t("bridge.protocol"))); return;
+            }
             onFeedback(value);
             if (value.type === "ready") ready.resolve(value.snapshot);
             if (value.type === "settled") {
@@ -162,6 +175,7 @@ export async function openTerminalBridge(
                 clearTimeout(pending.timer); pending.reject(new Error(i18n.t("bridge.notRunning")));
               }
               acknowledgements.clear();
+              admissions.clear();
             }
           }).catch(() => fail(new Error(i18n.t("bridge.protocol"))));
         }
@@ -188,6 +202,15 @@ export async function openTerminalBridge(
       started = true;
       active.write(encodeBridgeFrame({ type: "start" }));
     },
+    admit(id, error) {
+      if (typeof id !== "string" || !id.trim() || (error !== undefined && typeof error !== "string")) {
+        throw new Error(i18n.t("bridge.invalidControl"));
+      }
+      if (closed || finished || !started || !receivedReady || !active || active.destroyed || !admissions.delete(id)) {
+        throw new Error(i18n.t("bridge.notRunning"));
+      }
+      active.write(encodeBridgeFrame({ type: "execution_admission", id, ...(error ? { error } : {}) }));
+    },
     steer(message) {
       if (typeof message !== "string" || !message.trim()) return Promise.reject(new Error(i18n.t("bridge.invalidControl")));
       if (closed || finished || !receivedReady || !active || active.destroyed) return Promise.reject(new Error(i18n.t("bridge.notRunning")));
@@ -198,6 +221,18 @@ export async function openTerminalBridge(
       }, timeoutMs);
       acknowledgements.set(id, { resolve: () => pending.resolve(), reject: pending.reject, timer });
       try { active.write(encodeBridgeFrame({ type: "steer", id, message })); }
+      catch { clearTimeout(timer); acknowledgements.delete(id); pending.reject(new Error(i18n.t("bridge.protocol"))); }
+      return pending.promise;
+    },
+    interrupt() {
+      if (closed || finished || !receivedReady || !active || active.destroyed) return Promise.reject(new Error(i18n.t("bridge.notRunning")));
+      const id = randomUUID();
+      const pending = deferred<void>();
+      const timer = setTimeout(() => {
+        acknowledgements.delete(id); pending.reject(new Error(i18n.t("bridge.timeout")));
+      }, timeoutMs);
+      acknowledgements.set(id, { resolve: () => pending.resolve(), reject: pending.reject, timer });
+      try { active.write(encodeBridgeFrame({ type: "interrupt", id })); }
       catch { clearTimeout(timer); acknowledgements.delete(id); pending.reject(new Error(i18n.t("bridge.protocol"))); }
       return pending.promise;
     },
