@@ -28,6 +28,10 @@ import type { PersistentSessionReference, SessionReference } from "./backends/se
 import type { AgentExecutionBackend, ExecutionResumeResult, ExecutionRunOptions, ExecutionRunResult } from "./backends/types.js";
 import { i18n } from "./i18n.js";
 import { getAgentConfig } from "./agent-types.js";
+import { resolveChildAgentConfig } from "./child-resource-policy.js";
+import { resolveExtensions, snapshotAgentExtensionPolicy, snapshotExtensionDefaults, isExtensionDefaultsSnapshot, type ExtensionDefaultsSnapshot } from "./extension-defaults.js";
+import { loadSettings } from "./settings.js";
+import { resolveProjectTrusted } from "./project-trust.js";
 import { resolveAgentLaunchBehavior } from "./invocation-config.js";
 import { assignHandle, handleBase } from "./mention.js";
 import { describeModel } from "./model-resolver.js";
@@ -124,8 +128,8 @@ function occupiesPoolSlot(
  * Whether a record is one of the session's own agents, rather than something
  * another agent or a workflow owns.
  *
- * The single definition behind every user-facing surface — the fleet list, the
- * widget, the `/agents` menus, `@handle` resolution, and the completion events
+ * The single definition behind every user-facing surface — the widget,
+ * `/config:subagents` menus, `@handle` resolution, and the completion events
  * and session entries. An owned child reports through its owner, so surfacing
  * it separately would double-count the same work in the places a person reads.
  */
@@ -209,6 +213,12 @@ export interface SpawnOptions {
   description: string;
   /** Definition resolved in the caller's configuration scope, before queueing. */
   agentConfig?: AgentConfig;
+  /** Immutable ordinary-extension choice captured at admission. */
+  resolvedExtensions?: import("./types.js").ResolvedExtensionRule;
+  /** Internal branch-owned defaults for callers without a full runtime policy. */
+  extensionDefaults?: ExtensionDefaultsSnapshot;
+  /** Explicit trust decision for configCwd, unless a branch policy owns it. */
+  projectTrusted?: boolean;
   backend?: "embedded" | "terminal";
   interactive?: boolean;
   autoExit?: boolean;
@@ -253,7 +263,7 @@ export interface SpawnOptions {
    * exceeds the limit rather than being invisible to it.
    *
    * Used by the scheduler, so a fired job can't be deferred past its trigger
-   * window, and by the `/agents` agent-file generator, which has no way to
+   * window, and by the `/config:subagents` agent-file generator, which has no way to
    * cancel a wait (see its call site).
    */
   bypassQueue?: boolean;
@@ -753,13 +763,37 @@ export class AgentManager {
     prompt: string,
     options: SpawnOptions,
   ): string {
-    const definition = options.agentConfig ?? getAgentConfig(type);
+    const requiredTools = snapshotRequiredTools(options.requiredTools);
+    const promptBinding = snapshotPromptBinding(options.promptBinding);
+    const capturedDefaults = isExtensionDefaultsSnapshot(options.extensionDefaults) ? options.extensionDefaults : undefined;
+    const configCwd = options.runtimePolicy?.configCwd ?? capturedDefaults?.configCwd ?? options.configCwd ?? ctx.cwd;
+    const projectTrusted = options.runtimePolicy?.projectTrusted ?? capturedDefaults?.projectTrusted ?? resolveProjectTrusted(configCwd, {
+      context: ctx, projectTrusted: options.projectTrusted,
+    });
+    const extensionDefaults = snapshotExtensionDefaults(configCwd, projectTrusted,
+      options.runtimePolicy ? options.runtimePolicy.settings ?? {}
+        : capturedDefaults ? capturedDefaults.settings
+          : loadSettings(configCwd, { projectTrusted }));
+    const selected = resolveChildAgentConfig(type, options.agentConfig ?? getAgentConfig(type), {
+      configCwd, projectTrusted,
+      disableDefaultAgents: extensionDefaults.settings.disableDefaultAgents,
+      settings: extensionDefaults.settings,
+    });
+    const definition = selected ? snapshotAgentExtensionPolicy(selected) : undefined;
+    const defaultExtensions = extensionDefaults.settings.defaultExtensions;
     options = {
       ...options,
+      projectTrusted,
+      extensionDefaults,
       agentConfig: definition,
-      cwd: options.cwd ?? (definition?.cwd ? resolve(options.configCwd ?? ctx.cwd, definition.cwd) : undefined),
-      requiredTools: snapshotRequiredTools(options.requiredTools),
-      promptBinding: snapshotPromptBinding(options.promptBinding),
+      resolvedExtensions: resolveExtensions({
+        agent: definition,
+        defaultExtensions,
+        isolated: options.isolated ?? definition?.isolated,
+      }),
+      cwd: options.cwd ?? (definition?.cwd ? resolve(configCwd, definition.cwd) : undefined),
+      requiredTools,
+      promptBinding,
     };
     if (this.disposed) throw new Error(i18n.t("managerRestore.disposed"));
     // Validate before the queue branch — a queued spawn should fail at the
@@ -1121,7 +1155,7 @@ export class AgentManager {
     //
     // The pool is resolved ONCE, here, and carried to `settleRun` below:
     // `poolFor` reads `maxConcurrentForeground`, which the user can change from
-    // `/agents → Settings` mid-run, so recomputing it at settle time would
+    // `/config:subagents → Settings` mid-run, so recomputing it at settle time would
     // decrement a pool this run never charged (counter underflow, limit
     // silently lifted) or skip the decrement for one it did (leaked slot —
     // every later blocking spawn queues forever). The two startup exits below
@@ -1210,6 +1244,9 @@ export class AgentManager {
       pi,
       agentId: id,
       agentConfig: options.agentConfig,
+      resolvedExtensions: options.resolvedExtensions,
+      extensionDefaults: options.extensionDefaults,
+      projectTrusted: options.projectTrusted,
       backend: options.backend,
       interactive: launch.interactive,
       autoExit: launch.autoExit,
@@ -1618,7 +1655,7 @@ export class AgentManager {
       // gets control back while the record stays "running", so nothing stops the
       // model from resuming the same agent again. Starting a second run would
       // overwrite record.abortController — orphaning the live run beyond the
-      // reach of `/agents` stop and abortAll() — double-count the pool slot, and
+      // reach of `/config:subagents` controls and abortAll() — double-count the pool slot, and
       // then reject from session.prompt() with "Agent is already processing",
       // whose settle path would abort the LIVE run's children and report a
       // failure for a run that is still going. Refuse instead, leaving the
@@ -1817,7 +1854,7 @@ export class AgentManager {
     record.status = "running";
     record.startedAt = Date.now();
 
-    // Fresh abort controller so /agents stop and steering target THIS run rather
+    // Fresh abort controller so /config:subagents controls and steering target THIS run rather
     // than the previous one's settled controller.
     const abortController = new AbortController();
     record.abortController = abortController;

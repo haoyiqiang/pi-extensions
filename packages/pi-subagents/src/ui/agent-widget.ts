@@ -628,6 +628,9 @@ export class AgentWidget {
       return;
     }
 
+    // A visibility toggle may have stopped refresh while agents kept running.
+    if (hasActive) this.ensureTimer();
+
     // Status bar — only call setStatus when the text actually changes
     let newStatusText: string | undefined;
     if (hasActive) {

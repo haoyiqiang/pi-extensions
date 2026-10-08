@@ -38,7 +38,7 @@
  * clone:
  *
  *   - the clone is handed the *registered* `Agent` tool, whose handler closes
- *     over the main activation, so it spawns top-level: widget, fleet row,
+ *     over the main activation, so it spawns top-level: widget,
  *     handle, completion notification, all as if the main model had called it;
  *   - that tool is re-bound to the main `ExtensionContext`, because the handler
  *     reads `cwd`, `model` and `sessionManager.getSessionId()` off it to place
@@ -114,7 +114,7 @@ export async function runMentionClone(opts: MentionCloneOptions): Promise<Mentio
       // forced rather than left to the clone: `run_in_background` defaults to
       // false, and a foreground agent answers through its TOOL RESULT — which
       // here is delivered into a session that is disposed moments later, so the
-      // agent would run, appear in the widget and the fleet, and reach nobody.
+      // agent would run, appear in the widget, and reach nobody.
       return agentTool.execute(
         undefined as never,
         { ...(params as Record<string, unknown>), run_in_background: true } as typeof params,

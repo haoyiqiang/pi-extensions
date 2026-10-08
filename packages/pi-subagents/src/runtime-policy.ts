@@ -15,11 +15,18 @@ export interface SubagentsRuntimePolicy {
   readonly maxSubagentDepth: number;
 }
 
-export function captureRuntimePolicy(cwd: string, projectTrusted: boolean): SubagentsRuntimePolicy {
+export function captureRuntimePolicy(
+  cwd: string,
+  projectTrusted: boolean,
+  capturedSettings?: Readonly<SubagentsConfig>,
+): SubagentsRuntimePolicy {
   const configCwd = resolve(cwd);
-  const configured = loadSettings(configCwd, { projectTrusted });
+  const configured = capturedSettings ?? loadSettings(configCwd, { projectTrusted });
   const settings = Object.freeze({
     ...configured,
+    ...(Array.isArray(configured.defaultExtensions)
+      ? { defaultExtensions: Object.freeze([...configured.defaultExtensions]) as unknown as string[] }
+      : {}),
     disableDefaultAgents: configured.disableDefaultAgents ?? false,
     scopeModels: configured.scopeModels ?? false,
     worktreeIsolation: configured.worktreeIsolation ?? true,

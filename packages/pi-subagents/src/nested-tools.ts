@@ -10,6 +10,7 @@ import { abortable } from "./abortable.js";
 import type { ExecutionSession } from "./backends/session.js";
 import type { AgentControlRequest } from "./agent-manager.js";
 import type { SubagentsRuntimePolicy } from "./runtime-policy.js";
+import type { ExtensionDefaultsSnapshot } from "./extension-defaults.js";
 import {
   buildAgentRegistry,
   getAgentConfigIn,
@@ -73,6 +74,7 @@ interface NestedSpawnOptions {
   configCwd?: string;
   rootSessionId?: string;
   runtimePolicy?: SubagentsRuntimePolicy;
+  extensionDefaults?: ExtensionDefaultsSnapshot;
 }
 
 export interface NestedAgentManager {
@@ -112,6 +114,7 @@ export interface NestedToolContext {
   /** Root used for agent/config discovery; may differ from the agent's working directory. */
   configCwd: string;
   runtimePolicy?: SubagentsRuntimePolicy;
+  extensionDefaults?: ExtensionDefaultsSnapshot;
 }
 
 function textResult(text: string) {
@@ -162,9 +165,10 @@ export function createNestedSubagentTools(context: NestedToolContext): ToolDefin
   // worktree isolation, the copy). Never via registerAgents — that is
   // process-global state shared with the main session and every other agent.
   const policy = context.runtimePolicy;
+  const extensionDefaults = context.extensionDefaults;
   const loadRegistry = () => buildAgentRegistry(
-    loadCustomAgents(context.configCwd, false, { projectTrusted: policy?.projectTrusted }),
-    policy?.settings,
+    loadCustomAgents(context.configCwd, false, { projectTrusted: policy?.projectTrusted ?? extensionDefaults?.projectTrusted }),
+    policy?.settings ?? extensionDefaults?.settings,
   );
   const worktreeAllowed = policy?.worktreeIsolation ?? isWorktreeIsolationEnabled();
   const allowedTypesIn = (registry: Map<string, AgentConfig>): Set<string> | undefined =>
@@ -295,11 +299,11 @@ export function createNestedSubagentTools(context: NestedToolContext): ToolDefin
         // Nested children are hidden from every reporting surface, so their spend
         // would otherwise be unattributable. Fold it into every ancestor's record:
         // the top-level one appears in lifecycle events, completion notifications,
-        // and `/agents`, and those all read `lifetimeUsage`. The whole chain is
+        // and `/config:subagents`, and those all read `lifetimeUsage`. The whole chain is
         // walked, not just the immediate parent — a spawn callback only fires for
         // that child's OWN turns, so stopping at one level would hide a
         // great-grandchild from the only record anyone can see. (The live
-        // widget/fleet counters read their own per-agent activity tracker, which
+        // widget counters read their own per-agent activity tracker, which
         // still sees only the top-level agent's own turns.)
         onAssistantUsage: (usage) => {
           for (let id: string | undefined = context.parentAgentId; id !== undefined; ) {
@@ -314,6 +318,7 @@ export function createNestedSubagentTools(context: NestedToolContext): ToolDefin
         maxSubagentDepth: context.maxSubagentDepth,
         configCwd: context.configCwd,
         runtimePolicy: policy,
+        extensionDefaults,
         rootSessionId,
       };
 

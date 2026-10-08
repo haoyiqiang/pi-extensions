@@ -121,7 +121,8 @@ agent 目录支持 `PI_CODING_AGENT_DIR`。[配置示例](./config.example.json)
 { "backend": "terminal" }
 ```
 
-把它写入 `.pi/subagents.json`，或使用 `/config:subagents terminal`。
+把它写入 `.pi/subagents.json`，或不带参数打开 `/config:subagents`，
+在**设置 → 执行后端（项目）**选择 `terminal`。
 标准运行会记录所选委派后端，恢复时继续使用它，不转换已有会话的后端。
 
 `requiredTools` 表示最低工具需求，不授予权限。标准子会话检查实际激活的工具。

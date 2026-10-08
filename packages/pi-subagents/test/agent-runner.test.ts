@@ -741,7 +741,7 @@ describe("agent-runner usage callback wiring", () => {
   });
 });
 
-// getAgentConversation renders the subagent transcript shown in the /agents
+// getAgentConversation renders the subagent transcript shown in the /config:subagents
 // inspect overlay. Pure function over session.messages — no mocks needed
 // beyond a literal-object session.
 describe("getAgentConversation", () => {
@@ -1070,6 +1070,49 @@ describe("agent-runner session persistence", () => {
   });
 });
 
+describe("direct embedded extension default admission", () => {
+  let root: string;
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "embedded-extension-defaults-"));
+    mkdirSync(join(root, ".pi"));
+  });
+  afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+  it.each([false, []].map((value) => [value]))("keeps explicit %j authoritative over a forged internal selection", async (extensions) => {
+    const definition = makeAgentConfig({ extensions, builtinToolNames: ["read"] });
+    withExtensions({ "/ext/plugin.ts": ["plugin_tool"] });
+    const { session } = createSession("done");
+    createAgentSession.mockResolvedValue({ session });
+    await runAgent(ctx, "Explore", "go", { pi, agentConfig: definition, configCwd: root, projectTrusted: true, resolvedExtensions: true });
+    expect(lastLoaderOpts().noExtensions).toBe(true);
+    expect(lastToolsPassed()).not.toContain("plugin_tool");
+    expect(createAgentSession.mock.calls[0][0].modelRuntime).toBe(parentModelRuntime);
+  });
+
+  it("uses a live trusted default only without captured policy", async () => {
+    writeFileSync(join(root, ".pi", "subagents.json"), JSON.stringify({ defaultExtensions: false }));
+    const definition = makeAgentConfig({ extensions: undefined });
+    const { session } = createSession("done");
+    createAgentSession.mockResolvedValue({ session });
+    await runAgent(ctx, "Explore", "go", { pi, agentConfig: definition, configCwd: root, projectTrusted: true });
+    expect(lastLoaderOpts().noExtensions).toBe(true);
+  });
+
+  it("keeps absent captured defaults as true even if live config becomes invalid", async () => {
+    writeFileSync(join(root, ".pi", "subagents.json"), JSON.stringify({ defaultExtensions: null }));
+    const definition = makeAgentConfig({ extensions: undefined });
+    withExtensions({ "/ext/plugin.ts": ["plugin_tool"] });
+    const { session } = createSession("done");
+    createAgentSession.mockResolvedValue({ session });
+    await runAgent(ctx, "Explore", "go", {
+      pi, agentConfig: definition,
+      runtimePolicy: { configCwd: root, projectTrusted: true, settings: {} } as any,
+    });
+    expect(lastLoaderOpts().noExtensions).toBe(false);
+    expect(lastToolsPassed()).toContain("plugin_tool");
+  });
+});
+
 describe("agent-runner master tool allowlist", () => {
   it("extensions: true with extension tools — all 7 built-ins plus extension tools land in the allowlist", async () => {
     vi.mocked(getConfig).mockReturnValueOnce(makeConfig({ extensions: true }));
@@ -1158,10 +1201,10 @@ describe("agent-runner master tool allowlist", () => {
     expect(createAgentSession.mock.calls[0][0].customTools).toEqual([]);
   });
 
-  it("injects scoped nested tools for an opted-in non-isolated agent", async () => {
-    vi.mocked(getConfig).mockReturnValueOnce(makeConfig({ extensions: false }));
+  it.each([false, []].map((value) => [value]))("injects scoped nested tools with ordinary extensions %j", async (extensions) => {
+    vi.mocked(getConfig).mockReturnValueOnce(makeConfig({ extensions }));
     vi.mocked(getAgentConfig).mockReturnValueOnce(
-      makeAgentConfig({ extensions: false, allowedSubagents: ["scout"] }),
+      makeAgentConfig({ extensions, allowedSubagents: ["scout"] }),
     );
     vi.mocked(getToolNamesForType).mockReturnValueOnce(BUILTINS_7);
     const { session } = createSession("OK");
@@ -1305,11 +1348,11 @@ describe("agent-runner master tool allowlist", () => {
         .resolves.not.toMatchObject({ block: true });
     });
 
-    it("keeps StructuredOutput in the static allowlist when extensions are off", async () => {
+    it.each([false, []].map((value) => [value]))("keeps StructuredOutput in the static allowlist for extensions %j", async (extensions) => {
       // The other branch: `sessionTools` becomes a hard allowlist and pi drops
       // any name missing from it out of the registry permanently.
-      vi.mocked(getConfig).mockReturnValueOnce(makeConfig({ extensions: false }));
-      vi.mocked(getAgentConfig).mockReturnValueOnce(makeAgentConfig({ extensions: false }));
+      vi.mocked(getConfig).mockReturnValueOnce(makeConfig({ extensions }));
+      vi.mocked(getAgentConfig).mockReturnValueOnce(makeAgentConfig({ extensions }));
       vi.mocked(getToolNamesForType).mockReturnValueOnce(BUILTINS_7);
       const { session } = createSession("OK");
       createAgentSession.mockResolvedValue({ session });
@@ -2409,10 +2452,10 @@ describe("agent-runner ext: tool selectors", () => {
     expect(tools).not.toContain("baz");
   });
 
-  it("ext:foo is orphaned when extensions: false — no extension loads, warning fires", async () => {
+  it.each([false, []].map((value) => [value]))("ext:foo is orphaned when extensions is %j — no ordinary tools", async (extensions) => {
     // `extensions:` is the sole loading authority. `ext:` selectors can only narrow
     // within the loaded set; they cannot pull an excluded extension back in.
-    setupExtAgent({ extensions: false, builtinToolNames: ["read"], extSelectors: ["ext:foo"] });
+    setupExtAgent({ extensions, builtinToolNames: ["read"], extSelectors: ["ext:foo"] });
     withExtensions({ "/ext/foo.ts": ["foo_tool"], "/ext/other.ts": ["other_tool"] });
     const { session } = createSession("OK");
     createAgentSession.mockResolvedValue({ session });

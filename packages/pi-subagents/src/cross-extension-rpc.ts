@@ -115,7 +115,10 @@ export function registerRpcHandlers(deps: RpcDeps): RpcHandle {
       // — same pattern the scheduler path already uses — so the spawned
       // agent's auth lookup doesn't crash with "No API key found for
       // undefined".
-      let normalizedOptions = options ?? {};
+      let normalizedOptions = { ...options };
+      // Internal admission snapshots are not RPC permission grants.
+      delete normalizedOptions.resolvedExtensions;
+      delete normalizedOptions.extensionDefaults;
       // `!= null` on purpose: a JSON-forwarding caller can serialize an unset
       // field as null, and the runner reads `options.model ?? default`, so null
       // means "inherit" — not an override to resolve or scope-check.

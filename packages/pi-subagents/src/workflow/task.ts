@@ -3,7 +3,7 @@
  *
  * A `SubagentWorkflow` tool call returns a task id immediately and the run continues
  * without it, so the run's state cannot live in the tool call's closure: the
- * inline card, the completion notification and (later) the `/agents → Workflows` dialog
+ * inline card, the completion notification and (later) the `/config:subagents → Workflows` dialog
  * all read it after `execute` has returned. This is that record, shaped after
  * Claude Code's `local_workflow` task so the fields line up with what the
  * renderers already expect.
@@ -68,9 +68,7 @@ export interface WorkflowTask {
   /**
    * Agents that have settled successfully, recomputed with the other counters.
    *
-   * Cached rather than derived on read because the fleet list asks five times a
-   * second: deriving it there would walk the whole append-only log on every
-   * tick, which for a thousand-agent run is real work in the render loop.
+   * Cached so rendering does not walk the append-only log on each refresh.
    */
   doneCount: number;
   totalTokens: number;
@@ -262,7 +260,7 @@ export function resolveResumeTarget(
   if (prior.status === "running") {
     return {
       ok: false,
-      message: `Workflow "${id}" is still running. Stop it from /agents → Workflows before resuming it.`,
+      message: `Workflow "${id}" is still running. Stop it from /config:subagents → Workflows before resuming it.`,
     };
   }
   if (prior.journalPath === undefined) {

@@ -1,211 +1,158 @@
 # pi-distill
 
-> **保留事实，把上下文留给决策。**
+> **保留原文，把上下文留给决策。**
 
-`pi-distill` 是一个 Pi 扩展：它不替换工具，也不改变命令的执行方式，只在工具已经返回真实结果之后，帮助 Agent 决定哪些内容值得进入下一轮上下文。
+一个工具结果处理入口，两种互斥策略：按 `outputRequest` 生成**普通摘要**，或通过显式启用的**诊断证据提取**保留原文引文。证据机制改编自 NVIDIA [SoL-Pi](https://github.com/NVlabs/SoL-Pi)。任何被接受的有损替换都先归档来源；需要核实时使用 Pi 原生 `read`，不新增摘要或回读工具。
 
-## 解决什么问题
+> English: [README.md](./README.md)
 
-编码 Agent 通常只需要命令、搜索或文件读取结果中的关键信息。把大段日志、生成文件或搜索结果完整塞入下一轮，会增加上下文消耗，也容易让有效信号被噪声淹没。`pi-distill` 在不替换 Pi 内置工具的前提下，增加一层结果级提炼。
-
-## 实际上下文节省效果
-
-构建日志、diff 输出和测试报告经常包含重复状态行、未变化上下文、堆栈噪声，以及下一步决策并不需要的细节。这些内容通常很适合高比例压缩。下面这张真实 Pi 会话截图中，结果从 51,215 个字符压缩到 240 个字符：**213.40 倍压缩，输出字符减少 99.5%**。
-
-![pi-distill 上下文节省示例](./assets/context-savings-example.png)
-
-截图统计的是字符减少比例，不是 tokenizer 得出的精确 token 统计。实际使用时通常会带来同量级的上下文 token 节省，但精确数值取决于语言、内容和模型 tokenizer。对于适合压缩的冗长输出，90% 以上是已经观察到的效果，但不是每个命令的保证；需要完整输出时请使用 `RAW`。
-
-| 场景 | 常见噪声 | 提炼结果保留 |
-| --- | --- | --- |
-| 构建 / 编译 | 重复进度、警告和未变化的环境信息 | 成功/失败、首个可行动错误、受影响文件和后续步骤 |
-| Diff 检查 | 大量未变化 hunk 和格式化噪声 | 变更文件、相关 hunk 和评审所需事实 |
-| 测试 | 单测逐条输出、snapshot 和框架模板 | 总数、失败用例、关键断言和有效诊断 |
-
-## Prompt 语言
-
-提炼 prompt 会严格跟随 `/config:language` 当前选择的语言。持久化语言发生变化后，下一次工具调用会读取新设置，即使语言命令和 `pi-distill` 来自不同的包实例也可以同步。`PI_EXTENSIONS_LOCALE` 仍然是显式的环境变量覆盖项。原始用户消息只作为语言上下文传入，不能覆盖已选择的语言。
-
-## 工作方式
-
-- 通过 Pi 原生的 `tool_call` / `tool_result` 事件监听 `bash`、`read`、`grep` 和 `find`。
-- 以工具的 `outputRequest` 作为是否提炼、如何提炼的依据。
-- 当提示词严格只有 `RAW` 时，视为明确要求返回原始输出。
-- 默认使用当前会话模型。也可以在 `/config:distill` 中从可用模型列表选择独立模型。
-- 在工具结果 details 中保留状态、字符数、压缩比、耗时和异常等诊断信息。
-- 超长输出不再由 pi-distill 写文件或截断，统一交由 Pi 自身的输出限制机制处理。
-- 写入一条紧凑的 UI-only 审计 entry，展示状态、prompt 预览和结果预览；这条 entry 不进入模型上下文。
-
-它不会注册第二个 `bash`、`read`、`grep` 或 `find` 工具。
-
-## 安装
+## 安装与启用
 
 ```bash
 pi install npm:pi-distill
 ```
 
-包清单会把共享依赖 `pi-extensions-i18n` 作为扩展入口加载，不需要额外安装。安装 `pi-distill` 后即可使用 `/config:language`。
+包会同时加载共享 i18n 扩展。运行 `/reload`，再通过 `/config:distill` 选择模型和配置处理。`/pi-distill` 是兼容别名；`/distill:stats` 显示本会话结果、尝试次数、用量、预计上下文节省和成本。交互式命令需要带 UI 的会话，工具结果处理也支持无界面运行。
 
-安装后重新加载 Pi：
+配置位于 `<Pi agent 目录>/extensions/pi-distill/config.json`，通常在 `~/.pi/agent` 下，支持 `PI_CODING_AGENT_DIR`。加载时不写配置，不迁移或修改用户全局设置。默认配置见 [config.example.json](./config.example.json)。
 
-```text
-/reload
-```
-
-交互式配置命令：
-
-```text
-/config:distill
-```
-
-## 核心思想
-
-我们不是想让 Agent 少看信息，而是避免它为了找一句结论，被迫把几千行日志一起带进上下文。
-
-工具执行层需要保留完整事实；Agent 消费层需要控制上下文成本。`pi-distill` 在两者之间增加一个可选的结果处理层：
-
-- 工具负责执行并返回事实；
-- Agent 通过 `outputRequest` 表达自己关心什么；
-- 扩展读取真实输出后，再决定是否调用提炼模型；
-- 模型只压缩消费路径，不改变原工具的业务语义；
-- 诊断信息记录这次处理是否真的节省了上下文。
-
-因此，提炼不是“把所有输出都交给模型总结”，而是一份明确的工具契约：需要什么就提取什么，需要完整内容就保留原文。
-
-## 为什么需要它
-
-构建、测试和 diff 往往会返回大量重复状态、未变化上下文、框架模板和堆栈噪声。Agent 可能只需要失败原因、变更文件或最终状态，却被迫先消费整段输出。
-
-直接截断会丢失关键事实；新增一个总结工具会增加调用链和决策负担；等 Agent 看完再总结又已经消耗了上下文。`pi-distill` 选择在结果进入后续推理前处理它，同时保留明确的原文模式和失败回退。
-
-## 实际效果
-
-下面是一段真实 Pi 会话中的输出：原始结果从 **51,215 个字符**提炼到 **240 个字符**，压缩 **213.40 倍**，输出字符减少 **99.5%**。
-
-![pi-distill 上下文节省示例](./assets/context-savings-example.png)
-
-这张图统计的是字符减少比例，不是 tokenizer 得出的精确 token 数。实际 token 节省会受到语言、内容和模型 tokenizer 影响；对于适合压缩的构建日志、diff 和测试输出，90% 甚至更高的节省比例是已经观察到的结果，但不是每个命令的保证。
-
-| 场景 | 原始输出中的典型噪声 | 提炼后优先保留 |
-| --- | --- | --- |
-| 构建 / 编译 | 重复进度、环境信息、重复警告 | 成功/失败、首个可行动错误、受影响文件、后续步骤 |
-| Diff 检查 | 大量未变化 hunk、格式化噪声 | 变更文件、相关 hunk、评审所需事实 |
-| 测试 | 逐条单测输出、snapshot、框架模板 | 总数、失败用例、关键断言、有效诊断 |
-
-节省比例不是唯一指标。扩展还记录提炼耗时、原始字符数、结果字符数、压缩比和异常；如果总结没有带来真实收益，会暴露 `ineffective-compression`，而不是静默假装优化成功。
-
-## 工作原理
-
-一次工具调用的处理链路如下：
-
-```text
-Agent 提出处理目标
-        ↓ 通过 outputRequest 传给工具
-工具执行真实操作，返回 stdout / stderr / 文件内容 / 多媒体结果
-        ↓
-pi-distill 根据真实结果和配置决定：原样返回，或调用模型提炼
-        ↓
-Agent 消费更适合当前决策的结果，并获得可审计的处理诊断
-```
-
-1. 扩展在会话启动时为所有已启用、参数 schema 为 object 的工具增加必填的 `outputRequest` 参数；`edit` 和 `write` 默认关闭，其他未配置工具默认开启。不写死 `bash`、`read`、`grep` 或 `find`。
-2. `tool_call` 事件捕获这个参数，并在交给底层工具前移除它，因此原工具不会收到扩展专用字段。
-3. `tool_result` 事件拿到真实输出后再做判断，不依赖 Agent 对输出长度的预测。
-4. 每次工具调用都必须包含非空的 `outputRequest`；严格的 `RAW` 表示明确要求原文；其他非空 prompt 才允许进入提炼流程。
-5. OpenAI-compatible Completions 提炼请求会通过 `response_format: { "type": "json_object" }` 启用原生 JSON 模式；OpenAI Responses-compatible 请求使用等价的 `text.format`。单次提炼超时后按照 `timeoutRetryCount` 重试，其他模型调用异常按照 `errorRetryCount` 重试（两者默认都重试 1 次）；如果模型已经返回文本，但只是 JSON 语法或响应结构校验失败，扩展会把坏响应和校验错误交给一次 JSON-only 修复 prompt，不会再次发送工具输出，也不会重新总结；修复失败、没有可用模型或结果收益过低时，扩展保留原始事实，并通过 details 和审计卡片暴露状态；模型用 Markdown 的 JSON 代码围栏（如 `````json … `````）包裹响应时也会兼容解析。
-6. 用户打断上级 Agent 请求时，所有尚未完成的提炼请求会立即取消，并且不会为这次中断继续重试；原始工具结果仍按 fail-open 路径保留。
-
-## 输出处理契约
-
-| `outputRequest` | 行为 | 适用场景 |
-| --- | --- | --- |
-| 未提供 | 工具调用无效；Pi 会在底层工具执行前拒绝该调用 | 不要省略；未明确要求压缩时使用 `RAW` |
-| 严格为 `RAW`（大小写不敏感） | 不调用提炼模型，保留完整原始文本；超长时由 Pi 自身的输出限制机制处理 | 逐字核对、复制内容、需要完整日志时 |
-| 任意非空且非 `RAW` | 输出达到阈值后调用模型，超时与其他异常分别使用独立重试次数，具体保留内容由 prompt 决定 | “只保留错误、警告和最终状态”等场景 |
-| 包含图片、音频或其他非文本内容 | 原样保留，不发送给提炼模型，不做文本长度截断 | 图片读取、二进制结果、混合文本与图片结果 |
-
-`RAW` 是确定性的完整输出信号。提炼 prompt 会要求总结模型在用户明确要求“不遗漏地完整提取”时直接返回 `RAW`，尤其适用于语法、参数、SQL、API 调用或其他需要复制的精确文本。工具调用方可以控制参数时，直接传 `RAW` 仍然是首选方式。
-
-## Prompt 语言
-
-提炼 prompt 完全跟随 `/config:language` 当前选择的语言：
-
-- 切换语言后，下一次工具调用读取新的持久化语言设置；
-- 即使 `/config:language` 和 `pi-distill` 来自不同的包实例，也通过共享 locale 设置同步；
-- `PI_EXTENSIONS_LOCALE` 可以作为显式环境变量覆盖；
-- 原始用户消息只作为任务上下文传入，不会把中文用户消息误判成中文 prompt。
-
-## 覆盖范围与边界
-
-- 自动处理所有当前已启用且参数 schema 为 object 的工具；能否注入 `outputRequest` 由工具 schema 决定，不维护固定工具名单。
-- 不注册替代工具，不改变原工具的执行语义；审计信息通过自己的 UI-only 会话 entry 展示。
-- 文本提炼是有损操作；完整性要求应使用 `RAW`。
-- 非文本结果是完整性边界：图片、音频、二进制和混合 content 不进入文本提炼链路。
-- 超长输出不再由 pi-distill 写临时文件或截断，统一交由 Pi 自身的输出限制机制处理，避免上下文无限膨胀。
-- 当前会话没有模型时，提炼会失败并保留原始结果，不阻止 Pi 启动。
-
-## 配置
-
-默认配置路径：
-
-```text
-~/.pi/agent/extensions/pi-distill/config.json
-```
-
-可以从 [`config.example.json`](./config.example.json) 开始：
+**证据模式与 Fusion 日志处理默认关闭。**明确开启诊断证据时配置：
 
 ```json
 {
-  "enabled": true,
-  "model": "",
-  "minChars": 200,
-  "maxChars": 100000,
-  "maxOutputChars": 10000,
-  "timeoutSeconds": 10,
-  "timeoutRetryCount": 1,
-  "errorRetryCount": 1,
-  "missedCompressionRatio": 10,
-  "summarizeErrors": true,
-  "tools": {},
-  "render": {
+  "evidence": {
     "enabled": true,
-    "showPrompt": true,
-    "showResult": true
+    "fusion": true,
+    "minBytes": 8192,
+    "commands": []
   }
 }
 ```
 
-配置文件字段优先于环境变量。未声明的字段依次回退到 `PI_DISTILL_*`、旧版 `PI_BASH_SUMMARY_*` 变量和默认值。
+`fusion: true` 额外允许处理 Action Fusion `edit/write` 追加的命令日志，不负责启用 Action Fusion。明确的 `tools.edit.enabled: false` 或 `tools.write.enabled: false` 优先。交互式设置提供这两个证据开关；字节配额和附加命令前缀在 JSON 中配置。
+
+## 处理链路
+
+```text
+工具返回真实结果
+  ├─ 关闭 / RAW / 非文本 / 排除范围 → 保留原结果
+  └─ 确定一个处理范围和一种策略
+       ├─ 识别出的诊断命令 → 证据提取（已开启时）
+       └─ 其他已启用文本＋outputRequest → 普通摘要
+            ↓ 检查大小、完整性、疑似敏感内容
+            ↓ 模型调用前先归档原文
+            ↓ 模型处理和本地校验
+            ├─ 合法、未超预算且有收益 → 处理结果＋来源引用
+            └─ 失败 / 取消 / 收益不足 → 保留原结果
+```
+
+证据失败不会降级为普通摘要，已处理的收据不再处理。Distill 不改变命令执行、文件修改或工具错误状态；通过原生 `tool_call/tool_result` 接入，不注册替代工具。事件按扩展顺序执行，因此来源是 Distill 实际收到的结果，不能恢复其他扩展已经丢掉的内容。
+
+## 工具 schema 与 RAW
+
+普通已启用 object-schema 工具保留必填、非空的 `outputRequest`。未配置的非修改工具仍按旧版默认开启，通过 `tools.<name>.enabled: false` 排除；启用证据不会暗中重置这份工具范围。
+
+```json
+{
+  "command": "npm run test",
+  "outputRequest": "保留失败用例、断言差异和最终统计"
+}
+```
+
+去除首尾空白后严格为 `RAW`（不区分大小写）时跳过两种策略，**保留收到的工具 content**，不是无限制的进程全文；底层工具自己的限制仍然存在。RAW、禁用和失败回退不再被 Distill 截断或改成文件指针，即使 `maxOutputChars` 配得很小也不会截断它们。自定义工具仍需自行限制输出；保留超大回退结果仍可能超过主模型上下文。
+
+明确启用证据和 Fusion 时，暴露 `then_run` 的兼容 `edit/write` 获得**可选** `outputRequest`：省略则用默认证据规则，RAW 跳过，其他文本指定关注重点。它只作用于命令日志；普通修改结果永不摘要，即使存在旧版 `tools.edit/write.enabled: true` 设置。Distill 仅捕获并移除已成功注入且仍由自己拥有的处理字段；原工具已有同名 `outputRequest` 时警告并保持原状，不删除禁用工具的同名业务字段。
+
+非文本或混合媒体结果不处理。扩展禁用时不向系统提示词添加处理契约。
+
+## 两种策略的区别
+
+### 诊断证据
+
+保守命令识别覆盖常见测试、构建、检查命令，包括 `npm run test/build`、`test:unit` 脚本、pnpm/yarn/bun、pytest/unittest、Go/Cargo 和原生构建工具。支持简单的非引号命令边界及常见包装，不解释任意 shell 程序。复合命令必须每段均为诊断或有限的无输出准备（`cd`、环境变量赋值、`true`、`:`）；`npm test; cat confidential.txt` 不进入自动证据策略。`echo 'npm test'` 等引号示例、命令替换和 heredoc 不自动认定为诊断。`evidence.commands` 添加字面 token 前缀，**不是可执行正则**；使用规范化后的可执行文件名，例如 `./verify --ci` 对应 `"verify --ci"`。
+
+固定双语提示词要求连续原文引文。`outputRequest` 只能选择关注重点，不能取消固定约束；处理模型不生成诊断或修复建议。证据策略只请求一次，不做 JSON 修复，不使用普通摘要的重试预算。校验 schema、数量/长度、引文原文匹配和必要的可识别失败证据；零失败统计不能冒充失败证据。工具状态成功但日志包含强失败信号时也要求保留失败证据。行号在本地计算，哈希、路径和观察到的工具错误状态由代码生成，不让模型编造。
+
+结果带 `[distill:evidence]`。**引文真实不证明覆盖完整、分类正确、因果关系正确或测试全部通过。**`|| true` 等命令可以掩盖测试失败；模型的不确定性只是建议，不是完整性证明。
+
+### 普通摘要
+
+其他启用文本仍按 `outputRequest` 处理，保留现有 RAW/SUMMARY 协议、重试预算和一次 JSON-only 格式修复。结果带 `[distill:summary]`，明确声明**未在本地逐项核验事实**。归档增强的是追溯能力，不是摘要正确性。
+
+两种策略按完整投影结果（含来源及受保护修改确认）计算收益，要求至少 **1.4 倍字符压缩**，并满足正文及完整结果预算。字符节省不是精确 tokenizer 节省。下面旧版真实会话截图中的 213.40 倍压缩发生在来源收据引入之前，仅说明合适冗长输出的潜力，不是此版本的保证。
+
+![历史上下文节省示例](./assets/context-savings-example.png)
+
+## 原文与原生 read 回读
+
+每次被接受的摘要或证据都提供模型可见来源：
+
+```text
+source_artifact="/…/extensions/pi-distill/artifacts/<会话哈希>/objects/<原文哈希>.txt"
+source_sha256=…
+source_bytes=…
+source_lines=4200
+source_kind=tool-output
+```
+
+调用时使用不含 JSON 引号的真实路径：
+
+```json
+{
+  "path": "/…/objects/<原文哈希>.txt",
+  "offset": 200,
+  "limit": 60,
+  "outputRequest": "RAW"
+}
+```
+
+仅在当前 `read` schema 暴露该字段时提供 `outputRequest`。行号从 1 开始；最后 N 行可一次定位：`offset = max(1, source_lines - N + 1)`，`limit = N`。行数沿用原生 read 的换行切分语义，包括末尾空行；read 自身行数/字节限制仍有效。
+
+工具提供的有界、普通、单链接且非符号链接临时文件可以作为更完整来源。Bash/Fusion 仅接受操作系统临时目录直属的原生 `pi-bash-*.log`，或错误标准化后原生格式的最终截断提示。不合法、不存在、过大或变化中的文件会回退原结果。已知截断且无法取得完整日志时不做证据替换；其他文本可作为 `source_kind=preview` 摘要，但不能冒称全文。来源是 Pi 提供的 UTF-8 文本；完整文件含非法 UTF-8 时拒绝，不默默改写。
+
+Fusion 仅处理 `[then_run:succeeded]` 或 `[then_run:failed]` 后的命令日志。修改确认、成功结果的 diff/patch metadata、机器标记和外层错误状态不变；跳过、执行中、缺失或边界歧义则不处理。Pi 对失败调用抛出的错误进行标准化后，可能本就没有 diff details，Distill 无法恢复。支持 `details.actionFusion.bashDetails`，不导入 Fusion 私有源码。
+
+## 存储、隐私与回退
+
+原文存于 agent 目录，不写项目。会话 ID 和内容经哈希成为路径；原子发布、内容去重并核验完整性，支持的平台使用私有权限。限制单条来源字节数和恢复后会话对象累计大小。归档失败或配额用尽时不发送模型请求，保留原结果。重新加载、恢复会话和正常退出不会删除归档；确认引用不再需要后，由用户明确执行文件清理。
+
+默认单条 1 MiB、单会话 64 MiB。写入同时使用进程内序列化和会话文件系统独占锁。取消可立即中断进程内队列等待，但不会让后续写入越过尚未完成的写入。锁被占用时不等待、不发送模型请求，保留原结果；进程崩溃遗留的锁不会自动夺取，确认没有活跃写入后再明确清理。遗留 staging 和对象目录内其他普通文件也计入配额，不静默删除。会话配额不是全局保留策略；文件系统不支持所需原子链接时保留原结果，不弱化完整性保证。
+
+处理可能把来源发送给当前或配置模型；两种策略都会跳过疑似凭据，但启发式检测**不是完整的隐私保证**。关闭处理或选择本地处理模型可避免额外的远程接收方，但不会脱敏原工具结果，也不会阻止主 Agent 将它发送给自己的模型；要求所有日志留在本机，还需使用本地主模型并合理配置工具。归档也可能含敏感文本。不要与独立 SoL-Pi Reducer 或重叠的结果摘要扩展同时运行。
+
+父请求取消会传播到模型请求。超时限制的是 Distill 等待时间，不保证忽略取消信号的 provider 停止远程执行或计费；前一个请求是否终止尚未确认时，不启动超时重试。已报告的用量计入 Pi 工具结果成本，包括被拒绝的证据和失败的 JSON 修复。即使修复请求挂起，首次响应已报告的用量也会保留；挂起请求从未报告的用量无法恢复。请求前通过启发式 token／模型上下文窗口检查跳过明显超预算输入。证据失败永不降级为未核验摘要。每次请求由模型注册表统一解析认证和地址，不额外执行鉴权预检查；Codex 后台请求使用独立会话并在请求完成后清理。
+
+## 配置项
 
 | 配置项 | 含义 |
 | --- | --- |
-| `model` | 可选的 `provider/modelId`；为空时使用当前 Pi 会话模型。在 `/config:distill` 中从可用模型列表选择，不需要手输。模型 ID 可以包含 `/`，例如 `openrouter/deepseek/deepseek-v4-flash`。 |
-| `minChars` | 达到此输出长度后才请求提炼。 |
-| `maxChars` | 提炼结果超过此字符数时写入临时文件。 |
-| `maxOutputChars` | 最终返回给 Agent 的文本上限。超出后写入临时文件，只返回文件指针。 |
-| `timeoutSeconds` | 每次提炼模型尝试的最长等待时间。 |
-| `timeoutRetryCount` | 超时后的额外重试次数。默认 `1`；设为 `0` 时不重试超时。 |
-| `errorRetryCount` | 非超时异常后的额外重试次数。默认 `1`；设为 `0` 时不重试其他异常。 |
-| `missedCompressionRatio` | 没有提供摘要 prompt 时，用于长输出诊断的倍数阈值。 |
-| `summarizeErrors` | 工具返回错误且达到 `minChars` 时，是否仍发送给提炼模型。 |
-| `tools.<name>.enabled` | 按工具开启或关闭 `outputRequest` 注入和结果提炼。`edit` 和 `write` 默认关闭，其他未配置工具默认开启，也可以通过 `/config:distill` 修改。 |
+| `enabled` | 是否启用；关键配置（包括格式错误的工具关闭设置）无效时停止处理，需手动修复。 |
+| `model` | 可选 `provider/modelId`，空值使用当前会话模型。 |
+| `minChars` | 普通摘要输入阈值，默认 200 字符。 |
+| `maxChars` | 被接受的摘要/证据正文预算，默认 100,000 字符；超出保留原结果。 |
+| `maxOutputChars` | 完整替换结果预算（含来源），默认 10,000；不是 RAW/回退限制。 |
+| `timeoutSeconds` | 每次模型尝试截止时间，默认 10 秒。 |
+| `timeoutRetryCount/errorRetryCount` | 普通摘要的超时/其他异常重试，默认各 1 次；证据始终只尝试一次。 |
+| `missedCompressionRatio` | 保留的兼容配置字段。 |
+| `summarizeErrors` | false 时两种策略都不处理错误，包括明确请求的长错误。 |
+| `evidence.enabled` | 诊断证据策略，默认 false。 |
+| `evidence.fusion` | 融合命令范围，默认 false；依赖证据已开启。 |
+| `evidence.minBytes` | 证据输入阈值，默认 8,192 个 UTF-8 字节。 |
+| `evidence.commands` | 最多 32 个附加字面命令前缀，每项不超过 256 字符。 |
+| `archive.maxSourceBytes` | 默认 1 MiB，最多 16 MiB；过大来源不发送模型。 |
+| `archive.maxSessionBytes` | 默认 64 MiB，最多 1 GiB；不静默驱逐归档。 |
+| `tools.<name>.enabled` | 现有工具开关；修改工具仍需明确开启证据/Fusion。 |
+| `render.*` | UI-only 审计卡片、请求和结果预览。 |
 
-`/pi-distill` 仍作为兼容别名保留。
-| `render.*` | 控制审计卡片、prompt 预览和结果预览。 |
+文件字段优先于现有 `PI_DISTILL_*` 和旧版 `PI_BASH_SUMMARY_*`；证据与归档配置仅支持 JSON。不自动改写或迁移全局配置。Fusion 开关仅控制兼容 Fusion 工具的日志处理及 schema，不是 Bash 权限沙箱。
 
-## Session 统计
+## 开发与来源
 
-使用 `/distill:stats` 查看当前 Pi 会话的提炼统计。统计只保存在内存中，在会话开始时重置，不保存原始工具输出。
+要求 Node.js 22+ 和 Pi 0.87.1+。Pi peer 最低版本与已测试的模型注册表、会话资源及工具用量 API 对齐，不再声明兼容 0.80–0.86。开发和离线 SDK 回归针对 Pi 0.87.1。确定性测试使用注入 provider、临时存储及原生 read，无需 API Key。
 
-统计包括工具结果数量、成功/失败/回退次数、模型尝试次数、原始与摘要字符数、压缩比、估算的原文/摘要 Token（启发式：CJK 字符约每字 1 token，其余文本约 4 字符 1 token）、预计节省 Token、提炼实际消耗的 input/output/cache/total Token 和成本。数量达到 1,000 或 1,000,000 时分别使用 `k` 或 `m` 紧凑显示；耗时会根据数值显示为 `ms`、`s` 或 `min`。原文/摘要 Token 是估算值；provider 未返回 usage 时，提炼消耗 Token 或成本字段显示为不可用。
+```bash
+npm run typecheck --workspace pi-distill
+npm test --workspace pi-distill
+```
 
-主要环境变量包括 `PI_DISTILL_MODEL`、`PI_DISTILL_MIN_CHARS`、`PI_DISTILL_MAX_CHARS`、`PI_DISTILL_MAX_OUTPUT_CHARS`、`PI_DISTILL_TIMEOUT_SECONDS`、`PI_DISTILL_TIMEOUT_RETRY_COUNT`、`PI_DISTILL_ERROR_RETRY_COUNT`、`PI_DISTILL_MISSED_COMPRESSION_RATIO` 和 `PI_DISTILL_SUMMARIZE_ERRORS`。
-
-## 要求
-
-- Node.js 22 或更高版本。
-- 当前 Pi 会话需要有可用模型，除非 `model` 指向一个已配置且可用的模型。`/config:distill` 的模型项会列出当前可用模型。
-
-## 许可证
-
-[MIT](../../LICENSE)
+提示词和通知跟随共享语言设置；UI 审计不进入模型上下文。SoL-Pi 改编代码的 MIT 授权及归属见 [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md) 和 [LICENSE](./LICENSE)。

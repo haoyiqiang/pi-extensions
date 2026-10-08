@@ -1,0 +1,18 @@
+{
+  "invalidConfig": { "en-US": "Invalid Distill {field}: {reason}. Processing is disabled until the configuration is repaired.", "zh-CN": "Distill 配置 {field} 无效：{reason}。修复配置前停止处理。" },
+  "configObject": { "en-US": "expected an object with supported fields", "zh-CN": "应为仅含支持字段的对象" },
+  "configBoolean": { "en-US": "expected a boolean", "zh-CN": "应为布尔值" },
+  "configBytes": { "en-US": "expected a positive safe integer within the documented byte limit", "zh-CN": "应为文档字节上限内的正安全整数" },
+  "configCommands": { "en-US": "expected at most 32 nonempty literal command prefixes, each at most 256 characters", "zh-CN": "应为最多 32 个非空字面命令前缀，每项不超过 256 字符" },
+  "summaryNotice": { "en-US": "Model summary; individual claims are not locally verified. Read the source for exact context.", "zh-CN": "模型摘要，未在本地逐项核验事实；精确上下文请读取原文。" },
+  "evidenceNotice": { "en-US": "Exact quotes verified against the source; coverage and evidence labels are not guaranteed. Tool status is not a test verdict.", "zh-CN": "已核对引文来源；不保证覆盖完整或证据分类正确。工具状态不等于测试结论。" },
+  "readback": { "en-US": "Read source_artifact with native read (offset/limit; outputRequest=RAW when applicable). Tail N lines: offset=max(1, source_lines-N+1).", "zh-CN": "使用原生 read 的 offset/limit 读取 source_artifact（适用时传 outputRequest=RAW）。最后 N 行起点：max(1, source_lines-N+1)。" },
+  "outputRequest": { "en-US": "Result handling request: exactly RAW bypasses processing; otherwise describe what to retain. Diagnostic evidence uses exact source quotes, not diagnoses. For fused edit/write this applies only to then_run output; when optional and omitted, use default evidence rules.", "zh-CN": "结果处理要求：严格传入 RAW 跳过处理；其他文本说明要保留的信息。诊断证据只引用原文，不做诊断。融合 edit/write 中仅作用于 then_run 输出；可选且省略时使用默认证据规则。" },
+  "contract": { "en-US": "Distill-controlled tools: {tools}. Apply these rules only to this list, not other tools' business fields. For tools with a required outputRequest, always supply a nonempty request or exactly RAW. Optional outputRequest on fused edit/write controls only then_run diagnostic logs; omission uses default evidence rules. RAW bypasses Distill, not the underlying tool's own limits. Use native read with RAW to inspect source_artifact; source_lines supports one-call tail reads. Evidence receipts verify quotes, not completeness or test outcomes; ordinary summaries are not fact-verified.", "zh-CN": "Distill 控制的工具：{tools}。以下规则仅作用于此列表，不作用于其他工具的业务字段。工具要求 outputRequest 时必须传非空处理要求或严格的 RAW。融合 edit/write 的可选 outputRequest 仅控制 then_run 诊断日志，省略时使用默认证据规则。RAW 跳过 Distill，不解除底层工具自身限制。通过原生 read 配合 RAW 回读 source_artifact；source_lines 可用于一次定位尾部。证据收据只核对引文，不保证完整性或测试结论；普通摘要未逐项核验事实。" },
+  "schemaCollision": { "en-US": "Tool {tool} already owns outputRequest; Distill leaves its schema and execution untouched.", "zh-CN": "工具 {tool} 已拥有 outputRequest；Distill 不修改其 schema 或执行参数。" },
+  "evidenceSetting": { "en-US": "Diagnostic evidence: {value}", "zh-CN": "诊断证据提取：{value}" },
+  "fusionSetting": { "en-US": "Fusion command evidence (requires diagnostic evidence): {value}", "zh-CN": "融合命令证据（需开启诊断证据）：{value}" },
+  "archiveFailure": { "en-US": "Source could not be archived; original tool output retained.", "zh-CN": "无法归档原文，已保留原工具输出。" },
+  "processingFailure": { "en-US": "Result processing failed or was cancelled; original tool output retained.", "zh-CN": "结果处理失败或已取消，保留原工具输出。" },
+  "evidenceRejected": { "en-US": "Evidence was rejected; original tool output retained without a summary fallback.", "zh-CN": "证据未通过校验，保留原工具输出，不降级为普通摘要。" }
+}

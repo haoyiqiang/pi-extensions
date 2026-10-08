@@ -1,5 +1,5 @@
 /**
- * workflow-command.test.ts — the `/agents → Workflows` run inspector.
+ * workflow-command.test.ts — the retained `/config:subagents → Workflows` run inspector.
  *
  * The dialog itself is covered by workflow-dialog.test.ts; what is untested
  * until here is the screen around it: what happens with no runs, one run, or
@@ -7,7 +7,7 @@
  * than only looking like it did.
  *
  * It is reached through the agents menu rather than its own command, so every
- * test here drives `/agents` and picks the entry — which also pins that the
+ * test here drives `/config:subagents` and picks the entry — which also pins that the
  * entry exists and is spelled the way the menu router expects.
  */
 
@@ -16,7 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import subagentsExtension from "../src/index.js";
 import { ctx, type Hermetic, hermeticDir, makePi } from "./helpers/boot-extension.js";
 
-/** Boot the real extension and hand back its `/agents` command. */
+/** Boot the real extension and hand back its `/config:subagents` command. */
 function bootCommand() {
   const booted = makePi();
   subagentsExtension(booted.pi);
@@ -26,8 +26,8 @@ function bootCommand() {
     hasUI: false,
     sessionManager: { getSessionId: vi.fn(() => undefined), getBranch: vi.fn(() => []) },
   }));
-  const command = booted.commands.get("agents");
-  if (!command) throw new Error("the extension did not register /agents");
+  const command = booted.commands.get("config:subagents");
+  if (!command) throw new Error("the extension did not register /config:subagents");
   return { ...booted, command };
 }
 
@@ -89,16 +89,16 @@ function commandCtx() {
   };
 }
 
-describe("/agents → Workflows", () => {
+describe("/config:subagents → Workflows", () => {
   let hermetic: Hermetic;
 
   // Workflows are opt-in, so every test that expects the feature to exist has
-  // to turn it on — the same thing a user does once in /agents → Settings.
+  // to turn it on — the same thing a user does once in /config:subagents → Settings.
   beforeEach(() => { hermetic = hermeticDir({ settings: { workflowsEnabled: true } }); });
   afterEach(() => { hermetic.restore(); });
 
   it("registers no top-level /workflows command", () => {
-    // It lives under /agents instead, deliberately: pi renames a duplicate
+    // It lives under /config:subagents instead, deliberately: pi renames a duplicate
     // command to `/workflows:1` and `/workflows:2`, which breaks the bare name
     // for both extensions. Pinned because re-adding it would be silent.
     const booted = bootCommand();
@@ -256,7 +256,7 @@ describe("/agents → Workflows", () => {
     it("opens as a centered overlay, like the conversation viewer beside it", async () => {
       // Not an overlay means inline: the frame renders into the conversation
       // and stays in the scrollback afterwards, and opening a run from the
-      // fleet list behaves unlike opening the agent row directly above it.
+      // inspector behaves unlike opening an agent conversation.
       const { command } = await withRuns(1);
       const ui = commandCtx();
       await command.handler("", ui.context);

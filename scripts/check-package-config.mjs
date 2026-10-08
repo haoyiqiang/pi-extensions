@@ -182,8 +182,8 @@ for (const dir of packageDirs) {
   }
 
   // The root Git package is an explicit full-suite distribution profile. Each
-  // package contributes explicit owned ./ extension paths; sibling source paths
-  // are forbidden except for the shared i18n extension entry.
+  // package contributes owned ./ entries, including dependency entry shims.
+  // The legacy shared i18n sibling entry remains accepted for existing packages.
   const ownedExtensionEntries = [];
   for (const extensionEntry of pkgJson.pi?.extensions ?? []) {
     if (typeof extensionEntry !== "string" || extensionEntry.length === 0) {
@@ -261,7 +261,10 @@ for (const dir of packageDirs) {
   if (
     importsI18n &&
     Array.isArray(pkgJson.pi?.extensions) &&
-    !pkgJson.pi.extensions.includes(SHARED_I18N_EXTENSION_ENTRY)
+    !pkgJson.pi.extensions.includes(SHARED_I18N_EXTENSION_ENTRY) &&
+    !ownedExtensionEntries.some((path) =>
+      /export\s*\{\s*default\s*\}\s*from\s*["']pi-extensions-i18n["']/.test(readFileSync(path, "utf8")),
+    )
   ) {
     error(`${label}: runtime imports pi-extensions-i18n, but its Pi extension entry is not loaded`);
   }

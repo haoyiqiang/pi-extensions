@@ -8,6 +8,7 @@ import {
 } from "../../agent-types.js";
 import { buildParentContext } from "../../context.js";
 import { resolveChildAgentConfig } from "../../child-resource-policy.js";
+import { assertAgentExtensionPolicy, parseExtensionRule, resolveExtensions, snapshotAgentExtensionPolicy } from "../../extension-defaults.js";
 import { resolveProjectTrusted } from "../../project-trust.js";
 import { captureRuntimePolicy, type SubagentsRuntimePolicy } from "../../runtime-policy.js";
 import { detectEnv } from "../../env.js";
@@ -35,6 +36,8 @@ export interface StandardTerminalPolicy {
   readonly configCwd: string;
   readonly cli: StandardTerminalCli;
   readonly agent: AgentConfig;
+  /** Absent only in old records; those use the saved agent field, not current defaults. */
+  readonly resolvedExtensions?: import("../../types.js").ResolvedExtensionRule;
   readonly isolated: boolean;
   readonly projectTrusted: boolean;
   readonly runtimePolicy?: SubagentsRuntimePolicy;
@@ -72,13 +75,15 @@ export async function prepareStandardTerminalPolicy(
 ): Promise<{ policy: StandardTerminalPolicy; prompt: (prompt: string) => string }> {
   const cwd = options.cwd ?? ctx.cwd;
   const configCwd = options.runtimePolicy?.configCwd ?? options.configCwd ?? cwd;
-  const projectTrusted = options.runtimePolicy?.projectTrusted ?? resolveProjectTrusted(configCwd, {
+  const projectTrusted = options.runtimePolicy?.projectTrusted ?? options.extensionDefaults?.projectTrusted ?? resolveProjectTrusted(configCwd, {
     context: ctx, projectTrusted: options.projectTrusted,
   });
-  const runtimePolicy = options.runtimePolicy ?? captureRuntimePolicy(configCwd, projectTrusted);
+  const runtimePolicy = options.runtimePolicy ?? captureRuntimePolicy(configCwd, projectTrusted,
+    options.extensionDefaults?.settings ?? (options.resolvedExtensions !== undefined ? {} : undefined));
   const agent = resolveChildAgentConfig(type, options.agentConfig, {
     configCwd, projectTrusted,
     disableDefaultAgents: runtimePolicy.settings.disableDefaultAgents,
+    settings: runtimePolicy.settings,
   });
   if (!agent) throw new Error(i18n.t("terminalBackend.invalidConfig"));
   const launch = resolveAgentLaunchBehavior(agent, options);
@@ -87,6 +92,12 @@ export async function prepareStandardTerminalPolicy(
   }
 
   const isolated = options.isolated ?? agent.isolated ?? false;
+  const resolvedExtensions = resolveExtensions({
+    agent,
+    isolated,
+    defaultExtensions: runtimePolicy.settings.defaultExtensions,
+    resolvedExtensions: options.resolvedExtensions,
+  });
   const inheritContext = options.inheritContext ?? agent.inheritContext ?? false;
   if (!isAbsolute(cwd) || !isAbsolute(configCwd)) throw new Error(i18n.t("terminalBackend.invalidConfig"));
 
@@ -142,7 +153,8 @@ export async function prepareStandardTerminalPolicy(
     cwd,
     configCwd,
     cli: "pi",
-    agent: Object.freeze({ ...agent }),
+    agent: snapshotAgentExtensionPolicy(agent),
+    resolvedExtensions,
     isolated,
     projectTrusted,
     runtimePolicy,
@@ -191,6 +203,9 @@ export function validateStandardTerminalPolicy(value: unknown): asserts value is
     || !validTurnBudget(policy.maxTurns, policy.graceTurns)) {
     throw new Error(i18n.t("terminalBackend.invalidConfig"));
   }
+  assertAgentExtensionPolicy(policy.agent);
+  parseExtensionRule(policy.resolvedExtensions, policy.agent.sourcePath ?? `agent:${policy.agent.name}`);
+  parseExtensionRule(policy.runtimePolicy?.settings.defaultExtensions, policy.configCwd);
   snapshotPromptBinding(policy.promptBinding);
   if (policy.structuredSchema !== undefined) compileInvocationSchema(policy.structuredSchema);
 }

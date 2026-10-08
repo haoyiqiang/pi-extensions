@@ -7,10 +7,14 @@ This repository contains small, independently installable extensions for the [Pi
 ```text
 pi-extensions/
 ├── packages/
+│   ├── pi-action-fusion/        # Opt-in edit/write + follow-up command (SoL-Pi adaptation)
 │   ├── pi-extensions-config/    # Shared portable JSON config I/O
 │   ├── pi-extensions-i18n/      # Shared locale and catalog runtime
 │   ├── pi-web-search/    # LLM/API search, URL Context, and bounded web fetch
 │   ├── pi-distill/              # Tool-output distillation
+│   ├── pi-advisor/              # Configured second-opinion model tool
+│   ├── pi-todo/                 # Branch-replayed task state and panel
+│   ├── pi-ask-user-question/    # Structured TUI/RPC questionnaires
 │   ├── pi-terminal-mux/         # Terminal multiplexer abstraction (muxy/cmux/tmux/zellij/wezterm/herdr/otty/orca + headless fallback)
 │   ├── pi-models-discovery/     # Dynamic model discovery for providers marked with discoverModels
 │   ├── pi-blackhole/            # Deterministic compaction, observational memory, and recall
@@ -36,7 +40,8 @@ The layer model, allowed workspace dependency edges, UI ownership, and root dist
 
 - `pi-spark` owns automatic Pi session titles and manual terminal naming under `spark.json`'s `naming` feature. It uses the Pi model registry and terminal-mux; automatic and manual naming share configurable session/workspace/tab targets. The retired `pi-naming` config is read-only fallback, not a second runtime or write target.
 
-- `pi-distill` discovers active tools with object parameter schemas and observes their results through Pi's native `tool_call` and `tool_result` events. It does not register duplicate tools and renders audit information through its own UI-only session entry.
+- `pi-action-fusion` owns opt-in native `edit`/`write` replacements with `then_run`; it does not summarize outputs or compact context. Internal follow-up commands emit only the outer mutation's tool events, not a separate Bash call. Do not co-load another mutation-tool replacement or assume Bash-only guards cover fused commands.
+- `pi-distill` discovers active tools with object parameter schemas and observes their results through Pi's native `tool_call` and `tool_result` events. It owns ordinary summaries and opt-in exact-quote diagnostic evidence, requiring source archival before any lossy replacement. RAW and failures retain received content; native `read` with RAW handles source readback. Fusion handling is opt-in and command-log-only; never summarize mutation confirmations or diff/patch. It does not register duplicate or readback tools and renders audit information through its own UI-only session entry.
 - `pi-extensions-config` owns only portable agent-dir resolution, JSON object reads, atomic writes, and preserving updates. Feature schemas, defaults, migrations, and UI remain in feature packages.
 - `pi-extensions-i18n` owns locale selection, catalog validation, interpolation, and the `/pi-language` command. Feature packages use it instead of implementing separate locale runtimes.
 - Background chat requests from an extension go through `ctx.modelRegistry.streamSimple(...).result()`, the same way `pi-spark` recap does. `ModelRuntime.prepareRequest` resolves auth and a resolved `baseUrl`. `openai-codex` background calls use an isolated `uuidv7` session and clean it up afterwards. Raw HTTP transports use `modelRegistry.getApiKeyAndHeaders` directly. Do not add another shared request wrapper, and do not call `pi-ai` `complete` / `completeSimple` for these side requests.
@@ -49,7 +54,7 @@ The layer model, allowed workspace dependency edges, UI ownership, and root dist
 
 Keep packages composable and independently installable. Avoid coupling one extension to another extension's private implementation details or display state.
 
-`packages/pi-subagents` and `packages/pi-workflow` are the root Git/local profile's unified products. They remain npm-private and outside release metadata; publication readiness is independent of runtime activation. The package gate explicitly permits only these two private products to declare root-profile resources; private test/incubation and retired workspaces remain excluded. Preserve upstream provenance and regression tests. `pi-workflow` owns DSL/orchestration, journals, retries/recovery and `/wf`; `pi-subagents` owns Agent/RPC/Fleet and canonical embedded/terminal Pi execution. Standard workflow stages keep SDK/resource semantics and inject scoped Agent tools; managed isolation is explicit. The products communicate through the versioned event bus, without cross-product source imports. Never enable the retained `SubagentWorkflow` engine or old interactive-tool aliases. `pi-interactive-subagents` has been archived outside this repository and is no longer a workspace or build/test target; retain absorbed-code attribution in unified subagents and never co-load an external legacy entry. Do not edit user-global settings or destroy old run/session files as an implicit migration.
+`packages/pi-subagents` and `packages/pi-workflow` are the root Git/local profile's unified products. They remain npm-private and outside release metadata; publication readiness is independent of runtime activation. The package gate explicitly permits only these two private products to declare root-profile resources; private test/incubation and retired workspaces remain excluded. Preserve upstream provenance and regression tests. `pi-workflow` owns DSL/orchestration, journals, retries/recovery and `/wf`; `pi-subagents` owns Agent/RPC, `/config:subagents` management, the above-editor AgentWidget and canonical embedded/terminal Pi execution. Standard workflow stages keep SDK/resource semantics and inject scoped Agent tools; managed isolation is explicit. The products communicate through the versioned event bus, without cross-product source imports. Never enable the retained `SubagentWorkflow` engine or old interactive-tool aliases. `pi-interactive-subagents` has been archived outside this repository and is no longer a workspace or build/test target; retain absorbed-code attribution in unified subagents and never co-load an external legacy entry. Do not edit user-global settings or destroy old run/session files as an implicit migration.
 
 ## Portability and safety
 
@@ -75,7 +80,7 @@ const NOTICE_SOURCE: NoticeSource = { tag: NOTICE_TAG, color: NOTICE_COLOR };
 notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("failed") });
 ```
 
-Keep the tag short and unique per package, keep the level accurate, and do not add colors outside TUI mode — the helper already handles that. The tag color (`NOTICE_TAG_COLOR`) is deliberately the same muted color for every package: nine theme color slots cannot distinguish sixteen packages, so the tag text identifies the source and the color never does. Level colors (warning/error body text) remain semantic and unchanged. The transcript block is registered once by `pi-extensions-i18n`'s own extension entry, so a package that uses the helper must load `../pi-extensions-i18n/index.ts` in its `pi.extensions` list. Verdict-style notices with their own semantic color pass `textColor` instead of building a footer status line.
+Keep the tag short and unique per package, keep the level accurate, and do not add colors outside TUI mode — the helper already handles that. The tag color (`NOTICE_TAG_COLOR`) is deliberately the same muted color for every package: nine theme color slots cannot distinguish sixteen packages, so the tag text identifies the source and the color never does. Level colors (warning/error body text) remain semantic and unchanged. The transcript block is registered once by `pi-extensions-i18n`'s own extension entry. Feature packages must load it through a shipped `i18n-entry.ts` shim (`export { default } from "pi-extensions-i18n"`) listed before their own entry in `pi.extensions`. Resolve the declared dependency, not a workspace sibling path: scoped npm installs do not preserve that layout. I18n deduplicates these entries per runtime event bus. Verdict-style notices with their own semantic color pass `textColor` instead of building a footer status line.
 
 Keep developer comments and implementation notes concise. Keep the English and Chinese README files separate so each language has a complete, readable entrypoint.
 

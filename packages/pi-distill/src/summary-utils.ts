@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { extensionConfigPath, readJsonObjectResult, resolveAgentDir } from "pi-extensions-config";
 import { promptI18n as i18n } from "./i18n.ts";
+import { parseProcessingConfig, type ProcessingConfig } from "./processing-config.ts";
 
 const DEFAULT_MIN_CHARS = 200;
 const DEFAULT_MAX_CHARS = 100_000;
@@ -17,15 +18,15 @@ const DEFAULT_DISABLED_TOOL_NAMES = new Set(["edit", "write"]);
 const CONFIG_DIRECTORY = "pi-distill";
 const CONFIG_FILE_NAME = "config.json";
 
-export interface BashSummaryConfig {
+export interface BashSummaryConfig extends ProcessingConfig {
   /** 未配置时使用当前会话模型。 */
   modelProvider?: string;
   modelId?: string;
   /** 输出达到此字符数后才调用提炼模型。 */
   minChars: number;
-  /** 提炼结果达到此字符数后写入文件。 */
+  /** 摘要正文字符预算；超过则保留原结果，不写摘要指针。 */
   maxChars: number;
-  /** 最终返回给 Agent 的内容达到此字符数后写入文件。 */
+  /** 成功替换结果（含来源）的字符预算；不截断 RAW 或失败回退。 */
   maxOutputChars: number;
   /** 模型调用最长等待时间。 */
   timeoutSeconds: number;
@@ -55,7 +56,7 @@ export interface DistillToolOverride {
 
 export type DistillToolConfig = Record<string, DistillToolOverride>;
 
-export interface DistillConfigFile {
+export interface DistillConfigFile extends ProcessingConfig {
   enabled?: boolean;
   /** provider/model；为空时使用当前会话模型。 */
   model?: string;
@@ -377,8 +378,18 @@ export function loadDistillConfig(
     );
   }
 
-  const config = parseBashSummaryConfig(effectiveEnv);
+  let config = parseBashSummaryConfig(effectiveEnv);
+  if (loadedFile.status === "invalid" || (file && "enabled" in file && typeof file.enabled !== "boolean")) config = undefined;
+  try {
+    const processing = parseProcessingConfig(file);
+    if (config) Object.assign(config, processing);
+  } catch (error) {
+    warnings.push(error instanceof Error ? error.message : String(error));
+    config = undefined;
+  }
+  const beforeTools = warnings.length;
   const tools = parseToolConfig(file, warnings);
+  if (warnings.length > beforeTools) config = undefined; // Never turn a malformed opt-out into default enablement.
   if (config && tools !== undefined) config.tools = tools;
   const render = parseRenderConfig(file, warnings);
   if (!config && warnings.length === 0) {
@@ -422,7 +433,7 @@ export type OutputSummaryIntent = "none" | "full" | "summary";
 export type OutputSummaryDecision = {
   intent: OutputSummaryIntent;
   shouldSummarize: boolean;
-  reason: "disabled" | "not-requested" | "full-output" | "below-threshold" | "explicit-summary" | "error-output";
+  reason: "disabled" | "not-requested" | "full-output" | "below-threshold" | "explicit-summary" | "error-output" | "errors-disabled";
 };
 
 export function classifyOutputSummaryIntent(prompt: string | undefined): OutputSummaryIntent {
@@ -453,6 +464,7 @@ export function decideOutputSummary(
   if (!config) return { intent, shouldSummarize: false, reason: "disabled" };
   if (intent === "none") return { intent, shouldSummarize: false, reason: "not-requested" };
   if (intent === "full") return { intent, shouldSummarize: false, reason: "full-output" };
+  if (isError && !config.summarizeErrors) return { intent, shouldSummarize: false, reason: "errors-disabled" };
   if (output.length < config.minChars) {
     return { intent, shouldSummarize: false, reason: "below-threshold" };
   }

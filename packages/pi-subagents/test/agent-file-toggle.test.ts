@@ -1,10 +1,10 @@
-// The `/agents` enable/disable operations edit an agent .md file's frontmatter.
+// The `/config:subagents` enable/disable operations edit an agent .md file's frontmatter.
 // The LOAD side (src/custom-agents.ts) parses that frontmatter with a real YAML
 // parser, so `enabled: false` is honored wherever it appears in the block. The
 // WRITE side here must agree — README.md documents `enabled: false` as a field
 // users hand-write, and a hand-authored file puts it wherever the author likes.
 //
-// These live in src/agent-file-toggle.ts rather than inside the `/agents`
+// These live in src/agent-file-toggle.ts rather than inside the `/config:subagents`
 // command closure because `registerCommand` is mocked in every wiring test,
 // which is why none of this had coverage.
 
@@ -95,7 +95,7 @@ describe("disableInContent", () => {
   // The previous guard was `content.includes("\nenabled: false\n")`, which a
   // trailing space defeats. It then inserted a SECOND `enabled: false`, and
   // duplicate map keys make the whole file unparseable — so an agent the user
-  // asked to disable disappeared from `/agents` entirely (since #212 an
+  // asked to disable disappeared from `/config:subagents` entirely (since #212 an
   // unparseable agent file is skipped, not surfaced).
   it("never writes a file the loader cannot parse", () => {
     for (const src of [
@@ -207,7 +207,7 @@ describe("isDisabledContent", () => {
 
 // The defect, stated as an invariant rather than as a list of shapes: the two
 // sides must never disagree about whether a file is disabled. Whatever the
-// loader reads as disabled, `/agents → Enable` has to be able to re-enable.
+// loader reads as disabled, `/config:subagents → Enable` has to be able to re-enable.
 describe("read and write paths agree", () => {
   const shapes: Array<[string, string]> = [
     ["key first", EXTENSION_WRITTEN_DISABLED],
@@ -238,7 +238,7 @@ describe("isEmptyStub", () => {
     expect(isEmptyStub("\uFEFF---\n---")).toBe(true);
   });
 
-  it("recognizes the stub /agents writes to disable a built-in default", () => {
+  it("recognizes the stub /config:subagents writes to disable a built-in default", () => {
     expect(isEmptyStub("---\n---\n")).toBe(true);
     expect(isEmptyStub(enableInContent("---\nenabled: false\n---\n").content)).toBe(true);
   });
@@ -304,7 +304,7 @@ describe("findAgentFile", () => {
   });
 
   // An agent's type comes from its frontmatter `name:` now, so `<type>.md` is a
-  // guess. Getting it wrong is not a harmless miss: `/agents → Disable` takes
+  // guess. Getting it wrong is not a harmless miss: `/config:subagents → Disable` takes
   // the no-file branch and writes a NEW stub, which loses to the real file on
   // load — so the agent stays enabled while the toast reports success.
   describe("locateAgentFile", () => {
@@ -352,7 +352,7 @@ describe("findAgentFile", () => {
   });
 });
 
-// `/agents → Create agent → Manual` writes an agent file from free-text prompts.
+// `/config:subagents → Create agent → Manual` writes an agent file from free-text prompts.
 // The description is whatever the user typed into `ctx.ui.input("Description
 // (one line)")` — no validation, no escaping — and it was interpolated straight
 // into a YAML scalar.

@@ -1,17 +1,7 @@
 /**
- * workflow-menu.ts — `/agents → Workflows`, and the run inspector behind it.
- *
- * The same shape `schedule-menu.ts` has for `/agents → Scheduled jobs`: the
- * submenu and the overlay it opens live here, and everything they need arrives
- * as {@link WorkflowMenuDeps} rather than through a closure. The inspector is
- * reached from two places — this menu and a `workflow` row in the fleet list —
- * and both go through `showWorkflowDialog`, so the two entry points cannot
- * drift apart on what the keys do.
- *
- * Lives in the agents menu rather than as a top-level `/workflows` command: it
- * is one more view of the same fleet, and a second command name would only add
- * a collision surface (pi renames duplicate commands to `/workflows:1` and
- * `/workflows:2`, which breaks the bare name for both).
+ * Retained upstream workflow inspector for `/config:subagents → Workflows`.
+ * The unified product disables this engine; pi-workflow owns active workflows.
+ * Dependencies arrive as {@link WorkflowMenuDeps} rather than through a closure.
  */
 
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
@@ -31,12 +21,6 @@ export interface WorkflowMenuDeps {
   getRecord(id: string): AgentRecord | undefined;
   /** The conversation overlay `c` opens on an agent row. */
   viewAgentConversation(ctx: ExtensionCommandContext, record: AgentRecord): Promise<void>;
-  /**
-   * The session context, for the fleet-list entry point — that one is a
-   * keypress in a list that holds no `ctx` of its own. Undefined between
-   * sessions, which is a no-op rather than an error.
-   */
-  getCtx(): ExtensionCommandContext | undefined;
 }
 
 /**
@@ -54,10 +38,7 @@ export async function showWorkflowDialog(
   task: WorkflowTask,
   deps: WorkflowMenuDeps,
 ): Promise<void> {
-  // Overlaid on the same terms as the conversation viewer, because they are
-  // reached the same way: both are rows of the fleet list, and opening one
-  // must not behave unlike opening the other. Inline, the frame would render
-  // into the conversation and stay in the scrollback after it closed.
+  // Match the conversation viewer overlay without leaving a frame in scrollback.
   const { VIEWPORT_HEIGHT_PCT } = await import("./conversation-viewer.js");
   /**
    * This dialog's own overlay, so `c` can hide it while the conversation is
@@ -147,23 +128,7 @@ export async function showWorkflowDialog(
   );
 }
 
-/**
- * Open a run from the fleet list.
- *
- * The list hands back an id rather than a task, so a run that settled and was
- * swept between render and keypress is a no-op instead of a crash. `esc` in the
- * dialog closes it and control returns to the list — which is why the promise
- * is handed back: the list puts the cursor back on the run rather than dropping
- * the reader at `main`.
- */
-export function openWorkflowFromFleet(id: string, deps: WorkflowMenuDeps): Promise<void> | void {
-  const task = deps.tasks.get(id);
-  const ctx = deps.getCtx();
-  if (task === undefined || ctx === undefined) return;
-  return showWorkflowDialog(ctx, task, deps);
-}
-
-/** `/agents → Workflows` — list this session's runs, open one. */
+/** `/config:subagents → Workflows` — list this session's retained runs, open one. */
 export async function showWorkflowsMenu(
   ctx: ExtensionCommandContext,
   deps: WorkflowMenuDeps,

@@ -12,7 +12,7 @@ being eligible for release automation.
 - `pi-spark` owns the compact editor/footer, transcript folding, credits, presets,
   recap, metrics, resources, and session/terminal naming.
 - `pi-blackhole` owns deterministic compaction, observational memory, and recall.
-- `@maplezzk/pi-subagents` owns the unified Agent/RPC/Fleet runtime, agent policy,
+- `@maplezzk/pi-subagents` owns the unified Agent/RPC runtime, agent policy,
   scheduling and lifecycle. `subagents.json` selects embedded or terminal Pi
   execution. It is active in the root profile but remains npm-private.
 - `@maplezzk/pi-workflow` owns the independent workflow DSL, orchestration,
@@ -35,7 +35,16 @@ all owned work.
 
 ### Capability packages
 
-- `pi-distill`: tool-output distillation.
+- `pi-distill`: source-archived tool-output summaries and opt-in verified diagnostic evidence. A single result router owns both strategies; native `read` performs readback. Fusion adapters preserve mutations and only process eligible command-log suffixes; no private cross-capability source imports.
+- `@maplezzk/pi-advisor`: explicit, configured second-opinion model calls via the
+  native model registry; no subagent or workflow runtime ownership.
+- `@maplezzk/pi-todo`: branch-replayed task state and an owned task widget.
+- `@maplezzk/pi-ask-user-question`: structured questionnaires using temporary TUI
+  overlays or RPC-native dialogs; non-UI sessions do not expose the tool.
+- `pi-action-fusion`: opt-in native `edit`/`write` replacements with a follow-up
+  shell command; no summarization or automatic compaction. Other replacements of
+  those tools must not be co-loaded. Internal commands belong to the outer
+  mutation's tool events, not a separate Bash tool call.
 - `@maplezzk/pi-web-search`: search, URL Context and bounded fetch.
 - `pi-models-discovery`: dynamic model discovery.
 - `pi-rewind`: file/session checkpoints.
@@ -100,11 +109,16 @@ No new shared model-request wrapper or global workflow executor registry is adde
 
 - Spark alone replaces the root editor/footer and owns core transcript folding,
   `/rename` and naming configuration.
-- Unified subagents owns its agent widget/Fleet and result presentation.
+- Unified subagents owns its above-editor AgentWidget, `/config:subagents`
+  management/configuration panel and result presentation. Backend selection lives
+  inside Settings; no `/agents` alias, command arguments or FleetView replacement.
 - Workflow owns run notices and commands. Child dialogs are serialized and scoped;
   children cannot replace root editor/footer/widgets. The RPIV lane dock is not
   bundled.
 - I18n owns the shared notice entry renderer; Distill owns its audit entry renderer.
+- Todo owns only its namespaced task widget. Advisor and question tools use
+  temporary dialogs, never the root editor/footer. SDK children keep their own
+  state and use the existing scoped UI port rather than reaching into root UI.
 
 Domain packages may create temporary modals/overlays or namespaced status entries,
 not claim another package's persistent surfaces. There is no shared product UI host.

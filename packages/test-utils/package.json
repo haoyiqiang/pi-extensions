@@ -6,13 +6,15 @@
   "type": "module",
   "main": "./index.ts",
   "exports": {
-    ".": "./index.ts"
+    ".": "./index.ts",
+    "./rpiv": "./src/rpiv/index.ts"
   },
   "files": [
     "index.ts",
     "src",
     "README.md",
     "README.zh-CN.md",
+    "RPIV-LICENSE",
     "tsconfig.json"
   ],
   "scripts": {
@@ -30,9 +32,12 @@
     "directory": "packages/test-utils"
   },
   "devDependencies": {
+    "@earendil-works/pi-ai": "0.87.1",
     "@earendil-works/pi-coding-agent": "0.87.1",
+    "@earendil-works/pi-tui": "0.87.1",
     "@types/node": "24.12.4",
     "tsx": "4.23.1",
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "vitest": "5.0.1"
   }
 }

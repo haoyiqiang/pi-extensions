@@ -1,4 +1,3 @@
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createStandardTerminalExecutionBackend } from "./backends/terminal/backend.js";
 import { createEmbeddedExecutionBackend } from "./backends/embedded-adapter.js";
 import { runAgent } from "./agent-runner.js";
@@ -22,11 +21,12 @@ export function createProductExecutionBackend(options: {
       },
     }),
     terminal: () => createStandardTerminalExecutionBackend(),
-    selectBackend: (ctx?: ExtensionContext) => {
+    selectBackend: (ctx, _cwd, request) => {
       const cwd = options.cwd ?? ctx?.cwd ?? process.cwd();
-      return options.backend
-        ?? loadSettings(cwd, { projectTrusted: resolveProjectTrusted(cwd, { context: ctx }) }).backend
-        ?? "embedded";
+      if (options.backend) return options.backend;
+      if (request?.runtimePolicy) return request.runtimePolicy.settings.backend ?? "embedded";
+      if (request?.extensionDefaults) return request.extensionDefaults.settings.backend ?? "embedded";
+      return loadSettings(cwd, { projectTrusted: resolveProjectTrusted(cwd, { context: ctx }) }).backend ?? "embedded";
     },
   });
 }

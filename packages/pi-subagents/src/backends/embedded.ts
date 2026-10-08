@@ -30,6 +30,8 @@ import { createNestedSubagentTools, getMaxSubagentDepth, type NestedAgentManager
 import { buildAgentPrompt, type PromptExtras } from "../prompts.js";
 import { resolveProjectTrusted } from "../project-trust.js";
 import type { SubagentsRuntimePolicy } from "../runtime-policy.js";
+import { ordinaryExtensionsDisabled, resolveExtensions, snapshotExtensionDefaults, type ExtensionDefaultsSnapshot } from "../extension-defaults.js";
+import { loadSettings } from "../settings.js";
 import { preloadSkills } from "../skill-loader.js";
 import { createEmbeddedInvocationPolicy, embeddedStructuredTools, invokeEmbeddedSession, observeEmbeddedActivity, rememberEmbeddedPolicy,
   type EmbeddedInvocationOptions, type EmbeddedInvocationResult } from "./embedded-invocation.js";
@@ -149,7 +151,7 @@ export function extensionCanonicalNames(extPath: string): string[] {
  * rather than their post-staging `Extension.path`.
  */
 export function parseExtensionsSpec(
-  entries: string[],
+  entries: readonly string[],
   cwd: string,
 ): { names: Set<string>; paths: string[]; wildcard: boolean } {
   const names = new Set<string>();
@@ -476,6 +478,10 @@ export interface RunOptions {
    * emit project_trust for `.pi/agents`/`.pi/subagents.json` alone.
    */
   projectTrusted?: boolean;
+  /** Immutable ordinary-extension selection; supplied by queue admission. */
+  resolvedExtensions?: import("../types.js").ResolvedExtensionRule;
+  /** Branch defaults for legacy callers that do not supply a full runtime policy. */
+  extensionDefaults?: ExtensionDefaultsSnapshot;
   /** Invocation-owned config defaults captured by the caller. */
   runtimePolicy?: SubagentsRuntimePolicy;
   /** Called on tool start/end with activity info. */
@@ -570,7 +576,7 @@ export async function runAgent(
   // They differ only for SpawnOptions.cwd spawns (config stays with the parent).
   const configCwd = options.runtimePolicy?.configCwd ?? options.configCwd ?? effectiveCwd;
   const agentDir = getAgentDir();
-  const projectTrusted = options.runtimePolicy?.projectTrusted ?? resolveProjectTrusted(configCwd, {
+  const projectTrusted = options.runtimePolicy?.projectTrusted ?? options.extensionDefaults?.projectTrusted ?? resolveProjectTrusted(configCwd, {
     projectTrusted: options.projectTrusted,
     context: ctx,
     agentDir,
@@ -578,7 +584,8 @@ export async function runAgent(
   const agentConfig = resolveChildAgentConfig(type, options.agentConfig, {
     configCwd,
     projectTrusted,
-    disableDefaultAgents: options.runtimePolicy?.settings.disableDefaultAgents,
+    disableDefaultAgents: options.runtimePolicy?.settings.disableDefaultAgents ?? options.extensionDefaults?.settings.disableDefaultAgents,
+    settings: options.runtimePolicy?.settings ?? options.extensionDefaults?.settings,
   });
   if (!projectTrusted && !agentConfig) {
     throw new Error(i18n.t("projectTrust.unknownGlobalAgent", { type }));
@@ -603,6 +610,17 @@ export async function runAgent(
     structuredOutput: options.structuredOutput,
   });
 
+  const isolated = options.isolated ?? agentConfig?.isolated ?? false;
+  const extensionDefaults = snapshotExtensionDefaults(configCwd, projectTrusted,
+    options.runtimePolicy ? options.runtimePolicy.settings
+      : options.extensionDefaults ? options.extensionDefaults.settings
+        : options.resolvedExtensions !== undefined ? {} : loadSettings(configCwd, { projectTrusted }));
+  const extensions = resolveExtensions({
+    agent: agentConfig,
+    resolvedExtensions: options.resolvedExtensions,
+    defaultExtensions: extensionDefaults.settings.defaultExtensions,
+    isolated,
+  });
   const env = await detectEnv(options.pi, effectiveCwd);
 
   // Get parent system prompt for append-mode agents
@@ -613,12 +631,11 @@ export async function runAgent(
   if (options.worktreeBase) extras.worktreeBase = options.worktreeBase;
   if (options.workflow && !options.structuredOutput) extras.workflowChild = true;
 
-  // Resolve extensions/skills: isolated overrides to false
-  const extensions = options.isolated ? false : config.extensions;
+  // Isolation independently vetoes ordinary extensions and skills.
   // Nulling excludes under isolated also suppresses the orphaned-exclude warning —
   // isolation is an intentional override, not a misconfiguration.
-  const excludeExtensions = options.isolated ? undefined : config.excludeExtensions;
-  const skills = options.isolated ? false : config.skills;
+  const excludeExtensions = isolated ? undefined : config.excludeExtensions;
+  const skills = isolated ? false : config.skills;
 
   // Skill preloading: when skills is string[], preload their content into prompt
   if (Array.isArray(skills)) {
@@ -687,9 +704,9 @@ export async function runAgent(
   // which extensions load. `ext:foo` against an extension that `extensions:` excluded
   // is an orphan and warns after reload. `isolated` means no extension tools at all.
   const { extNames, narrowing } = parseExtSelectors(
-    options.isolated ? [] : (agentConfig?.extSelectors ?? []),
+    isolated ? [] : (agentConfig?.extSelectors ?? []),
   );
-  const noExtensions = extensions === false;
+  const noExtensions = ordinaryExtensionsDisabled(extensions);
 
   const extensionsSpec = Array.isArray(extensions)
     ? parseExtensionsSpec(extensions, configCwd)
@@ -857,7 +874,7 @@ export async function runAgent(
   const nestedRuntime = options.nestedRuntime && options.nestedRuntime.depth < effectiveMaxDepth
     ? options.nestedRuntime
     : undefined;
-  const nestedTools = agentConfig?.allowedSubagents && nestedRuntime && !options.isolated
+  const nestedTools = agentConfig?.allowedSubagents && nestedRuntime && !isolated
     ? createNestedSubagentTools({
         manager: nestedRuntime.manager,
         pi: options.pi,
@@ -867,6 +884,7 @@ export async function runAgent(
         allowedSubagents: agentConfig.allowedSubagents,
         configCwd,
         runtimePolicy: options.runtimePolicy,
+        extensionDefaults,
       })
     : [];
   const nestedToolNames = new Set(nestedTools.map(tool => tool.name));

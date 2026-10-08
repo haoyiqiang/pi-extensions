@@ -4,17 +4,17 @@
  * 通过 Pi 的工具事件处理所有可扩展工具的结果，并在会话启动时原地扩展
  * 最终生效工具的参数 schema。不注册同名工具，也不争夺工具所有权。
  *
- * 所有工具统一使用 outputRequest：严格传入 RAW 时返回原始输出；其他非空
- * outputRequest 表示调用提炼模型，具体保留内容由 outputRequest 决定。
- * 提炼结果超过 maxChars 时写入临时文件，只返回文件路径；最终返回内容
- * 超过 maxOutputChars 时同样写入临时文件，只把文件指针交给 Agent。
+ * 普通已启用工具要求 outputRequest；Fusion 诊断范围使用可选参数。
+ * 严格 RAW 保留收到的 content；其他请求控制摘要或证据关注重点。
+ * 所有有损替换先归档原文；诊断日志可选择可核验的证据策略。
+ * maxChars/maxOutputChars 仅控制成功替换预算，不截断 RAW 或失败回退。
  *
  * 配置文件优先；旧环境变量继续兼容：
  * - ~/.pi/agent/extensions/pi-distill/config.json
  * - PI_DISTILL_MODEL=provider/model
  * - PI_DISTILL_MIN_CHARS=触发提炼的最小输出字符数，默认 200
- * - PI_DISTILL_MAX_CHARS=提炼结果超过此字符数时写入文件，默认 100000
- * - PI_DISTILL_MAX_OUTPUT_CHARS=最终返回内容超过此字符数时写入文件，默认 10000
+ * - PI_DISTILL_MAX_CHARS=成功替换的正文预算，默认 100000
+ * - PI_DISTILL_MAX_OUTPUT_CHARS=含来源的完整替换预算，默认 10000
  * - PI_DISTILL_TIMEOUT_SECONDS=模型调用最长等待秒数，默认 10
  * - PI_DISTILL_TIMEOUT_RETRY_COUNT=提炼超时后的额外重试次数，默认 1；0 表示不重试
  * - PI_DISTILL_ERROR_RETRY_COUNT=其他异常后的额外重试次数，默认 1；0 表示不重试
@@ -22,7 +22,7 @@
  * - 旧 PI_BASH_SUMMARY_* 变量作为兼容回退
  */
 
-import { complete } from "@earendil-works/pi-ai/compat";
+import type { complete } from "@earendil-works/pi-ai/compat";
 import type {
   ExtensionAPI,
   ExtensionCommandContext,
@@ -35,11 +35,13 @@ import {
   appendDistillFallbackAudit,
   registerDistillFallbackRenderer,
 } from "./fallback-renderer.ts";
-import { getTextContent, hasNonTextContent, limitReturnedToolResult } from "./output-limit.ts";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { cleanupSessionResources, uuidv7, type Api, type Context, type Model } from "@earendil-works/pi-ai";
+import { getTextContent, hasNonTextContent } from "./output-limit.ts";
+import { updateJsonObjectAtomic, resolveAgentDir } from "pi-extensions-config";
+import { archiveSource, type SourceArtifact } from "./archive.ts";
+import { buildEvidencePrompt, validateEvidence, formatEvidence } from "./evidence.ts";
+import { processingConfig, processingEnabled, isMutationTool, processingReceipt, processingI18n } from "./processing-config.ts";
+import { selectSourceScope, loadSource, isDiagnosticCommand, LIKELY_SECRET } from "./source.ts";
+import { cleanupSessionResources, uuidv7, type Api, type Context, type Model, type Usage } from "@earendil-works/pi-ai";
 import { NOTICE_TAG_COLOR, installNoticeRenderer, notifyWithSource, type NoticeColor, type NoticeSource } from "pi-extensions-i18n";
 import {
   buildSummaryPrompt,
@@ -49,7 +51,6 @@ import {
   decideOutputSummary,
   getDistillConfigPath,
   isRawSummary,
-  isDistillToolEnabled,
   loadDistillConfig,
   MIN_EFFECTIVE_COMPRESSION_RATIO,
   shouldFallbackToOriginal,
@@ -57,7 +58,6 @@ import {
   type DistillConfigFile,
   type DistillRenderConfig,
   type DistillToolConfig,
-  type OutputSummaryDecision,
 } from "./summary-utils.ts";
 import { resolveDistillRuntimeModel } from "./model-choice.ts";
 import { listDistillSelectableModels, selectDistillModel } from "./model-picker.ts";
@@ -67,6 +67,7 @@ import { i18n } from "./i18n.ts";
 type ToolResult = {
   content: Array<{ type?: string; text?: string }>;
   isError?: boolean;
+  usage?: Usage;
   details?: {
     fullOutputPath?: string;
     [key: string]: unknown;
@@ -91,10 +92,9 @@ type PendingDistillCall = {
 
 type OutputRequestSchemaState = {
   hadProperties: boolean;
-  hadOutputRequest: boolean;
-  originalOutputRequest?: unknown;
   hadRequired: boolean;
-  originalRequired?: unknown;
+  addedRequired: boolean;
+  injectedProperty: unknown;
 };
 
 const outputRequestSchemaStates = new WeakMap<object, OutputRequestSchemaState>();
@@ -103,10 +103,10 @@ type ToolResultEventPatch = {
   content?: ToolResultEvent["content"];
   details?: unknown;
   isError?: boolean;
+  usage?: Usage;
 };
 
-export const OUTPUT_REQUEST_DESCRIPTION = i18n.t("outputRequestDescription");
-const OUTPUT_REQUEST_SYSTEM_GUIDELINE = i18n.t("outputRequestSystemGuideline");
+export const OUTPUT_REQUEST_DESCRIPTION = processingI18n.t("outputRequest");
 
 /** 本扩展的提示标签；短且唯一，便于在会话里定位来源。 */
 const NOTICE_TAG = "distill";
@@ -136,6 +136,7 @@ type SummaryUsage = {
   reasoning?: number;
   cacheRead?: number;
   cacheWrite?: number;
+  cacheWrite1h?: number;
   totalTokens?: number;
   cost?: {
     input?: number;
@@ -157,6 +158,11 @@ type SummaryResult = {
   attempts?: number;
   jsonRepairAttempted?: boolean;
   jsonRepairSucceeded?: boolean;
+};
+
+type SummaryAttemptState = {
+  usage?: SummaryUsage;
+  jsonRepairAttempted?: boolean;
 };
 
 type SummaryCompletion = (...args: Parameters<typeof complete>) => ReturnType<typeof complete>;
@@ -227,8 +233,8 @@ class SummaryResponseFormatError extends Error {
 /** JSON 修复失败：不再触发完整重试，避免重复总结改写事实。 */
 class SummaryJsonRepairError extends Error {
   readonly jsonRepairAttempted = true;
-
-  constructor(message: string) {
+  attempts?: number;
+  constructor(message: string, public usage?: SummaryUsage) {
     super(message);
     this.name = "SummaryJsonRepairError";
   }
@@ -286,6 +292,7 @@ function normalizeSummaryUsage(value: unknown): SummaryUsage | undefined {
     reasoning: toFiniteNumber(record.reasoning),
     cacheRead: toFiniteNumber(record.cacheRead),
     cacheWrite: toFiniteNumber(record.cacheWrite),
+    cacheWrite1h: toFiniteNumber(record.cacheWrite1h),
     totalTokens: toFiniteNumber(record.totalTokens),
   };
   if (record.cost && typeof record.cost === "object" && !Array.isArray(record.cost)) {
@@ -307,7 +314,7 @@ function normalizeSummaryUsage(value: unknown): SummaryUsage | undefined {
 function mergeSummaryUsage(first: SummaryUsage | undefined, second: SummaryUsage | undefined): SummaryUsage | undefined {
   if (!first && !second) return undefined;
   const merged: SummaryUsage = {};
-  for (const key of ["input", "output", "reasoning", "cacheRead", "cacheWrite", "totalTokens"] as const) {
+  for (const key of ["input", "output", "reasoning", "cacheRead", "cacheWrite", "cacheWrite1h", "totalTokens"] as const) {
     const value = (first?.[key] ?? 0) + (second?.[key] ?? 0);
     if ((first?.[key] !== undefined || second?.[key] !== undefined) && Number.isFinite(value)) {
       merged[key] = value;
@@ -340,6 +347,28 @@ function getSummaryUsageDiagnostics(usage: SummaryUsage | undefined): Pick<
   };
 }
 
+function withProcessingUsage(result: ToolResult, usage?: SummaryUsage): ToolResult {
+  if (!usage || (!Object.values(usage).some((value) => typeof value === "number") && usage.cost?.total === undefined)) return result;
+  const old = result.usage;
+  const total: Usage = {
+    input: (old?.input ?? 0) + (usage.input ?? 0),
+    output: (old?.output ?? 0) + (usage.output ?? usage.reasoning ?? 0),
+    cacheRead: (old?.cacheRead ?? 0) + (usage.cacheRead ?? 0),
+    cacheWrite: (old?.cacheWrite ?? 0) + (usage.cacheWrite ?? 0),
+    totalTokens: (old?.totalTokens ?? 0) + (usage.totalTokens ?? ((usage.input ?? 0) + (usage.output ?? usage.reasoning ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0))),
+    cost: {
+      input: (old?.cost.input ?? 0) + (usage.cost?.input ?? 0),
+      output: (old?.cost.output ?? 0) + (usage.cost?.output ?? 0),
+      cacheRead: (old?.cost.cacheRead ?? 0) + (usage.cost?.cacheRead ?? 0),
+      cacheWrite: (old?.cost.cacheWrite ?? 0) + (usage.cost?.cacheWrite ?? 0),
+      total: (old?.cost.total ?? 0) + (usage.cost?.total ?? 0),
+    },
+  };
+  if (old?.reasoning !== undefined || usage.reasoning !== undefined) total.reasoning = (old?.reasoning ?? 0) + (usage.reasoning ?? 0);
+  if (old?.cacheWrite1h !== undefined || usage.cacheWrite1h !== undefined) total.cacheWrite1h = (old?.cacheWrite1h ?? 0) + (usage.cacheWrite1h ?? 0);
+  return { ...result, usage: total };
+}
+
 function getTokenCompressionDiagnostics(
   originalOutput: string,
   finalOutput: string,
@@ -367,6 +396,7 @@ type DistillSessionStats = {
   originalOutputChars: number;
   summaryChars: number;
   summaryDurationMs: number;
+  modelOperations: number;
   summaryInputTokens: number;
   summaryOutputTokens: number;
   summaryReasoningTokens: number;
@@ -396,6 +426,7 @@ function createDistillSessionStats(): DistillSessionStats {
     originalOutputChars: 0,
     summaryChars: 0,
     summaryDurationMs: 0,
+    modelOperations: 0,
     summaryInputTokens: 0,
     summaryOutputTokens: 0,
     summaryReasoningTokens: 0,
@@ -423,9 +454,9 @@ function recordDistillSessionResult(
   const status = typeof details?.outputSummaryStatus === "string"
     ? details.outputSummaryStatus
     : undefined;
-  if (status === "summarized") stats.summarizedResults += 1;
+  if (status === "summarized" || status === "evidence-verified") stats.summarizedResults += 1;
   else if (status === "summary-fallback") stats.fallbackResults += 1;
-  else if (status === "summary-failed") stats.failedResults += 1;
+  else if (status === "summary-failed" || status === "evidence-failed" || status === "archive-failed") stats.failedResults += 1;
   else if (status === "full-output") stats.rawResults += 1;
   else if (status === "non-text-output") stats.nonTextResults += 1;
   else stats.skippedResults += 1;
@@ -435,7 +466,9 @@ function recordDistillSessionResult(
   if (attempts !== undefined) stats.retryCount += Math.max(0, attempts - 1);
   stats.originalOutputChars += getDetailNumber(details, "originalOutputChars") ?? 0;
   stats.summaryChars += getDetailNumber(details, "summaryChars") ?? 0;
-  stats.summaryDurationMs += getDetailNumber(details, "summaryDurationMs") ?? 0;
+  const duration = getDetailNumber(details, "summaryDurationMs");
+  stats.summaryDurationMs += duration ?? 0;
+  if (duration !== undefined) stats.modelOperations += 1;
   stats.summaryInputTokens += getDetailNumber(details, "summaryInputTokens") ?? 0;
   stats.summaryOutputTokens += getDetailNumber(details, "summaryOutputTokens") ?? 0;
   stats.summaryReasoningTokens += getDetailNumber(details, "summaryReasoningTokens") ?? 0;
@@ -449,6 +482,9 @@ function recordDistillSessionResult(
     getDetailNumber(details, "summaryInputTokens") !== undefined
     || getDetailNumber(details, "summaryOutputTokens") !== undefined
     || getDetailNumber(details, "summaryTotalTokens") !== undefined
+    || getDetailNumber(details, "summaryReasoningTokens") !== undefined
+    || getDetailNumber(details, "summaryCacheReadTokens") !== undefined
+    || getDetailNumber(details, "summaryCacheWriteTokens") !== undefined
   ) {
     stats.hasSummaryTokenUsage = true;
   }
@@ -487,10 +523,7 @@ function formatDistillSessionStats(stats: DistillSessionStats): string {
     ? (stats.originalOutputChars / stats.summaryChars).toFixed(2)
     : "-";
   const cost = stats.hasSummaryCost ? stats.summaryCost.toFixed(6) : i18n.t("statsUnavailable");
-  const summaryOperations = stats.summarizedResults
-    + stats.fallbackResults
-    + stats.failedResults
-    + stats.rawResults;
+  const summaryOperations = stats.modelOperations;
   const averageDurationMs = summaryOperations > 0
     ? Math.round(stats.summaryDurationMs / summaryOperations)
     : 0;
@@ -577,91 +610,6 @@ function getCompressionDiagnostics(
   };
 }
 
-function getSkippedSummaryDiagnostics(
-  decision: OutputSummaryDecision,
-  outputChars: number | undefined,
-  config: BashSummaryConfig,
-): Pick<SummaryDiagnostics, "outputSummaryAnomalies" | "outputSummaryAdvice" | "missedCompressionRatio"> {
-  if (
-    outputChars === undefined ||
-    outputChars < config.minChars * config.missedCompressionRatio
-  ) {
-    return {};
-  }
-
-  if (decision.intent === "none") {
-    return {
-      missedCompressionRatio: config.missedCompressionRatio,
-      outputSummaryAnomalies: ["missed-compression"],
-      outputSummaryAdvice:
-        `Warning: this output has ${outputChars} chars, reaching ${config.missedCompressionRatio}x the summary threshold, but no summary prompt was provided. Use a non-RAW prompt unless the exact original is required; use strict RAW in that case.`,
-    };
-  }
-
-  if (decision.intent === "full") {
-    return {
-      missedCompressionRatio: config.missedCompressionRatio,
-      outputSummaryAdvice:
-        `This output has ${outputChars} chars, reaching ${config.missedCompressionRatio}x the summary threshold. RAW handling was selected, so the original was preserved without summarization. Use a compression-oriented prompt next time if the exact original is not required; use strict RAW in that case.`,
-    };
-  }
-
-  return {};
-}
-
-function buildAgentDiagnosticText(diagnostics: SummaryDiagnostics): string | undefined {
-  if (!diagnostics.outputSummaryAdvice && !diagnostics.outputSummaryAnomalies?.length) {
-    return undefined;
-  }
-
-  const lines = [
-    diagnostics.outputSummaryAnomalies?.length
-      ? "[Output handling error — action required]"
-      : "[Output handling diagnostics]",
-  ];
-  if (diagnostics.originalOutputChars !== undefined) {
-    lines.push(`Original chars: ${diagnostics.originalOutputChars}`);
-  }
-  if (diagnostics.summaryChars !== undefined) {
-    lines.push(`Summary chars: ${diagnostics.summaryChars}`);
-  }
-  if (diagnostics.compressionRatio !== undefined) {
-    lines.push(`Compression ratio: ${diagnostics.compressionRatio.toFixed(2)}x`);
-  }
-  if (diagnostics.compressionSavedPercent !== undefined) {
-    lines.push(`Context saved: ${diagnostics.compressionSavedPercent.toFixed(1)}%`);
-  }
-  if (diagnostics.missedCompressionRatio !== undefined) {
-    lines.push(`Long-output threshold: ${diagnostics.missedCompressionRatio.toFixed(1)}x`);
-  }
-  if (diagnostics.outputSummaryAnomalies?.length) {
-    lines.push(`Anomalies: ${diagnostics.outputSummaryAnomalies.join(", ")}`);
-  }
-  if (diagnostics.outputSummaryAdvice) {
-    lines.push(`Advice: ${diagnostics.outputSummaryAdvice}`);
-  }
-  return lines.join("\n");
-}
-
-async function getCompleteOutput(result: ToolResult): Promise<string> {
-  const fullOutputPath = result.details?.fullOutputPath;
-  if (fullOutputPath) {
-    return readFile(fullOutputPath, "utf8");
-  }
-  return getTextContent(result);
-}
-
-async function writeSummaryFile(summary: string): Promise<string> {
-  const directory = join(tmpdir(), "pi-distill");
-  await mkdir(directory, { recursive: true });
-  const filePath = join(
-    directory,
-    `summary-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`,
-  );
-  await writeFile(filePath, summary, "utf8");
-  return filePath;
-}
-
 function parseSummaryResponse(text: string, summaryModel: string): SummaryResult {
   const normalizedText = unwrapJsonCodeFence(text);
   let payload: unknown;
@@ -730,12 +678,41 @@ function unwrapJsonCodeFence(text: string): string {
   return match?.[2]?.trim() ?? trimmed;
 }
 
+class PendingCancellationError extends Error {
+  constructor() { super("processing-cancellation-unconfirmed"); }
+}
+
+async function abortable<T>(work: () => Promise<T>, signal: AbortSignal): Promise<T> {
+  signal.throwIfAborted();
+  let settled = false;
+  const request = work().then((value) => { settled = true; return value; }, (error) => { settled = true; throw error; });
+  let onAbort!: () => void;
+  const interrupted = new Promise<never>((_resolve, reject) => {
+    // Give signal-aware requests one event-loop turn to settle; never start another
+    // billable request when cancellation of the previous transport is unconfirmed.
+    onAbort = () => setImmediate(() => reject(settled ? signal.reason : new PendingCancellationError()));
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) onAbort();
+  });
+  try {
+    const value = await Promise.race([request, interrupted]);
+    signal.throwIfAborted();
+    return value;
+  } finally { signal.removeEventListener("abort", onAbort); }
+}
+
 async function completeSummaryMessage(
   completion: SummaryCompletion,
   model: SummaryCompletionModel,
   text: string,
   options: SummaryCompletionOptions,
+  recordUsage?: (usage: SummaryUsage | undefined) => void,
 ): Promise<{ text: string; usage: SummaryUsage | undefined }> {
+  options?.signal?.throwIfAborted();
+  if (model.contextWindow && Number.isFinite(model.contextWindow) &&
+      estimateHeuristicTokens(text) + (options?.maxTokens ?? 0) + 1024 >= model.contextWindow) {
+    throw new Error("model-request-over-context-budget");
+  }
   const response = await completion(
     model,
     {
@@ -750,10 +727,15 @@ async function completeSummaryMessage(
     options,
   );
 
-  if (response.stopReason === "error" || response.stopReason === "aborted") {
+  // Publish reported usage before validation/cancellation can leave this request
+  // pending. The outer deadline must retain earlier responses during repair.
+  const usage = normalizeSummaryUsage(response.usage);
+  recordUsage?.(usage);
+  if (options?.signal?.aborted) throw new SummaryAttemptError("processing-aborted", usage);
+  if (response.stopReason && response.stopReason !== "stop") {
     throw new SummaryAttemptError(
       response.errorMessage ?? `Summarizer stopped with reason: ${response.stopReason}`,
-      normalizeSummaryUsage(response.usage),
+      usage,
     );
   }
 
@@ -764,16 +746,16 @@ async function completeSummaryMessage(
     .trim();
 
   if (!rawResponse) {
-    throw new SummaryAttemptError("Summarizer returned no text", normalizeSummaryUsage(response.usage));
+    throw new SummaryAttemptError("Summarizer returned no text", usage);
   }
-  return { text: rawResponse, usage: normalizeSummaryUsage(response.usage) };
+  return { text: rawResponse, usage };
 }
 
 /**
  * 像 pi-spark recap 一样走注册表发旁路请求。
  * 鉴权和 baseUrl 由 ModelRuntime.prepareRequest 解析；openai-codex 使用独立会话，避免复用主连接。
  */
-function completeBackground(
+async function completeBackground(
   ctx: Pick<ExtensionContext, "modelRegistry">,
   model: Model<Api>,
   context: Context,
@@ -784,7 +766,7 @@ function completeBackground(
   }
   const sessionId = uuidv7();
   try {
-    return ctx.modelRegistry.streamSimple(model, context, { ...options, sessionId }).result();
+    return await ctx.modelRegistry.streamSimple(model, context, { ...options, sessionId }).result();
   } finally {
     cleanupSessionResources(sessionId);
   }
@@ -796,7 +778,9 @@ async function summarizeOutput(
   config: BashSummaryConfig,
   context: DistillExecutionContext,
   signal: AbortSignal,
+  attempt: SummaryAttemptState,
   completion?: SummaryCompletion,
+  evidenceIsError?: boolean,
 ): Promise<SummaryResult> {
   const configuredReference = config.modelProvider && config.modelId
     ? `${config.modelProvider}/${config.modelId}`
@@ -812,11 +796,9 @@ async function summarizeOutput(
       : i18n.t("sessionModelMissing"));
   }
 
-  const auth = await context.ctx.modelRegistry.getApiKeyAndHeaders(model);
-  if (auth.ok === false) throw new Error(`Summarizer authentication failed: ${auth.error}`);
-
   const completionOptions = {
-    maxTokens: Math.max(256, Math.ceil(config.maxChars / 2)),
+    maxTokens: Math.min(model.maxTokens || 8192, evidenceIsError === undefined ? 8192 : 4096, Math.max(256, Math.ceil(config.maxChars / 2))),
+    cacheRetention: evidenceIsError === undefined ? undefined : "none",
     onPayload: addSummaryJsonResponseFormat,
     signal,
   } satisfies SummaryCompletionOptions;
@@ -826,18 +808,29 @@ async function summarizeOutput(
     requestContext: Context,
     requestOptions?: SummaryCompletionOptions,
   ) => completeBackground(context.ctx, requestModel, requestContext, requestOptions));
+  const recordUsage = (usage: SummaryUsage | undefined) => {
+    attempt.usage = mergeSummaryUsage(attempt.usage, usage);
+  };
+  signal.throwIfAborted();
   const { text: rawResponse, usage } = await completeSummaryMessage(
     request,
     model,
-    [
-      buildSummarySystemPrompt(),
-      "",
-      buildSummaryUserPrompt(prompt, output, context.originalUserPrompt),
-    ].join("\n"),
+    evidenceIsError === undefined
+      ? [buildSummarySystemPrompt(), "", buildSummaryUserPrompt(prompt, output, context.originalUserPrompt)].join("\n")
+      : buildEvidencePrompt(output, prompt),
     completionOptions,
+    recordUsage,
   );
-
+  signal.throwIfAborted();
   const summaryModel = `${model.provider}/${model.id}`;
+  if (evidenceIsError !== undefined) {
+    const checked = validateEvidence(rawResponse, output, evidenceIsError);
+    if (!checked.ok) throw new SummaryAttemptError(`evidence-rejected:${checked.reason}`, usage);
+    const text = formatEvidence(checked.evidence, checked.uncertain);
+    return { text, summaryChars: text.length, summaryModel, usage, decision: {
+      mode: "SUMMARY", reasonCode: "SELECTED_INFORMATION", reason: "exact-quotes",
+    } };
+  }
   let parsed: SummaryResult;
   let totalUsage = usage;
   try {
@@ -849,16 +842,19 @@ async function summarizeOutput(
 
     // 只修复模型已返回的 JSON：不重新发送工具输出，不重新总结，避免二次总结改写事实。
     let repaired: { text: string; usage: SummaryUsage | undefined };
+    attempt.jsonRepairAttempted = true;
     try {
       repaired = await completeSummaryMessage(
         request,
         model,
         buildJsonRepairPrompt(rawResponse, error.message),
         completionOptions,
+        recordUsage,
       );
     } catch (repairError) {
       throw new SummaryJsonRepairError(
         `Summarizer JSON repair failed: ${repairError instanceof Error ? repairError.message : String(repairError)}`,
+        mergeSummaryUsage(usage, repairError instanceof SummaryAttemptError ? repairError.usage : undefined),
       );
     }
 
@@ -867,22 +863,14 @@ async function summarizeOutput(
     } catch (repairError) {
       throw new SummaryJsonRepairError(
         `Summarizer JSON repair returned an invalid response: ${repairError instanceof Error ? repairError.message : String(repairError)}`,
+        mergeSummaryUsage(usage, repaired.usage),
       );
     }
     parsed.jsonRepairAttempted = true;
     parsed.jsonRepairSucceeded = true;
     totalUsage = mergeSummaryUsage(usage, repaired.usage);
   }
-  if (parsed.decision.mode === "RAW") return { ...parsed, usage: totalUsage };
-  if (parsed.summaryChars <= config.maxChars) return { ...parsed, usage: totalUsage };
-
-  const summaryFilePath = await writeSummaryFile(parsed.text);
-  return {
-    ...parsed,
-    text: `Summary exceeded ${config.maxChars} chars and was written to: ${summaryFilePath}`,
-    summaryFilePath,
-    usage,
-  };
+  return { ...parsed, usage: totalUsage };
 }
 
 async function summarizeOutputWithRetries(
@@ -891,6 +879,7 @@ async function summarizeOutputWithRetries(
   config: BashSummaryConfig,
   context: DistillExecutionContext,
   completion?: SummaryCompletion,
+  evidenceIsError?: boolean,
 ): Promise<SummaryResult> {
   let timeoutRetries = 0;
   let errorRetries = 0;
@@ -915,16 +904,19 @@ async function summarizeOutputWithRetries(
       config.timeoutSeconds * 1000,
     );
     attempts += 1;
+    const attempt: SummaryAttemptState = {};
 
     try {
-      const result = await summarizeOutput(
+      const result = await abortable(() => summarizeOutput(
         prompt,
         output,
         config,
         context,
         attemptController.signal,
+        attempt,
         completion,
-      );
+        evidenceIsError,
+      ), attemptController.signal);
       totalUsage = mergeSummaryUsage(totalUsage, result.usage);
       return {
         ...result,
@@ -934,16 +926,26 @@ async function summarizeOutputWithRetries(
     } catch (error) {
       totalUsage = mergeSummaryUsage(
         totalUsage,
-        error instanceof SummaryAttemptError || error instanceof SummaryRetryError
+        (error instanceof SummaryAttemptError || error instanceof SummaryRetryError || error instanceof SummaryJsonRepairError
           ? error.usage
-          : undefined,
+          : undefined) ?? attempt.usage,
       );
-      if (context.signal?.aborted) {
-        throw new SummaryRetryError("Summarization aborted", attempts, totalUsage);
+      if (context.signal?.aborted || error instanceof PendingCancellationError) {
+        const message = context.signal?.aborted ? "Summarization aborted" : (error as Error).message;
+        if (attempt.jsonRepairAttempted) {
+          const repairError = new SummaryJsonRepairError(message, totalUsage);
+          repairError.attempts = attempts;
+          throw repairError;
+        }
+        throw new SummaryRetryError(message, attempts, totalUsage);
       }
       // 已有响应只需修复 JSON 时，不再重新触发一次完整总结；否则会增加成本，
       // 也可能让第二次总结改写原本已经生成的事实。
-      if (error instanceof SummaryJsonRepairError) throw error;
+      if (error instanceof SummaryJsonRepairError) {
+        error.usage = totalUsage;
+        error.attempts = attempts;
+        throw error;
+      }
       const retryLimit = timedOut ? config.timeoutRetryCount : config.errorRetryCount;
       const retriesUsed = timedOut ? timeoutRetries : errorRetries;
       if (retriesUsed >= retryLimit) {
@@ -983,269 +985,145 @@ export async function processToolResult(
   const prompt = getOutputRequest(context.params);
   const loaded = loadDistillConfig();
   const config = loaded.config;
-  const outputSummaryRender = { ...loaded.render };
-  // Pi may persist raw tool output before this hook runs. This second limit
-  // protects the post-distillation result, including RAW and fallbacks.
-  const maxReturnedChars = config?.maxOutputChars ?? 10_000;
-  const finish = (candidate: ToolResult) => limitReturnedToolResult(candidate, maxReturnedChars);
-  if (loaded.warnings.length > 0) {
-    notifyWithSource({ ctx: context.ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("configWarnings", {
-      warnings: loaded.warnings.join(" "),
-    }) });
-  }
+  const originalText = getTextContent(result);
+  const base: SummaryDiagnostics = {
+    toolExecutionMs,
+    outputSummaryPrompt: prompt || undefined,
+    outputSummaryRender: { ...loaded.render },
+    originalOutputChars: originalText.length,
+  };
+  const retain = (status: string, extra: SummaryDiagnostics = {}): ToolResult => attachDiagnostics(result, {
+    ...base, outputSummaryStatus: status,
+    summaryChars: originalText.length,
+    ...getTokenCompressionDiagnostics(originalText, originalText),
+    ...extra,
+  });
+  if (loaded.warnings.length) notifyWithSource({ ctx: context.ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("configWarnings", { warnings: loaded.warnings.join(" ") }) });
+  if (!loaded.enabled || !config) return retain(loaded.enabled ? "disabled" : "disabled-by-config");
+  if (!processingEnabled(config, context.toolName)) return result;
+  if (hasNonTextContent(result)) return retain("non-text-output");
+  if (isRawSummary(prompt)) return retain("full-output", { outputSummaryIntent: "full" });
+  if (context.signal?.aborted) return retain("summary-failed");
+  if (isObjectRecord(result.details?.distill) && result.details.distill.version === 1) return result;
+  if (result.isError && !config.summarizeErrors) return retain("errors-disabled");
 
-  if (config && loaded.enabled && !isDistillToolEnabled(config, context.toolName)) return result;
+  const settings = processingConfig(config);
+  const scope = selectSourceScope(context.toolName, context.params, result);
+  if (!scope) return retain("not-requested");
+  const evidence = settings.evidence.enabled && Boolean(scope.command && isDiagnosticCommand(scope.command, settings.evidence.commands));
+  // Fusion is evidence-only. Never feed a mutation confirmation or diff into the generic summarizer.
+  if (isMutationTool(context.toolName) && !evidence) return retain("not-requested");
+  if (!evidence && !prompt) return retain("not-requested");
 
-  if (hasNonTextContent(result)) {
-    return attachDiagnostics(result, {
-      toolExecutionMs,
-      outputSummaryPrompt: prompt || undefined,
-      outputSummaryRender,
-      outputSummaryStatus: "non-text-output",
-    });
-  }
-
-  if (!config || !loaded.enabled) {
-    const diagnostics: SummaryDiagnostics = {
-      toolExecutionMs,
-      outputSummaryPrompt: prompt || undefined,
-      outputSummaryRender,
-      outputSummaryStatus: loaded.enabled ? "disabled" : "disabled-by-config",
-      outputSummaryAdvice: loaded.warnings.length > 0
-        ? `Distill is disabled: ${loaded.warnings.join(" ")}`
-        : loaded.enabled
-          ? "Distill is disabled: invalid configuration. Check /config:distill."
-          : "Distill is disabled by configuration.",
-    };
-    const agentDiagnostic = buildAgentDiagnosticText(diagnostics);
-    return finish({
-      ...attachDiagnostics(result, diagnostics),
-      content: agentDiagnostic
-        ? [...result.content, { type: "text", text: agentDiagnostic }]
-        : result.content,
-    });
-  }
-
-  let output: string;
+  let source: Awaited<ReturnType<typeof loadSource>>;
   try {
-    output = await getCompleteOutput(result);
+    source = await loadSource(scope, settings.archive.maxSourceBytes, context.signal);
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    return finish(attachDiagnostics(result, {
-      toolExecutionMs,
-      outputSummaryPrompt: prompt || undefined,
-      outputSummaryRender,
-      outputSummaryStatus: "diagnostic-failed",
-      summaryTriggerMinChars: config.minChars,
-      summaryTriggerMaxChars: null,
-      summaryResultMaxChars: config.maxChars,
-      missedCompressionRatio: config.missedCompressionRatio,
-      outputSummaryError: errorMessage,
-    }));
+    return retain("diagnostic-failed", { outputSummaryError: String(error) });
   }
-
-  const decision = decideOutputSummary(prompt, output, config, result.isError === true);
-  if (!decision.shouldSummarize) {
-    const skippedDiagnostics = getSkippedSummaryDiagnostics(decision, output.length, config);
-    const diagnostics: SummaryDiagnostics = {
-      toolExecutionMs,
-      originalOutputChars: output.length,
-      outputSummaryIntent: decision.intent,
-      outputSummaryPrompt: prompt || undefined,
-      outputSummaryRender,
-      outputSummaryStatus: decision.reason,
-      summaryTriggerMinChars: config.minChars,
-      summaryTriggerMaxChars: null,
-      summaryResultMaxChars: config.maxChars,
-      missedCompressionRatio: config.missedCompressionRatio,
-      ...getTokenCompressionDiagnostics(output, output),
-      ...skippedDiagnostics,
-    };
-    const candidate = {
-      ...attachDiagnostics(result, diagnostics),
-      content: result.content,
-    };
-    return finish(candidate);
+  if (evidence && source.kind === "preview") return retain("incomplete-source");
+  if (evidence && Buffer.byteLength(source.body, "utf8") < settings.evidence.minBytes) return retain("below-threshold");
+  if (!evidence) {
+    const decision = decideOutputSummary(prompt, source.body, config, result.isError === true);
+    if (!decision.shouldSummarize) return retain(decision.reason, { outputSummaryIntent: decision.intent });
   }
+  if (LIKELY_SECRET.test(source.body)) return retain("sensitive-source");
+  if (context.signal?.aborted) return retain("summary-failed");
 
-  const summaryStartedAt = performance.now();
+  const modelRef = config.modelProvider && config.modelId ? `${config.modelProvider}/${config.modelId}` : "";
+  const runtimeModel = resolveDistillRuntimeModel(modelRef, context.ctx.modelRegistry, context.ctx.model);
+  if (runtimeModel?.contextWindow && Number.isFinite(runtimeModel.contextWindow)) {
+    const payload = evidence ? buildEvidencePrompt(source.body, prompt) : buildSummaryPrompt(prompt, source.body, context.originalUserPrompt);
+    const outputReserve = Math.min(runtimeModel.maxTokens || 8192, evidence ? 4096 : 8192, Math.max(256, Math.ceil(config.maxChars / 2)));
+    if (estimateHeuristicTokens(payload) + outputReserve + 1024 >= runtimeModel.contextWindow) return retain("input-over-budget");
+  }
+  let artifact: SourceArtifact;
   try {
-    const summarized = await summarizeOutputWithRetries(
-      prompt,
-      output,
-      config,
-      context,
-      completion,
-    );
-    const summaryDurationMs = Math.round(performance.now() - summaryStartedAt);
-    if (summarized.decision.mode === "RAW") {
-      // RAW 是总结模型的控制哨兵，不是要交给 Agent 的正文；原文仍通过同一条 final limiter。
-      const rawDecision: OutputSummaryDecision = {
-        intent: "full",
-        shouldSummarize: false,
-        reason: "full-output",
-      };
-      const rawDiagnostics = getSkippedSummaryDiagnostics(rawDecision, output.length, config);
-      const diagnostics: SummaryDiagnostics = {
-        originalOutputChars: output.length,
-        summaryChars: output.length,
-        summaryAttempts: summarized.attempts,
-        ...getSummaryUsageDiagnostics(summarized.usage),
-        ...getTokenCompressionDiagnostics(output, output),
-        compressionRatio: 1,
-        compressionSavedPercent: 0,
-        ...rawDiagnostics,
-      };
-      const candidate = {
-        ...attachDiagnostics(result, {
-          toolExecutionMs,
-          summaryDurationMs,
-          outputSummaryIntent: "full",
-          outputSummaryPrompt: prompt || undefined,
-          outputSummaryRender,
-          outputSummaryStatus: "full-output",
-          summaryTriggerMinChars: config.minChars,
-          summaryTriggerMaxChars: null,
-          summaryResultMaxChars: config.maxChars,
-          missedCompressionRatio: config.missedCompressionRatio,
-          summaryModel: summarized.summaryModel,
-          summaryJsonRepairAttempted: summarized.jsonRepairAttempted,
-          summaryJsonRepairSucceeded: summarized.jsonRepairSucceeded,
-          outputSummaryDecisionMode: summarized.decision.mode,
-          outputSummaryReasonCode: summarized.decision.reasonCode,
-          outputSummaryReason: summarized.decision.reason,
-          ...diagnostics,
-        }),
-        content: [{ type: "text", text: output }],
-      };
-      return finish(candidate);
-    }
-    const compressionDiagnostics = getCompressionDiagnostics(
-      decision.intent,
-      output.length,
-      summarized.summaryChars,
-    );
-    const summaryDiagnostics: SummaryDiagnostics = {
-      originalOutputChars: output.length,
-      summaryChars: summarized.summaryChars,
-      summaryAttempts: summarized.attempts,
-      ...getSummaryUsageDiagnostics(summarized.usage),
-      ...getTokenCompressionDiagnostics(output, summarized.text),
-      ...compressionDiagnostics,
+    artifact = await archiveSource(source.body, {
+      agentDir: resolveAgentDir(),
+      sessionId: context.ctx.sessionManager.getSessionId(),
+      kind: source.kind,
+      ...settings.archive,
+      signal: context.signal,
+    });
+  } catch (error) {
+    return retain("archive-failed", { outputSummaryAdvice: processingI18n.t("archiveFailure"), outputSummaryError: String(error) });
+  }
+  const started = performance.now();
+  try {
+    const processed = await summarizeOutputWithRetries(prompt, source.body,
+      evidence ? { ...config, timeoutRetryCount: 0, errorRetryCount: 0 } : config,
+      context, completion, evidence ? result.isError === true : undefined);
+    const diagnostics: SummaryDiagnostics = {
+      summaryDurationMs: Math.round(performance.now() - started),
+      summaryAttempts: processed.attempts,
+      summaryModel: processed.summaryModel,
+      summaryJsonRepairAttempted: processed.jsonRepairAttempted,
+      summaryJsonRepairSucceeded: processed.jsonRepairSucceeded,
+      outputSummaryDecisionMode: processed.decision.mode,
+      outputSummaryReasonCode: processed.decision.reasonCode,
+      outputSummaryReason: processed.decision.reason,
+      ...getSummaryUsageDiagnostics(processed.usage),
     };
-    const agentDiagnostic = buildAgentDiagnosticText(summaryDiagnostics);
-
-    if (shouldFallbackToOriginal(output.length, summarized.summaryChars)) {
-      return finish({
-        ...attachDiagnostics(result, {
-          toolExecutionMs,
-          summaryDurationMs,
-          outputSummaryIntent: decision.intent,
-          outputSummaryPrompt: prompt || undefined,
-          outputSummaryRender,
-          outputSummaryStatus: "summary-fallback",
-          summaryTriggerMinChars: config.minChars,
-          summaryTriggerMaxChars: null,
-          summaryResultMaxChars: config.maxChars,
-          missedCompressionRatio: config.missedCompressionRatio,
-          summaryModel: summarized.summaryModel,
-          summaryJsonRepairAttempted: summarized.jsonRepairAttempted,
-          summaryJsonRepairSucceeded: summarized.jsonRepairSucceeded,
-          outputSummaryDecisionMode: summarized.decision.mode,
-          outputSummaryReasonCode: summarized.decision.reasonCode,
-          outputSummaryReason: summarized.decision.reason,
-          ...summaryDiagnostics,
-          ...getTokenCompressionDiagnostics(output, output),
-        }),
-        content: [{ type: "text", text: output }],
-      });
+    if (context.signal?.aborted) return withProcessingUsage(retain("summary-failed", diagnostics), processed.usage);
+    if (processed.decision.mode === "RAW") return withProcessingUsage(retain("full-output", { ...diagnostics, outputSummaryIntent: "full" }), processed.usage);
+    const mode = evidence ? "evidence" : "summary";
+    const receipt = processingReceipt(mode, processed.text, artifact, result.isError === true);
+    const candidate = scope.project(receipt + source.suffix);
+    const candidateText = getTextContent(candidate);
+    // Measure what actually reaches context, including citations and protected mutation text.
+    if (processed.summaryChars > config.maxChars || candidateText.length > config.maxOutputChars ||
+      shouldFallbackToOriginal(originalText.length, candidateText.length)) {
+      return withProcessingUsage(retain("summary-fallback", { ...diagnostics, outputSummaryAnomalies: ["ineffective-compression"] }), processed.usage);
     }
-
-    return finish({
-      // 输出处理参数只影响结果上下文，不改变原工具的业务执行。
-      // 异常诊断额外作为文本传给 Agent；普通成功总结不增加噪音。
-      content: [
-        { type: "text", text: summarized.text },
-        ...(agentDiagnostic ? [{ type: "text", text: agentDiagnostic }] : []),
-      ],
+    return withProcessingUsage({
+      ...candidate,
       details: {
         ...(result.details ?? {}),
-        toolExecutionMs,
-        summaryDurationMs,
-        outputSummaryIntent: decision.intent,
-        outputSummaryPrompt: prompt || undefined,
-        outputSummaryRender,
-        outputSummaryStatus: "summarized",
-        summaryTriggerMinChars: config.minChars,
-        summaryTriggerMaxChars: null,
-        summaryResultMaxChars: config.maxChars,
-        missedCompressionRatio: config.missedCompressionRatio,
-        summaryModel: summarized.summaryModel,
-        summaryJsonRepairAttempted: summarized.jsonRepairAttempted,
-        summaryJsonRepairSucceeded: summarized.jsonRepairSucceeded,
-        outputSummaryDecisionMode: summarized.decision.mode,
-        outputSummaryReasonCode: summarized.decision.reasonCode,
-        outputSummaryReason: summarized.decision.reason,
-        summaryText: summarized.text,
-        summaryFilePath: summarized.summaryFilePath,
-        ...summaryDiagnostics,
+        ...base,
+        ...diagnostics,
+        outputSummaryStatus: evidence ? "evidence-verified" : "summarized",
+        summaryText: receipt,
+        summaryChars: candidateText.length,
+        ...getCompressionDiagnostics("summary", originalText.length, candidateText.length),
+        ...getTokenCompressionDiagnostics(originalText, candidateText),
+        distill: { version: 1, strategy: mode, source: artifact, verification: evidence ? "exact-quotes" : "none", coverage: "not-guaranteed" },
       },
-    });
+    }, processed.usage);
   } catch (error) {
-    const summaryDurationMs = Math.round(performance.now() - summaryStartedAt);
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    const retryError = error instanceof SummaryRetryError ? error : undefined;
-    // 总结链路任何异常都必须保留原始结果，不能把异常文本替换给 AI。
-    const diagnostics: SummaryDiagnostics = {
-      toolExecutionMs,
-      summaryDurationMs,
-      originalOutputChars: output.length,
-      summaryAttempts: retryError?.attempts,
-      ...getSummaryUsageDiagnostics(retryError?.usage),
-      outputSummaryIntent: decision.intent,
-      outputSummaryPrompt: prompt || undefined,
-      outputSummaryRender,
-      outputSummaryStatus: "summary-failed",
-      summaryTriggerMinChars: config.minChars,
-      summaryTriggerMaxChars: null,
-      summaryResultMaxChars: config.maxChars,
-      missedCompressionRatio: config.missedCompressionRatio,
-      summaryJsonRepairAttempted: error instanceof SummaryJsonRepairError ? true : undefined,
+    const retry = error instanceof SummaryRetryError || error instanceof SummaryJsonRepairError ? error : undefined;
+    return withProcessingUsage(retain(evidence ? "evidence-failed" : "summary-failed", {
+      summaryDurationMs: Math.round(performance.now() - started),
+      summaryAttempts: retry?.attempts,
+      ...getSummaryUsageDiagnostics(retry?.usage),
+      summaryJsonRepairAttempted: error instanceof SummaryJsonRepairError || undefined,
       summaryJsonRepairSucceeded: error instanceof SummaryJsonRepairError ? false : undefined,
-      ...getTokenCompressionDiagnostics(output, output),
-      outputSummaryAnomalies: ["summary-failed"],
-      outputSummaryAdvice: `Summarization failed; the original output was preserved. Check model configuration or authentication. Requests still running after ${config.timeoutSeconds}s are treated as timed out.`,
-      outputSummaryError: errorMessage,
-    };
-    const agentDiagnostic = buildAgentDiagnosticText(diagnostics);
-    const candidate = {
-      ...attachDiagnostics(result, diagnostics),
-      content: agentDiagnostic
-        ? [...result.content, { type: "text", text: agentDiagnostic }]
-        : result.content,
-    };
-    return finish(candidate);
+      outputSummaryError: error instanceof Error ? error.message : String(error),
+      outputSummaryAdvice: processingI18n.t(evidence ? "evidenceRejected" : "processingFailure"),
+    }), retry?.usage);
   }
 }
-
 function restoreOutputRequestParameter(parameters: Record<string, unknown>): boolean {
   const state = outputRequestSchemaStates.get(parameters);
   if (!state) return false;
 
   const properties = parameters.properties;
-  if (state.hadOutputRequest) {
-    if (properties && typeof properties === "object" && !Array.isArray(properties)) {
-      (properties as Record<string, unknown>).outputRequest = state.originalOutputRequest;
+  if (isObjectRecord(properties) && properties.outputRequest === state.injectedProperty) {
+    if (!state.addedRequired && Array.isArray(parameters.required) && parameters.required.includes("outputRequest")) {
+      // Another extension now requires the optional field. Hand it off rather
+      // than leave a required key with no property, or erase its requirement.
+      outputRequestSchemaStates.delete(parameters);
+      return true;
     }
-  } else if (properties && typeof properties === "object" && !Array.isArray(properties)) {
-    delete (properties as Record<string, unknown>).outputRequest;
-    if (!state.hadProperties && Object.keys(properties).length === 0) {
-      delete parameters.properties;
+    delete properties.outputRequest;
+    if (!state.hadProperties && Object.keys(properties).length === 0) delete parameters.properties;
+    if (state.addedRequired && Array.isArray(parameters.required)) {
+      const remaining = parameters.required.filter((key) => key !== "outputRequest");
+      parameters.required = remaining;
+      if (!state.hadRequired && remaining.length === 0) delete parameters.required;
     }
   }
-
-  if (state.hadRequired) parameters.required = state.originalRequired;
-  else delete parameters.required;
+  // Never restore an old complete required array over another extension's changes.
   outputRequestSchemaStates.delete(parameters);
   return true;
 }
@@ -1254,6 +1132,7 @@ function extendOutputRequestParameter(
   tool: ToolInfo,
   enabled: boolean,
   reportWarning: DistillWarningReporter,
+  optional = false,
 ): boolean {
   const parameters = tool.parameters as unknown as Record<string, unknown> | undefined;
   if (!parameters || typeof parameters !== "object" || Array.isArray(parameters)) {
@@ -1277,28 +1156,28 @@ function extendOutputRequestParameter(
     return false;
   }
 
-  if (!outputRequestSchemaStates.has(parameters)) {
-    const currentProperties = parameters.properties as Record<string, unknown> | undefined;
-    outputRequestSchemaStates.set(parameters, {
-      hadProperties,
-      hadOutputRequest: Boolean(currentProperties && Object.prototype.hasOwnProperty.call(currentProperties, "outputRequest")),
-      originalOutputRequest: currentProperties?.outputRequest,
-      hadRequired: Object.prototype.hasOwnProperty.call(parameters, "required"),
-      originalRequired: Array.isArray(parameters.required)
-        ? [...parameters.required]
-        : parameters.required,
-    });
+  const currentProperties = parameters.properties as Record<string, unknown>;
+  let state = outputRequestSchemaStates.get(parameters);
+  if ((Object.hasOwn(currentProperties, "outputRequest") && (!state || currentProperties.outputRequest !== state.injectedProperty)) ||
+      (!state && Array.isArray(parameters.required) && parameters.required.includes("outputRequest"))) {
+    reportWarning(processingI18n.t("schemaCollision", { tool: tool.name }));
+    return false;
   }
-
-  (parameters.properties as Record<string, unknown>).outputRequest = {
-    type: "string",
-    description: OUTPUT_REQUEST_DESCRIPTION,
-  };
-  const required = Array.isArray(parameters.required)
-    ? parameters.required.filter((value): value is string =>
-        typeof value === "string" && value !== "outputRequest")
-    : [];
-  parameters.required = [...required, "outputRequest"];
+  if (!state) {
+    state = { hadProperties, hadRequired: Object.hasOwn(parameters, "required"), addedRequired: false, injectedProperty: {
+      type: "string", minLength: 1, pattern: "\\S", description: processingI18n.t("outputRequest"),
+    } };
+    outputRequestSchemaStates.set(parameters, state);
+  }
+  currentProperties.outputRequest = state.injectedProperty;
+  const required = Array.isArray(parameters.required) ? [...parameters.required] : [];
+  if (optional && state.addedRequired) {
+    parameters.required = required.filter((value) => value !== "outputRequest");
+    state.addedRequired = false;
+  } else if (!optional && !required.includes("outputRequest")) {
+    parameters.required = [...required, "outputRequest"];
+    state.addedRequired = true;
+  }
   return true;
 }
 
@@ -1309,10 +1188,19 @@ export function extendDistillToolParameters(
 ): number {
   let extended = 0;
   for (const tool of pi.getAllTools()) {
-    const enabled = loaded.enabled && Boolean(loaded.config) && isDistillToolEnabled(loaded.config, tool.name);
-    if (extendOutputRequestParameter(tool, enabled, reportWarning) && enabled) extended += 1;
+    const enabled = loaded.enabled && Boolean(loaded.config) && processingEnabled(loaded.config!, tool.name);
+    const schema = tool.parameters as { properties?: Record<string, unknown> } | undefined;
+    const supportsScope = !isMutationTool(tool.name) || Boolean(schema?.properties?.then_run);
+    if (extendOutputRequestParameter(tool, enabled && supportsScope, reportWarning, isMutationTool(tool.name)) && enabled && supportsScope) extended += 1;
   }
   return extended;
+}
+
+function ownsOutputRequest(pi: Pick<ExtensionAPI, "getAllTools">, name: string): boolean {
+  const schema = pi.getAllTools().find((tool) => tool.name === name)?.parameters as Record<string, unknown> | undefined;
+  if (!schema) return false;
+  const state = outputRequestSchemaStates.get(schema);
+  return Boolean(state && isObjectRecord(schema.properties) && schema.properties.outputRequest === state.injectedProperty);
 }
 
 function toToolResultEventResult(result: ToolResult): ToolResultEventPatch {
@@ -1320,12 +1208,15 @@ function toToolResultEventResult(result: ToolResult): ToolResultEventPatch {
     content: result.content as ToolResultEvent["content"],
     details: result.details,
     isError: result.isError,
+    ...(result.usage ? { usage: result.usage } : {}),
   };
 }
 
 type DistillUiConfig = Required<Pick<DistillConfigFile, "enabled" | "model" | "minChars" | "maxChars" | "maxOutputChars" | "timeoutSeconds" | "timeoutRetryCount" | "errorRetryCount" | "missedCompressionRatio" | "summarizeErrors">> & {
   tools: DistillToolConfig;
   render: DistillRenderConfig;
+  evidence: ReturnType<typeof processingConfig>["evidence"];
+  archive: ReturnType<typeof processingConfig>["archive"];
 };
 
 function getDistillUiConfig(): DistillUiConfig {
@@ -1348,6 +1239,7 @@ function getDistillUiConfig(): DistillUiConfig {
       Object.entries(config?.tools ?? {}).map(([toolName, override]) => [toolName, { ...override }]),
     ),
     render: { ...loaded.render },
+    ...processingConfig(config),
   };
 }
 
@@ -1407,8 +1299,19 @@ async function saveDistillConfigFile(
   configPath: string,
   onSaved?: () => void,
 ): Promise<void> {
-  await mkdir(dirname(configPath), { recursive: true });
-  await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  updateJsonObjectAtomic(configPath, (current) => {
+    const oldTools = isObjectRecord(current.tools) ? current.tools : {};
+    const tools = { ...oldTools };
+    for (const [name, override] of Object.entries(config.tools)) {
+      tools[name] = { ...(isObjectRecord(oldTools[name]) ? oldTools[name] : {}), ...override };
+    }
+    return {
+      ...current, ...config, tools,
+      render: { ...(isObjectRecord(current.render) ? current.render : {}), ...config.render },
+      evidence: { ...(isObjectRecord(current.evidence) ? current.evidence : {}), ...config.evidence },
+      archive: { ...(isObjectRecord(current.archive) ? current.archive : {}), ...config.archive },
+    };
+  });
   const saved = loadDistillConfig();
   if (saved.warnings.length > 0) {
     notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("savedWarnings", { warnings: saved.warnings.join(" ") }) });
@@ -1440,14 +1343,14 @@ async function runDistillToolConfigUi(
   while (true) {
     const choices = toolNames.map((toolName) => i18n.t("toolStatus", {
       tool: toolName,
-      value: isDistillToolEnabled(config, toolName) ? i18n.t("on") : i18n.t("off"),
+      value: processingEnabled(config, toolName) ? i18n.t("on") : i18n.t("off"),
     }));
     const choice = await ctx.ui.select(i18n.t("toolSettingsTitle"), choices);
     if (choice === undefined) return;
     const index = choices.indexOf(choice);
     if (index < 0) return;
     const toolName = toolNames[index];
-    config.tools[toolName] = { enabled: !isDistillToolEnabled(config, toolName) };
+    config.tools[toolName] = { enabled: !processingEnabled(config, toolName) };
     await saveDistillConfigFile(ctx, config, configPath, onSaved);
   }
 }
@@ -1462,6 +1365,7 @@ async function runDistillConfigUi(
   if (loaded.warnings.length > 0) {
     notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("configWarnings", { warnings: loaded.warnings.join(" ") }) });
   }
+  if (!loaded.config) return; // Critical invalid fields require manual repair; never overwrite them with defaults.
   const config = getDistillUiConfig();
 
   while (true) {
@@ -1480,6 +1384,8 @@ async function runDistillConfigUi(
       i18n.t("showOutputRequest", { value: config.render.showPrompt ? i18n.t("on") : i18n.t("off") }),
       i18n.t("showSummary", { value: config.render.showResult ? i18n.t("on") : i18n.t("off") }),
       i18n.t("toolOverrides"),
+      processingI18n.t("evidenceSetting", { value: config.evidence.enabled ? i18n.t("on") : i18n.t("off") }),
+      processingI18n.t("fusionSetting", { value: config.evidence.fusion ? i18n.t("on") : i18n.t("off") }),
     ];
     const choice = await ctx.ui.select(i18n.t("settingsTitle"), choices);
     if (choice === undefined) return;
@@ -1557,6 +1463,12 @@ async function runDistillConfigUi(
       await saveDistillConfigFile(ctx, config, configPath, onSaved);
     } else if (choice === choices[13]) {
       await runDistillToolConfigUi(ctx, pi, config, configPath, onSaved);
+    } else if (choice === choices[14]) {
+      config.evidence.enabled = !config.evidence.enabled;
+      await saveDistillConfigFile(ctx, config, configPath, onSaved);
+    } else if (choice === choices[15]) {
+      config.evidence.fusion = !config.evidence.fusion;
+      await saveDistillConfigFile(ctx, config, configPath, onSaved);
     }
   }
 }
@@ -1626,18 +1538,24 @@ export default function piDistillExtension(pi: ExtensionAPI) {
   pi.on("before_agent_start", (event, ctx) => {
     originalUserPrompt = typeof event.prompt === "string" ? event.prompt : "";
     extendParameters(ctx);
+    const loaded = loadDistillConfig();
+    if (!loaded.enabled || !loaded.config) return;
+    const controlled = pi.getAllTools().filter((tool) => ownsOutputRequest(pi, tool.name)).map((tool) => tool.name);
+    if (controlled.length === 0) return;
     return {
       systemPrompt: [
         typeof event.systemPrompt === "string" ? event.systemPrompt : "",
-        `<output-prompt-contract>\n${OUTPUT_REQUEST_SYSTEM_GUIDELINE}\n</output-prompt-contract>`,
+        `<output-prompt-contract>\n${processingI18n.t("contract", { tools: controlled.join(", ") })}\n</output-prompt-contract>`,
       ].filter((value) => value.length > 0).join("\n\n"),
     };
   });
   pi.on("tool_call", (event) => {
     const loaded = loadDistillConfig();
+    const owned = ownsOutputRequest(pi, event.toolName);
     const enabled = loaded.enabled
       && Boolean(loaded.config)
-      && isDistillToolEnabled(loaded.config, event.toolName);
+      && processingEnabled(loaded.config!, event.toolName)
+      && owned;
     pendingCalls.set(event.toolCallId, {
       enabled,
       outputRequest: enabled ? getOutputRequest(event.input) : "",
@@ -1645,16 +1563,17 @@ export default function piDistillExtension(pi: ExtensionAPI) {
       startedAt: performance.now(),
     });
     // outputRequest 只控制结果处理，不能泄漏给底层内置工具。
-    delete (event.input as Record<string, unknown>).outputRequest;
+    if (owned) delete (event.input as Record<string, unknown>).outputRequest;
   });
   pi.on("tool_result", async (event: ToolResultEvent, ctx) => {
     const pending = pendingCalls.get(event.toolCallId);
     pendingCalls.delete(event.toolCallId);
-    if (pending && !pending.enabled) {
+    if (pending ? !pending.enabled : !ownsOutputRequest(pi, event.toolName)) {
       const untouchedResult: ToolResult = {
         content: event.content,
         details: event.details as Record<string, unknown> | undefined,
         isError: event.isError,
+        usage: event.usage,
       };
       recordDistillSessionResult(sessionStats, untouchedResult.details);
       return toToolResultEventResult(untouchedResult);
@@ -1673,6 +1592,7 @@ export default function piDistillExtension(pi: ExtensionAPI) {
         content: event.content,
         details: event.details as Record<string, unknown> | undefined,
         isError: event.isError,
+        usage: event.usage,
       },
       pending ? Math.round(performance.now() - pending.startedAt) : 0,
     );

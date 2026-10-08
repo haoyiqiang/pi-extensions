@@ -1,9 +1,9 @@
 /**
- * agent-file-toggle.ts — Pure helpers for the `/agents` file-editing operations:
+ * agent-file-toggle.ts — Pure helpers for the `/config:subagents` file-editing operations:
  * locating an agent's .md file, toggling its `enabled:` frontmatter flag, and
  * serializing an AgentConfig back to frontmatter for eject.
  *
- * These live outside src/index.ts so they can be tested directly: the `/agents`
+ * These live outside src/index.ts so they can be tested directly: the `/config:subagents`
  * command handler is an ~890-line closure reached only through `registerCommand`,
  * which every test mocks.
  *
@@ -40,7 +40,7 @@ export const personalAgentsDir = () => join(getAgentDir(), "agents");
 /**
  * Find the file path of a custom agent by name, in discovery-precedence order
  * (project, workspace, then global). Mirrors the load-side precedence in
- * src/custom-agents.ts — if the two drift, `/agents` edits a file the loader
+ * src/custom-agents.ts — if the two drift, `/config:subagents` edits a file the loader
  * isn't reading.
  */
 export function findAgentFile(
@@ -63,7 +63,7 @@ export function findAgentFile(
  * An agent's type comes from its frontmatter `name:` now, so the two can
  * disagree: `reviewer.md` declaring `name: code-reviewer` is loaded as
  * `code-reviewer`, and probing for `code-reviewer.md` finds nothing. That is
- * not a harmless miss — `/agents → Disable` would then take the no-file branch
+ * not a harmless miss — `/config:subagents → Disable` would then take the no-file branch
  * and write a NEW `code-reviewer.md` stub, which loses to `reviewer.md` on
  * load, leaving the agent enabled while reporting success.
  *
@@ -178,12 +178,12 @@ export function enableInContent(content: string): { content: string; changed: bo
   return { content: kept.join(""), changed: true };
 }
 
-/** Is this the empty stub `/agents` writes when disabling a built-in default? */
+/** Is this the empty stub `/config:subagents` writes when disabling a built-in default? */
 export function isEmptyStub(content: string): boolean {
   return content.replace(/\r\n/g, "\n").trim() === "---\n---";
 }
 
-/** The answers `/agents → Create agent → Manual` collects, before serialization. */
+/** The answers `/config:subagents → Create agent → Manual` collects, before serialization. */
 export interface NewAgentInput {
   description: string;
   /** Already-resolved `tools:` value ("none", "all", or a CSV of tool names). */
@@ -192,6 +192,8 @@ export interface NewAgentInput {
   model?: string;
   /** A pi thinking level, or undefined to inherit. */
   thinking?: string;
+  /** Omit to follow the trusted default; explicit true/false/[] must round-trip. */
+  extensions?: AgentConfig["extensions"];
   systemPrompt: string;
 }
 
@@ -213,9 +215,10 @@ export interface NewAgentInput {
 export function buildNewAgentFile(input: NewAgentInput): string {
   const modelLine = input.model ? `\nmodel: ${JSON.stringify(input.model)}` : "";
   const thinkingLine = input.thinking ? `\nthinking: ${input.thinking}` : "";
+  const extensionsLine = input.extensions === undefined ? "" : `\nextensions: ${JSON.stringify(input.extensions)}`;
   return `---
 description: ${JSON.stringify(input.description)}
-tools: ${input.tools}${modelLine}${thinkingLine}
+tools: ${input.tools}${modelLine}${thinkingLine}${extensionsLine}
 prompt_mode: replace
 ---
 
@@ -247,8 +250,7 @@ export function serializeAgentFile(cfg: AgentConfig): string {
     fmFields.push(`allowed_subagents: ${cfg.allowedSubagents === "all" ? "all" : cfg.allowedSubagents.join(", ")}`);
   }
   fmFields.push(`prompt_mode: ${cfg.promptMode}`);
-  if (cfg.extensions === false) fmFields.push("extensions: false");
-  else if (Array.isArray(cfg.extensions)) fmFields.push(`extensions: ${cfg.extensions.join(", ")}`);
+  if (cfg.extensions !== undefined) fmFields.push(`extensions: ${JSON.stringify(cfg.extensions)}`);
   if (cfg.excludeExtensions?.length) fmFields.push(`exclude_extensions: ${cfg.excludeExtensions.join(", ")}`);
   if (cfg.skills === false) fmFields.push("skills: false");
   else if (Array.isArray(cfg.skills)) fmFields.push(`skills: ${cfg.skills.join(", ")}`);

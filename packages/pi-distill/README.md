@@ -1,208 +1,158 @@
 # pi-distill
 
-> **Keep the facts. Spend context on decisions.**
+> **Keep the source. Spend context on decisions.**
 
-`pi-distill` is a Pi extension that controls how tool results enter the agent context. It does not replace tools or change how commands run; it adds an optional result-processing layer after the tool has returned its real output.
+One post-tool processing extension with two mutually exclusive strategies: **ordinary summaries** guided by `outputRequest`, and opt-in **diagnostic evidence extraction** adapted from NVIDIA's [SoL-Pi](https://github.com/NVlabs/SoL-Pi). Every accepted lossy replacement has an archived source. Read that source with Pi's existing `read` tool; no extra reduction or readback tool is registered.
 
-## What it solves
+> 中文：[README.zh-CN.md](./README.zh-CN.md)
 
-Coding agents often need only the important lines from a command, search, or file read. Passing every byte of a large result into the next turn increases context usage and can hide the signal in logs or generated files. `pi-distill` adds a result-level distillation layer without replacing Pi's built-in tools.
-
-## Context savings in practice
-
-Build logs, diff output, and test reports often contain repeated status lines, unchanged context, stack-trace noise, and details that are not needed for the next decision. Those are strong candidates for high compression. In one real Pi session, the result below went from 51,215 characters to 240 characters: **213.40× compression and 99.5% fewer output characters**.
-
-![pi-distill context savings example](./assets/context-savings-example.png)
-
-The screenshot reports character reduction, not an exact tokenizer measurement. In practice this usually removes a similar order of magnitude of context tokens, but the exact token saving depends on the language, content, and model tokenizer. Treat 90%+ as an observed outcome for suitable verbose outputs, not a guarantee for every command; use `RAW` whenever the complete output is needed.
-
-| Scenario | Typical noise | What the distill result keeps |
-| --- | --- | --- |
-| Build / compile | Repeated progress, warnings, and unchanged setup lines | Pass/fail, first actionable errors, affected files, and next steps |
-| Diff inspection | Large unchanged hunks and formatting noise | Changed files, relevant hunks, and review-relevant facts |
-| Tests | Per-test verbosity, snapshots, and framework boilerplate | Totals, failed cases, key assertions, and useful diagnostics |
-
-## Prompt language
-
-The distillation prompt strictly follows the current locale selected by `/config:language`. Changing the persisted locale is picked up on the next tool call, including when the language command and `pi-distill` are loaded from separate package instances. `PI_EXTENSIONS_LOCALE` remains the explicit environment-variable override. The original user message is included only as language context and never overrides the selected locale.
-
-## How it works
-
-- Observes `bash`, `read`, `grep`, and `find` through Pi's native `tool_call` / `tool_result` events.
-- Uses the tool's `outputRequest` as the source of truth for whether and how to distill a result.
-- Treats a prompt containing only `RAW` as an explicit request for the original output.
-- Uses the current session model by default, or a model selected from the available list in `/config:distill`.
-- Keeps diagnostic metadata such as status, character counts, compression ratio, duration, and anomalies in the tool result details.
-- Oversized output is no longer written to a file or truncated by pi-distill; it is left to Pi's own output-limiting mechanism.
-- Writes a compact, UI-only audit entry with status, prompt preview, and result preview. The entry is excluded from model context.
-
-It does not register a second `bash`, `read`, `grep`, or `find` tool.
-
-## Install
+## Install and enable
 
 ```bash
 pi install npm:pi-distill
 ```
 
-The package manifest also loads the shared `pi-extensions-i18n` dependency as an extension entry; no separate installation is required. This makes `/config:language` available after installing `pi-distill`.
+The package also loads its shared i18n extension. Run `/reload`, then `/config:distill` to select a model and configure processing. `/pi-distill` remains a compatibility alias. `/distill:stats` reports per-session results, attempts, usage, estimated context savings and cost. UI commands require a UI-capable session; result processing also works headlessly.
 
-Reload Pi after installation:
+Configuration is read from `<Pi agent directory>/extensions/pi-distill/config.json`, normally under `~/.pi/agent`; `PI_CODING_AGENT_DIR` is supported. Loading does not write or migrate global settings. See [config.example.json](./config.example.json).
 
-```text
-/reload
-```
-
-Open the interactive configuration command with:
-
-```text
-/config:distill
-```
-
-## The idea
-
-We are not trying to make the agent see less information. We are trying to avoid making it carry thousands of log lines into context just to find one conclusion.
-
-The execution layer should preserve facts. The consumption layer should control context cost. `pi-distill` connects the two:
-
-- the tool executes and returns facts;
-- the agent states what it cares about through `outputRequest`;
-- the extension reads the actual result before deciding whether to call a distillation model;
-- the model compresses the consumption path without changing the tool's semantics;
-- diagnostics show whether the transformation actually saved context.
-
-Distillation is therefore a tool contract, not a blanket “summarize everything” switch: ask for the information you need, or explicitly keep the original when you need completeness.
-
-## Why it exists
-
-Builds, tests, and diffs often contain repeated status lines, unchanged context, framework boilerplate, and stack-trace noise. The agent may need only the failure, changed files, or final state, but still has to consume the entire result first.
-
-Always truncating can hide the important fact. Adding a separate summary tool creates another decision and another call. Waiting until the agent has read the output is too late. `pi-distill` processes the result before the next reasoning step, while retaining an explicit raw-output mode and safe fallbacks.
-
-## Observed context savings
-
-In the real Pi session shown below, an output went from **51,215 characters** to **240 characters**: **213.40× compression** and **99.5% fewer output characters**.
-
-![pi-distill context savings example](./assets/context-savings-example.png)
-
-The screenshot measures character reduction, not an exact tokenizer count. Actual token savings depend on the language, content, and model tokenizer. For suitable verbose build logs, diffs, and test output, savings of 90% or more have been observed, but this is not a guarantee for every command.
-
-| Scenario | Typical noise | What the distilled result prioritizes |
-| --- | --- | --- |
-| Build / compile | Repeated progress, setup lines, repeated warnings | Pass/fail, first actionable error, affected files, next steps |
-| Diff inspection | Large unchanged hunks and formatting noise | Changed files, relevant hunks, review-relevant facts |
-| Tests | Per-test verbosity, snapshots, framework boilerplate | Totals, failed cases, key assertions, useful diagnostics |
-
-Savings are not the only metric. The extension records duration, original and result character counts, compression ratio, and anomalies. If a summary does not create real value, it reports `ineffective-compression` instead of silently claiming success.
-
-## How it works
-
-```text
-Agent states a handling goal
-        ↓ through outputRequest
-Tool runs the real operation and returns stdout / stderr / files / media
-        ↓
-pi-distill uses the actual result and configuration to keep it, distill it, or write it to a file
-        ↓
-Agent consumes a result suited to the current decision, with auditable diagnostics
-```
-
-1. At session start, the extension adds required `outputRequest` to every enabled active tool whose parameter schema is an object. `edit` and `write` are disabled by default; other tools are enabled unless configured otherwise. It does not hard-code `bash`, `read`, `grep`, or `find`.
-2. The `tool_call` handler captures the parameter and removes it before forwarding the call, so the underlying tool never receives the extension-only field.
-3. The `tool_result` handler sees the actual output and decides what to do; it does not rely on the agent predicting the output size.
-4. Every tool call must include a non-empty `outputRequest`. A prompt containing only `RAW` explicitly requests the original. Any other non-empty prompt permits distillation once the configured threshold is reached.
-5. OpenAI-compatible completion requests enable native JSON mode with `response_format: { "type": "json_object" }`; OpenAI Responses-compatible requests use the equivalent `text.format`. A timed-out attempt is retried according to `timeoutRetryCount`, while other provider failures use `errorRetryCount` (both default to one retry). If a non-empty model response is only invalid JSON or violates the response schema, pi-distill makes one JSON-only repair call with the malformed response and validation error; it does not resend the tool output or run summarization again. If repair fails, no model is available, or compression is ineffective, the original facts are retained and the status is exposed through details and the audit card. JSON responses wrapped in Markdown fences such as `````json … ````` are also accepted.
-6. Interrupting the parent Agent request aborts any in-flight distillation request immediately and disables retries for that interrupted result; the original tool output remains available through the normal fail-open path.
-
-## Output contract
-
-| `outputRequest` | Behavior | Use it when |
-| --- | --- | --- |
-| Omitted | Invalid tool call; Pi rejects the call before the underlying tool runs | Never omit it; use `RAW` when no compression is explicitly requested |
-| Exactly `RAW` (case-insensitive) | Skip the distillation model and keep the complete original text; oversized text is handled by Pi's own output-limiting mechanism | You need to inspect, copy, or verify exact output |
-| Any non-empty value other than `RAW` | Call the model when the output reaches the threshold; timed-out and other failed attempts use separate retry budgets, and the prompt defines what to retain | “Keep errors, warnings, and final status” workflows |
-| Any non-text content such as images or audio | Preserve the result as-is; do not send it to the distillation model or apply text truncation | Image reads, binary results, and mixed text/media results |
-
-`RAW` is the deterministic completeness signal. The distillation prompt tells the summarizer to return exactly `RAW` when the request clearly asks for complete extraction without omissions, especially for syntax, parameters, SQL, API calls, or other text that must be copied. Passing `RAW` directly remains the preferred option when the tool caller can control the parameter.
-
-## Prompt language
-
-The distillation prompt strictly follows the locale selected by `/config:language`:
-
-- the next tool call reads the newly persisted locale after a language switch;
-- separate package instances still synchronize through the shared locale setting;
-- `PI_EXTENSIONS_LOCALE` remains an explicit environment-variable override;
-- the original user message is passed as task context only and cannot accidentally force the prompt language.
-
-## Scope and boundaries
-
-- Handles every enabled active tool with an object parameter schema; whether `outputRequest` can be injected is determined by the tool schema, not a fixed allowlist.
-- Registers no replacement tools and does not change tool execution semantics; audit information is displayed through its own UI-only session entry.
-- Text distillation is lossy; use `RAW` when completeness matters.
-- Non-text results are a completeness boundary: images, audio, binary data, and mixed content bypass text distillation.
-- Oversized distilled or final text is no longer written to a file or truncated by pi-distill; it is left to Pi's own output-limiting mechanism, preventing unbounded context growth.
-- If no model is available, distillation fails open: the original result is retained and Pi can continue running.
-
-## Configuration
-
-Default configuration path:
-
-```text
-~/.pi/agent/extensions/pi-distill/config.json
-```
-
-Start from [`config.example.json`](./config.example.json):
+**Evidence and Fusion processing are disabled by default.** To enable diagnostic evidence, explicitly set:
 
 ```json
 {
-  "enabled": true,
-  "model": "",
-  "minChars": 200,
-  "maxChars": 100000,
-  "maxOutputChars": 10000,
-  "timeoutSeconds": 10,
-  "timeoutRetryCount": 1,
-  "errorRetryCount": 1,
-  "missedCompressionRatio": 10,
-  "summarizeErrors": true,
-  "render": {
+  "evidence": {
     "enabled": true,
-    "showPrompt": true,
-    "showResult": true
+    "fusion": true,
+    "minBytes": 8192,
+    "commands": []
   }
 }
 ```
 
-Configuration-file fields take precedence over environment variables. Unspecified fields fall back to `PI_DISTILL_*`, then the legacy `PI_BASH_SUMMARY_*` variables, then defaults.
+`fusion: true` additionally allows the command log appended by Action Fusion's `edit`/`write`; it does not enable Action Fusion itself. An explicit `tools.edit.enabled: false` or `tools.write.enabled: false` takes precedence. The interactive settings expose both evidence switches. Size quotas and additional command prefixes are configured in JSON.
 
-| Setting | Meaning |
+## Processing chain
+
+```text
+Tool returns actual output
+  ├─ disabled / RAW / non-text / excluded → keep the original result
+  └─ select one scope and one strategy
+       ├─ recognized diagnostic command → evidence (when enabled)
+       └─ other enabled text + outputRequest → ordinary summary
+            ↓ source size / completeness / sensitive-content checks
+            ↓ archive source before model work
+            ↓ model processing and local validation
+            ├─ valid, within budget and useful → receipt + source reference
+            └─ failure / cancelled / ineffective → keep original result
+```
+
+There is no evidence-to-summary fallback and no processing of an already processed receipt. Processing does not change tool execution, file edits or the tool's error state. It uses native `tool_call`/`tool_result` events and registers no replacement tools. Handlers see results in extension order: the source is what Distill receives, not bytes another extension has already discarded.
+
+## Tool schema and RAW
+
+Ordinary enabled object-schema tools retain the required, nonempty `outputRequest` contract. Unconfigured non-mutation tools retain their previous default of enabled; use `tools.<name>.enabled: false` to opt out. Evidence does not silently change that allowlist.
+
+```json
+{
+  "command": "npm run test",
+  "outputRequest": "Keep failed cases, assertion differences and final totals"
+}
+```
+
+Exactly `RAW`, case-insensitive after trimming, bypasses both strategies. It **preserves the received tool content**, not an unlimited process transcript: the underlying tool's own limits still apply. RAW, disabled paths and failures are no longer truncated or replaced with a file pointer by Distill. Even a tiny `maxOutputChars` cannot truncate them. Custom tools remain responsible for bounding their own output; preserving an oversized fallback can still exceed the primary model's context.
+
+When evidence and Fusion processing are enabled, compatible `edit`/`write` definitions exposing `then_run` receive an **optional** `outputRequest`. Omission uses default evidence rules; RAW bypasses processing; any other value provides a focus. The field applies only to command logs. Plain mutation results are never summarized, even if an older `tools.edit/write.enabled: true` setting exists. Distill removes only successfully injected, extension-owned handling fields before execution. A tool's native `outputRequest` collision is warned about and left untouched.
+
+Non-text or mixed-media results bypass processing. A disabled extension does not add the handling contract to the system prompt.
+
+## Evidence versus summaries
+
+### Diagnostic evidence
+
+A conservative command detector recognizes common test/build/check commands, including `npm run test`, `npm run build`, script variants such as `test:unit`, pnpm/yarn/bun, pytest/unittest, Go/Cargo and native build tools. It recognizes simple unquoted command boundaries and common wrappers, not arbitrary shell programs. Compound commands are eligible only when every segment is diagnostic or a narrow silent setup (`cd`, environment assignment, `true`, `:`); `npm test; cat confidential.txt` is not automatic evidence. Quoted examples such as `echo 'npm test'`, command substitutions and heredocs are not automatically treated as diagnostics. `evidence.commands` adds literal token prefixes, **not executable regexes**; use the normalized executable basename, for example `"verify --ci"` for `./verify --ci`.
+
+The fixed bilingual extraction prompt requires contiguous exact source quotes. `outputRequest` may prioritize evidence but cannot remove the fixed constraints. No diagnosis or repair suggestion is generated. One model attempt, no JSON repair and no configured summary retries are used for this strategy. The validator checks schema, item/quote bounds, exact source membership and required recognizable failure evidence; benign zero-failure counts cannot fulfill that guard. Strong failure signals also require failure evidence when a successful shell status masks them. Lines are computed locally; source hashes, paths and the observed tool error state are generated by the host, not invented by the model.
+
+A result is headed `[distill:evidence]`. **Verified quotes do not prove complete coverage, correct classification, causality, or a passing test suite.** A successful shell invocation can hide test failure with `|| true`. Uncertainty is model advice, never a completeness certificate.
+
+### Ordinary summaries
+
+Other enabled text remains guided by `outputRequest`. The existing structured RAW/SUMMARY model protocol, retry budgets and one JSON-only repair attempt remain available. A result is headed `[distill:summary]` and explicitly states that individual claims are **not locally fact-verified**. Source archival improves traceability, not semantic correctness.
+
+Both paths measure the complete projected result, including citations and protected mutation confirmation. At least **1.4× character reduction** and both output budgets are required. Character savings are not exact tokenizer savings. An older real-session screenshot below shows suitable verbose output savings; its historical 213.40× figure predates source receipts and is not a guarantee for this version.
+
+![Historical context-savings example](./assets/context-savings-example.png)
+
+## Sources and native readback
+
+Every accepted summary or evidence receipt includes model-visible metadata:
+
+```text
+source_artifact="/…/extensions/pi-distill/artifacts/<session-hash>/objects/<source-hash>.txt"
+source_sha256=…
+source_bytes=…
+source_lines=4200
+source_kind=tool-output
+```
+
+Use the actual path string without the JSON quotes:
+
+```json
+{
+  "path": "/…/objects/<source-hash>.txt",
+  "offset": 200,
+  "limit": 60,
+  "outputRequest": "RAW"
+}
+```
+
+Only include `outputRequest` if the current `read` schema exposes it. Lines are 1-based. To inspect the last N lines once, use `offset = max(1, source_lines - N + 1)` and `limit = N`. Line counts use native `read`'s newline splitting, including an empty trailing line. Native read's line/byte limits still apply.
+
+A bounded, regular, single-link, non-symlink temp file provided by a tool may supply fuller source text. Bash/Fusion accepts only native `pi-bash-*.log` spool files directly under the OS temp directory, or a native-shaped final truncation footer after error normalization. Invalid, missing, oversized or changing files fail open. Evidence skips known truncated previews without a usable full log. Other tool output can be summarized as `source_kind=preview`, which is not a full-source claim. The source is UTF-8 text supplied by Pi; malformed full-file UTF-8 is rejected rather than silently changed.
+
+For Fusion, only `[then_run:succeeded]` or `[then_run:failed]` command log suffixes are eligible. Confirmation, successful diff/patch metadata, machine marker and outer error state remain intact. Skipped, running, missing or ambiguous boundaries are left alone. Failed calls may not retain native diff details because Pi normalizes thrown errors; Distill cannot reconstruct them. Nested `details.actionFusion.bashDetails` is recognized without importing Fusion's private source.
+
+## Storage, privacy and failure behavior
+
+Archives live under the agent directory, not the project. Session IDs and source content are hashed for filenames. Objects are atomically published, deduplicated with integrity checks, and use private permissions where supported. Source quotas and restored session object sizes are checked. Archive failure or quota exhaustion prevents the remote request and retains the original result. Files are not deleted on reload, session restore or normal shutdown; cleanup is an explicit user filesystem operation after references are no longer needed.
+
+The default source cap is 1 MiB and per-session cap is 64 MiB. Quota writes use both in-process serialization and an exclusive per-session filesystem lock. Cancellation interrupts in-process queue waiting without letting later writers overtake an active writer. Lock contention fails open to original output instead of waiting or starting remote processing. A lock left after process crash is not automatically stolen; explicitly remove a stale lock only after confirming no writer is active. Stale staging and other regular object-directory files count toward quota and are not silently deleted. Session storage quotas do not provide an agent-directory-wide retention policy. Optional filesystems without required atomic-link support cause fail-open behavior rather than weakening integrity.
+
+Processing can send source text to the current/configured model. A heuristic secret detector skips likely credentials in either strategy, but **is not a complete privacy guarantee**. Disable processing or select a suitable local processing model to avoid an additional remote recipient. This does not redact the original tool result or stop the primary Agent from sending it to its own model; keeping all output local also requires a local primary model and appropriate tool settings. Archives themselves can contain sensitive local text. Do not co-load the standalone SoL-Pi Reducer or another overlapping result summarizer.
+
+Cancellation propagates to model requests. Deadlines bound Distill's wait, not remote execution or billing when a provider ignores cancellation; no timeout retry starts while termination of the prior request remains unconfirmed. Reported usage is included in Pi tool-result accounting, including rejected evidence and failed JSON repair. An initial response's reported usage is retained even if its repair request hangs; usage never reported by the hung request cannot be reconstructed. A conservative heuristic prompt/context-window preflight also skips predictably oversized requests. Evidence never falls back to an unverified summary. The current model registry handles authentication and resolved endpoints once per request, without a separate authentication precheck; Codex side requests use isolated sessions cleaned up after completion.
+
+## Configuration reference
+
+| Field | Meaning |
 | --- | --- |
-| `model` | Optional `provider/modelId`; empty uses the current Pi session model. `/config:distill` selects from the available model list instead of free text. Model IDs may contain `/`, for example `openrouter/deepseek/deepseek-v4-flash`. |
-| `minChars` | Minimum output size before a summary is requested. |
-| `maxChars` | Distilled text is written to a temporary file when it exceeds this length. |
-| `maxOutputChars` | Maximum text returned to the Agent. Oversized text is written to a temporary file and replaced with a file pointer. |
-| `timeoutSeconds` | Maximum time allowed for each distillation model attempt. |
-| `timeoutRetryCount` | Number of additional attempts after a timeout. Defaults to `1`; set to `0` to disable timeout retries. |
-| `errorRetryCount` | Number of additional attempts after any non-timeout error. Defaults to `1`; set to `0` to disable other error retries. |
-| `missedCompressionRatio` | Long-output threshold for a diagnostic when no summary prompt was supplied. |
-| `summarizeErrors` | Whether error results that meet `minChars` should still be sent to the distillation model. |
-| `tools.<name>.enabled` | Enables or disables `outputRequest` injection and result distillation for one tool. `edit` and `write` default to disabled; other unconfigured tools default to enabled. It can also be changed from `/config:distill`. |
+| `enabled` | Enable the processing extension. Invalid critical configuration, including malformed tool opt-outs, disables processing and requires manual repair. |
+| `model` | Optional `provider/modelId`; empty uses the current session model. |
+| `minChars` | Ordinary-summary input threshold; default 200 characters. |
+| `maxChars` | Accepted summary/evidence body budget; default 100,000 characters. Exceeding it retains original output. |
+| `maxOutputChars` | Accepted complete projected result budget, including citations; default 10,000. Not a RAW/fallback limit. |
+| `timeoutSeconds` | Deadline for each model attempt; default 10 seconds. |
+| `timeoutRetryCount` / `errorRetryCount` | Ordinary-summary retries, default 1 each; evidence always uses one attempt. |
+| `missedCompressionRatio` | Legacy configuration field retained for compatibility. |
+| `summarizeErrors` | False skips error results in both strategies, including explicit requests. |
+| `evidence.enabled` | Opt-in diagnostic strategy, default false. |
+| `evidence.fusion` | Opt-in fused-command scope, default false; requires evidence enabled. |
+| `evidence.minBytes` | Evidence input threshold, default 8,192 UTF-8 bytes. |
+| `evidence.commands` | Up to 32 additional literal normalized command prefixes, at most 256 chars each. |
+| `archive.maxSourceBytes` | Default 1 MiB; configurable up to 16 MiB. Over-budget sources are not sent. |
+| `archive.maxSessionBytes` | Default 64 MiB; configurable up to 1 GiB. No silent eviction. |
+| `tools.<name>.enabled` | Existing per-tool opt-out/enable settings; mutation scopes require the explicit evidence/Fusion switches. |
+| `render.*` | UI-only audit card visibility, request and result preview. |
 
-`/pi-distill` remains available as a compatibility alias.
-| `render.*` | Controls the audit card, prompt preview, and result preview. |
+File fields take precedence over existing `PI_DISTILL_*` and legacy `PI_BASH_SUMMARY_*` variables. Evidence/archive fields are JSON-only. No automatic rewrite or migration of user-global configuration is performed. Enabling Fusion changes only its handling schema and requires a compatible loaded Fusion tool; it is not a Bash permission sandbox.
 
-## Session statistics
+## Development and provenance
 
-Use `/distill:stats` to view distillation statistics for the current Pi session. Statistics are kept in memory, reset when the session starts, and never store raw tool output.
+Node.js 22+ and Pi 0.87.1+ are required. The Pi peer minimum is aligned with the tested model-registry, session-resource and tool-usage APIs; versions 0.80–0.86 are no longer declared compatible. Development and offline SDK regressions target Pi 0.87.1. Deterministic tests use injected providers, temporary storage and native read; no API keys are required.
 
-The report includes tool-result counts, success/failure/fallback counts, model attempts, original and summary character totals, compression ratio, estimated original/summary tokens (heuristic: CJK characters count ~1 token each, other text ~4 chars/token), estimated tokens saved, and model-reported input/output/cache/total tokens and cost. Counts use compact `k` and `m` units at 1,000 and 1,000,000; durations use `ms`, `s`, or `min` based on their value. Estimated context tokens are labeled as estimates; usage and cost fields are shown as unavailable when the provider does not return usage data.
+```bash
+npm run typecheck --workspace pi-distill
+npm test --workspace pi-distill
+```
 
-The main environment variables are `PI_DISTILL_MODEL`, `PI_DISTILL_MIN_CHARS`, `PI_DISTILL_MAX_CHARS`, `PI_DISTILL_MAX_OUTPUT_CHARS`, `PI_DISTILL_TIMEOUT_SECONDS`, `PI_DISTILL_TIMEOUT_RETRY_COUNT`, `PI_DISTILL_ERROR_RETRY_COUNT`, `PI_DISTILL_MISSED_COMPRESSION_RATIO`, and `PI_DISTILL_SUMMARIZE_ERRORS`.
-
-## Requirements
-
-- Node.js 22 or newer.
-- A current Pi session model, unless `model` points to an available configured model. The model row in `/config:distill` lists the models currently available.
-
-## License
-
-[MIT](../../LICENSE)
+Prompts and notices follow the shared locale. UI audit entries do not enter model context. See [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md) and [LICENSE](./LICENSE) for the adapted MIT-licensed SoL-Pi mechanisms.

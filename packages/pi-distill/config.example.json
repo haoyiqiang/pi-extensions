@@ -9,6 +9,16 @@
   "errorRetryCount": 1,
   "missedCompressionRatio": 10,
   "summarizeErrors": true,
+  "evidence": {
+    "enabled": false,
+    "fusion": false,
+    "minBytes": 8192,
+    "commands": []
+  },
+  "archive": {
+    "maxSourceBytes": 1048576,
+    "maxSessionBytes": 67108864
+  },
   "tools": {},
   "render": {
     "enabled": true,

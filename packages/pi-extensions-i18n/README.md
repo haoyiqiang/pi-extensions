@@ -75,7 +75,7 @@ const NOTICE_SOURCE: NoticeSource = { tag: NOTICE_TAG, color: NOTICE_COLOR };
 notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("failed") });
 ```
 
-This renders as a filled background block with `[distill] message` on its first line: the label uses the shared muted `NOTICE_TAG_COLOR`, the body colour follows `level` (`warning` yellow, `error` red, `info` the extension message text colour), and `textColor` overrides the body colour for verdict-style lines that carry their own semantic colour. Level colours are semantic and stay untouched; only the source label gives up colour as an identity channel. In tui mode the notice is written as a Pi custom entry below the message; rpc/print/json keep using `ctx.ui.notify` with plain `[distill] message` text so no ANSI leaks into other frontends. The block is registered once by this package's own extension entry, so a package that uses the helper must load `../pi-extensions-i18n/index.ts` in its `pi.extensions` list. Use `formatNotice({ source, message, mode, theme })` when you only need the rendered string.
+This renders as a filled background block with `[distill] message` on its first line: the label uses the shared muted `NOTICE_TAG_COLOR`, the body colour follows `level` (`warning` yellow, `error` red, `info` the extension message text colour), and `textColor` overrides the body colour for verdict-style lines that carry their own semantic colour. Level colours are semantic and stay untouched; only the source label gives up colour as an identity channel. In tui mode the notice is written as a Pi custom entry below the message; rpc/print/json keep using `ctx.ui.notify` with plain `[distill] message` text so no ANSI leaks into other frontends. The block is registered once by this package's extension entry. A feature package should ship an `i18n-entry.ts` containing `export { default } from "pi-extensions-i18n"` and list it before its own entry in `pi.extensions`. This uses normal dependency resolution in scoped, hoisted and nested npm layouts; workspace sibling paths are not portable. Entries are deduplicated per runtime event bus, not across independent child sessions. Use `formatNotice({ source, message, mode, theme })` when you only need the rendered string.
 
 Notice delivery is keyed by the stable `ctx.sessionManager` owner, not the last
 extension API loaded in the process. Keep the original context when possible. For
@@ -93,6 +93,14 @@ release();
 Bindings are token-safe: root shutdown or replacement invalidates an old relay,
 which falls back to its own UI rather than appending to a closed/replacement
 session. Installing the renderer alone never claims notice ownership.
+
+The extension emits `LOCALE_CHANGED_EVENT` (`pi-extensions-i18n:locale:changed:v1`,
+`{ locale: "zh-CN" | "en-US" }`) after resolving the launch flag or saving a language
+selection. Features may re-register their own translated tool/command definitions
+on that event. Refresh at `session_start` and before input/model requests as a
+fallback for environment or externally edited preferences; do not reset feature
+state or custom guidance. Event subscriptions belong to the extension runtime and
+must be released on shutdown.
 
 New packages can register a namespace and resolve strings at render time:
 

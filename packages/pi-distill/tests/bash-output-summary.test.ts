@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { hasNonTextContent, limitReturnedToolResult } from "../src/output-limit.ts";
+import { hasNonTextContent } from "../src/output-limit.ts";
 import {
   appendDistillFallbackAudit,
   buildDistillAuditLines,
@@ -77,6 +77,8 @@ async function withFakeSummaryConfig<T>(
   retryConfig: {
     timeoutRetryCount?: number;
     errorRetryCount?: number;
+    maxChars?: number;
+    summarizeErrors?: boolean;
   } = {
     timeoutRetryCount: 1,
     errorRetryCount: 1,
@@ -91,6 +93,7 @@ async function withFakeSummaryConfig<T>(
     "PI_DISTILL_TIMEOUT_SECONDS",
     "PI_DISTILL_TIMEOUT_RETRY_COUNT",
     "PI_DISTILL_ERROR_RETRY_COUNT",
+    "PI_DISTILL_SUMMARIZE_ERRORS",
   ];
   const previous = new Map(keys.map((key) => [key, process.env[key]] as const));
   const agentDir = await mkdtemp(join(tmpdir(), "pi-distill-summary-test-"));
@@ -100,20 +103,23 @@ async function withFakeSummaryConfig<T>(
     enabled: true,
     model: "fake/model",
     minChars: 1,
-    maxChars: 10000,
+    maxChars: retryConfig.maxChars ?? 10000,
     maxOutputChars,
     timeoutSeconds: 1,
-    ...retryConfig,
+    timeoutRetryCount: retryConfig.timeoutRetryCount,
+    errorRetryCount: retryConfig.errorRetryCount,
+    summarizeErrors: retryConfig.summarizeErrors,
   }));
   process.env.PI_CODING_AGENT_DIR = agentDir;
   process.env.PI_DISTILL_MODEL = "fake/model";
   process.env.PI_DISTILL_MIN_CHARS = "1";
-  process.env.PI_DISTILL_MAX_CHARS = "10000";
+  process.env.PI_DISTILL_MAX_CHARS = String(retryConfig.maxChars ?? 10000);
   process.env.PI_DISTILL_MAX_OUTPUT_CHARS = String(maxOutputChars);
   process.env.PI_DISTILL_TIMEOUT_SECONDS = "1";
   for (const [key, value] of [
     ["PI_DISTILL_TIMEOUT_RETRY_COUNT", retryConfig.timeoutRetryCount],
     ["PI_DISTILL_ERROR_RETRY_COUNT", retryConfig.errorRetryCount],
+    ["PI_DISTILL_SUMMARIZE_ERRORS", retryConfig.summarizeErrors],
   ] as const) {
     if (value === undefined) delete process.env[key];
     else process.env[key] = String(value);
@@ -125,6 +131,7 @@ async function withFakeSummaryConfig<T>(
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
     }
+    await rm(agentDir, { recursive: true, force: true });
   }
 }
 
@@ -159,6 +166,67 @@ function getCompletionPrompt(args: Parameters<TestCompletion>): string {
     ?.flatMap((message) => message.content ?? [])
     .map((content) => content.text ?? "")
     .join("\n") ?? "";
+}
+
+function resultText(result: TestResult): string {
+  return result.content
+    .filter((part) => part.type === "text" && typeof part.text === "string")
+    .map((part) => part.text ?? "")
+    .join("\n");
+}
+
+function assertOriginalPreserved(result: TestResult, original: string): void {
+  assert.equal(resultText(result), original);
+  assert.equal(result.content.length, 1);
+  assert.equal(result.details?.outputTruncated, undefined);
+  assert.equal(result.details?.fullOutputPath, undefined);
+  assert.doesNotMatch(resultText(result), /Output handling diagnostics|Output exceeded .* chars/);
+}
+
+async function assertSummaryReceipt(result: TestResult, original: string, summary: string): Promise<void> {
+  const receipt = resultText(result);
+  const distill = result.details?.distill as {
+    version: number;
+    strategy: string;
+    source: { path: string; sha256: string; bytes: number; lines: number; kind: string };
+    verification: string;
+    coverage: string;
+  };
+  assert.equal(result.details?.outputSummaryStatus, "summarized");
+  assert.ok(distill);
+  assert.match(distill.source.path, /\S/);
+  assert.match(distill.source.sha256, /^[a-f0-9]{64}$/);
+  assert.deepEqual(distill, {
+    version: 1,
+    strategy: "summary",
+    source: {
+      path: distill.source.path,
+      sha256: distill.source.sha256,
+      bytes: Buffer.byteLength(original, "utf8"),
+      lines: original.split("\n").length,
+      kind: "tool-output",
+    },
+    verification: "none",
+    coverage: "not-guaranteed",
+  });
+  const expected = [
+    "[distill:summary]",
+    "tool_status=success",
+    "Model summary; individual claims are not locally verified. Read the source for exact context.",
+    summary,
+    [
+      `source_artifact=${JSON.stringify(distill.source.path)}`,
+      `source_sha256=${distill.source.sha256}`,
+      `source_bytes=${distill.source.bytes}`,
+      `source_lines=${distill.source.lines}`,
+      `source_kind=${distill.source.kind}`,
+      "Read source_artifact with native read (offset/limit; outputRequest=RAW when applicable). Tail N lines: offset=max(1, source_lines-N+1).",
+    ].join("\n"),
+  ].join("\n\n");
+  assert.equal(receipt, expected);
+  assert.equal(result.details?.summaryText, expected);
+  assert.equal(await readFile(distill.source.path, "utf8"), original);
+  assert.ok(original.length / receipt.length >= 1.4, `expected at least 1.4x whole-receipt reduction, got ${original.length / receipt.length}`);
 }
 
 test("只配置总结模型时使用默认阈值", () => {
@@ -603,38 +671,46 @@ test("真实使用场景数据集逐 case 验证 prompt 契约", async () => {
   }
 });
 
-test("fake provider 覆盖摘要链路的 RAW、有效摘要和低收益回退", async () => {
+test("fake provider 覆盖 RAW、带来源收据的有效摘要和低收益回退", async () => {
   await withFakeSummaryConfig(async () => {
     const context = fakeSummaryContext();
-    const output = "ERROR E42 at checkout.ts:8; next: retry fixture";
+    const output = "FAIL checkout request 42\nERROR E42 at checkout.ts:8\nnext: retry fixture\n".repeat(80);
+    let rawModelCalls = 0;
+    const rawContext = fakeSummaryContext();
+    rawContext.params.outputRequest = "RAW";
 
     const raw = await processToolResult(
-      context,
+      rawContext,
       fakeToolResult(output),
       0,
-      fakeCompletion("RAW"),
+      async () => {
+        rawModelCalls += 1;
+        throw new Error("RAW must not call the model");
+      },
     );
-    assert.equal(raw.content[0]?.text, output);
-    assert.equal(raw.details?.outputSummaryReasonCode, "VERBATIM_REQUEST");
-    assert.match(String(raw.details?.outputSummaryReason), /verbatim/i);
+    assert.equal(rawModelCalls, 0);
+    assertOriginalPreserved(raw, output);
+    assert.equal(raw.details?.outputSummaryStatus, "full-output");
 
+    const summary = "ERROR E42 at checkout.ts:8; next: retry fixture";
     const summarized = await processToolResult(
       context,
       fakeToolResult(output),
       0,
-      fakeCompletion("ERROR E42 at checkout.ts:8; next: retry fixture"),
+      fakeCompletion(summary),
     );
-    assert.equal(summarized.content[0]?.text, "ERROR E42 at checkout.ts:8; next: retry fixture");
+    await assertSummaryReceipt(summarized, output, summary);
     assert.equal(summarized.details?.outputSummaryReasonCode, "SELECTED_INFORMATION");
     assert.match(String(summarized.details?.outputSummaryReason), /specific information/i);
 
+    const fallbackInput = "1234567890";
     const fallback = await processToolResult(
       context,
-      fakeToolResult("1234567890"),
+      fakeToolResult(fallbackInput),
       0,
       fakeCompletion("123456789"),
     );
-    assert.equal(fallback.content[0]?.text, "1234567890");
+    assertOriginalPreserved(fallback, fallbackInput);
     assert.equal(fallback.details?.outputSummaryStatus, "summary-fallback");
   });
 });
@@ -703,7 +779,7 @@ test("OpenAI 提炼请求通过 provider payload 设置 JSON response format", a
 
 test("提炼首次失败后默认重试一次并可成功返回", async () => {
   await withFakeSummaryConfig(async () => {
-    const output = "FAIL checkout\nERROR at checkout.ts:8\nnext: inspect the payment provider\n".repeat(4);
+    const output = "FAIL checkout\nERROR at checkout.ts:8\nnext: inspect the payment provider\n".repeat(80);
     const successfulCompletion = fakeCompletion("ERROR at checkout.ts:8; inspect the payment provider");
     const notices: Array<{ message: string; type?: string }> = [];
     let attempts = 0;
@@ -721,8 +797,7 @@ test("提炼首次失败后默认重试一次并可成功返回", async () => {
     );
 
     assert.equal(attempts, 2);
-    assert.equal(result.details?.outputSummaryStatus, "summarized");
-    assert.equal(result.content[0]?.text, "ERROR at checkout.ts:8; inspect the payment provider");
+    await assertSummaryReceipt(result, output, "ERROR at checkout.ts:8; inspect the payment provider");
     assert.deepEqual(notices, [{
       message: "[distill] Distillation hit a non-timeout error; starting retry 1/1: temporary provider failure",
       type: "warning",
@@ -760,6 +835,7 @@ test("errorRetryCount 为零时非超时异常不重试", async () => {
     );
 
     assert.equal(attempts, 1);
+    assertOriginalPreserved(result, "FAIL checkout\nERROR at checkout.ts:8\nnext: retry");
     assert.equal(result.details?.outputSummaryStatus, "summary-failed");
     assert.match(String(result.details?.outputSummaryError), /provider unavailable/);
   }, 10000, { timeoutRetryCount: 1, errorRetryCount: 0 });
@@ -767,7 +843,7 @@ test("errorRetryCount 为零时非超时异常不重试", async () => {
 
 test("JSON 协议失败后只调用 JSON repair，不重新总结", async () => {
   await withFakeSummaryConfig(async () => {
-    const output = "FULL TOOL OUTPUT SHOULD STAY OUT OF THE REPAIR PROMPT\nERROR E42\nnext: retry";
+    const output = "FULL TOOL OUTPUT SHOULD STAY OUT OF THE REPAIR PROMPT\nERROR E42\nnext: retry\n".repeat(80);
     const prompts: string[] = [];
     let calls = 0;
     const malformed = '{"decision":{"mode":"SUMMARY","reasonCode":"SELECTED_INFORMATION","reason":"The request selects information; therefore SUMMARY.","summary":"ERROR E42"}}';
@@ -795,8 +871,7 @@ test("JSON 协议失败后只调用 JSON repair，不重新总结", async () => 
     );
 
     assert.equal(calls, 2);
-    assert.equal(result.content[0]?.text, "ERROR E42");
-    assert.equal(result.details?.outputSummaryStatus, "summarized");
+    await assertSummaryReceipt(result, output, "ERROR E42");
     assert.equal(result.details?.summaryJsonRepairAttempted, true);
     assert.equal(result.details?.summaryJsonRepairSucceeded, true);
     assert.match(prompts[1] ?? "", /JSON protocol repairer/);
@@ -829,7 +904,7 @@ test("JSON repair 失败时不消耗 errorRetryCount 重新总结", async () => 
     );
 
     assert.equal(calls, 2);
-    assert.equal(result.content[0]?.text, output);
+    assertOriginalPreserved(result, output);
     assert.equal(result.details?.outputSummaryStatus, "summary-failed");
     assert.equal(result.details?.summaryJsonRepairAttempted, true);
     assert.equal(result.details?.summaryJsonRepairSucceeded, false);
@@ -839,7 +914,7 @@ test("JSON repair 失败时不消耗 errorRetryCount 重新总结", async () => 
 
 test("超时使用独立重试次数并可在下一次尝试成功", async () => {
   await withFakeSummaryConfig(async () => {
-    const output = "ERROR deployment timeout at api\n".repeat(10);
+    const output = "ERROR deployment timeout at api\n".repeat(80);
     const successfulCompletion = fakeCompletion("ERROR deployment timeout at api");
     let attempts = 0;
     const timeoutThenSuccess: TestCompletion = async (...args) => {
@@ -867,8 +942,7 @@ test("超时使用独立重试次数并可在下一次尝试成功", async () =>
     );
 
     assert.equal(attempts, 2);
-    assert.equal(result.details?.outputSummaryStatus, "summarized");
-    assert.equal(result.content[0]?.text, "ERROR deployment timeout at api");
+    await assertSummaryReceipt(result, output, "ERROR deployment timeout at api");
   }, 10000, { timeoutRetryCount: 1, errorRetryCount: 0 });
 });
 
@@ -876,7 +950,7 @@ test("提炼 details 保留模型 token usage", async () => {
   await withFakeSummaryConfig(async () => {
     const result = await processToolResult(
       fakeSummaryContext(),
-      fakeToolResult("FAIL checkout\\nERROR at checkout.ts:8\\nnext: inspect"),
+      fakeToolResult("FAIL checkout\nERROR at checkout.ts:8\nnext: inspect\n".repeat(80)),
       0,
       fakeCompletion("ERROR at checkout.ts:8", "json", {
         input: 1200,
@@ -901,14 +975,13 @@ test("提炼 details 保留模型 token usage", async () => {
     assert.equal(result.details?.summaryTotalTokens, 1600);
     assert.equal(result.details?.summaryCost, 0.003);
     assert.equal(result.details?.summaryAttempts, 1);
-    assert.ok((result.details?.estimatedOriginalOutputTokens ?? 0) > 0);
-    assert.ok((result.details?.estimatedSummaryTokens ?? 0) > 0);
-    assert.equal(
-      result.details?.estimatedTokensSaved,
-      (result.details?.estimatedOriginalOutputTokens ?? 0)
-        - (result.details?.estimatedSummaryTokens ?? 0),
-    );
-    assert.ok((result.details?.estimatedTokensSaved ?? 0) > 0);
+    const originalTokens = Number(result.details?.estimatedOriginalOutputTokens);
+    const summaryTokens = Number(result.details?.estimatedSummaryTokens);
+    const savedTokens = Number(result.details?.estimatedTokensSaved);
+    assert.ok(originalTokens > 0);
+    assert.ok(summaryTokens > 0);
+    assert.equal(savedTokens, originalTokens - summaryTokens);
+    assert.ok(savedTokens > 0);
   });
 });
 
@@ -934,7 +1007,7 @@ test("重试时累计每次模型调用的 token usage", async () => {
 
     const result = await processToolResult(
       fakeSummaryContext(),
-      fakeToolResult("FAIL checkout\\nERROR at checkout.ts:8\\nnext: inspect"),
+      fakeToolResult("FAIL checkout\nERROR at checkout.ts:8\nnext: inspect\n".repeat(80)),
       0,
       completion,
     );
@@ -968,7 +1041,7 @@ test("fake provider 的空响应、非法响应和异常都保留原文", async 
       0,
       async () => ({ content: [] } as unknown as TestCompletionResult),
     );
-    assert.equal(empty.content[0]?.text, output);
+    assertOriginalPreserved(empty, output);
     assert.equal(empty.details?.outputSummaryStatus, "summary-failed");
 
     const invalid = await processToolResult(
@@ -981,7 +1054,7 @@ test("fake provider 的空响应、非法响应和异常都保留原文", async 
         content: [],
       } as unknown as TestCompletionResult),
     );
-    assert.equal(invalid.content[0]?.text, output);
+    assertOriginalPreserved(invalid, output);
     assert.equal(invalid.details?.outputSummaryStatus, "summary-failed");
     assert.match(String(invalid.details?.outputSummaryError), /invalid provider response/);
 
@@ -991,7 +1064,7 @@ test("fake provider 的空响应、非法响应和异常都保留原文", async 
       0,
       async () => { throw new Error("fake provider failed"); },
     );
-    assert.equal(thrown.content[0]?.text, output);
+    assertOriginalPreserved(thrown, output);
     assert.equal(thrown.details?.outputSummaryStatus, "summary-failed");
     assert.match(String(thrown.details?.outputSummaryError), /fake provider failed/);
   });
@@ -1000,7 +1073,7 @@ test("fake provider 的空响应、非法响应和异常都保留原文", async 
 test("兼容模型用 Markdown 代码围栏包裹 JSON 响应", async () => {
   await withFakeSummaryConfig(async () => {
     const context = fakeSummaryContext();
-    const output = "FAIL checkout\nERROR at checkout.ts:8\nnext: retry fixture";
+    const output = "FAIL checkout\nERROR at checkout.ts:8\nnext: retry fixture\n".repeat(80);
 
     const result = await processToolResult(
       context,
@@ -1009,8 +1082,7 @@ test("兼容模型用 Markdown 代码围栏包裹 JSON 响应", async () => {
       fakeCompletion("ERROR at checkout.ts:8", "fenced-json"),
     );
 
-    assert.equal(result.content[0]?.text, "ERROR at checkout.ts:8");
-    assert.equal(result.details?.outputSummaryStatus, "summarized");
+    await assertSummaryReceipt(result, output, "ERROR at checkout.ts:8");
     assert.equal(result.details?.outputSummaryDecisionMode, "SUMMARY");
   });
 });
@@ -1034,9 +1106,9 @@ test("fake provider 超时后保留原文并记录失败", async () => {
 
     const result = await processToolResult(context, fakeToolResult(output), 0, timeoutCompletion);
     assert.equal(attempts, 1);
-    assert.equal(result.content[0]?.text, output);
+    assertOriginalPreserved(result, output);
     assert.equal(result.details?.outputSummaryStatus, "summary-failed");
-    assert.match(String(result.details?.outputSummaryError), /fake provider aborted/);
+    assert.match(String(result.details?.outputSummaryError), /abort|timed? out/i);
   }, 10000, { timeoutRetryCount: 0, errorRetryCount: 1 });
 });
 
@@ -1123,49 +1195,81 @@ test("包含图片等非文本内容时识别为非纯文本输出", () => {
   );
 });
 
-test("最终文本超过上限时写入临时文件并返回文件指针", async () => {
-  const finalContent = "x".repeat(10_001);
-  const result = await limitReturnedToolResult(
-    { content: [{ type: "text", text: finalContent }] },
-    10_000,
-  );
-
-  assert.equal(result.details?.outputTruncated, true);
-  assert.equal(result.details?.outputLimitChars, 10_000);
-  assert.match(result.content[0]?.text ?? "", /Output exceeded 10000 chars/);
-  assert.equal(
-    await readFile(result.details?.fullOutputPath as string, "utf8"),
-    finalContent,
-  );
-});
-
-test("最终输出限制覆盖摘要结果", async () => {
+test("大型 RAW 输出不截断、不调用模型也不创建归档", async () => {
   await withFakeSummaryConfig(async () => {
+    const original = "RAW exact line\n".repeat(4_000);
+    const context = fakeSummaryContext();
+    context.params.outputRequest = "RAW";
+    const before = (await readdir(process.env.PI_CODING_AGENT_DIR!, { recursive: true })).sort();
+    let modelCalls = 0;
     const result = await processToolResult(
-      fakeSummaryContext(),
-      fakeToolResult("a".repeat(500)),
+      context,
+      fakeToolResult(original),
       0,
-      fakeCompletion("x".repeat(200)),
+      async () => {
+        modelCalls += 1;
+        throw new Error("RAW must not call the model");
+      },
     );
 
-    assert.equal(result.details?.outputTruncated, true);
-    assert.equal(result.details?.outputLimitChars, 100);
-    const returnedText = result.content[0]?.text ?? "";
-    assert.ok(returnedText.length <= 100);
-    assert.match(returnedText, /Output exceeded 100 chars/);
-    assert.match(
-      await readFile(result.details?.fullOutputPath as string, "utf8"),
-      /^x{200}/,
-    );
+    assert.equal(modelCalls, 0);
+    assertOriginalPreserved(result, original);
+    assert.equal(result.details?.outputSummaryStatus, "full-output");
+    assert.equal(result.details?.distill, undefined);
+    assert.deepEqual((await readdir(process.env.PI_CODING_AGENT_DIR!, { recursive: true })).sort(), before);
   }, 100);
 });
 
-test("按工具开关动态注入和移除 outputRequest", () => {
+test("maxOutputChars 和 maxChars 只作为摘要收据验收预算", async () => {
+  const original = "verbose diagnostic line\n".repeat(300);
+  await withFakeSummaryConfig(async () => {
+    const result = await processToolResult(
+      fakeSummaryContext(),
+      fakeToolResult(original),
+      0,
+      fakeCompletion("short summary"),
+    );
+    assertOriginalPreserved(result, original);
+    assert.equal(result.details?.outputSummaryStatus, "summary-fallback");
+  }, 100);
+
+  await withFakeSummaryConfig(async () => {
+    const result = await processToolResult(
+      fakeSummaryContext(),
+      fakeToolResult(original),
+      0,
+      fakeCompletion("summary exceeds ten chars"),
+    );
+    assertOriginalPreserved(result, original);
+    assert.equal(result.details?.outputSummaryStatus, "summary-fallback");
+  }, 10_000, { timeoutRetryCount: 1, errorRetryCount: 1, maxChars: 10 });
+});
+
+test("summarizeErrors=false 跳过大型错误输出并保留原文", async () => {
+  await withFakeSummaryConfig(async () => {
+    const original = "ERROR repeated failure context\n".repeat(300);
+    let modelCalls = 0;
+    const result = await processToolResult(
+      fakeSummaryContext(),
+      fakeToolResult(original, true),
+      0,
+      async () => {
+        modelCalls += 1;
+        throw new Error("disabled error summarization must not call the model");
+      },
+    );
+    assert.equal(modelCalls, 0);
+    assertOriginalPreserved(result, original);
+    assert.equal(result.details?.outputSummaryStatus, "errors-disabled");
+  }, 10_000, { timeoutRetryCount: 1, errorRetryCount: 1, summarizeErrors: false });
+});
+
+test("outputRequest schema 要求非空；Fusion 还要求 evidence 双开关和 then_run", () => {
   const tools = ["bash", "read", "edit", "write"].map((name) => ({
     name,
     parameters: {
       type: "object",
-      properties: { value: { type: "string" } },
+      properties: { value: { type: "string" } } as Record<string, unknown>,
       required: ["value"],
     },
   }));
@@ -1180,7 +1284,8 @@ test("按工具开关动态注入和移除 outputRequest", () => {
       errorRetryCount: 1,
       missedCompressionRatio: 10,
       summarizeErrors: true,
-      tools: { bash: { enabled: false }, edit: { enabled: true } },
+      evidence: { enabled: true, fusion: true },
+      tools: { bash: { enabled: false }, edit: { enabled: true }, write: { enabled: true } },
     },
     render: { enabled: true, showPrompt: true, showResult: true },
     configPath: "",
@@ -1188,21 +1293,35 @@ test("按工具开关动态注入和移除 outputRequest", () => {
   };
   const api = { getAllTools: () => tools } as any;
 
-  assert.equal(extendDistillToolParameters(api, loaded), 2);
+  assert.equal(extendDistillToolParameters(api, loaded), 1);
   assert.equal((tools[0].parameters as any).properties.outputRequest, undefined);
-  assert.equal((tools[0].parameters as any).required.includes("outputRequest"), false);
-  assert.equal(typeof (tools[1].parameters as any).properties.outputRequest, "object");
-  assert.equal(typeof (tools[2].parameters as any).properties.outputRequest, "object");
+  const readSchema = (tools[1].parameters as any).properties.outputRequest;
+  assert.deepEqual({ type: readSchema.type, minLength: readSchema.minLength, pattern: readSchema.pattern }, {
+    type: "string",
+    minLength: 1,
+    pattern: "\\S",
+  });
+  assert.equal((tools[1].parameters as any).required.includes("outputRequest"), true);
+  assert.equal((tools[2].parameters as any).properties.outputRequest, undefined);
   assert.equal((tools[3].parameters as any).properties.outputRequest, undefined);
 
-  loaded.config.tools.bash.enabled = true;
-  assert.equal(extendDistillToolParameters(api, loaded), 3);
-  assert.equal(typeof (tools[0].parameters as any).properties.outputRequest, "object");
-
-  loaded.config.tools.bash.enabled = false;
+  (tools[2].parameters.properties as Record<string, unknown>).then_run = { type: "object" };
   assert.equal(extendDistillToolParameters(api, loaded), 2);
-  assert.equal((tools[0].parameters as any).properties.outputRequest, undefined);
-  assert.deepEqual((tools[0].parameters as any).required, ["value"]);
+  const fusionSchema = (tools[2].parameters as any).properties.outputRequest;
+  assert.deepEqual({ type: fusionSchema.type, minLength: fusionSchema.minLength, pattern: fusionSchema.pattern }, {
+    type: "string",
+    minLength: 1,
+    pattern: "\\S",
+  });
+  assert.equal((tools[2].parameters as any).required.includes("outputRequest"), false);
+
+  loaded.config.evidence.fusion = false;
+  assert.equal(extendDistillToolParameters(api, loaded), 1);
+  assert.equal((tools[2].parameters as any).properties.outputRequest, undefined);
+  loaded.config.evidence.fusion = true;
+  loaded.config.evidence.enabled = false;
+  assert.equal(extendDistillToolParameters(api, loaded), 1);
+  assert.equal((tools[2].parameters as any).properties.outputRequest, undefined);
 });
 
 test("pi-distill 可以追加 UI-only 保底审计", () => {
@@ -1308,13 +1427,12 @@ test("用户中断会终止 Pi 事件中尚未完成的提炼请求", async () =
       markStarted?.();
     })]);
 
+    const tools = [{
+      name: "read", description: "read tool", parameters: { type: "object", properties: {} },
+      sourceInfo: { source: "pi-distill-abort-test" },
+    }];
     const pi = {
-      getAllTools: () => [{
-        name: "read",
-        description: "read tool",
-        parameters: { type: "object", properties: {} },
-        sourceInfo: { source: "pi-distill-abort-test" },
-      }],
+      getAllTools: () => tools,
       registerTool: () => undefined,
       registerCommand: () => undefined,
       registerEntryRenderer: () => undefined,
@@ -1339,6 +1457,7 @@ test("用户中断会终止 Pi 事件中尚未完成的提炼请求", async () =
 
     try {
       piDistillExtension(pi);
+      await handlers.get("session_start")?.({ type: "session_start" }, context);
       const input: Record<string, unknown> = { path: "large.txt", outputRequest: "提取错误" };
       await handlers.get("tool_call")?.({
         type: "tool_call",
@@ -1365,9 +1484,9 @@ test("用户中断会终止 Pi 事件中尚未完成的提炼请求", async () =
 
       assert.equal(providerWasAborted, true);
       assert.equal(faux.state.callCount, 1);
-      assert.equal(result.content[0]?.text, "ERROR still running");
+      assert.deepEqual(result.content, [{ type: "text", text: "ERROR still running" }]);
       assert.equal(result.details.outputSummaryStatus, "summary-failed");
-      assert.match(String(result.details.outputSummaryError), /Summarization aborted/);
+      assert.match(String(result.details.outputSummaryError), /abort/i);
     } finally {
       releaseResponse?.();
       await handlers.get("session_shutdown")?.();
@@ -1377,12 +1496,10 @@ test("用户中断会终止 Pi 事件中尚未完成的提炼请求", async () =
 });
 
 test("pi-distill 独立扩展最终工具 schema，并通过 Pi 事件处理 outputRequest", async () => {
-  const {
-    default: piDistillExtension,
-    OUTPUT_REQUEST_DESCRIPTION,
-  } = await import("../src/index.ts");
+  const { default: piDistillExtension } = await import("../src/index.ts");
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
-  process.env.PI_CODING_AGENT_DIR = await mkdtemp(join(tmpdir(), "pi-distill-extension-"));
+  const extensionAgentDir = await mkdtemp(join(tmpdir(), "pi-distill-extension-"));
+  process.env.PI_CODING_AGENT_DIR = extensionAgentDir;
   try {
     const handlers = new Map<string, (...args: any[]) => any>();
     const tools = ["bash", "read", "grep", "find", "ls", "edit", "write", "custom-tool"].map((name) => ({
@@ -1421,8 +1538,8 @@ test("pi-distill 独立扩展最终工具 schema，并通过 Pi 事件处理 out
       prompt: "grep for undefined",
       systemPrompt: "base system prompt",
     }, {});
-    assert.match(beforeAgentStartResult.systemPrompt, /MANDATORY tool-call rule|强制工具调用规则/);
-    assert.match(beforeAgentStartResult.systemPrompt, /RAW must be exactly the three ASCII letters|RAW 必须是严格的三个 ASCII 字母/);
+    assert.match(beforeAgentStartResult.systemPrompt, /For tools with a required outputRequest, always supply a nonempty request or exactly RAW/);
+    assert.match(beforeAgentStartResult.systemPrompt, /Use native read with RAW to inspect source_artifact/);
 
     assert.equal(registeredToolCount, 0);
     for (const tool of tools) {
@@ -1431,10 +1548,16 @@ test("pi-distill 独立扩展最终工具 schema，并通过 Pi 事件处理 out
       assert.equal(schema.required.filter((value: string) => value === "outputRequest").length, enabledByDefault ? 1 : 0);
       assert.equal(schema.properties.outputRequest?.type, enabledByDefault ? "string" : undefined);
       if (enabledByDefault) {
-        assert.equal(
-          schema.properties.outputRequest.description,
-          OUTPUT_REQUEST_DESCRIPTION,
-        );
+        assert.deepEqual({
+          type: schema.properties.outputRequest.type,
+          minLength: schema.properties.outputRequest.minLength,
+          pattern: schema.properties.outputRequest.pattern,
+        }, {
+          type: "string",
+          minLength: 1,
+          pattern: "\\S",
+        });
+        assert.match(schema.properties.outputRequest.description, /exactly RAW|严格传入 RAW/);
       }
     }
 
@@ -1456,7 +1579,6 @@ test("pi-distill 独立扩展最终工具 schema，并通过 Pi 事件处理 out
       details: {},
       isError: false,
     }, { cwd: process.cwd() });
-    assert.equal(result.details.outputSummaryIntent, "full");
     assert.equal(result.details.outputSummaryPrompt, "RAW");
     assert.deepEqual(result.details.outputSummaryRender, {
       enabled: true,
@@ -1499,7 +1621,7 @@ test("pi-distill 独立扩展最终工具 schema，并通过 Pi 事件处理 out
       "custom-tool": { enabled: false },
       write: { enabled: true },
     });
-    assert.equal(typeof (tools.find((tool) => tool.name === "write")!.parameters as any).properties.outputRequest, "object");
+    assert.equal((tools.find((tool) => tool.name === "write")!.parameters as any).properties.outputRequest, undefined);
     assert.equal((tools.find((tool) => tool.name === "custom-tool")!.parameters as any).properties.outputRequest, undefined);
 
     const disabledInput: Record<string, unknown> = { value: "custom", outputRequest: "RAW" };
@@ -1509,7 +1631,7 @@ test("pi-distill 独立扩展最终工具 schema，并通过 Pi 事件处理 out
       toolCallId: "call-disabled",
       input: disabledInput,
     }, {});
-    assert.equal(disabledInput.outputRequest, undefined);
+    assert.equal(disabledInput.outputRequest, "RAW");
     const disabledResult = await handlers.get("tool_result")?.({
       type: "tool_result",
       toolName: "custom-tool",
@@ -1527,6 +1649,7 @@ test("pi-distill 独立扩展最终工具 schema，并通过 Pi 事件处理 out
   } finally {
     if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    await rm(extensionAgentDir, { recursive: true, force: true });
   }
 });
 

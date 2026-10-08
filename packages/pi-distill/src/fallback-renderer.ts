@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { type Component, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { type Component, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { DistillRenderConfig } from "./summary-utils.ts";
 import { rendererI18n as i18n } from "./i18n.ts";
 
@@ -96,7 +96,10 @@ export function renderDistillAuditText(audit: DistillAuditView, theme: RenderThe
 }
 
 function padLine(line: string, width: number): string {
-  return `${line}${" ".repeat(Math.max(0, width - visibleWidth(line)))}`;
+  // A single wide glyph cannot wrap into a one-column terminal. Clip only
+  // the display projection; the stored receipt/source stays unchanged.
+  const fitted = visibleWidth(line) > width ? truncateToWidth(line, width, "") : line;
+  return `${fitted}${" ".repeat(Math.max(0, width - visibleWidth(fitted)))}`;
 }
 
 function wrapDistillAuditLine(
@@ -112,6 +115,9 @@ function wrapDistillAuditLine(
     const labelTone = label === "Summary" ? "success" : label === "Error" ? "error" : label === "Warning" ? "warning" : "accent";
     const renderedPrefix = `${theme.fg("dim", branch)}${theme.fg(labelTone, label)}${gap}`;
     const renderedContinuation = theme.fg("dim", branch.startsWith("├") ? "│       " : "        ");
+    if (visibleWidth(renderedPrefix) >= width) {
+      return wrapTextWithAnsi(renderDistillAuditLine(audit, line, index, theme), width).map((part) => padLine(part, width));
+    }
     const contentWidth = Math.max(1, width - visibleWidth(renderedPrefix));
     const wrappedContent = wrapTextWithAnsi(content, contentWidth);
     return wrappedContent.map((part, partIndex) => padLine(
@@ -124,6 +130,9 @@ function wrapDistillAuditLine(
   if (continuation) {
     const [, prefix = "", content = ""] = continuation;
     const renderedPrefix = theme.fg("dim", prefix);
+    if (visibleWidth(renderedPrefix) >= width) {
+      return wrapTextWithAnsi(renderDistillAuditLine(audit, line, index, theme), width).map((part) => padLine(part, width));
+    }
     const contentWidth = Math.max(1, width - visibleWidth(renderedPrefix));
     const wrappedContent = wrapTextWithAnsi(content, contentWidth);
     return wrappedContent.map((part) => padLine(`${renderedPrefix}${part}`, width));
@@ -184,6 +193,13 @@ export function buildDistillAuditLines(
 
   const statusViews: Record<string, { icon: string; textKey?: string; tone: AuditTone }> = {
     summarized: { icon: "✓", tone: "success" },
+    "evidence-verified": { icon: "✓", textKey: "evidenceVerified", tone: "success" },
+    "evidence-failed": { icon: "✕", textKey: "evidenceFailed", tone: "error" },
+    "archive-failed": { icon: "!", textKey: "archiveFailed", tone: "warning" },
+    "incomplete-source": { icon: "○", textKey: "incompleteSource", tone: "warning" },
+    "input-over-budget": { icon: "○", textKey: "inputOverBudget", tone: "warning" },
+    "sensitive-source": { icon: "○", textKey: "sensitiveSource", tone: "warning" },
+    "errors-disabled": { icon: "○", textKey: "errorsDisabled", tone: "dim" },
     "summary-fallback": { icon: "↺", textKey: "summaryFallback", tone: "warning" },
     disabled: { icon: "○", textKey: "disabled", tone: "dim" },
     "disabled-by-config": { icon: "○", textKey: "off", tone: "dim" },
@@ -208,7 +224,8 @@ export function buildDistillAuditLines(
   const compressionSavedPercent = getFiniteNumber(details.compressionSavedPercent);
   const toolExecutionMs = getFiniteNumber(details.toolExecutionMs);
   const summaryDurationMs = getFiniteNumber(details.summaryDurationMs);
-  const fullOutputPath = getString(details.fullOutputPath);
+  const distill = details.distill as { source?: { path?: unknown } } | undefined;
+  const fullOutputPath = getString(distill?.source?.path) ?? getString(details.fullOutputPath);
   const outputRequest = getString(details.outputSummaryPrompt);
   const summaryText = getString(details.summaryText);
   const statusView = statusViews[status] ?? { icon: "○", tone: "muted" as const };

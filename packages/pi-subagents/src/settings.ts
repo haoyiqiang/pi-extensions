@@ -1,6 +1,6 @@
 // Persistence for pi-subagents operational settings.
 // - Global:  <agentDir>/subagents.json (via resolveAgentDir()) — manual defaults, never written here
-// - Project: <cwd>/.pi/subagents.json — written by /agents → Settings; overrides global only when trusted
+// - Project: <cwd>/.pi/subagents.json — written by /config:subagents → Settings; overrides global only when trusted
 
 import { join } from "node:path";
 import {
@@ -11,11 +11,14 @@ import {
 } from "pi-extensions-config";
 import { NO_FALLBACK } from "./agent-types.js";
 import { i18n } from "./i18n.js";
+import { parseExtensionRule } from "./extension-defaults.js";
 import type { AgentMentionMode, JoinMode, ViewerMarkdownMode, WidgetMode } from "./types.js";
 
 export type SubagentBackend = "embedded" | "terminal";
 
 export interface SubagentsSettings {
+  /** Default for omitted agent extensions. Missing stays unconfigured; [] selects none. */
+  defaultExtensions?: boolean | string[];
   maxConcurrent?: number;
   /**
    * Max concurrent FOREGROUND (blocking) agents — `0` = unlimited, the default,
@@ -42,7 +45,7 @@ export interface SubagentsSettings {
   /**
    * 0 = unlimited — the extension's single source of truth for that convention:
    * `normalizeMaxTurns()` in agent-runner.ts treats 0 → `undefined`, and the
-   * `/agents` → Settings input prompt explicitly says "0 = unlimited".
+   * `/config:subagents` → Settings input prompt explicitly says "0 = unlimited".
    */
   defaultMaxTurns?: number;
   graceTurns?: number;
@@ -68,7 +71,7 @@ export interface SubagentsSettings {
    * Master switch for the schedule subagent feature. Defaults to `true`.
    * When `false`: the `Agent` tool's `schedule` param + its guideline are
    * stripped from the tool spec at registration (zero LLM-context cost), the
-   * scheduler doesn't bind to the session, and the `/agents → Scheduled jobs`
+   * scheduler doesn't bind to the session, and the `/config:subagents → Scheduled jobs`
    * menu entry is hidden. Schema-level removal applies at extension load
    * (next pi session); runtime menu/runtime-fire short-circuit is immediate.
    */
@@ -125,12 +128,6 @@ export interface SubagentsSettings {
    * next pi session.
    */
   toolDescriptionMode?: ToolDescriptionMode;
-  /**
-   * Whether the Claude Code-style FleetView (the navigable main+subagents list
-   * rendered below the editor) is shown. Defaults to `true`. Pure-UI: when off,
-   * the list never registers and the global key handler never captures input.
-   */
-  fleetView?: boolean;
   /**
    * Whether `@handle message` typed at the prompt is routed to that subagent
    * instead of the main model, and whether `@` offers running agents alongside
@@ -208,7 +205,7 @@ export interface SubagentsSettings {
    * Master switch for scripted workflows. Defaults to `true`.
    *
    * Off is not a soft hide: the `SubagentWorkflow` tool is never registered, so
-   * the model is not told it exists and cannot call it, the `/agents`
+   * the model is not told it exists and cannot call it, the `/config:subagents`
    * Workflows entry is hidden, and `--subagents-workflow-file` is refused.
    *
    * Absent is not the same as `true`. Unset means *auto*: on, but yielding to
@@ -220,7 +217,7 @@ export interface SubagentsSettings {
    * `resolveWorkflowCollisions` in index.ts.
    *
    * Read once at extension init, before registration, so flipping it in
-   * `/agents → Settings` takes effect on the next pi session — the same
+   * `/config:subagents → Settings` takes effect on the next pi session — the same
    * contract `schedulingEnabled` has, and for the same reason: a tool spec is
    * fixed once pi has it.
    */
@@ -273,7 +270,7 @@ export interface SubagentsSettings {
   reportUsage?: boolean;
   /**
    * Whether the subagent surfaces show an estimated dollar cost next to their
-   * token counts (widget, FleetView, conversation viewer, foreground results,
+   * token counts (widget, conversation viewer, foreground results,
    * completion notifications). Defaults to `false`. Applied live.
    *
    * Rendered as `~$0.0042` — the tilde marks it as pi's reported estimate
@@ -300,7 +297,7 @@ export interface SubagentsSettings {
    * How much of the conversation viewer's transcript renders as Markdown.
    * Defaults to `assistant`. Applied live — the viewer's `m` key cycles this
    * same setting, so a choice made in the overlay persists like one made in
-   * `/agents → Settings`.
+   * `/config:subagents → Settings`.
    *
    * Scoped rather than all-or-nothing because the two kinds of content have
    * different contracts: assistant text is authored as Markdown, while a tool
@@ -328,11 +325,11 @@ export interface SubagentsConfigPaths {
   project: string;
 }
 
-/** Fields owned by the imported `/agents` settings UI. */
+/** Fields owned by the management panel's project settings UI. */
 const UI_SETTING_KEYS: readonly (keyof SubagentsSettings)[] = [
   "maxConcurrent", "maxConcurrentForeground", "defaultMaxTurns", "graceTurns",
   "defaultJoinMode", "backgroundByDefault", "schedulingEnabled", "scopeModels",
-  "strictAgentFiles", "disableDefaultAgents", "toolDescriptionMode", "fleetView",
+  "strictAgentFiles", "disableDefaultAgents", "toolDescriptionMode",
   "agentMentions", "rememberAgents", "widgetMode", "outputTranscript",
   "worktreeIsolation", "workflowsEnabled", "maxSubagentDepth", "fallbackSubagent",
   "reportUsage", "showCost", "showModel", "viewerMarkdown",
@@ -351,7 +348,6 @@ export interface SettingsAppliers {
   setStrictAgentFiles: (b: boolean) => void;
   setDisableDefaultAgents: (b: boolean) => void;
   setToolDescriptionMode: (mode: ToolDescriptionMode) => void;
-  setFleetView: (b: boolean) => void;
   setAgentMentions: (mode: AgentMentionMode) => void;
   setRememberAgents: (b: boolean) => void;
   setWidgetMode: (mode: WidgetMode) => void;
@@ -384,12 +380,15 @@ const GRACE_TURNS_CEILING = 1_000;
 const SUBAGENT_DEPTH_CEILING = 16;
 
 /** Drop fields that don't match the expected shape. Silent — garbage becomes absent. */
-function sanitize(raw: JsonObject): SubagentsConfig {
+function sanitize(raw: JsonObject, path: string): SubagentsConfig {
   const r = raw;
   const out: SubagentsConfig = {};
+  if (Object.hasOwn(r, "defaultExtensions")) {
+    out.defaultExtensions = parseExtensionRule(r.defaultExtensions, path);
+  }
   if (Object.hasOwn(r, "backend")) {
     if (r.backend !== "embedded" && r.backend !== "terminal") {
-      throw new Error(i18n.t("product.backendUsage"));
+      throw new Error(i18n.t("product.backendInvalid"));
     }
     out.backend = r.backend;
   }
@@ -450,9 +449,6 @@ function sanitize(raw: JsonObject): SubagentsConfig {
   }
   if (typeof r.toolDescriptionMode === "string" && VALID_TOOL_DESCRIPTION_MODES.has(r.toolDescriptionMode)) {
     out.toolDescriptionMode = r.toolDescriptionMode as ToolDescriptionMode;
-  }
-  if (typeof r.fleetView === "boolean") {
-    out.fleetView = r.fleetView;
   }
   // Was a boolean before the `model` mode existed. A hand-written or
   // previously-written `true` means "on", which is now the default `model`.
@@ -520,7 +516,7 @@ export function getSubagentsConfigPaths(
 function readSettingsFile(path: string): SubagentsConfig {
   const result = readJsonObjectResult(path);
   if (result.status === "missing") return {};
-  if (result.status === "loaded") return sanitize(result.value);
+  if (result.status === "loaded") return sanitize(result.value, path);
   console.warn(`[pi-subagents] Ignoring malformed settings at ${path}: ${result.error.message}`);
   return {};
 }
@@ -542,6 +538,29 @@ export function loadSettings(
     : { ...global, ...readSettingsFile(paths.project) };
 }
 
+export interface DefaultExtensionsSelection {
+  readonly value: SubagentsSettings["defaultExtensions"];
+  readonly source: "project" | "global" | "unset";
+  readonly path?: string;
+}
+
+/** Read and validate each trusted layer before choosing the effective selection. */
+export function loadDefaultExtensions(
+  cwd: string = process.cwd(),
+  options: LoadSettingsOptions = {},
+): DefaultExtensionsSelection {
+  const paths = getSubagentsConfigPaths(cwd);
+  const global = readSettingsFile(paths.global);
+  const project = options.projectTrusted === false ? {} : readSettingsFile(paths.project);
+  if (project.defaultExtensions !== undefined) {
+    return { value: project.defaultExtensions, source: "project", path: paths.project };
+  }
+  if (global.defaultExtensions !== undefined) {
+    return { value: global.defaultExtensions, source: "global", path: paths.global };
+  }
+  return { value: undefined, source: "unset" };
+}
+
 /**
  * Write project-local settings. Global is never touched from code.
  *
@@ -554,7 +573,10 @@ export function saveSettings(s: SubagentsConfig, cwd: string = process.cwd()): b
   const current = readJsonObjectResult(path);
   const next: JsonObject = current.status === "loaded" ? { ...current.value } : {};
   for (const key of UI_SETTING_KEYS) delete next[key];
-  Object.assign(next, s);
+  // The default selection has a dedicated, source-aware UI write path. Never
+  // pin an inherited global value from a blanket effective-settings snapshot.
+  const { defaultExtensions: _defaultExtensions, ...uiSnapshot } = s;
+  Object.assign(next, uiSnapshot);
   return tryWriteJsonAtomic(path, next);
 }
 
@@ -575,7 +597,6 @@ export function applySettings(s: SubagentsSettings, appliers: Partial<SettingsAp
   if (typeof s.strictAgentFiles === "boolean") appliers.setStrictAgentFiles?.(s.strictAgentFiles);
   if (typeof s.disableDefaultAgents === "boolean") appliers.setDisableDefaultAgents?.(s.disableDefaultAgents);
   if (s.toolDescriptionMode) appliers.setToolDescriptionMode?.(s.toolDescriptionMode);
-  if (typeof s.fleetView === "boolean") appliers.setFleetView?.(s.fleetView);
   if (s.agentMentions) appliers.setAgentMentions?.(s.agentMentions);
   if (typeof s.rememberAgents === "boolean") appliers.setRememberAgents?.(s.rememberAgents);
   if (s.widgetMode) appliers.setWidgetMode?.(s.widgetMode);

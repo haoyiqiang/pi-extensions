@@ -189,7 +189,7 @@ export class ConversationViewer implements Component {
      */
     private viewerMarkdown?: () => ViewerMarkdownMode,
     /**
-     * Persist a mode chosen with `m`, so the key and `/agents → Settings` mean
+     * Persist a mode chosen with `m`, so the key and `/config:subagents → Settings` mean
      * the same thing. Omitted → `m` still cycles, viewer-locally.
      */
     private onMarkdownMode?: (mode: ViewerMarkdownMode) => void,

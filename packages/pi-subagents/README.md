@@ -3,7 +3,7 @@
 > 中文文档：[README.zh-CN.md](./README.zh-CN.md)
 
 One `Agent`/RPC/management interface, with configurable in-process and terminal
-execution. Agent definitions, scheduling, queues, results and the Fleet/widget UI
+execution. Agent definitions, scheduling, queues, results and the above-editor AgentWidget
 belong to `pi-subagents`; terminal operations use `pi-terminal-mux`. The independent
 `pi-workflow` package owns workflow definitions, orchestration, journals and `/wf`.
 
@@ -53,8 +53,13 @@ Agent-directory resolution honors `PI_CODING_AGENT_DIR`. See
 { "backend": "embedded" }
 ```
 
-Use `"terminal"` for a separate child process/terminal surface. You can also use
-`/config:subagents embedded|terminal`; it preserves unrelated project settings.
+Use `"terminal"` for a separate child process/terminal surface. Open
+`/config:subagents` **without arguments** for the full management panel, then choose
+**Settings → Execution backend (project)**. This writes only the trusted project's
+`.pi/subagents.json`, preserving unrelated settings; global defaults remain read-only.
+`/agents` and backend command arguments are no longer supported. FleetView is removed
+without a replacement; the above-editor AgentWidget remains. Legacy `fleetView`
+configuration is ignored without migrating existing files.
 Changing the default affects **new agents only**. Existing handles and evicted
 `@handle` conversations retain their backend identity.
 
@@ -74,8 +79,11 @@ falling back to embedded.
   `steer` requires a nonempty `message`; `interrupt` stops only the active turn;
   `cancel` ends the task and its owned children, retaining healthy resumable sessions;
   `close` retires ownership after confirmed cleanup without deleting persisted history.
-- `/agents`, Fleet/widget, mentions and **RPC v3** use the same manager controls.
+- `/config:subagents`, AgentWidget, mentions and **RPC v3** use the same manager controls.
   The ambiguous `stop` action/channel is removed; callers must choose an explicit verb.
+
+The AgentWidget owns its live refresh timer: setting Widget to `off` hides it and
+stops refreshing; re-enabling it during active work resumes live activity and elapsed-time updates.
 
 Concurrency limits count active execution, not open terminal sessions. Interactive
 idle sessions release their slot and reacquire it before the next turn; a queued
@@ -136,12 +144,45 @@ terminal integrations are detected by `pi-terminal-mux`. Visible interactive use
 requires an appropriate terminal environment; native Windows process supervision
 is not currently supported.
 
+### Default extension policy
+
+`/config:subagents` → **Settings → Default extensions (project)** opens a policy
+chooser. Enter opens it; Space does not change this row. **All discovered** saves
+`true`, including future approved discovery. **Specified extensions** opens a
+searchable multi-select: Space toggles, Ctrl+A selects all *currently available*
+resources, Ctrl+R clears, Enter saves an explicit array (including `[]`), and Esc
+cancels without writing. Saved unavailable selectors remain until explicitly
+removed; saved spellings and paths are not silently canonicalized. **None** saves
+`false`; **Reset project override** deletes only the project key to inherit global
+policy or the compatibility fallback. The UI never writes global configuration.
+
+`defaultExtensions` is optional in `subagents.json`. Omission in both layers retains
+compatibility `true`; `true` discovers ordinary-child extensions from approved Pi
+resources, `false` and `[]` disable them, and a string array selects names/paths.
+An agent that omits `extensions` uses this layered default. Explicit agent
+`extensions: true`, `false`, `[]`, or names/paths overrides it. Built-ins omit the
+field; existing user Explore/Plan files with `extensions: true` remain explicit
+and unchanged. `isolated: true` disables extensions regardless of defaults;
+`exclude_extensions` still wins, and root/UI products remain filtered.
+
+Discovery is **not strict inheritance of the parent's actually loaded extensions**:
+it uses Pi's approved global/project manifest and resource paths, without temporary
+CLI sources. Opening the catalog only reads metadata; it never imports extension
+modules, executes factories, installs missing npm/git sources, or reloads resources.
+The detail view shows policy and provenance, not a claimed loaded list. Policy is
+frozen at admission; changing defaults affects new admissions, not queued/running
+actors or retained sessions.
+
+The deprecated `inherit_extensions` field is rejected, including when `extensions`
+is also present. Rename it to `extensions` and remove the old field; omit
+`extensions` instead if the agent should follow the configurable default.
+
 ## Workflow integration
 
 The main entry also offers the versioned workflow executor. Do not load
 `workflow-executor.ts` a second time alongside it. For a workflow-only launcher,
 that separate entry initializes the runtime and supplies child-scoped Agent tools
-without loading the root Fleet/widget UI.
+without loading the root management panel or AgentWidget.
 
 The default **standard** workflow profile preserves the original SDK host shape:
 

@@ -8,6 +8,7 @@ import { basename, join } from "node:path";
 import { parseFrontmatter } from "@earendil-works/pi-coding-agent";
 import { resolveAgentDir } from "pi-extensions-config";
 import { BUILTIN_TOOL_NAMES } from "./agent-types.js";
+import { assertNoLegacyExtensions, parseExtensionRule } from "./extension-defaults.js";
 import type { AgentConfig, IsolationMode, MemoryScope, ThinkingLevel } from "./types.js";
 
 /**
@@ -28,7 +29,7 @@ const RESERVED_IN_TYPE = ":";
 /**
  * Scan for custom agent .md files from multiple locations.
  * Discovery hierarchy (higher priority wins):
- *   1. Project:   <cwd>/.pi/agents/*.md (authoritative — also where /agents writes)
+ *   1. Project:   <cwd>/.pi/agents/*.md (authoritative — also where /config:subagents writes)
  *   2. Workspace: <cwd>/.agents/agents/*.md (shared cross-tool .agents workspace, read-only)
  *   3. Global:    $PI_CODING_AGENT_DIR/agents/*.md (default: ~/.pi/agent/agents/*.md)
  *
@@ -91,6 +92,9 @@ function loadFromDir(dir: string, agents: Map<string, AgentConfig>, source: "pro
       continue;
     }
     const { frontmatter: fm, body } = parsed;
+    // Migration errors are fatal even in non-strict mode; never substitute a fallback.
+    assertNoLegacyExtensions(fm, path);
+    const extensions = parseExtensionRule(fm.extensions, path, { allowCsv: true });
 
     // Claude Code's rule: `name:` IS the agent type, and the filename need not
     // match. Absent, the filename stands in — Claude Code requires the field,
@@ -129,7 +133,7 @@ function loadFromDir(dir: string, agents: Map<string, AgentConfig>, source: "pro
       builtinToolNames,
       extSelectors,
       disallowedTools: mergeCsvLists(fm.disallowed_tools, fm["deny-tools"], fm.deny_tools),
-      extensions: inheritField(fm.extensions ?? fm.inherit_extensions),
+      ...(extensions !== undefined ? { extensions } : {}),
       excludeExtensions: csvListOptional(fm.exclude_extensions),
       skills: inheritField(fm.skill ?? fm.skills ?? fm.inherit_skills),
       model: str(fm.model),
@@ -343,7 +347,7 @@ function parseIsolation(val: unknown): IsolationMode | undefined {
 }
 
 /**
- * Parse an inherit field (extensions, skills).
+ * Parse the legacy skills inherit field (unchanged).
  * omitted/true → true (inherit all); false/"none"/empty → false; csv → listed names.
  */
 function inheritField(val: unknown): true | string[] | false {

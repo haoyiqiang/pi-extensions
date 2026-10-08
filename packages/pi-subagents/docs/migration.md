@@ -53,8 +53,9 @@ Both execution backends use Pi. There is no external Claude CLI branch or CLI
 selector; Pi's own model providers remain independent of the execution backend.
 
 - Default: `embedded`, with ordinary autonomous Agent execution.
-- To use terminal execution: `/config:subagents terminal`.
-- To switch back: `/config:subagents embedded`.
+- Open `/config:subagents` without arguments, then **Settings → Execution backend (project)**
+  to select `terminal` or `embedded`. Only approved project overrides are written;
+  global defaults remain read-only.
 - Configuration: `<agentDir>/subagents.json`, overlaid by
   `<project>/.pi/subagents.json`. `PI_CODING_AGENT_DIR` is supported.
 
@@ -69,6 +70,29 @@ A visible interactive session requires a supported multiplexer. Autonomous termi
 work can use the headless process fallback. Existing sessions retain their backend;
 terminal descendants stay on their saved terminal branch.
 
+### Extension-default migration
+
+`defaultExtensions` in global/project `subagents.json` is optional: absent in both
+layers still means `true` for compatibility. Use `true` for all approved ordinary-child
+resources (including future discovery), `false` or `[]` for none, or a string array
+for explicit selectors. **Settings → Default extensions (project)** saves only the
+project key; Reset deletes it to inherit global/default. Multi-select Ctrl+A saves
+an explicit current list, not future-inclusive `true`; Esc cancels without writing.
+Global configuration is never changed by this UI.
+
+Omitted agent `extensions` now follows this default; explicit values override it.
+Existing user definitions with `extensions: true` stay explicit and are not rewritten.
+`isolated: true`, `exclude_extensions`, and root/UI filtering still apply. Discovery
+uses approved Pi resources, not an exact copy of the parent's loaded list or temporary
+CLI sources. Opening the picker performs metadata discovery only, with missing remote
+packages skipped: no imports, factories, installs, or resource reload.
+
+The deprecated frontmatter/programmatic `inherit_extensions` field is **rejected**,
+including when the same definition also has `extensions`. Rename/remove the legacy
+field; use only `extensions`, or omit it to follow defaults. There is no compatibility
+alias or automatic file migration. Details show policy/source, not actual loaded
+extensions; newly saved defaults apply only at new admission.
+
 ## Tool and command changes
 
 | Retired surface | Unified surface |
@@ -79,13 +103,17 @@ terminal descendants stay on their saved terminal branch.
 | End the task, retain the session | `steer_subagent` with `action: "cancel"` |
 | Retire ownership after cleanup | `steer_subagent` with `action: "close"` |
 | Background result | `get_subagent_result` |
-| `subagents_list` / old management command | `/agents` and the common Fleet/widget |
+| `subagents_list` / old management command | `/config:subagents` management panel and above-editor AgentWidget |
 | `/plan`, `/iterate` | Explicit workflow definitions run through `/wf`; no aliases |
 | `__pi_subagents` global bridge | Versioned event-bus RPC; see [RPC](./rpc.md) |
 
 The original `pi-subagents` Symbol manager view remains a view of the same root
 manager for its existing consumers. It is not the retired interactive bridge.
 The separate upstream `SubagentWorkflow` engine is not activated.
+`/agents` and backend command arguments are removed, with no aliases. FleetView and
+its terminal-input shortcuts are removed without a replacement. AgentWidget,
+Agent/RPC execution and persisted sessions remain; legacy `fleetView` keys are
+ignored without rewriting user files.
 
 ## Workflow migration
 

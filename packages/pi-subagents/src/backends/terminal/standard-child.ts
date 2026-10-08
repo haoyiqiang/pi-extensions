@@ -11,16 +11,14 @@ import {
   type AgentSessionServices,
   type CreateAgentSessionRuntimeFactory,
   type InlineExtension,
-  type LoadExtensionsResult,
 } from "@earendil-works/pi-coding-agent";
 import { createAgentRuntime } from "../../agent-runtime.js";
 import { runInChildSessionContext } from "../../child-context.js";
 import { i18n } from "../../i18n.js";
-import { initializeSubagentsRuntime } from "../../runtime.js";
 import { captureRuntimePolicy } from "../../runtime-policy.js";
-import { isOrdinaryChildProduct } from "../../child-resource-policy.js";
+import { initializeStandardTerminalRuntime, standardResourceOptions } from "./standard-resources.js";
 import { BUILTIN_TOOL_NAMES } from "../../agent-types.js";
-import { SUBAGENT_TOOL_NAMES, extensionCanonicalNames, parseExtensionsSpec } from "../embedded.js";
+import { SUBAGENT_TOOL_NAMES } from "../embedded.js";
 import { STRUCTURED_OUTPUT_TOOL_NAME } from "../../structured-output.js";
 import {
   STANDARD_TERMINAL_CONFIG_ENV,
@@ -30,8 +28,6 @@ import {
 import terminalChildExtension from "./child-extension.js";
 import { createStandardToolScope } from "./standard-tool-scope.js";
 import { validateStandardTerminalPolicy } from "./standard-policy.js";
-
-const PRIVATE_INLINE_PREFIX = "<inline:pi-subagents-terminal-";
 
 function readConfig(): StandardTerminalChildConfig {
   const path = process.env[STANDARD_TERMINAL_CONFIG_ENV];
@@ -44,55 +40,6 @@ function readConfig(): StandardTerminalChildConfig {
   }
   validateStandardTerminalPolicy(value.policy);
   return value;
-}
-
-function resourceOptions(
-  config: StandardTerminalChildConfig,
-  privateFactories: InlineExtension[],
-) {
-  const { policy } = config;
-  const extensions = policy.isolated ? false : policy.agent.extensions;
-  const excludes = new Set((policy.agent.excludeExtensions ?? []).map((name) => name.toLowerCase()));
-  const spec = Array.isArray(extensions) ? parseExtensionsSpec(extensions, policy.configCwd) : undefined;
-  const keep = spec?.names ?? new Set<string>();
-  const loadAll = extensions === true || spec?.wildcard === true;
-  const noExtensions = extensions === false;
-  const additionalExtensionPaths = [
-    ...(spec?.paths ?? []),
-    ...config.providerExtensions,
-  ];
-  const providerPaths = new Set(config.providerExtensions.map((path) => resolve(path)));
-
-  const extensionsOverride = (base: LoadExtensionsResult): LoadExtensionsResult => ({
-    ...base,
-    extensions: base.extensions.filter((extension) => {
-      if (extension.path.startsWith(PRIVATE_INLINE_PREFIX)) return true;
-      if (providerPaths.has(resolve(extension.resolvedPath))) return true;
-      const canons = extensionCanonicalNames(extension.path);
-      if (isOrdinaryChildProduct(extension)) return false;
-      if (canons.some((name) => excludes.has(name))) return false;
-      return loadAll || canons.some((name) => keep.has(name));
-    }).map((extension) => providerPaths.has(resolve(extension.resolvedPath))
-      // Remove registry entries too, so a provider cannot shadow an allowed builtin.
-      ? { ...extension, tools: new Map() }
-      : extension),
-  });
-
-  return {
-    noExtensions,
-    additionalExtensionPaths: additionalExtensionPaths.length > 0 ? additionalExtensionPaths : undefined,
-    extensionFactories: privateFactories,
-    extensionsOverride,
-    noSkills: policy.isolated || policy.agent.skills === false || Array.isArray(policy.agent.skills),
-    // Agent prompt_mode is resolved by buildAgentPrompt before launch. Match the
-    // embedded backend by suppressing a second template/context/append layer;
-    // standard workflow stages use their separate SDK resource host unchanged.
-    noPromptTemplates: true,
-    noThemes: policy.isolated,
-    noContextFiles: true,
-    systemPromptOverride: () => policy.systemPrompt,
-    appendSystemPromptOverride: () => [],
-  };
 }
 
 async function createRuntimeFactory(config: StandardTerminalChildConfig): Promise<CreateAgentSessionRuntimeFactory> {
@@ -140,7 +87,7 @@ async function createRuntimeFactory(config: StandardTerminalChildConfig): Promis
       cwd: config.policy.configCwd,
       agentDir: config.agentDir,
       settingsManager,
-      resourceLoaderOptions: resourceOptions(config, factories),
+      resourceLoaderOptions: standardResourceOptions(config, factories),
     });
     const services: AgentSessionServices = { ...baseServices, cwd };
     servicesRef = services;
@@ -171,7 +118,7 @@ async function main(): Promise<void> {
   const config = readConfig();
   // This is a fresh OS process: initialize canonical non-UI settings once before
   // any scoped Agent runtime reads process-local defaults.
-  initializeSubagentsRuntime(config.policy.configCwd, { projectTrusted: config.policy.projectTrusted });
+  initializeStandardTerminalRuntime(config.policy);
   const createRuntime = await createRuntimeFactory(config);
   const manifestPath = process.env[TERMINAL_MANIFEST_ENV];
   if (!manifestPath) throw new Error(i18n.t("bridge.invalidManifest"));

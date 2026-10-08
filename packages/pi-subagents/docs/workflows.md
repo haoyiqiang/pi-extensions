@@ -1,6 +1,8 @@
 # Scripted workflows
 
-> Upstream reference for the private import, not rpiv-workflow. See the [migration status](../README.md).
+> Historical reference for the retained upstream engine, which the unified product
+> does not activate. Active workflows belong to `pi-workflow` and `/wf`; see the
+> [current product README](../README.md). FleetView has been removed entirely.
 
 A workflow is a small JavaScript program that spawns and coordinates many subagents: fan out over a list, push every item through the same stages, verify each result, return a summary. It runs in the background and reports as it goes.
 
@@ -46,7 +48,7 @@ To iterate, edit the script file and call SubagentWorkflow again with scriptPath
 
 Three things in there matter.
 
-**`Task ID`** is what `resumeFromRunId` takes, and what `/agents → Workflows` lists the run under.
+**`Task ID`** is what `resumeFromRunId` takes, and what the retained `/config:subagents → Workflows` inspector lists the run under.
 
 **`Script`** is the file to edit. **It is a scratch file in your system temp directory, not in your project** — it will not survive a reboot or a temp sweep. If the workflow turns out to be worth keeping, copy it somewhere durable; see [Save it](#5-save-it). The path means something slightly different depending on how the run was started: for an inline script it is a copy the tool just wrote, and for a run started from `scriptPath` or `name` it is *your own file*, reported straight back.
 
@@ -54,7 +56,7 @@ Three things in there matter.
 
 ### 3. Watch it run
 
-Three surfaces, in increasing order of detail.
+Two retained surfaces, in increasing order of detail.
 
 A **card in the transcript**, updating as the run goes:
 
@@ -70,11 +72,9 @@ A **card in the transcript**, updating as the run goes:
   ⎿  auditing 6 route files
 ```
 
-A **`workflow` row in FleetView**, above the agents, carrying its agent counts where a description would go. `⏎` on it opens the inspector rather than a conversation overlay.
-
 Each row names the model the child *actually* ran on — read back from its session once pi has resolved its defaults, not the string the script asked for — so a fuzzy `model: "haiku"` reads as the model it resolved to, and an `agent()` that named no model still says what it inherited.
 
-The **inspector**, at `/agents → Workflows` — two panes, two levels: phases on the left, that phase's agents on the right, and `⏎` to descend into one agent's prompt, activity and outcome. The detail pane has room for the canonical `provider/model-id` and the thinking level, including a level pi clamped (`thinking: low (asked max)`). The full key table is in [the README](./upstream-README.md#commands); the four that change the run rather than the view are:
+The retained **inspector**, at `/config:subagents → Workflows` — two panes, two levels: phases on the left, that phase's agents on the right, and `⏎` to descend into one agent's prompt, activity and outcome. The detail pane has room for the canonical `provider/model-id` and the thinking level, including a level pi clamped (`thinking: low (asked max)`). The full key table is in [the README](./upstream-README.md#commands); the four that change the run rather than the view are:
 
 | Key | |
 |---|---|
@@ -89,11 +89,11 @@ The fifth key only shows you something:
 
 | Key | |
 |---|---|
-| `c` | Open the selected agent's **conversation** — the same viewer a fleet-list row opens, over the dialog |
+| `c` | Open the selected agent's **conversation** — the conversation viewer, over the dialog |
 
 Because it changes nothing, `c` works at both levels and on an agent that has already settled — which is the usual case, since reading what a child did is most of why the inspector gets opened. The dialog hides itself while the conversation is up and comes back when you close it. A row with no child behind it yet (queued, or replayed from the resume journal) has no conversation to open and does not offer the key.
 
-A run's own agents are not listed separately in the fleet list, the widget, the `/agents` menus or `@handle` resolution — they belong to the run, which reports for them. `c` in the inspector is the one way in to a child's conversation.
+A run's own agents are not listed separately in the widget, the `/config:subagents` menus or `@handle` resolution — they belong to the run, which reports for them. `c` in the inspector is the one way in to a child's conversation.
 
 ### 4. Edit and re-run
 
@@ -108,7 +108,7 @@ Every run journals each settled `agent()` call beside its script as `<run id>.wo
 Four things it will not do:
 
 - **Cross sessions.** The journal is keyed to the session that wrote it. Restart pi and the run id is dead — you get `No workflow run "<id>" in this session.`
-- **Resume a live run.** Stop it from `/agents → Workflows` first; while it is running you get `Workflow "<id>" is still running.`
+- **Resume a live run.** Stop it from `/config:subagents → Workflows` first; while it is running you get `Workflow "<id>" is still running.`
 - **Replay a failure.** A journaled failure ends the prefix, so resuming a run that died at agent 5 retries exactly agent 5. That is the point.
 - **Replay a run that used `agent({ resume })` at all.** A replayed agent is text from a file rather than a live child, so there would be no conversation left for a later `resume` to continue.
 
@@ -130,7 +130,7 @@ The file must carry an `export const meta = { name, description }` declaration. 
 
 Then invoke it by name: *"run the auth-audit workflow"*. The model passes `name: "auth-audit"` and the run reports that file back as its `Script:`, so the edit-and-re-run loop still works on it.
 
-**Nothing lists your saved workflows for you.** `/agents → Workflows` is a *run* inspector scoped to the current session, not a workflow browser — with five workflows saved on disk it will show you nothing. You reach a saved workflow by naming it to the model, or with [`--subagents-workflow-file=`](./upstream-README.md#cli-flags). Keeping the names memorable is on you.
+**Nothing lists your saved workflows for you.** `/config:subagents → Workflows` is a retained *run* inspector scoped to the current session, not a workflow browser — with five workflows saved on disk it will show you nothing. You reach a saved workflow by naming it to the model, or with [`--subagents-workflow-file=`](./upstream-README.md#cli-flags). Keeping the names memorable is on you.
 
 ### 6. Parameterize it
 
@@ -302,7 +302,7 @@ The first two are scratch: temp storage, wiped by a reboot or a temp sweep. Only
 
 These are three different things and are easy to conflate: 1000 is a budget for the whole run, the concurrency figure is how many run *simultaneously*, and 4096 is per call rather than per run. Excess items queue rather than melting the machine.
 
-Above 25 scheduled agents, or 1.5M tokens actual or projected, the card adds `⚠ Large workflow · /agents → Workflows to stop`.
+Above 25 scheduled agents, or 1.5M tokens actual or projected, the card adds `⚠ Large workflow · /config:subagents → Workflows to stop`.
 
 A run's concurrency limit is its own, independent of the session's `maxConcurrent` and `maxConcurrentForeground` pools — its agents do not enter either.
 
@@ -376,7 +376,7 @@ The script called `Date.now()`, `new Date()` or `Math.random()`. A script that v
 A typo, or an option from a different tool. The supported set is `label`, `phase`, `model`, `agentType`, `isolation`, `gate`, `resume`, `effort`, `schema`.
 
 **An agent ran as the wrong type and nothing said so.**
-An `agentType` that names no known agent falls back to `general-purpose` **silently** — unlike the `Agent` tool, which tells you. Option *keys* are validated; option *values* are not. Check the spelling against `/agents`; matching is case-insensitive, and a disabled agent does not count.
+An `agentType` that names no known agent falls back to `general-purpose` **silently** — unlike the `Agent` tool, which tells you. Option *keys* are validated; option *values* are not. Check the spelling against `/config:subagents`; matching is case-insensitive, and a disabled agent does not count.
 
 **`agent()` returned `null`.**
 The agent failed terminally, or you skipped it with `s` in the inspector. These are indistinguishable to the script. With `schema`, it also covers a child that never produced a payload matching the schema.

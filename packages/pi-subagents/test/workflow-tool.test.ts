@@ -117,7 +117,7 @@ describe("createWorkflowHost — spawn mapping", () => {
     const [, , type, prompt, options] = stub.spawnAndWait.mock.calls[0];
     expect(type).toBe("general-purpose");
     expect(prompt).toBe("do the thing");
-    // The label is the child's display description, so the fleet list and the
+    // The label is the child's display description, so the widget and the
     // workflow tree name the same agent the same way.
     expect(options.description).toBe("review:bugs");
   });
@@ -197,7 +197,7 @@ describe("createWorkflowHost — spawn mapping", () => {
 
   it("stamps its children with the run id and keeps them out of the pool", async () => {
     // Ownership, not decoration: the stamp is what removes a workflow's agents
-    // from the fleet list, the widget and the `/agents` menus, and what keeps
+    // from the widget and the `/config:subagents` menus, and what keeps
     // one fan-out from filling the session's concurrency pool.
     const stub = stubManager();
     const host = createWorkflowHost({
@@ -1054,10 +1054,7 @@ describe("--subagents-workflow-file", () => {
       ...overrides,
     });
 
-  it("registers the fleet row as soon as a run starts, not when it settles", async () => {
-    // The regression this guards: a run's agents are owned by it, so their
-    // lifecycle callbacks no longer refresh the fleet — and nothing else did,
-    // which left a running workflow invisible in FleetView.
+  it("starts a retained workflow without a below-editor list or input hook", async () => {
     const booted = makePi();
     subagentsExtension(booted.pi);
     const context = uiCtx();
@@ -1065,25 +1062,25 @@ describe("--subagents-workflow-file", () => {
     context.ui.setWidget.mockClear();
 
     await booted.tools.get("SubagentWorkflow").execute(
-      "tc-fleet",
+      "tc-ui",
       { script: inlineScript },
       undefined, undefined, ctx({ cwd: hermetic.dir }),
     );
 
     const keys = context.ui.setWidget.mock.calls.map((call: any[]) => call[0]);
-    expect(keys, "the run has to claim its row before its first agent starts").toContain("fleet");
+    expect(keys).not.toContain("fleet");
+    expect(context.ui.setWidget.mock.calls.every((call: any[]) => call[2]?.placement !== "belowEditor")).toBe(true);
+    expect(context.ui.onTerminalInput).not.toHaveBeenCalled();
   });
 
-  it("captures the UI at session_start, before any tool has executed", () => {
-    // A flag-launched workflow runs from session_start, so a UI captured only
-    // from tool_execution_start would leave it with no widget and no fleet row.
+  it("does not intercept terminal input at session_start", async () => {
     const booted = makePi();
     subagentsExtension(booted.pi);
     const context = uiCtx();
 
-    booted.lifecycle.get("session_start")?.({}, context);
+    await booted.lifecycle.get("session_start")?.({}, context);
 
-    expect(context.ui.onTerminalInput, "the fleet list only hooks input once it has a UI").toHaveBeenCalled();
+    expect(context.ui.onTerminalInput).not.toHaveBeenCalled();
   });
 
   it("registers the flag at activation but does not read it there", () => {
@@ -1481,7 +1478,7 @@ describe("collisions with another extension", () => {
   });
 
   /**
-   * Drive `/agents → Settings` far enough to write the settings file.
+   * Drive `/config:subagents → Settings` far enough to write the settings file.
    *
    * Any change writes the WHOLE snapshot, so which row is toggled does not
    * matter — row 0 is `Max concurrency`, whose single-value list re-applies the
@@ -1505,13 +1502,14 @@ describe("collisions with another extension", () => {
         }),
         custom: vi.fn(async (factory: any) => {
           built = factory({ requestRender: () => {} }, {}, {}, () => {});
+          built.handleInput("\u001b[B"); // Skip the backend row; mutate the legacy snapshot.
           built.handleInput(" ");
           return undefined;
         }),
         input: vi.fn(async () => undefined),
       },
     });
-    await booted.commands.get("agents").handler("", context);
+    await booted.commands.get("config:subagents").handler("", context);
     return context;
   }
 

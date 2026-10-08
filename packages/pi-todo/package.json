@@ -1,0 +1,70 @@
+{
+  "name": "@maplezzk/pi-todo",
+  "version": "0.1.0",
+  "description": "Persistent branch-aware todo tool and TUI widget for Pi",
+  "type": "module",
+  "main": "./index.ts",
+  "exports": { ".": "./index.ts" },
+  "files": [
+    "index.ts",
+    "i18n-entry.ts",
+    "config.ts",
+    "todo.ts",
+    "todo-overlay.ts",
+    "catalog.json",
+    "state",
+    "tool",
+    "view",
+    "docs",
+    "config.example.json",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE",
+    "UPSTREAM.md",
+    "vitest.config.ts",
+    "test",
+    "!**/*.test.ts",
+    "!test-fixtures.ts",
+    "!vitest.config.ts",
+    "!test/**",
+    "!tests/**"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit --pretty false",
+    "build": "npm run typecheck"
+  },
+  "pi": { "extensions": ["./i18n-entry.ts", "./index.ts"] },
+  "engines": { "node": ">=22" },
+  "license": "MIT",
+  "author": "maplezzk",
+  "homepage": "https://github.com/maplezzk/pi-extensions/tree/main/packages/pi-todo",
+  "bugs": "https://github.com/maplezzk/pi-extensions/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/maplezzk/pi-extensions.git",
+    "directory": "packages/pi-todo"
+  },
+  "publishConfig": { "access": "public", "registry": "https://registry.npmjs.org" },
+  "keywords": ["pi-package", "pi", "pi-extension", "coding-agent", "todo", "task-list"],
+  "dependencies": {
+    "pi-extensions-config": "^0.1.0",
+    "pi-extensions-i18n": "^0.8.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": ">=0.87.1 <1.0.0",
+    "@earendil-works/pi-coding-agent": ">=0.87.1 <1.0.0",
+    "@earendil-works/pi-tui": ">=0.87.1 <1.0.0",
+    "typebox": ">=1.3.7 <2.0.0"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "0.87.1",
+    "@earendil-works/pi-coding-agent": "0.87.1",
+    "@earendil-works/pi-tui": "0.87.1",
+    "@maplezzk/pi-test-utils": "0.0.0",
+    "@types/node": "24.12.4",
+    "typebox": "1.3.7",
+    "typescript": "5.9.3",
+    "vitest": "5.0.1"
+  }
+}

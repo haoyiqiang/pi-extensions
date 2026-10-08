@@ -48,7 +48,7 @@ notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t
 渲染细节：
 
 - 只有 TUI 会把提示画成底色块；rpc/print/json 仍走 `ctx.ui.notify`，输出纯文本 `[distill] 提示正文`，不会出现 ANSI 乱码。
-- 底色块由本包的扩展入口 `installNoticeRenderer(pi)` 注册一次，因此使用本包的功能包必须在自己的 `pi.extensions` 里加载 `../pi-extensions-i18n/index.ts`。
+- 底色块由本包的扩展入口注册一次。功能包应发布一个内容为 `export { default } from "pi-extensions-i18n"` 的 `i18n-entry.ts`，并在 `pi.extensions` 中放在自身入口之前。通过正常依赖解析兼容 scoped、提升和嵌套 npm 布局，不依赖工作区 sibling 路径。同一运行时 event bus 内只注册一次，独立子会话仍分别初始化。
 - 老版本 Pi 没有这两个能力时不会注入，提示自动退回 `ctx.ui.notify`（仍然可见，只是没有底色）。
 
 需要更细粒度控制时用 `formatNotice({ source, message, mode, theme })` 只取文本。
@@ -99,6 +99,12 @@ release();
 
 绑定带有 owner token：根会话关闭或替换会使旧转发失效，回退到自身 UI，而不会向已经关闭
 的会话或新替换的会话追加。仅安装 renderer 不会接管提示归属。
+
+解析启动参数或保存语言选择后，扩展发送 `LOCALE_CHANGED_EVENT`
+（`pi-extensions-i18n:locale:changed:v1`，`{ locale: "zh-CN" | "en-US" }`）。
+功能包可在事件中重新注册自身的翻译工具／命令定义；同时在 `session_start`、输入／模型请求前
+兜底刷新，以覆盖环境变量或外部文件修改。不要因此重置功能状态或自定义 guidance；运行时关闭时
+释放事件订阅。
 
 新包可以注册 namespace，并在渲染时查询当前语言：
 

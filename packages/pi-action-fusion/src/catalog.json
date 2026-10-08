@@ -1,0 +1,43 @@
+{
+  "editThenRun": {
+    "en-US": "Optional command to run after this file edit succeeds, such as a test or build. A failed edit skips the command; a failed command keeps the edit. This command executes inside edit, not as a separate bash tool call.",
+    "zh-CN": "可选：文件编辑成功后执行的命令，例如测试或构建。编辑失败则跳过命令；命令失败不撤销编辑。命令在 edit 内执行，不是独立的 bash 工具调用。"
+  },
+  "writeThenRun": {
+    "en-US": "Optional command to run after this file write succeeds, such as a test or build. A failed write skips the command; a failed command keeps the write. This command executes inside write, not as a separate bash tool call.",
+    "zh-CN": "可选：文件写入成功后执行的命令，例如测试或构建。写入失败则跳过命令；命令失败不撤销写入。命令在 write 内执行，不是独立的 bash 工具调用。"
+  },
+  "command": { "en-US": "Bash command to run after a successful file mutation", "zh-CN": "文件修改成功后执行的 Bash 命令" },
+  "timeout": { "en-US": "Timeout in seconds; omitted means no default timeout", "zh-CN": "超时秒数；省略时无默认超时" },
+  "guideline": { "en-US": "Use then_run only when the follow-up command is already known and safe to run after this single-file mutation. Omit it when inspecting the edit result must come first.", "zh-CN": "仅在已明确后续命令、且可以安全地在单文件修改后执行时使用 then_run。需要先检查编辑结果时，请省略。" },
+  "invalidCommand": { "en-US": "then_run.command must be a non-empty string.", "zh-CN": "then_run.command 必须是非空字符串。" },
+  "mutationSkipped": { "en-US": "The file mutation did not complete successfully; the command was not run.", "zh-CN": "文件修改未成功完成，未执行后续命令。" },
+  "targetChanged": { "en-US": "Target content changed before the follow-up command.", "zh-CN": "执行后续命令前，目标文件内容发生了变化。" },
+  "commandSkipped": { "en-US": "The command was not run.", "zh-CN": "未执行后续命令。" },
+  "aborted": { "en-US": "Operation aborted.", "zh-CN": "操作已取消。" },
+  "followUp": { "en-US": "Follow-up command", "zh-CN": "后续命令" },
+  "uiFusion": { "en-US": "Fusion", "zh-CN": "融合" },
+  "uiMutation": { "en-US": "Mutation", "zh-CN": "修改" },
+  "uiMutationPending": { "en-US": "Waiting to modify", "zh-CN": "等待修改" },
+  "uiMutationRunning": { "en-US": "Modifying", "zh-CN": "修改中" },
+  "uiMutationSaved": { "en-US": "Changes saved", "zh-CN": "修改已保存" },
+  "uiMutationRetained": { "en-US": "Changes saved; not rolled back", "zh-CN": "修改已保存，未回滚" },
+  "uiMutationFailed": { "en-US": "Mutation failed", "zh-CN": "修改失败" },
+  "uiMutationUnknown": { "en-US": "Mutation status unconfirmed; see details", "zh-CN": "修改状态未确认，见详情" },
+  "uiCommandPending": { "en-US": "Waiting", "zh-CN": "待执行" },
+  "uiCommandRunning": { "en-US": "Running", "zh-CN": "执行中" },
+  "uiCommandExit": { "en-US": "exit {code}", "zh-CN": "退出 {code}" },
+  "uiCommandFailed": { "en-US": "Failed", "zh-CN": "失败" },
+  "uiCommandTimeout": { "en-US": "Timed out", "zh-CN": "超时" },
+  "uiCommandAborted": { "en-US": "Cancelled", "zh-CN": "已取消" },
+  "uiCommandSkipped": { "en-US": "Not run", "zh-CN": "未执行" },
+  "uiCommandPlaceholder": { "en-US": "Command arguments pending", "zh-CN": "命令参数准备中" },
+  "savedRoundTrip": { "en-US": "1 model round-trip avoided", "zh-CN": "已省去 1 次模型往返" },
+  "configDescription": { "en-US": "Configure Action Fusion: status, enable, or disable; reload after changes", "zh-CN": "配置 Action Fusion：status、enable 或 disable；修改后需重新加载" },
+  "configUsage": { "en-US": "Usage: /config:action-fusion [status|enable|disable]", "zh-CN": "用法：/config:action-fusion [status|enable|disable]" },
+  "configStatus": { "en-US": "Action Fusion: loaded={loaded}; configured={enabled}.\n{path}", "zh-CN": "Action Fusion：已加载={loaded}；配置启用={enabled}。\n{path}" },
+  "configSaved": { "en-US": "Action Fusion configured={enabled}. Run /reload to apply.\n{path}", "zh-CN": "Action Fusion 配置启用={enabled}。运行 /reload 后生效。\n{path}" },
+  "configInvalid": { "en-US": "Invalid Action Fusion configuration; the feature stays disabled. Repair the file before changing this setting.\n{path}\n{reason}", "zh-CN": "Action Fusion 配置无效，功能保持关闭。请先修复配置文件再修改此设置。\n{path}\n{reason}" },
+  "configShape": { "en-US": "Only the optional boolean field enabled is supported.", "zh-CN": "仅支持可选的布尔字段 enabled。" },
+  "configSaveFailed": { "en-US": "Could not save Action Fusion configuration: {error}", "zh-CN": "无法保存 Action Fusion 配置：{error}" }
+}

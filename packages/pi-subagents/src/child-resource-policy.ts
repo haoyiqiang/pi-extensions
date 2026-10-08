@@ -4,7 +4,8 @@ import type { Extension, LoadExtensionsResult } from "@earendil-works/pi-coding-
 import { getAgentConfig, getAgentConfigIn, isDefaultsDisabled } from "./agent-types.js";
 import { loadCustomAgents } from "./custom-agents.js";
 import { DEFAULT_AGENTS } from "./default-agents.js";
-import { loadSettings } from "./settings.js";
+import { assertAgentExtensionPolicy } from "./extension-defaults.js";
+import { loadSettings, type SubagentsConfig } from "./settings.js";
 import type { AgentConfig, SubagentType } from "./types.js";
 
 const AMBIENT_OBSERVER_MANIFEST_FLAG = "ambientObserver";
@@ -93,13 +94,16 @@ function defaultAgent(type: SubagentType): AgentConfig | undefined {
 export function resolveChildAgentConfig(
   type: SubagentType,
   captured: AgentConfig | undefined,
-  options: { configCwd: string; projectTrusted: boolean; disableDefaultAgents?: boolean },
+  options: { configCwd: string; projectTrusted: boolean; disableDefaultAgents?: boolean; settings?: Readonly<SubagentsConfig> },
 ): AgentConfig | undefined {
+  assertAgentExtensionPolicy(captured);
   if (options.projectTrusted) {
     if (captured) return captured.enabled === false ? undefined : captured;
     const registered = getAgentConfig(type);
+    assertAgentExtensionPolicy(registered);
     if (registered) return registered.enabled === false ? undefined : registered;
-    const settings = loadSettings(options.configCwd, { projectTrusted: true });
+    const settings = options.settings ?? (options.disableDefaultAgents === undefined
+      ? loadSettings(options.configCwd, { projectTrusted: true }) : {});
     const defaultsDisabled = options.disableDefaultAgents
       ?? settings.disableDefaultAgents
       ?? isDefaultsDisabled();
@@ -113,6 +117,7 @@ export function resolveChildAgentConfig(
   // filesystem project layer, even when the SDK caller omitted a captured copy.
   if (!captured) {
     const registered = getAgentConfig(type);
+    assertAgentExtensionPolicy(registered);
     if (registered && registered.source === undefined && registered.isDefault !== true) {
       return registered.enabled === false ? undefined : registered;
     }
@@ -122,7 +127,8 @@ export function resolveChildAgentConfig(
   const global = getAgentConfigIn(globalAgents, type);
   if (global) return global.enabled === false ? undefined : global;
 
-  const settings = loadSettings(options.configCwd, { projectTrusted: false });
+  const settings = options.settings ?? (options.disableDefaultAgents === undefined
+    ? loadSettings(options.configCwd, { projectTrusted: false }) : {});
   if ((options.disableDefaultAgents ?? settings.disableDefaultAgents) === true) return undefined;
   return defaultAgent(type);
 }

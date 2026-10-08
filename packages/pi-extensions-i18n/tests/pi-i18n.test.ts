@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
+import { createEventBus } from "@earendil-works/pi-coding-agent";
 import { withTempAgentDir } from "@maplezzk/pi-test-utils";
 import piI18n, {
   applyLocale,
@@ -118,6 +119,7 @@ test("a child extension runtime without a locale flag inherits the root startup 
     const createRuntime = (flag: string | undefined) => {
       const handlers = new Map<string, (...args: any[]) => any>();
       piI18n({
+        events: createEventBus(),
         registerFlag() {},
         getFlag() { return flag; },
         on(name: string, handler: (...args: any[]) => any) { handlers.set(name, handler); },
@@ -149,6 +151,7 @@ test("extension registers locale flag, aliases, and applies the startup override
     const flags = new Map<string, unknown>([["locale", "en-US"]]);
     const registeredFlags: string[] = [];
     piI18n({
+      events: createEventBus(),
       registerFlag(name: string) {
         registeredFlags.push(name);
       },
@@ -183,6 +186,36 @@ test("extension registers locale flag, aliases, and applies the startup override
     assert.equal(JSON.parse(readFileSync(getLocaleConfigPath(agentDir), "utf8")).locale, "zh-CN");
     applyLocale("zh-CN");
     assert.equal(getLocale(), "en-US", "startup flag owner remains above the legacy public override");
+  });
+});
+
+test("dependency entry shims share one registration per event bus and release it on shutdown", async () => {
+  await withAgentDir(() => {
+    const bus = createEventBus();
+    const register = (events = bus) => {
+      const commands: string[] = [];
+      const flags: string[] = [];
+      const handlers = new Map<string, () => void>();
+      piI18n({
+        events,
+        registerFlag(name: string) { flags.push(name); },
+        getFlag() {},
+        on(name: string, handler: () => void) { handlers.set(name, handler); },
+        registerCommand(name: string) { commands.push(name); },
+        registerEntryRenderer() {},
+        appendEntry() {},
+      } as any);
+      return { commands, flags, handlers };
+    };
+    const first = register();
+    const duplicate = register();
+    assert.equal(first.commands.length, 3);
+    assert.deepEqual(first.flags, ["locale"]);
+    assert.deepEqual(duplicate.commands, []);
+    assert.deepEqual(duplicate.flags, []);
+    assert.equal(register(createEventBus()).commands.length, 3, "an independent child runtime still registers");
+    first.handlers.get("session_shutdown")?.();
+    assert.equal(register().commands.length, 3, "shutdown does not leave a stale admission guard");
   });
 });
 

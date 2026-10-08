@@ -4,6 +4,7 @@ import { isAbsolute, join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { SessionManager, type FileEntry } from "@earendil-works/pi-coding-agent";
 import { i18n } from "../../i18n.js";
+import { ExtensionPolicyError, resolveSavedExtensions } from "../../extension-defaults.js";
 import { readSessionSnapshot } from "../session-reader.js";
 import type { SessionBranchEntry, TranscriptMessage } from "../session.js";
 import type { PersistentSessionReference } from "../session-reference.js";
@@ -60,15 +61,25 @@ function snapshotPolicy(value: unknown): StandardTerminalPolicy {
     validateStandardTerminalPolicy(value);
     return Object.freeze({
       ...value,
+      resolvedExtensions: resolveSavedExtensions(value),
+      ...(value.runtimePolicy ? { runtimePolicy: Object.freeze({
+        ...value.runtimePolicy,
+        settings: Object.freeze({
+          ...value.runtimePolicy.settings,
+          ...(Array.isArray(value.runtimePolicy.settings.defaultExtensions) ? {
+            defaultExtensions: Object.freeze([...value.runtimePolicy.settings.defaultExtensions]) as unknown as string[],
+          } : {}),
+        }),
+      }) } : {}),
       ...(value.promptBinding ? { promptBinding: Object.freeze({ ...value.promptBinding }) } : {}),
       ...(value.model ? { model: Object.freeze({ ...value.model }) } : {}),
       agent: Object.freeze({
         ...value.agent,
         ...(value.agent.builtinToolNames ? { builtinToolNames: [...value.agent.builtinToolNames] } : {}),
-        ...(value.agent.extSelectors ? { extSelectors: [...value.agent.extSelectors] } : {}),
+        ...(value.agent.extSelectors ? { extSelectors: Object.freeze([...value.agent.extSelectors]) as unknown as string[] } : {}),
         ...(value.agent.disallowedTools ? { disallowedTools: [...value.agent.disallowedTools] } : {}),
-        ...(Array.isArray(value.agent.extensions) ? { extensions: [...value.agent.extensions] } : {}),
-        ...(value.agent.excludeExtensions ? { excludeExtensions: [...value.agent.excludeExtensions] } : {}),
+        ...(Array.isArray(value.agent.extensions) ? { extensions: Object.freeze([...value.agent.extensions]) as unknown as string[] } : {}),
+        ...(value.agent.excludeExtensions ? { excludeExtensions: Object.freeze([...value.agent.excludeExtensions]) as unknown as string[] } : {}),
         ...(Array.isArray(value.agent.skills) ? { skills: [...value.agent.skills] } : {}),
         ...(Array.isArray(value.agent.allowedSubagents) ? { allowedSubagents: [...value.agent.allowedSubagents] } : {}),
       }),
@@ -76,7 +87,10 @@ function snapshotPolicy(value: unknown): StandardTerminalPolicy {
       ...(value.nested ? { nested: Object.freeze({ ...value.nested }) } : {}),
       ...(value.structuredSchema ? { structuredSchema: Object.freeze({ ...value.structuredSchema }) } : {}),
     });
-  } catch { return fail("sessionStore.invalidRecord"); }
+  } catch (error) {
+    if (error instanceof ExtensionPolicyError) throw error;
+    return fail("sessionStore.invalidRecord");
+  }
 }
 
 function writeRecord(reference: PersistentSessionReference<"terminal">, policy: StandardTerminalPolicy): void {

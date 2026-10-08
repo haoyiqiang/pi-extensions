@@ -11,7 +11,6 @@ import { i18n } from "../src/i18n.js";
 import { getAgentConversation } from "../src/transcript.js";
 import { AgentWidget } from "../src/ui/agent-widget.js";
 import { ConversationViewer } from "../src/ui/conversation-viewer.js";
-import { FleetList, type FleetUICtx } from "../src/ui/fleet-list.js";
 import { cleanupWorktree, createWorktree } from "../src/worktree.js";
 
 vi.mock("../src/worktree.js", async importOriginal => ({
@@ -910,22 +909,9 @@ describe("idle restore UI observations", () => {
     await f.manager.restore(reference("workflow"), { ...metadata, description: "hidden workflow", workflowId: "workflow" });
     const theme = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
     const tui = { terminal: { rows: 40, columns: 120 }, requestRender: vi.fn() };
-    let factory: Parameters<FleetUICtx["setWidget"]>[1];
-    const ui: FleetUICtx = {
-      setWidget: (_key, content) => { factory = content; },
-      onTerminalInput: () => () => {}, getEditorText: () => "", notify: vi.fn(), custom: vi.fn(),
-    };
-    const fleet = new FleetList(f.manager, new Map());
     const viewer = new ConversationViewer(tui as any, record.session!, record, undefined, theme, vi.fn(),
       undefined, undefined, undefined, false, () => "off");
     try {
-      fleet.setUICtx(ui);
-      fleet.update();
-      const list = factory?.(tui, theme).render(120).join("\n");
-      expect(list).toContain(metadata.description);
-      expect(list).toContain(i18n.t("product.waitingLabel"));
-      expect(list).not.toContain("hidden nested");
-      expect(list).not.toContain("hidden workflow");
       const text = viewer.render(120).join("\n");
       expect(text).toContain("historical answer");
       expect(text).toContain(i18n.t("product.waitingLabel"));
@@ -945,9 +931,10 @@ describe("idle restore UI observations", () => {
       expect(widgetText).toContain(metadata.description);
       expect(widgetText).toContain(i18n.t("product.waitingLabel"));
       expect(widgetText).not.toContain("thinking…");
+      expect(widgetText).not.toContain("hidden nested");
+      expect(widgetText).not.toContain("hidden workflow");
       widget.dispose();
     } finally {
-      fleet.dispose();
       viewer.dispose();
     }
     expectNoInvocation(f);

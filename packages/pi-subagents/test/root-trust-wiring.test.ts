@@ -172,7 +172,7 @@ describe("root project-trust binding", () => {
       },
     });
     await booted.lifecycle.get("session_start")?.({}, sessionCtx);
-    await booted.commands.get("agents").handler("", sessionCtx);
+    await booted.commands.get("config:subagents").handler("", sessionCtx);
 
     expect(readFileSync(projectSettings, "utf8")).toBe(original);
     expect(notices.some(message => message.includes(i18n.t("product.projectUntrusted")))).toBe(true);

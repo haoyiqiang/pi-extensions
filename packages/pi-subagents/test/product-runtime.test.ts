@@ -5,8 +5,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { type ExtensionContext, initTheme } from "@earendil-works/pi-coding-agent";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 const terminalFactories = vi.hoisted(() => ({ standard: vi.fn() }));
 vi.mock("../src/backends/terminal/backend.js", async (importOriginal) => {
@@ -14,7 +14,9 @@ vi.mock("../src/backends/terminal/backend.js", async (importOriginal) => {
   return { ...actual, createStandardTerminalExecutionBackend: terminalFactories.standard };
 });
 
+import * as configIO from "pi-extensions-config";
 import productExtension from "../index.js";
+import { i18n } from "../src/i18n.js";
 import { AgentManager } from "../src/agent-manager.js";
 import { createAgentRuntime } from "../src/agent-runtime.js";
 import { registerAgents } from "../src/agent-types.js";
@@ -28,6 +30,7 @@ import type {
 import subagentsExtension from "../src/index.js";
 import {
   createRoutedExecutionBackend,
+  getConfiguredBackend,
   initializeSubagentsRuntime,
 } from "../src/runtime.js";
 import { saveSettings } from "../src/settings.js";
@@ -190,6 +193,8 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+beforeAll(() => initTheme(undefined, false));
+
 afterEach(() => {
   terminalFactories.standard.mockReset();
   registerAgents(new Map());
@@ -207,7 +212,9 @@ describe("unified product runtime", () => {
       for (const retired of [
         "subagent", "subagent_resume", "subagents_list", "subagent_interrupt", "subagent_done", "SubagentWorkflow",
       ]) expect(h.tools.has(retired)).toBe(false);
-      expect(h.commands.has("subagent")).toBe(false);
+      expect([...h.commands.keys()]).toEqual(["config:subagents"]);
+      expect(h.commands.has("agents")).toBe(false);
+      expect(h.pi.registerCommand).toHaveBeenCalledTimes(1);
     } finally {
       await h.fire("session_shutdown", { reason: "quit" });
       env.restore();
@@ -220,7 +227,6 @@ describe("unified product runtime", () => {
       schedulingEnabled: false,
       workflowsEnabled: false,
       outputTranscript: false,
-      fleetView: false,
       agentMentions: "off",
     } });
     writeAgent(env.dir, "general-purpose", "---\ntools: read\nextensions: false\nskills: false\n---\nRead-only project override.\n");
@@ -438,7 +444,6 @@ describe("unified product runtime", () => {
       schedulingEnabled: false,
       workflowsEnabled: false,
       outputTranscript: false,
-      fleetView: false,
       agentMentions: "direct",
     } });
     const saved = join(env.dir, "saved-agent.jsonl");
@@ -518,7 +523,101 @@ describe("unified product runtime", () => {
     expect(resume).toHaveBeenCalledTimes(1);
   });
 
-  it("saves backend choices and legacy settings without deleting unrelated product keys", async () => {
+  it("rejects every argument without opening a selector or writing configuration", async () => {
+    const env = hermeticDir({ settings: { backend: "embedded", fleetView: true } });
+    const h = harness();
+    const ctx = context(env.dir, { mode: "tui", hasUI: true });
+    const path = join(env.dir, ".pi", "subagents.json");
+    const original = readFileSync(path, "utf8");
+    try {
+      productExtension(h.pi);
+      for (const args of ["embedded", "terminal", "status", "list", "unknown"]) {
+        await h.commands.get("config:subagents").handler(args, ctx);
+      }
+      expect(readFileSync(path, "utf8")).toBe(original);
+      expect(ctx.ui.select).not.toHaveBeenCalled();
+      expect(ctx.ui.notify).toHaveBeenCalledTimes(5);
+      expect(ctx.ui.notify.mock.calls.every((call: any[]) => call[0].includes(i18n.t("product.configUsage")))).toBe(true);
+    } finally {
+      await h.fire("session_shutdown", { reason: "quit" });
+      env.restore();
+    }
+  });
+
+  it("does not substitute a backend selector or status/list for the panel outside TUI", async () => {
+    const env = hermeticDir();
+    const h = harness();
+    try {
+      productExtension(h.pi);
+      for (const mode of ["print", "json", "rpc"]) {
+        const ctx = context(env.dir, { mode, hasUI: mode === "rpc" });
+        await h.commands.get("config:subagents").handler("", ctx);
+        expect(ctx.ui.select).not.toHaveBeenCalled();
+        expect(ctx.ui.setWidget).not.toHaveBeenCalled();
+        expect(ctx.ui.setStatus).not.toHaveBeenCalled();
+        expect(ctx.ui.notify.mock.calls[0][0]).toContain(i18n.t("product.panelRequiresTui"));
+      }
+    } finally {
+      await h.fire("session_shutdown", { reason: "quit" });
+      env.restore();
+    }
+  });
+
+  it("opens the full active management menu with no arguments", async () => {
+    const env = hermeticDir({ settings: { schedulingEnabled: true } });
+    const h = harness();
+    const ctx = context(env.dir, { mode: "tui", hasUI: true });
+    try {
+      productExtension(h.pi);
+      await h.fire("session_start", {}, ctx);
+      await h.commands.get("config:subagents").handler("  ", ctx);
+      expect(ctx.ui.select).toHaveBeenCalledWith("Agents", [
+        expect.stringMatching(/^Agent types \(/),
+        expect.stringMatching(/^Scheduled jobs \(/),
+        "Create new agent", "Settings",
+      ]);
+      expect(ctx.ui.select.mock.calls[0][1].some((label: string) => label.startsWith("Workflows"))).toBe(false);
+    } finally {
+      await h.fire("session_shutdown", { reason: "quit" });
+      env.restore();
+    }
+  });
+
+  it("retains only the above-editor AgentWidget through start, execution, switch and shutdown", async () => {
+    const env = hermeticDir({ settings: { fleetView: true, schedulingEnabled: false, outputTranscript: false } });
+    const h = harness();
+    const backend = fakeBackend("embedded");
+    const ctx = context(env.dir, { mode: "tui", hasUI: true });
+    ctx.ui.onTerminalInput = vi.fn(() => vi.fn());
+    try {
+      subagentsExtension(h.pi, { legacyWorkflow: false, execution: backend.backend });
+      await h.fire("session_start", {}, ctx);
+      await h.fire("tool_execution_start", {}, ctx);
+      await h.tools.get("Agent").execute("widget", {
+        prompt: "widget task", description: "widget task", subagent_type: "general-purpose", run_in_background: true,
+      }, undefined, undefined, ctx);
+      await flush();
+      const registrations = ctx.ui.setWidget.mock.calls.filter((call: any[]) => call[1]);
+      expect(registrations.length).toBeGreaterThan(0);
+      expect(registrations.every((call: any[]) => call[0] === "agents" && call[2]?.placement === "aboveEditor")).toBe(true);
+      await h.commands.get("config:subagents").handler("", ctx);
+      expect(ctx.ui.select.mock.calls[0][1]).toEqual([
+        expect.stringMatching(/^Running agents \(/), expect.stringMatching(/^Agent types \(/),
+        "Create new agent", "Settings",
+      ]);
+      await h.fire("session_before_switch");
+      await h.fire("session_start", {}, ctx);
+      await h.fire("session_shutdown", { reason: "quit" });
+      expect(ctx.ui.onTerminalInput).not.toHaveBeenCalled();
+      expect(ctx.ui.setWidget.mock.calls.some((call: any[]) => call[0] === "fleet")).toBe(false);
+      expect(ctx.ui.setWidget).toHaveBeenLastCalledWith("agents", undefined);
+    } finally {
+      await h.fire("session_shutdown", { reason: "quit" });
+      env.restore();
+    }
+  });
+
+  it("saves backend choices from Settings without deleting unrelated product keys or touching global defaults", async () => {
     const env = hermeticDir({ settings: {
       backend: "embedded",
       maxConcurrent: 4,
@@ -526,11 +625,26 @@ describe("unified product runtime", () => {
       futureProductKey: "keep-me",
     } });
     const h = harness();
-    const ctx = context(env.dir);
+    const ctx = context(env.dir, { mode: "tui", hasUI: true });
+    const globalPath = join(process.env.PI_CODING_AGENT_DIR!, "subagents.json");
+    const globalContent = '{"backend":"embedded","showModel":true}\n';
+    writeFileSync(globalPath, globalContent);
+    ctx.ui.select.mockResolvedValueOnce("Settings");
+    ctx.ui.custom = vi.fn(async (factory: any) => {
+      const panel = factory({ requestRender: vi.fn() }, {}, {}, vi.fn());
+      panel.handleInput(" "); // First row is the project backend setting.
+      return undefined;
+    });
     const configPath = join(env.dir, ".pi", "subagents.json");
     try {
       productExtension(h.pi);
-      await h.commands.get("config:subagents").handler("terminal", ctx);
+      await h.fire("session_start", {}, ctx);
+      await h.commands.get("config:subagents").handler("", ctx);
+      expect(ctx.ui.custom).toHaveBeenCalledOnce();
+      expect(readFileSync(globalPath, "utf8")).toBe(globalContent);
+      expect(h.pi.events.emit).toHaveBeenCalledWith("subagents:settings_changed", expect.objectContaining({
+        settings: expect.objectContaining({ backend: "terminal" }), persisted: true,
+      }));
       expect(JSON.parse(readFileSync(configPath, "utf8"))).toEqual({
         backend: "terminal",
         maxConcurrent: 4,
@@ -545,6 +659,94 @@ describe("unified product runtime", () => {
         terminalOptions: { surface: "headless" },
         futureProductKey: "keep-me",
       });
+    } finally {
+      await h.fire("session_shutdown", { reason: "quit" });
+      env.restore();
+    }
+  });
+
+  it("routes the Chinese management menu to localized project backend settings", async () => {
+    const env = hermeticDir({ settings: { backend: "embedded", schedulingEnabled: false } });
+    const h = harness();
+    const ctx = context(env.dir, { mode: "tui", hasUI: true });
+    const previousLocale = process.env.PI_EXTENSIONS_LOCALE;
+    process.env.PI_EXTENSIONS_LOCALE = "zh-CN";
+    let rendered: string[] = [];
+    ctx.ui.select.mockResolvedValueOnce(i18n.t("product.menuSettings"));
+    ctx.ui.custom = vi.fn(async (factory: any) => {
+      const panel = factory({ requestRender: vi.fn() }, {}, {}, vi.fn());
+      panel.handleInput(" ");
+      rendered = panel.render(200);
+    });
+    try {
+      productExtension(h.pi);
+      await h.fire("session_start", {}, ctx);
+      await h.commands.get("config:subagents").handler("", ctx);
+      expect(ctx.ui.select.mock.calls[0]).toEqual([i18n.t("product.menuTitle"), [
+        i18n.t("product.menuTypes", { count: 3 }), i18n.t("product.menuCreate"), i18n.t("product.menuSettings"),
+      ]]);
+      expect(rendered.join("\n")).toContain(i18n.t("product.backendLabel"));
+      expect(JSON.parse(readFileSync(join(env.dir, ".pi", "subagents.json"), "utf8")).backend).toBe("terminal");
+    } finally {
+      await h.fire("session_shutdown", { reason: "quit" });
+      if (previousLocale === undefined) delete process.env.PI_EXTENSIONS_LOCALE;
+      else process.env.PI_EXTENSIONS_LOCALE = previousLocale;
+      env.restore();
+    }
+  });
+
+  it("rechecks trust before backend changes, leaving project and global files untouched", async () => {
+    const env = hermeticDir({ settings: { backend: "embedded" } });
+    const h = harness();
+    let trusted = true;
+    const ctx = context(env.dir, { mode: "tui", hasUI: true, isProjectTrusted: () => trusted });
+    const projectPath = join(env.dir, ".pi", "subagents.json");
+    const original = readFileSync(projectPath, "utf8");
+    const globalPath = join(process.env.PI_CODING_AGENT_DIR!, "subagents.json");
+    writeFileSync(globalPath, '{"backend":"embedded"}');
+    ctx.ui.select.mockResolvedValueOnce("Settings");
+    ctx.ui.custom = vi.fn(async (factory: any) => {
+      const panel = factory({ requestRender: vi.fn() }, {}, {}, vi.fn());
+      trusted = false;
+      panel.handleInput(" ");
+    });
+    try {
+      productExtension(h.pi);
+      await h.fire("session_start", {}, ctx);
+      await h.commands.get("config:subagents").handler("", ctx);
+      expect(readFileSync(projectPath, "utf8")).toBe(original);
+      expect(readFileSync(globalPath, "utf8")).toBe('{"backend":"embedded"}');
+      expect(ctx.ui.notify.mock.calls.some((call: any[]) => call[0].includes(i18n.t("product.projectUntrusted")))).toBe(true);
+    } finally {
+      await h.fire("session_shutdown", { reason: "quit" });
+      env.restore();
+    }
+  });
+
+  it("reports backend persistence failures without applying the new backend", async () => {
+    const env = hermeticDir({ settings: { backend: "embedded" } });
+    const h = harness();
+    const ctx = context(env.dir, { mode: "tui", hasUI: true });
+    const path = join(env.dir, ".pi", "subagents.json");
+    const original = readFileSync(path, "utf8");
+    ctx.ui.select.mockResolvedValueOnce("Settings");
+    ctx.ui.custom = vi.fn(async (factory: any) => {
+      const panel = factory({ requestRender: vi.fn() }, {}, {}, vi.fn());
+      panel.handleInput(" ");
+    });
+    try {
+      productExtension(h.pi);
+      await h.fire("session_start", {}, ctx);
+      const write = vi.spyOn(configIO, "updateJsonObjectAtomic").mockImplementationOnce(() => { throw new Error("write blocked"); });
+      try {
+        await h.commands.get("config:subagents").handler("", ctx);
+      } finally {
+        write.mockRestore();
+      }
+      expect(readFileSync(path, "utf8")).toBe(original);
+      expect(getConfiguredBackend()).toBe("embedded");
+      expect(ctx.ui.notify.mock.calls.some((call: any[]) => call[1] === "error" && call[0].includes("write blocked"))).toBe(true);
+      expect(h.pi.events.emit.mock.calls.some((call: any[]) => call[0] === "subagents:settings_changed")).toBe(false);
     } finally {
       await h.fire("session_shutdown", { reason: "quit" });
       env.restore();

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { AgentManager } from "../src/agent-manager.js";
 import { runAgent, resumeAgent } from "../src/backends/embedded.js";
@@ -6,6 +6,7 @@ import type { ExecutionSession } from "../src/backends/session.js";
 import type { AgentExecutionBackend } from "../src/backends/types.js";
 import { assertRequiredTools, snapshotRequiredTools } from "../src/backends/tool-requirements.js";
 import { i18n } from "../src/i18n.js";
+import { ctx as makeContext, hermeticDir, type Hermetic } from "./helpers/boot-extension.js";
 
 const invalid = () => i18n.t("toolRequirements.invalid", { maxTools: 256, maxNameLength: 256 });
 function deferred() {
@@ -61,7 +62,11 @@ describe("invocation tool requirement snapshots", () => {
 });
 
 const managers: AgentManager[] = [];
-afterEach(async () => { await Promise.all(managers.splice(0).map(manager => manager.dispose())); });
+const environments: Hermetic[] = [];
+afterEach(async () => {
+  await Promise.all(managers.splice(0).map(manager => manager.dispose()));
+  for (const environment of environments.splice(0).reverse()) environment.restore();
+});
 const pi = {} as ExtensionAPI;
 const ctx = {} as ExtensionContext;
 function managerFixture(onStart?: () => void) {
@@ -90,6 +95,13 @@ function managerFixture(onStart?: () => void) {
 }
 
 describe("manager invocation requirement forwarding", () => {
+  let ctx: ExtensionContext;
+  beforeEach(() => {
+    const environment = hermeticDir({ settings: { defaultExtensions: false, schedulingEnabled: false } });
+    environments.push(environment);
+    ctx = makeContext({ cwd: environment.dir, isProjectTrusted: () => true });
+  });
+
   it.each([false, true])("snapshots before a queued spawn (background: %s)", async isBackground => {
     const { manager, backend, hold } = managerFixture();
     const holder = isBackground

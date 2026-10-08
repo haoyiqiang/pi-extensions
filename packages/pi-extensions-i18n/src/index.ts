@@ -3,6 +3,7 @@ import { registerLocalesFromDir } from "./loader.ts";
 import {
   applyLocaleForOwner,
   createLocaleOverrideOwner,
+  getLocale,
   getLocalePreference,
   inheritLocaleForOwner,
   LOCALE_ENV,
@@ -31,6 +32,9 @@ const NOTICE_TAG = "language";
 const NOTICE_COLOR: NoticeColor = NOTICE_TAG_COLOR;
 const NOTICE_SOURCE: NoticeSource = { tag: NOTICE_TAG, color: NOTICE_COLOR };
 const FLAG_NAME = "locale";
+const EXTENSION_PROBE_EVENT = "pi-extensions-i18n:extension:ready:v1";
+export const LOCALE_CHANGED_EVENT = "pi-extensions-i18n:locale:changed:v1";
+interface ExtensionProbe { loaded: boolean }
 
 interface CommandI18n {
   t(key: string, params?: MessageParams): string;
@@ -96,6 +100,7 @@ function registerLocaleCommand(
 
       try {
         const configPath = saveLocalePreference(preference);
+        pi.events.emit(LOCALE_CHANGED_EVENT, { locale: getLocale() });
         const overrides = [
           getFlagPreference() ? i18n.t("flagOverride", { flag: `--${FLAG_NAME}` }) : "",
           process.env[LOCALE_ENV] ? i18n.t("envOverride", { env: LOCALE_ENV }) : "",
@@ -124,6 +129,11 @@ function registerLocaleCommand(
 }
 
 export default function piI18n(pi: ExtensionAPI): void {
+  // Dependency entry shims may load this factory through several package paths.
+  const probe: ExtensionProbe = { loaded: false };
+  pi.events.emit(EXTENSION_PROBE_EVENT, probe);
+  if (probe.loaded) return;
+  const releaseProbe = pi.events.on(EXTENSION_PROBE_EVENT, (data) => { (data as ExtensionProbe).loaded = true; });
   const noticeOwner = installNoticeRenderer(pi);
   const localeOwner = createLocaleOverrideOwner();
   const commandI18n = loadCommandI18n();
@@ -153,9 +163,11 @@ export default function piI18n(pi: ExtensionAPI): void {
     }
     if (flagPreference) applyLocaleForOwner(localeOwner, flagPreference);
     else inheritLocaleForOwner(localeOwner);
+    pi.events.emit(LOCALE_CHANGED_EVENT, { locale: getLocale() });
   });
 
   pi.on("session_shutdown", () => {
+    releaseProbe();
     releaseNoticeOwner?.();
     releaseNoticeOwner = undefined;
     releaseLocaleOverrideOwner(localeOwner);

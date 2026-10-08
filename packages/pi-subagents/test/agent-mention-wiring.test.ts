@@ -499,8 +499,8 @@ describe("mentioning an agent that has never run", () => {
 
   it("tracks its tool activity, so the widget shows what it is doing (#181)", async () => {
     // A mention spawn never passes through the Agent tool, which is where the
-    // activity tracker is normally created. Without one the widget and
-    // FleetView have no tool name and no turn count for the agent, so its row
+    // activity tracker is normally created. Without one the widget
+    // has no tool name and no turn count for the agent, so its row
     // reads `thinking…` from start to finish.
     const { lifecycle } = bootDirect();
     heldRun(fakeSession());
@@ -1125,7 +1125,7 @@ describe("resuming an evicted agent by name", () => {
   it("refuses to reopen a conversation under a substitute agent", async () => {
     // resolveSpawnType falls back to general-purpose for a type it cannot
     // resolve (#183) — and "cannot resolve" includes merely disabled, which
-    // `/agents → Disable` does at any time. Inheriting that here would reopen
+    // `/config:subagents → Disable` does at any time. Inheriting that here would reopen
     // an Explore transcript under general-purpose's prompt and tools while
     // announcing "Resuming @scout", then re-tombstone under the substitute so
     // the handle never finds its way back.
@@ -1160,7 +1160,7 @@ describe("resuming an evicted agent by name", () => {
 
   it("resumes again once the agent is re-enabled", async () => {
     // So the refusal keeps the tombstone: dropping it would make a temporary
-    // `/agents → Disable` permanently lose the conversation.
+    // `/config:subagents → Disable` permanently lose the conversation.
     hermetic = hermeticDir({
       settings: { outputTranscript: false },
       agentFiles: { scout: "---\ndescription: scouts\nenabled: false\n---\nbody" },

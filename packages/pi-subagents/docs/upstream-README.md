@@ -2,7 +2,9 @@
 
 > Archived upstream reference from v0.19.0 / `e955e29`. Installation, release,
 > and live-test instructions below describe upstream, not this private workspace.
-> See the [local migration README](../README.md) before using this code.
+> FleetView, `/agents`, and `SubagentWorkflow` below are historical, not active product
+> interfaces. Current management uses `/config:subagents` without arguments; FleetView
+> has been removed. See the [current product README](../README.md) before use.
 
 A [pi](https://pi.dev) extension that brings **Claude Code-style autonomous sub-agents and workflow orchestration** to pi. Spawn specialized agents that run in isolated sessions — each with its own tools, system prompt, model, and thinking level. Run them in the background (the default) or block on them, steer them mid-run, resume completed sessions, and define your own custom agent types. When the orchestration shouldn't be improvised, hand a deterministic JavaScript script to the `SubagentWorkflow` tool — `agent()`, `parallel()`, `pipeline()` — and scripts written for Claude Code's `Workflow` tool run here unchanged.
 

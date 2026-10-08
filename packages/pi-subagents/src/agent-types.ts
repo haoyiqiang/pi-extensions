@@ -7,6 +7,7 @@
 
 import { createCodingTools, createReadOnlyTools } from "@earendil-works/pi-coding-agent";
 import { DEFAULT_AGENTS } from "./default-agents.js";
+import { assertAgentExtensionPolicy } from "./extension-defaults.js";
 import type { AgentConfig } from "./types.js";
 
 /**
@@ -67,7 +68,10 @@ export function buildAgentRegistry(
   if (!(options ? options.disableDefaultAgents === true : disableDefaults)) {
     for (const [name, config] of DEFAULT_AGENTS) registry.set(name, config);
   }
-  for (const [name, config] of userAgents) registry.set(name, config);
+  for (const [name, config] of userAgents) {
+    assertAgentExtensionPolicy(config);
+    registry.set(name, config);
+  }
   return registry;
 }
 
@@ -77,8 +81,9 @@ export function buildAgentRegistry(
  * Disabled agents (enabled === false) are kept in the registry but excluded from spawning.
  */
 export function registerAgents(userAgents: Map<string, AgentConfig>): void {
+  const registry = buildAgentRegistry(userAgents);
   agents.clear();
-  for (const [name, config] of buildAgentRegistry(userAgents)) {
+  for (const [name, config] of registry) {
     agents.set(name, config);
   }
 }
@@ -303,7 +308,7 @@ export function getConfig(type: string): {
   color?: string;
   description: string;
   builtinToolNames: string[];
-  extensions: true | string[] | false;
+  extensions?: boolean | string[];
   excludeExtensions?: string[];
   skills: true | string[] | false;
   promptMode: "replace" | "append";
@@ -343,7 +348,6 @@ export function getConfig(type: string): {
     displayName: "Agent",
     description: "General-purpose agent for complex, multi-step tasks",
     builtinToolNames: BUILTIN_TOOL_NAMES,
-    extensions: true,
     skills: true,
     promptMode: "append",
   };

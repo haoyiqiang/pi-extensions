@@ -3,7 +3,7 @@
 > English documentation: [README.md](./README.md)
 
 通过同一套 `Agent`、RPC 和管理界面，配置选择进程内或终端执行。代理定义、调度、队列、
-结果和 Fleet/widget 界面属于 `pi-subagents`，终端操作使用 `pi-terminal-mux`。
+结果和编辑器上方的 AgentWidget 属于 `pi-subagents`，终端操作使用 `pi-terminal-mux`。
 独立的 `pi-workflow` 负责工作流定义、编排、日志和 `/wf`。
 
 ## 启用与发布
@@ -46,8 +46,11 @@ agent 目录支持 `PI_CODING_AGENT_DIR`。已有运行设置见
 { "backend": "embedded" }
 ```
 
-使用 `"terminal"` 可在独立进程/终端中执行。也可运行
-`/config:subagents embedded|terminal`，它会保留项目配置中的其他字段。
+使用 `"terminal"` 可在独立进程/终端中执行。**不带参数**运行 `/config:subagents`
+打开完整管理面板，再选择**设置 → 执行后端（项目）**。只写入已获准项目的
+`.pi/subagents.json`，保留其他字段；全局默认值只读。
+`/agents` 和命令参数式后端切换不再支持。FleetView 已彻底移除且没有替代视图；
+编辑器上方的 AgentWidget 保留。旧 `fleetView` 配置会被忽略，不迁移既有文件。
 修改默认值只影响**新建代理**，已有句柄及被回收后通过 `@handle` 恢复的对话保留原后端。
 
 普通 `Agent` 调用在两种后端中都默认自主完成，不会因为切换到 terminal 就让所有前台调用
@@ -63,8 +66,11 @@ agent 目录支持 `PI_CODING_AGENT_DIR`。已有运行设置见
   `steer` 要求非空 `message`；`interrupt` 仅中断活跃轮次；
   `cancel` 结束任务及所属子任务，保留健康、可恢复的会话；
   `close` 确认清理成功后结束管理关系，不删除持久化历史。
-- `/agents`、Fleet/widget、mentions 和 **RPC v3** 使用同一套 manager 控制。
+- `/config:subagents`、AgentWidget、mentions 和 **RPC v3** 使用同一套 manager 控制。
   不再提供含义模糊的 `stop` action/channel；调用方必须选择明确动词。
+
+AgentWidget 自行管理实时刷新计时器：设为 `off` 会隐藏并停止刷新；任务仍活跃时
+重新开启，会恢复活动信息和耗时的实时更新。
 
 并发限制统计活跃执行，不统计打开的终端数量。交互会话 idle 时释放槽位，下一轮执行前
 重新获取；排队轮次显示为等待，不被误报为模型正在运行。
@@ -110,11 +116,35 @@ terminal 是进程边界，**不是操作系统沙箱**。扩展和工作流定�
 资源。可选终端依赖由 `pi-terminal-mux` 检测；可见交互需要合适的终端环境。目前不支持原生
 Windows 进程监督。
 
+### 默认扩展策略
+
+`/config:subagents` → **设置 → 默认加载插件（项目）**打开策略选择器。Enter 打开，
+空格不修改此行。**所有已发现插件**保存 `true`，包含未来新增的已获准资源。
+**指定插件**打开可搜索多选列表：空格勾选，Ctrl+A 全选*当前可用*资源，Ctrl+R 清空，
+Enter 保存显式数组（包括 `[]`），Esc 取消且不写入。保存过但当前不可发现的选择器会保留，
+除非明确移除；不会静默规范化已保存的大小写或路径。**不加载**保存 `false`；
+**重置项目覆盖**仅删除项目字段，恢复继承全局策略或兼容默认值。界面不写全局配置。
+
+`subagents.json` 的 `defaultExtensions` 可省略。两层均省略时保留兼容默认 `true`；
+`true` 从已获准 Pi 资源发现普通子会话扩展，`false` 与 `[]` 禁用，字符串数组指定名称／路径。
+代理省略 `extensions` 时使用此分层默认；显式 `extensions: true`、`false`、`[]` 或名称／路径
+覆盖默认。内置代理省略该字段；已有用户 Explore／Plan 文件中的 `extensions: true`
+仍为显式策略，不修改文件。`isolated: true` 始终禁用扩展；`exclude_extensions` 仍优先，
+根／UI 产品继续过滤。
+
+发现**不是严格继承父会话实际加载的扩展**：使用 Pi 已获准的全局／项目 manifest 与资源路径，
+不包含临时 CLI 来源。打开列表仅读取元数据，不导入扩展模块、不执行 factory、不安装缺失
+npm／git 来源，也不重新加载资源。详情展示策略与来源，不冒充实际加载列表。策略在准入时
+固定；修改默认只影响新准入，不改变已排队／运行代理或保留会话。
+
+旧字段 `inherit_extensions` 已被拒绝，即使同时存在 `extensions` 也不接受。
+请重命名为 `extensions` 并移除旧字段；若代理应跟随可配置默认值，则省略 `extensions`。
+
 ## 工作流接入
 
 主入口同时提供版本化工作流执行器，不要再额外加载 `workflow-executor.ts`。
 只需要工作流的启动器可以单独使用该入口：它初始化运行时并提供子会话内的 Agent 工具，
-不加载根会话 Fleet/widget。
+不加载根会话管理面板或 AgentWidget。
 
 默认 **standard** 配置保留原 SDK host 结构：
 

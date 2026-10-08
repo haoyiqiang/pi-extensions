@@ -331,7 +331,7 @@ describe("attributing the spawn to the real session", () => {
     // precisely so the completion notification is skipped as redundant. Here
     // that tool result lands in the throwaway clone, which is disposed moments
     // later — so the agent runs to completion, shows up in the widget and the
-    // fleet, and its answer reaches nobody. The main conversation is not part
+    // widget, and its answer reaches nobody. The main conversation is not part
     // of the clone's turn, so background delivery is the only way back.
     const tool = agentTool();
     cloneSession(callsAgent({ subagent_type: "Explore", prompt: "go" }));

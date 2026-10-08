@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { processToolResult } from "../src/index.ts";
@@ -121,6 +121,7 @@ async function withModelConfig<T>(model: string, action: () => Promise<T>): Prom
   } finally {
     if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    await rm(agentDir, { recursive: true, force: true });
   }
 }
 
@@ -144,7 +145,7 @@ test("配置了不带 provider 的唯一模型 ID 时使用该模型", async () 
       },
     } as unknown as Parameters<typeof processToolResult>[0],
     {
-      content: [{ type: "text", text: "error: boom" }],
+      content: [{ type: "text", text: "error: boom\n".repeat(500) }],
       details: {},
     } as unknown as Parameters<typeof processToolResult>[1],
     0,

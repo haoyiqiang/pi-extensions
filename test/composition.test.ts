@@ -111,9 +111,17 @@ test("root manifest extensions compose as one unified control plane", async () =
       assert.equal(harness.entryRenderers.get("pi-distill-audit")?.owner, "pi-distill");
       assert.equal(harness.messageRenderers.get("subagent-notification")?.owner, "pi-subagents");
       assert.equal(harness.tools.get("recall")?.owner, "pi-blackhole");
+      assert.equal(harness.tools.get("advisor")?.owner, "pi-advisor");
+      assert.equal(harness.tools.get("todo")?.owner, "pi-todo");
+      assert.equal(harness.tools.get("ask_user_question")?.owner, "pi-ask-user-question");
+      assert.equal(harness.commands.get("advisor")?.owner, "pi-advisor");
+      assert.equal(harness.commands.get("todos")?.owner, "pi-todo");
       for (const tool of UNIFIED_TOOLS) assert.equal(harness.tools.get(tool)?.owner, "pi-subagents");
       for (const tool of RETIRED_TOOLS) assert.equal(harness.tools.has(tool), false, `${tool} is retired`);
-      assert.equal(harness.commands.get("agents")?.owner, "pi-subagents");
+      assert.equal(harness.commands.has("agents"), false);
+      for (const name of ["config:subagents embedded", "config:subagents terminal"]) {
+        assert.equal(harness.commands.has(name), false);
+      }
       assert.equal(harness.commands.get("config:subagents")?.owner, "pi-subagents");
       assert.equal(harness.commands.get("wf")?.owner, "pi-workflow");
       assert.equal(harness.commands.get("wf-cancel")?.owner, "pi-workflow");
@@ -122,6 +130,9 @@ test("root manifest extensions compose as one unified control plane", async () =
       assert.equal((globalThis as Record<PropertyKey, unknown>)[MANAGER_KEY], rootManager);
       assert.equal(harness.commands.get("rewind")?.owner, "pi-rewind");
       assert.equal(harness.commands.get("config:distill")?.owner, "pi-distill");
+      assert.equal(harness.commands.get("config:action-fusion")?.owner, "pi-action-fusion");
+      assert.equal(harness.tools.has("edit"), false, "Fusion stays disabled with no configuration");
+      assert.equal(harness.tools.has("write"), false);
       for (const command of ["rename", "config:naming", "naming-config", "pi-naming-config"]) {
         assert.equal(harness.commands.get(command)?.owner, "pi-spark");
       }
@@ -291,6 +302,13 @@ test("real SDK root profile runs, cancels and resumes file workflows through com
         [...UNIFIED_TOOLS].sort(),
       );
       assert.ok(runtime.session.getAllTools().some((tool) => tool.name === "Agent"));
+      for (const name of ["edit", "write"]) {
+        const tool = runtime.session.getAllTools().find((candidate) => candidate.name === name);
+        assert.ok(tool, `${name} must be supplied by the explicitly enabled Fusion package`);
+        assert.ok((tool.parameters as { properties: Record<string, unknown> }).properties.then_run);
+        assert.equal((tool.parameters as { properties: Record<string, unknown> }).properties.outputRequest, undefined,
+          "Distill must keep its default exclusion of mutation tools");
+      }
 
       const rootManager = (globalThis as Record<PropertyKey, unknown>)[MANAGER_KEY];
       assert.ok(rootManager);
@@ -431,6 +449,8 @@ function writeSdkFixture(options: { cwd: string; agentDir: string; provider: str
     retry: { enabled: false, provider: { maxRetries: 0 } },
     enableInstallTelemetry: false,
   }, null, 2)}\n`);
+  mkdirSync(join(agentDir, "extensions", "pi-action-fusion"), { recursive: true });
+  writeFileSync(join(agentDir, "extensions", "pi-action-fusion", "config.json"), '{"enabled":true}\n');
   writeFileSync(join(agentDir, "spark.json"), `${JSON.stringify({
     cleanMode: false,
     credits: false,
@@ -448,7 +468,6 @@ function writeSdkFixture(options: { cwd: string; agentDir: string; provider: str
     maxConcurrent: 2,
     maxSubagentDepth: 2,
     schedulingEnabled: false,
-    fleetView: false,
     agentMentions: "off",
     rememberAgents: false,
     outputTranscript: false,

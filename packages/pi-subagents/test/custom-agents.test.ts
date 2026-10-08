@@ -182,7 +182,7 @@ Just a prompt.`);
     expect(agent.color).toBeUndefined();
     expect(agent.description).toBe("minimal"); // defaults to filename
     expect(agent.builtinToolNames).toEqual(BUILTIN_TOOL_NAMES); // all tools
-    expect(agent.extensions).toBe(true); // inherit all
+    expect(agent.extensions).toBeUndefined(); // follow the trusted default
     expect(agent.skills).toBe(true); // inherit all
     expect(agent.model).toBeUndefined();
     expect(agent.thinking).toBeUndefined();
@@ -558,7 +558,7 @@ tools: read
     expect(result.get("nobody")!.systemPrompt).toBe("");
   });
 
-  it("supports inherit_extensions as alternative to extensions", () => {
+  it("rejects inherit_extensions instead of silently substituting an agent", () => {
     writeAgent("altkey", `---
 inherit_extensions: false
 inherit_skills: false
@@ -566,10 +566,7 @@ inherit_skills: false
 
 Alt keys.`);
 
-    const result = loadCustomAgents(tmpDir);
-    const agent = result.get("altkey")!;
-    expect(agent.extensions).toBe(false);
-    expect(agent.skills).toBe(false);
+    expect(() => loadCustomAgents(tmpDir, false)).toThrow(join(tmpDir, ".pi", "agents", "altkey.md"));
   });
 
   it("extensions: none → false", () => {
@@ -627,7 +624,7 @@ Agent prompt.`);
   });
 
   it("records the file it was read from, not the one its type would name", () => {
-    // `/agents` edits `sourcePath`: probing for `<type>.md` finds nothing here,
+    // `/config:subagents` edits `sourcePath`: probing for `<type>.md` finds nothing here,
     // and its no-file branch writes a stub that loses to this file on load.
     writeAgent("blubb", `---
 name: code-review
@@ -1080,7 +1077,7 @@ Good body.`);
     }
   });
 
-  // `/agents → Eject` writes an AgentConfig back out as frontmatter. That writer
+  // `/config:subagents → Eject` writes an AgentConfig back out as frontmatter. That writer
   // and this loader are the two halves of one format, but nothing pinned them
   // together — so a field can serialize to something the loader reads back
   // differently, and the agent silently changes shape on eject.

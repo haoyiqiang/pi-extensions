@@ -31,6 +31,11 @@ export type MemoryScope = "user" | "project" | "local";
  */
 export type IsolationMode = "worktree" | "off";
 
+/** Omission inherits the trusted default; an explicit empty array selects none. */
+export type ExtensionRule = boolean | string[];
+/** Invocation-owned selection; arrays are copied and frozen before queueing. */
+export type ResolvedExtensionRule = boolean | readonly string[];
+
 /** Unified agent configuration — used for both default and user-defined agents. */
 export interface AgentConfig {
   name: string;
@@ -45,8 +50,8 @@ export interface AgentConfig {
   extSelectors?: string[];
   /** Tool denylist — these tools are removed even if `builtinToolNames` or extensions include them. */
   disallowedTools?: string[];
-  /** true = inherit all, string[] = only listed, false = none */
-  extensions: true | string[] | false;
+  /** Omitted = trusted default; true = all child-eligible; false/[] = none. */
+  extensions?: ExtensionRule;
   /** Extension-name denylist applied after the `extensions:` include set. Exclude wins.
    * Plain canonical names only (case-insensitive); no paths, no wildcard. */
   excludeExtensions?: string[];

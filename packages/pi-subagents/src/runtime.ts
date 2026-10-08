@@ -55,6 +55,8 @@ export interface InitializeSubagentsRuntimeOptions {
   /** Optional lifecycle outlet. Initialization itself does not load or require UI. */
   emit?: SettingsEmit;
   projectTrusted?: boolean;
+  /** Already validated invocation/saved settings; presence suppresses config I/O. */
+  settings?: Readonly<SubagentsConfig>;
 }
 
 export interface InitializedSubagentsRuntime {
@@ -100,7 +102,7 @@ export function initializeSubagentsRuntime(
   options: InitializeSubagentsRuntimeOptions = {},
 ): InitializedSubagentsRuntime {
   const runtimeCwd = resolve(cwd);
-  const settings = loadSettings(runtimeCwd, { projectTrusted: options.projectTrusted });
+  const settings = options.settings ?? loadSettings(runtimeCwd, { projectTrusted: options.projectTrusted });
 
   resetCommonState();
   applySettings(settings, COMMON_APPLIERS);
@@ -136,13 +138,14 @@ export interface ExecutionBackendFactories {
 export interface ExecutionBackendSelectionContext {
   ctx?: ExtensionContext;
   cwd?: string;
+  runOptions?: ExecutionRunOptions;
 }
 
 export interface ExecutionBackendSelectionOptions extends ExecutionBackendFactories {
   /** Stable fallback for operations that do not carry a run context. */
   cwd?: string;
   /** Read at each fresh run by the router, and once by the pinned factory. */
-  selectBackend?: (ctx?: ExtensionContext, cwd?: string) => ExecutionBackendKind;
+  selectBackend?: (ctx?: ExtensionContext, cwd?: string, runOptions?: ExecutionRunOptions) => ExecutionBackendKind;
 }
 
 export interface InterruptibleExecutionBackend extends AgentExecutionBackend {
@@ -178,7 +181,9 @@ function backendResolver(options: ExecutionBackendSelectionOptions) {
 
   const selected = (selection: ExecutionBackendSelectionContext = {}): ExecutionBackendKind => {
     const cwd = selection.cwd ?? selection.ctx?.cwd ?? options.cwd;
-    if (options.selectBackend) return options.selectBackend(selection.ctx, cwd);
+    if (options.selectBackend) return options.selectBackend(selection.ctx, cwd, selection.runOptions);
+    if (selection.runOptions?.runtimePolicy) return selection.runOptions.runtimePolicy.settings.backend ?? "embedded";
+    if (selection.runOptions?.extensionDefaults) return selection.runOptions.extensionDefaults.settings.backend ?? "embedded";
     if (cwd) return loadSettings(cwd).backend ?? "embedded";
     return getConfiguredBackend();
   };
@@ -244,7 +249,7 @@ export function createRoutedExecutionBackend(
     },
     run(ctx, type, prompt, runOptions: ExecutionRunOptions): Promise<ExecutionRunResult> {
       const requested = (runOptions as ExecutionRunOptions & { backend?: ExecutionBackendKind }).backend;
-      const backend = resolver.get(requested ?? resolver.selected({ ctx, cwd: ctx.cwd }));
+      const backend = resolver.get(requested ?? resolver.selected({ ctx, cwd: ctx.cwd, runOptions }));
       const onSessionCreated = runOptions.onSessionCreated;
       return backend.run(ctx, type, prompt, {
         ...runOptions,

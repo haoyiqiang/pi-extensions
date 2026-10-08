@@ -259,7 +259,8 @@ sessions remained separate work; see the following delta for managed embedded.
   aborted/failed invocations' undelivered queues before proving a clean checkpoint.
 - Added private manager restore/adoption with an explicit idle status, no prompt/result
   replay or historical accounting, guarded ownership reservations and late-handle cleanup.
-  Viewer/fleet surfaces distinguish idle history from completed work.
+  Historical upstream viewer/fleet surfaces distinguished idle history from
+  completed work; the current product retains the viewer and AgentWidget only.
 - Track fresh and resumed invocation settlement independently of immediate stopped
   status. Foreground resume exposes its actual promise; waitForAll no longer observes
   stale/missing promises. Dispose rejects admission and closes late handles without

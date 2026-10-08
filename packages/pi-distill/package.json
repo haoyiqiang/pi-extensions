@@ -14,7 +14,9 @@
     "assets",
     "config.example.json",
     "README.md",
-    "README.zh-CN.md"
+    "README.zh-CN.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "scripts": {
     "test": "tsx --test tests/*.test.ts",
@@ -51,9 +53,9 @@
     "coding-agent"
   ],
   "peerDependencies": {
-    "@earendil-works/pi-ai": ">=0.80.0",
-    "@earendil-works/pi-coding-agent": ">=0.80.0",
-    "@earendil-works/pi-tui": ">=0.80.0"
+    "@earendil-works/pi-ai": ">=0.87.1",
+    "@earendil-works/pi-coding-agent": ">=0.87.1",
+    "@earendil-works/pi-tui": ">=0.87.1"
   },
   "dependencies": {
     "pi-extensions-config": "^0.1.0",

@@ -132,7 +132,8 @@ To select delegated terminal agents, configure **subagents**, not stage placemen
 { "backend": "terminal" }
 ```
 
-Save that in `.pi/subagents.json`, or use `/config:subagents terminal`.
+Save that in `.pi/subagents.json`, or open `/config:subagents` without arguments
+and choose **Settings → Execution backend (project) → terminal**.
 The standard run records and reuses its selected delegation backend on recovery.
 It does not convert existing sessions across backends.
 

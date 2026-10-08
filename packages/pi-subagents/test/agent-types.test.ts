@@ -85,7 +85,7 @@ describe("agent type registry", () => {
       const config = getConfig("general-purpose");
       expect(config.displayName).toBe("Agent");
       expect(config.builtinToolNames).toEqual(BUILTIN_TOOL_NAMES);
-      expect(config.extensions).toBe(true);
+      expect(config.extensions).toBeUndefined();
       expect(config.skills).toBe(true);
     });
 

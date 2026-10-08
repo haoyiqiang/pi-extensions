@@ -47,8 +47,8 @@ pi --no-extensions \
 模型 provider 与执行后端是两个独立维度。
 
 - 默认 `embedded`，普通 Agent 自主执行。
-- 使用终端执行：`/config:subagents terminal`。
-- 切回进程内执行：`/config:subagents embedded`。
+- 不带参数打开 `/config:subagents`，在**设置 → 执行后端（项目）**选择
+  `terminal` 或 `embedded`。仅写入已获准项目的覆盖配置，全局默认值只读。
 - 配置先读 `<agentDir>/subagents.json`，再由 `<project>/.pi/subagents.json` 覆盖；
   支持 `PI_CODING_AGENT_DIR`。
 
@@ -61,6 +61,24 @@ pi --no-extensions \
 任务可以使用 headless 子进程回退。已有会话保留自己的后端，terminal 后代仍固定在
 保存的 terminal 分支上。
 
+### 默认扩展迁移
+
+全局／项目 `subagents.json` 中的 `defaultExtensions` 可省略：两层都没有时仍使用兼容默认
+`true`。`true` 包含所有已获准普通子会话资源及未来新增；`false` 或 `[]` 禁用；字符串数组
+指定选择器。**设置 → 默认加载插件（项目）**只写项目字段；重置删除该字段，恢复继承
+全局／默认值。多选 Ctrl+A 保存当前显式列表，不是包含未来发现的 `true`；Esc 取消且不写入。
+界面不会改动全局配置。
+
+省略代理 `extensions` 时使用分层默认；显式值覆盖默认。已有用户定义中的
+`extensions: true` 仍为显式策略，不自动改写。`isolated: true`、`exclude_extensions` 与根／UI
+过滤仍有效。发现使用已获准 Pi 资源，而非严格复制父会话已加载列表，也不包含临时 CLI 来源。
+打开列表仅发现元数据，跳过缺失远程包，不导入、不执行 factory、不安装、不重新加载资源。
+
+frontmatter／程序化定义中的旧字段 `inherit_extensions` **已被拒绝**，即使同一定义还包含
+`extensions` 也不接受。请重命名／移除旧字段，仅使用 `extensions`；要跟随默认则省略。
+不提供兼容别名或自动文件迁移。详情仅展示策略／来源，不代表实际加载扩展；新保存的默认
+只对新准入生效。
+
 ## 工具与命令变化
 
 | 退役入口 | 统一入口 |
@@ -71,12 +89,15 @@ pi --no-extensions \
 | 结束任务、保留会话 | `steer_subagent` 的 `action: "cancel"` |
 | 确认清理后结束管理 | `steer_subagent` 的 `action: "close"` |
 | 后台结果 | `get_subagent_result` |
-| `subagents_list`／旧管理命令 | `/agents` 及统一 Fleet/widget |
+| `subagents_list`／旧管理命令 | `/config:subagents` 管理面板和编辑器上方的 AgentWidget |
 | `/plan`、`/iterate` | 显式定义工作流并使用 `/wf`，不提供别名 |
 | `__pi_subagents` 全局桥 | 版本化事件总线 RPC，见 [RPC 文档](./rpc.md) |
 
 原 `pi-subagents` 的 Symbol manager view 仍是同一个根管理器的视图，供其既有调用方
 使用，不是旧交互桥。另一套上游 `SubagentWorkflow` 引擎不启用。
+`/agents` 和命令参数式后端切换已移除，不保留别名。FleetView 及其终端输入快捷键
+已移除且没有替代视图。AgentWidget、Agent/RPC 执行和持久化会话保留；
+旧 `fleetView` 字段只会被忽略，不改写用户文件。
 
 ## 工作流迁移
 

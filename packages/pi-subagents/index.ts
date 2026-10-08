@@ -1,6 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import activateSubagents from "./src/index.js";
-import { registerBackendCommand } from "./src/backend-command.js";
 import { inChildSessionContext } from "./src/child-context.js";
 import { createProductExecutionBackend } from "./src/product-backend.js";
 import { createWorkflowAgentRuntime } from "./src/workflow/agent-runtime.js";
@@ -10,7 +9,6 @@ import { registerWorkflowExecutor } from "./src/workflow/pi-executor.js";
 export default function (pi: ExtensionAPI): void {
   if (inChildSessionContext()) return;
   activateSubagents(pi, { legacyWorkflow: false, execution: createProductExecutionBackend() });
-  registerBackendCommand(pi);
   registerWorkflowExecutor(pi, {
     runtimeInitialized: true,
     createRuntime: ({ backend, runtimePolicy }) => createWorkflowAgentRuntime({ backend, runtimePolicy }),

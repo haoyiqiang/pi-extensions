@@ -101,11 +101,15 @@ describe("AgentWidget", () => {
       setStatus: () => {},
       setWidget: (_key, content) => { factory = content; },
     });
-    widget.update();
-    if (!factory) return "";
-    return factory({ terminal: { columns: 120 }, requestRender: () => {} }, theme)
-      .render()
-      .join("\n");
+    try {
+      widget.update();
+      if (!factory) return "";
+      return factory({ terminal: { columns: 120 }, requestRender: () => {} }, theme)
+        .render()
+        .join("\n");
+    } finally {
+      widget.dispose();
+    }
   }
 
   // "all" (and the no-policy constructor default) shows every agent.
@@ -125,7 +129,7 @@ describe("AgentWidget", () => {
 
   it("hides a workflow's agents in every coordinator widget mode", () => {
     // They belong to the run, which reports for them through its own card and
-    // its own row in the fleet list.
+    // its own separate row.
     const manager = {
       listAgents: () => [makeRecord("child", { isBackground: true, workflowId: "wf_abc" })],
     };
@@ -222,8 +226,13 @@ describe("AgentWidget", () => {
     let factory: any;
     widget.setUICtx({ setStatus: () => {}, setWidget: (_key, content) => { factory = content; } });
     for (const r of records) if (r.status === "completed") widget.markFinished(r.id);
-    widget.update();
-    const lines = factory({ terminal: { columns: 200 }, requestRender: () => {} }, theme).render().join("\n");
+    let lines: string;
+    try {
+      widget.update();
+      lines = factory({ terminal: { columns: 200 }, requestRender: () => {} }, theme).render().join("\n");
+    } finally {
+      widget.dispose();
+    }
 
     expect(lines).toContain("7 queued");
     expect(lines).not.toContain("q1 description");
@@ -313,8 +322,12 @@ describe("AgentWidget cost display", () => {
     );
     let factory: any;
     widget.setUICtx({ setStatus: () => {}, setWidget: (_k, c) => { factory = c; } } as any);
-    widget.update();
-    return factory({ terminal: { columns: 200 }, requestRender: () => {} }, theme).render().join("\n");
+    try {
+      widget.update();
+      return factory({ terminal: { columns: 200 }, requestRender: () => {} }, theme).render().join("\n");
+    } finally {
+      widget.dispose();
+    }
   }
 
   it("shows the cost beside the token count when enabled", () => {
@@ -350,8 +363,13 @@ describe("AgentWidget cost display", () => {
     );
     let factory: any;
     widget.setUICtx({ setStatus: () => {}, setWidget: (_k, c) => { factory = c; } } as any);
-    widget.update();
-    const out = factory({ terminal: { columns: 200 }, requestRender: () => {} }, theme).render().join("\n");
+    let out: string;
+    try {
+      widget.update();
+      out = factory({ terminal: { columns: 200 }, requestRender: () => {} }, theme).render().join("\n");
+    } finally {
+      widget.dispose();
+    }
 
     expect(out).toContain("done agent");
     expect(out).toContain("~$0.0042");
@@ -371,8 +389,13 @@ describe("AgentWidget cost display", () => {
     );
     let factory: any;
     widget.setUICtx({ setStatus: () => {}, setWidget: (_k, c) => { factory = c; } } as any);
-    widget.update();
-    const out = factory({ terminal: { columns: 200 }, requestRender: () => {} }, theme).render().join("\n");
+    let out: string;
+    try {
+      widget.update();
+      out = factory({ terminal: { columns: 200 }, requestRender: () => {} }, theme).render().join("\n");
+    } finally {
+      widget.dispose();
+    }
 
     expect(out).toContain("1.2k token");
     expect(out).toContain("~$0.0042");
@@ -390,9 +413,13 @@ describe("AgentWidget cost display", () => {
     const widget = new AgentWidget({ listAgents: () => [agent] } as any, activity, () => "all");
     let factory: any;
     widget.setUICtx({ setStatus: () => {}, setWidget: (_k, c) => { factory = c; } } as any);
-    widget.update();
-    expect(factory({ terminal: { columns: 200 }, requestRender: () => {} }, theme).render().join("\n"))
-      .not.toContain("$");
+    try {
+      widget.update();
+      expect(factory({ terminal: { columns: 200 }, requestRender: () => {} }, theme).render().join("\n"))
+        .not.toContain("$");
+    } finally {
+      widget.dispose();
+    }
   });
 });
 
@@ -430,9 +457,13 @@ describe("AgentWidget overflow accounting", () => {
     const widget = new AgentWidget({ listAgents: () => agents } as any, activity, () => "all");
     let factory: any;
     widget.setUICtx({ setStatus: () => {}, setWidget: (_k, c) => { factory = c; } } as any);
-    widget.update();
-    if (!factory) return [];
-    return factory({ terminal: { columns: 200 }, requestRender: () => {} }, theme).render();
+    try {
+      widget.update();
+      if (!factory) return [];
+      return factory({ terminal: { columns: 200 }, requestRender: () => {} }, theme).render();
+    } finally {
+      widget.dispose();
+    }
   }
 
   /** The `+N more (…)` footer, if the widget overflowed. */
@@ -521,20 +552,24 @@ describe("AgentWidget overflow accounting", () => {
       return (factory?.({ terminal: { columns: 200 }, requestRender: () => {} }, theme).render() ?? []).join("\n");
     };
 
-    // First run finishes and ages out of the widget.
-    widget.markFinished(agent.id);
-    widget.onTurnStart();
-    widget.onTurnStart();
-    expect(render()).not.toContain("resumed description");
+    try {
+      // First run finishes and ages out of the widget.
+      widget.markFinished(agent.id);
+      widget.onTurnStart();
+      widget.onTurnStart();
+      expect(render()).not.toContain("resumed description");
 
-    // Background resume puts it back on the running list.
-    agent.status = "running";
-    widget.markRunning(agent.id);
-    expect(render()).toContain("resumed description");
+      // Background resume puts it back on the running list.
+      agent.status = "running";
+      widget.markRunning(agent.id);
+      expect(render()).toContain("resumed description");
 
-    // ...and its completion is visible when the resumed run settles.
-    agent.status = "completed";
-    widget.markFinished(agent.id);
-    expect(render()).toContain("resumed description");
+      // ...and its completion is visible when the resumed run settles.
+      agent.status = "completed";
+      widget.markFinished(agent.id);
+      expect(render()).toContain("resumed description");
+    } finally {
+      widget.dispose();
+    }
   });
 });
