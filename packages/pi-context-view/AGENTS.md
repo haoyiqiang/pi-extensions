@@ -34,5 +34,5 @@ The command accepts only `usage`, `injections`, and `config`; keep both views un
 npm run check --workspace pi-context-view
 ```
 
-- **Lifecycle changes.** Load `test/fixtures/marker.ts`, `test/fixtures/forced-prompt.ts`, and `test/fixtures/input-transform.ts` in both extension orders and use an `after_provider_response` sentinel to prove a probe makes no provider request.
+- **Lifecycle changes.** Load `tests/fixtures/marker.ts`, `tests/fixtures/forced-prompt.ts`, and `tests/fixtures/input-transform.ts` in both extension orders and use an `after_provider_response` sentinel to prove a probe makes no provider request.
 - **TUI changes.** Follow the `pi-extension` skill for real-PTY and provider smoke tests, and exercise the dimensions and interactions required by `doc/UI.md`.

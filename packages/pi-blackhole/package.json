@@ -11,7 +11,7 @@
     "i18n-entry.ts",
     "index.ts",
     "src",
-    "!src/**/*.test.ts",
+    "!**/*.test.ts",
     "locales",
     "docs",
     "README.md",

@@ -23,7 +23,6 @@
     "LICENSE",
     "UPSTREAM.md",
     "!**/*.test.ts",
-    "!test-fixtures.ts",
     "!tests",
     "!vitest.config.ts"
   ],

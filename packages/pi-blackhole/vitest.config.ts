@@ -7,7 +7,7 @@ export default defineConfig({
     // Importing a test file's first module can be I/O-bound on slow or external
     // disks, so allow headroom above the 10s default for tests that load the graph.
     testTimeout: 120_000,
-    include: ["tests/**/*.test.ts", "src/**/*.test.ts"],
+    include: ["tests/**/*.test.ts"],
     setupFiles: ["tests/setup.ts"],
   },
   resolve: {

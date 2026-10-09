@@ -857,7 +857,7 @@ Persisted probe records contain only role and timestamp identities.
 | `src/model.ts`            | Define types, ownership, hierarchy, and grouping.                                             |
 | `src/text.ts`             | Sanitize dynamic text before terminal display.                                                |
 | `src/ui/`                 | Handle navigation, layout, previews, and fullscreen rendering.                                |
-| `test/fixtures/`          | Test capture visibility, forced prompts, and extension load order.                            |
+| `tests/fixtures/`         | Test capture visibility, forced prompts, and extension load order.                            |
 
 Keep pi event and command wiring in `src/index.ts`. Keep state machines,
 measurement, and rendering in focused modules that can be tested independently.
@@ -885,8 +885,8 @@ probe request isolation and message ownership, not a relaxation of those goals.
   messages or historical patches. Explicit removals cannot revive live defaults.
 - Every rendered line respects width, and views reflow with width and height.
 
-For lifecycle smoke tests, load `test/fixtures/marker.ts`,
-`test/fixtures/forced-prompt.ts`, and `test/fixtures/input-transform.ts` before
+For lifecycle smoke tests, load `tests/fixtures/marker.ts`,
+`tests/fixtures/forced-prompt.ts`, and `tests/fixtures/input-transform.ts` before
 and after this extension. Use an
 `after_provider_response` sentinel to detect provider calls.
 Follow [UI.md](UI.md#responsive-rendering) for the rendering test matrix.
