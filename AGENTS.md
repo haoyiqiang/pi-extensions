@@ -30,7 +30,7 @@ pi-extensions/
 
 Each package owns its entrypoint, tests, configuration example, localization resources, and package README. The public package source of truth is this repository; consumers should install the published npm packages instead of copying package source into another project.
 
-The layer model, allowed workspace dependency edges, UI ownership, and root distribution-profile rules are defined in `docs/package-architecture.md` and enforced by `scripts/check-package-boundaries.mjs`. The root Pi manifest is an explicit allowlist; never restore a `packages/*/index.ts` loading glob.
+The layer model, allowed workspace dependency edges, UI ownership, and root distribution-profile rules are enforced by `scripts/check-package-boundaries.mjs` and `scripts/check-package-config.mjs`. The root Pi manifest is an explicit allowlist; never restore a `packages/*/index.ts` loading glob.
 
 ## Package boundaries
 
