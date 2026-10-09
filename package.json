@@ -31,12 +31,8 @@
       "packages/pi-rewind/index.ts",
       "packages/pi-web-search/i18n-entry.ts",
       "packages/pi-web-search/index.ts",
-      "packages/pi-advisor/i18n-entry.ts",
-      "packages/pi-advisor/index.ts",
       "packages/pi-todo/i18n-entry.ts",
-      "packages/pi-todo/index.ts",
-      "packages/pi-ask-user-question/i18n-entry.ts",
-      "packages/pi-ask-user-question/index.ts"
+      "packages/pi-todo/index.ts"
     ],
     "themes": [
       "packages/pi-spark/themes"

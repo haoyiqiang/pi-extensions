@@ -8,9 +8,7 @@
   "packages": {
     "packages/pi-utils": {},
     "packages/pi-web-search": {},
-    "packages/pi-advisor": {},
     "packages/pi-todo": {},
-    "packages/pi-ask-user-question": {},
     "packages/pi-distill": {},
     "packages/pi-action-fusion": {},
     "packages/pi-terminal-mux": {},

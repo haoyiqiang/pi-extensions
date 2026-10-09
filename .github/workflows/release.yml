@@ -100,9 +100,7 @@ jobs:
       matrix:
         include:
           - dir: packages/pi-web-search
-          - dir: packages/pi-advisor
           - dir: packages/pi-todo
-          - dir: packages/pi-ask-user-question
           - dir: packages/pi-distill
           - dir: packages/pi-action-fusion
           - dir: packages/pi-models-discovery

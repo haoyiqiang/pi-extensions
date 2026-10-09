@@ -22,9 +22,7 @@
 | [`pi-models-discovery`](./packages/pi-models-discovery) | 自动发现 models.json 中标记 `discoverModels` 的 provider 的模型列表，启动走持久化缓存，并提供手动刷新命令。 | [English](./packages/pi-models-discovery/README.md) · [中文](./packages/pi-models-discovery/README.zh-CN.md) |
 | [`pi-utils`](./packages/pi-utils) | 提供可移植的 JSON 配置读写、locale/catalog 运行时与带来源标签提示，以及确定性的测试 fixture。 | [English](./packages/pi-utils/README.md) · [中文](./packages/pi-utils/README.zh-CN.md) |
 | [`@maplezzk/pi-web-search`](./packages/pi-web-search) | 整合 LLM 内置网络搜索、独立 Search API、Gemini/Vertex URL Context、有界网页抓取和可选 GitHub 仓库提取。 | [English](./packages/pi-web-search/README.md) · [中文](./packages/pi-web-search/README.zh-CN.md) |
-| [`@maplezzk/pi-advisor`](./packages/pi-advisor) | 通过原生 model registry 请求第二意见，默认不启用审查模型。 | [English](./packages/pi-advisor/README.md) · [中文](./packages/pi-advisor/README.zh-CN.md) |
 | [`@maplezzk/pi-todo`](./packages/pi-todo) | 随当前分支回放的任务列表、依赖校验及独立任务面板。 | [English](./packages/pi-todo/README.md) · [中文](./packages/pi-todo/README.zh-CN.md) |
-| [`@maplezzk/pi-ask-user-question`](./packages/pi-ask-user-question) | 支持预览／备注的结构化问卷，RPC 使用原生对话框回退。 | [English](./packages/pi-ask-user-question/README.md) · [中文](./packages/pi-ask-user-question/README.zh-CN.md) |
 
 共享库会发布到 npm 供功能包依赖。[`pi-utils`](./packages/pi-utils) 负责可移植的 JSON 配置读写、locale/catalog 运行时、共享提示渲染器和确定性测试 fixture；功能包通过自带的 `i18n-entry.ts` shim 加载它的扩展入口。[`pi-terminal-mux`](./packages/pi-terminal-mux) 提供终端 surface 操作。
 

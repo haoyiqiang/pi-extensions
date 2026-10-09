@@ -11,9 +11,7 @@ pi-extensions/
 │   ├── pi-utils/                # Shared config I/O, locale/notice runtime, and test fixtures
 │   ├── pi-web-search/    # LLM/API search, URL Context, and bounded web fetch
 │   ├── pi-distill/              # Tool-output distillation
-│   ├── pi-advisor/              # Configured second-opinion model tool
 │   ├── pi-todo/                 # Branch-replayed task state and panel
-│   ├── pi-ask-user-question/    # Structured TUI/RPC questionnaires
 │   ├── pi-terminal-mux/         # Terminal multiplexer abstraction (muxy/cmux/tmux/zellij/wezterm/herdr/otty/orca + headless fallback)
 │   ├── pi-models-discovery/     # Dynamic model discovery for providers marked with discoverModels
 │   ├── pi-blackhole/            # Deterministic compaction, observational memory, and recall

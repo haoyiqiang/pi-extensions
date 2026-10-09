@@ -17,9 +17,7 @@ test("真实发布工作流覆盖分波 matrix 与专用自动发布 job，并�
   assert.deepEqual(collectPublishedPackageDirectories(source), [
     "packages/pi-utils",
     "packages/pi-web-search",
-    "packages/pi-advisor",
     "packages/pi-todo",
-    "packages/pi-ask-user-question",
     "packages/pi-distill",
     "packages/pi-action-fusion",
     "packages/pi-models-discovery",
