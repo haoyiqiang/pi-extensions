@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { isKeyRelease, isKeyRepeat, matchesKey, type OverlayHandle, type TUI } from "@earendil-works/pi-tui";
-import { LOCALE_CHANGED_EVENT, NOTICE_TAG_COLOR, notifyWithSource, type NoticeSource } from "pi-extensions-i18n";
+import { LOCALE_CHANGED_EVENT, NOTICE_TAG_COLOR, notifyWithSource, type NoticeSource } from "pi-utils";
 import {
 	COLLAPSE_KEY_OFF,
 	formatKeySpecForDisplay,
@@ -218,7 +218,7 @@ function makeSessionFactory(config: {
 					const [{ SettingsManager, ProjectTrustStore }, { resolveAgentDir }, { editWithExternalEditor }] =
 						await Promise.all([
 							import("@earendil-works/pi-coding-agent"),
-							import("pi-extensions-config"),
+							import("pi-utils"),
 							import("./state/external-editor.js"),
 						]);
 					if (editorSignal.aborted) return undefined;

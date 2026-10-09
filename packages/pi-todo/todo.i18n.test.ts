@@ -1,5 +1,5 @@
-import { createMockCtx, createMockPi } from "@maplezzk/pi-test-utils/rpiv";
-import { applyLocale, clearLocaleOverride } from "pi-extensions-i18n";
+import { createMockCtx, createMockPi } from "pi-utils/rpiv";
+import { applyLocale, clearLocaleOverride } from "pi-utils";
 import { afterEach, expect, it } from "vitest";
 import { __resetState, registerTodoTool } from "./todo.js";
 

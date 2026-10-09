@@ -4,7 +4,7 @@ import {
   NOTICE_TAG_COLOR,
   type MessageParams,
   type NoticeSource,
-} from "pi-extensions-i18n";
+} from "pi-utils";
 import type { TaskStatus } from "../tool/types.js";
 
 export const i18n = createTranslator(loadCatalog(new URL("../catalog.json", import.meta.url)));

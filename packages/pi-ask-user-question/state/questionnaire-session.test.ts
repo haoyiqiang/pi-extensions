@@ -1,7 +1,7 @@
 import { setImmediate as nextTask } from "node:timers/promises";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
-import { makeTheme } from "@maplezzk/pi-test-utils/rpiv";
+import { makeTheme } from "pi-utils/rpiv";
 import { describe, expect, it, vi } from "vitest";
 import type { QuestionnaireResult, QuestionParams } from "../tool/types.js";
 import type { WrappingSelectItem } from "../view/components/wrapping-select.js";

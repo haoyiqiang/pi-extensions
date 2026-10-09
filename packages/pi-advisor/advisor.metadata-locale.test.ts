@@ -1,6 +1,6 @@
 import { createEventBus } from "@earendil-works/pi-coding-agent";
-import { createMockCtx, createMockPi } from "@maplezzk/pi-test-utils/rpiv";
-import { applyLocale, LOCALE_CHANGED_EVENT } from "pi-extensions-i18n";
+import { createMockCtx, createMockPi } from "pi-utils/rpiv";
+import { applyLocale, LOCALE_CHANGED_EVENT } from "pi-utils";
 import { afterEach, expect, it } from "vitest";
 import advisor from "./index.ts";
 

@@ -51,8 +51,8 @@ import { getAgentDir, readStoredCredential } from "@earendil-works/pi-coding-age
 import type { ExtensionAPI, ProviderModelConfig } from "@earendil-works/pi-coding-agent";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { NOTICE_TAG_COLOR, installNoticeRenderer, notifyWithSource, scope, type MessageParams, type NoticeColor, type NoticeSource } from "pi-extensions-i18n";
-import { registerLocalesFromDir } from "pi-extensions-i18n/loader";
+import { NOTICE_TAG_COLOR, installNoticeRenderer, notifyWithSource, scope, type MessageParams, type NoticeColor, type NoticeSource } from "pi-utils";
+import { registerLocalesFromDir } from "pi-utils/loader";
 
 const NAMESPACE = "pi-models-discovery";
 const loadedLocales = registerLocalesFromDir(NAMESPACE, new URL("../locales/", import.meta.url));

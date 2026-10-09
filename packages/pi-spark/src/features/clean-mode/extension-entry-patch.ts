@@ -16,13 +16,13 @@
  *   tool-supervisor 审计行、pi-spark 的逐轮遥测；
  * - 会话恢复窗口（session_start 之后、首次 agent_start 之前）—— 历史轮次留下的
  *   条目，与历史工具行一样属于工作过程。
- * 运行结束后才出现的条目（提示、汇总）保持可见；pi-extensions-i18n 的通知条目按级别区分
+ * 运行结束后才出现的条目（提示、汇总）保持可见；pi-utils 的通知条目按级别区分
  * —— `info` 级（metrics 的逐轮遥测、配置保存成功）属于过程噪声，跟着工作过程一起收起；
  * `warning` / `error` 是扩展出错时唯一能说话的地方，无论何时都留着，否则警告会被静默吞掉。
  */
 
 import { Container, visibleWidth } from "@earendil-works/pi-tui";
-import { NOTICE_ENTRY_TYPE } from "pi-extensions-i18n";
+import { NOTICE_ENTRY_TYPE } from "pi-utils";
 import { installMethodPatch, type PatchablePrototype } from "./prototype-patch.js";
 import type { CleanModeConfig, CleanModeState } from "./types.js";
 
@@ -108,7 +108,7 @@ export function readExtensionEntryCustomType(host: ExtensionEntryHost): string |
 /**
  * 读通知条目的级别。
  *
- * 通知条目由 pi-extensions-i18n 写成 `{ tag, color, level, message, ... }`。读不出来
+ * 通知条目由 pi-utils 写成 `{ tag, color, level, message, ... }`。读不出来
  * （别的包用了同一个 customType、字段改过、老版本）时返回 undefined，调用方按「留着」处理
  * —— 宁可多显示一条，也不能把警告静默吞掉。
  */

@@ -11,7 +11,7 @@
  * 4. package.json has required fields (name, version, description, main, exports, files, license)
  * 5. i18n catalogs have both zh-CN and en-US for every key
  * 6. package.json "files" includes README.md and README.zh-CN.md
- * 7. The root Pi distribution profile explicitly lists every extension and theme, including allowlisted private products
+ * 7. The root Pi distribution profile explicitly lists every extension and theme
  * 8. Pi development dependency pins use one exact version across all workspaces
  */
 
@@ -120,12 +120,6 @@ const rootPackageJson = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf
 const rootExtensionEntries = rootPackageJson.pi?.extensions ?? [];
 const rootThemeEntries = rootPackageJson.pi?.themes ?? [];
 const WORKSPACE_PACKAGES_PATH = "packages";
-const SHARED_I18N_EXTENSION_ENTRY = "../pi-extensions-i18n/index.ts";
-const ROOT_PRIVATE_PRODUCT_PACKAGES = new Map([
-  ["packages/pi-subagents", "@maplezzk/pi-subagents"],
-  ["packages/pi-workflow", "@maplezzk/pi-workflow"],
-]);
-const seenRootPrivateProducts = new Set();
 const expectedRootExtensionEntries = new Set();
 const expectedRootThemeEntries = new Set();
 for (const entry of [...rootExtensionEntries, ...rootThemeEntries]) {
@@ -148,15 +142,6 @@ for (const dir of packageDirs) {
   const packagePath = `${WORKSPACE_PACKAGES_PATH}/${dir}`;
   const pkgJson = JSON.parse(readFileSync(join(pkgRoot, "package.json"), "utf8"));
   const label = pkgJson.name ?? dir;
-  const expectedPrivateProductName = ROOT_PRIVATE_PRODUCT_PACKAGES.get(packagePath);
-  const isRootPrivateProduct = expectedPrivateProductName === pkgJson.name;
-  if (expectedPrivateProductName && !isRootPrivateProduct) {
-    error(`${packagePath}: private product allowlist expects package name "${expectedPrivateProductName}", found "${pkgJson.name}"`);
-  }
-  if (isRootPrivateProduct) {
-    seenRootPrivateProducts.add(packagePath);
-    if (pkgJson.private !== true) error(`${label}: root private products must remain private and unpublished`);
-  }
   for (const [dependency, version] of Object.entries(pkgJson.devDependencies ?? {})) {
     if (!PI_DEV_DEPENDENCIES.has(dependency)) continue;
     if (!/^\d+\.\d+\.\d+$/.test(version)) {
@@ -167,15 +152,15 @@ for (const dir of packageDirs) {
     piDevPins.set(version, users);
   }
 
-  // Private test/incubation/retired workspaces cannot claim Pi resources. The
-  // two private products above are an explicit exception for the root Git/local
-  // distribution only; private status still excludes them from npm releases.
-  if (pkgJson.private === true && !isRootPrivateProduct) {
+  // Private test/incubation/retired workspaces cannot claim Pi resources or
+  // enter the root Git/local distribution profile. Private status also excludes
+  // them from npm releases regardless of the resource rules below.
+  if (pkgJson.private === true) {
     for (const kind of ["extensions", "themes", "skills", "prompts"]) {
-      if (pkgJson.pi?.[kind]?.length) error(`${label}: non-product private workspaces must not declare Pi ${kind}`);
+      if (pkgJson.pi?.[kind]?.length) error(`${label}: private workspaces must not declare Pi ${kind}`);
       for (const entry of rootPackageJson.pi?.[kind] ?? []) {
         if (entry.startsWith(`${packagePath}/`)) {
-          error(`${label}: non-product private workspace resource must not appear in the root Pi profile: "${entry}"`);
+          error(`${label}: private workspace resource must not appear in the root Pi profile: "${entry}"`);
         }
       }
     }
@@ -183,7 +168,6 @@ for (const dir of packageDirs) {
 
   // The root Git package is an explicit full-suite distribution profile. Each
   // package contributes owned ./ entries, including dependency entry shims.
-  // The legacy shared i18n sibling entry remains accepted for existing packages.
   const ownedExtensionEntries = [];
   for (const extensionEntry of pkgJson.pi?.extensions ?? []) {
     if (typeof extensionEntry !== "string" || extensionEntry.length === 0) {
@@ -194,7 +178,6 @@ for (const dir of packageDirs) {
       error(`${label}: Pi extension entries must be explicit, found "${extensionEntry}"`);
       continue;
     }
-    if (extensionEntry === SHARED_I18N_EXTENSION_ENTRY) continue;
     if (!extensionEntry.startsWith("./")) {
       error(`${label}: Pi extension entry must use an owned ./ path, found "${extensionEntry}"`);
       continue;
@@ -216,10 +199,6 @@ for (const dir of packageDirs) {
       error(`${label}: root Pi manifest is missing extension entry "${rootExtensionEntry}"`);
     }
   }
-  if (isRootPrivateProduct && ownedExtensionEntries.length === 0) {
-    error(`${label}: allowlisted root private product must declare an owned Pi extension`);
-  }
-
   for (const themeEntry of pkgJson.pi?.themes ?? []) {
     if (typeof themeEntry !== "string" || !themeEntry.startsWith("./")) continue;
     const rootThemeEntry = `${WORKSPACE_PACKAGES_PATH}/${dir}/${themeEntry.slice(2)}`;
@@ -252,21 +231,20 @@ for (const dir of packageDirs) {
     join(pkgRoot, "pi-extension"),
     ...ownedExtensionEntries,
   ].flatMap((path) => (path.endsWith(".ts") ? (existsSync(path) ? [path] : []) : collectTypeScriptFiles(path))))];
-  const importsI18n = runtimeSourceFiles.some((path) =>
-    /(?:from|import\s*\()\s*["']pi-extensions-i18n["']/.test(readFileSync(path, "utf8")),
+  const importsPiUtils = runtimeSourceFiles.some((path) =>
+    /(?:from|import\s*\()\s*["']pi-utils["']/.test(readFileSync(path, "utf8")),
   );
-  if (importsI18n && !pkgJson.dependencies?.["pi-extensions-i18n"]) {
-    error(`${label}: runtime imports pi-extensions-i18n, but it is not declared in dependencies`);
+  if (importsPiUtils && !pkgJson.dependencies?.["pi-utils"]) {
+    error(`${label}: runtime imports pi-utils, but it is not declared in dependencies`);
   }
   if (
-    importsI18n &&
+    importsPiUtils &&
     Array.isArray(pkgJson.pi?.extensions) &&
-    !pkgJson.pi.extensions.includes(SHARED_I18N_EXTENSION_ENTRY) &&
     !ownedExtensionEntries.some((path) =>
-      /export\s*\{\s*default\s*\}\s*from\s*["']pi-extensions-i18n["']/.test(readFileSync(path, "utf8")),
+      /export\s*\{\s*default\s*\}\s*from\s*["']pi-utils["']/.test(readFileSync(path, "utf8")),
     )
   ) {
-    error(`${label}: runtime imports pi-extensions-i18n, but its Pi extension entry is not loaded`);
+    error(`${label}: runtime imports pi-utils, but its shared extension entry is not loaded`);
   }
 
   // 5. files field should include READMEs
@@ -306,12 +284,6 @@ for (const dir of packageDirs) {
         error(`${label}: locales/en-US.json and locales/zh-CN.json must contain the same keys`);
       }
     }
-  }
-}
-
-for (const [packagePath, packageName] of ROOT_PRIVATE_PRODUCT_PACKAGES) {
-  if (!seenRootPrivateProducts.has(packagePath)) {
-    error(`Root private product allowlist references missing or mismatched package "${packageName}" at "${packagePath}"`);
   }
 }
 

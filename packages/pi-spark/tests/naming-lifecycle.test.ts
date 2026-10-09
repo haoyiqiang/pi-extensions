@@ -3,7 +3,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { createExtensionRegistrationHarness, withTempAgentDir } from "@maplezzk/pi-test-utils";
+import { createExtensionRegistrationHarness, withTempAgentDir } from "pi-utils";
 import spark from "../index.ts";
 import { clearConfigCache } from "../src/config/index.ts";
 import { loadNamingConfig } from "../src/config/naming-store.ts";

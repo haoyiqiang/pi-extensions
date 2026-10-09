@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: MIT
  */
 
-import { createTranslator, loadCatalog } from "pi-extensions-i18n";
+import { createTranslator, loadCatalog } from "pi-utils";
 
 const evidenceI18n = createTranslator(loadCatalog(new URL("./evidence-catalog.json", import.meta.url)));
 

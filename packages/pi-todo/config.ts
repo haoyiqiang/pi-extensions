@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
-import { extensionConfigPath, readJsonObjectResult, type JsonObject } from "pi-extensions-config";
+import { extensionConfigPath, readJsonObjectResult, type JsonObject } from "pi-utils";
 
 export interface GuidanceFields {
   promptSnippet?: string;

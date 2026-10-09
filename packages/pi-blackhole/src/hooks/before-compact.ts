@@ -30,7 +30,7 @@ import { buildGlobalIndexById, loadGlobalIndexById } from "../core/global-indice
 import { loadGitFileTags } from "../extract/git-status.js";
 import { collectFilesTouched } from "../extract/file-touch.js";
 import { i18n, NOTICE_SOURCE } from "../i18n.js";
-import { notifyWithSource, type NoticeLevel } from "pi-extensions-i18n";
+import { notifyWithSource, type NoticeLevel } from "pi-utils";
 
 export const PI_VCC_COMPACT_INSTRUCTION = "__pi_vcc__";
 

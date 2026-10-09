@@ -9,8 +9,8 @@ import {
   type NoticeContext,
   type NoticeLevel,
   type NoticeSource,
-} from "pi-extensions-i18n";
-import { registerLocalesFromDir } from "pi-extensions-i18n/loader";
+} from "pi-utils";
+import { registerLocalesFromDir } from "pi-utils/loader";
 
 const NAMESPACE = "pi-blackhole";
 const loaded = registerLocalesFromDir(NAMESPACE, new URL("../locales/", import.meta.url));

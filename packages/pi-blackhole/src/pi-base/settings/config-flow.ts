@@ -16,7 +16,7 @@ import { createSettingsModalBody } from "./body.ts";
 import type { SettingsModalBodyComponent } from "./types.ts";
 import { frame, frameContentWidth, responsiveInnerRows, DEFAULT_PADDING_X } from "./frame.ts";
 import { i18n, NOTICE_SOURCE } from "../../i18n.js";
-import { notifyWithSource } from "pi-extensions-i18n";
+import { notifyWithSource } from "pi-utils";
 
 // ── Types ──────────────────────────────────────────────────────────────
 

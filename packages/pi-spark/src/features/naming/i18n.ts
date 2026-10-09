@@ -1,4 +1,4 @@
-import type { MessageParams } from "pi-extensions-i18n";
+import type { MessageParams } from "pi-utils";
 import { i18n as sparkI18n } from "../../i18n.ts";
 
 /** Naming shares Spark's catalog, locale and notice ownership. */

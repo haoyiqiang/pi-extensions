@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { defu } from "defu";
-import { readJsonObjectResult } from "pi-extensions-config";
+import { readJsonObjectResult } from "pi-utils";
 
 import { readLegacyCleanModeConfig } from "./legacy-clean-mode";
 import { readLegacyMetricsConfig } from "./legacy-metrics";
@@ -9,7 +9,7 @@ import { readLegacyNamingConfig } from "./legacy-naming";
 import { readLegacySessionResourcesConfig } from "./legacy-resources";
 import { featureSchemas } from "./schema";
 import { i18n, NOTICE_SOURCE } from "../i18n";
-import { notifyWithSource } from "pi-extensions-i18n";
+import { notifyWithSource } from "pi-utils";
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { SparkConfig } from "./schema";

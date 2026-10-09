@@ -1,4 +1,4 @@
-import { createMockCtx, createMockPi, makeTheme, makeTui } from "@maplezzk/pi-test-utils/rpiv";
+import { createMockCtx, createMockPi, makeTheme, makeTui } from "pi-utils/rpiv";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { registerAskUserQuestionTool } from "./ask-user-question.js";
 

@@ -9,7 +9,7 @@ A small collection of composable extensions for the [Pi coding agent](https://gi
 
 ## Packages
 
-Published packages are independently installable from npm. The unified subagent/workflow products are included in the Git/local suite but are not yet npm releases. Each package owns its behavior, configuration, examples, and tests.
+Published packages are independently installable from npm. Each package owns its behavior, configuration, examples, and tests.
 
 | Package | Description | Documentation |
 | --- | --- | --- |
@@ -20,23 +20,21 @@ Published packages are independently installable from npm. The unified subagent/
 | [`pi-distill`](./packages/pi-distill) | Archives sources before summarizing enabled tool results, with opt-in locally verified diagnostic evidence. | [English](./packages/pi-distill/README.md) · [中文](./packages/pi-distill/README.zh-CN.md) |
 | [`pi-action-fusion`](./packages/pi-action-fusion) | Opt-in single-file edit/write plus a follow-up command in one tool call; adapted from SoL-Pi, disabled by default. New package, pending first npm release; available in the Git/local suite. | [English](./packages/pi-action-fusion/README.md) · [中文](./packages/pi-action-fusion/README.zh-CN.md) |
 | [`pi-models-discovery`](./packages/pi-models-discovery) | Discovers models from `{baseUrl}/models` for providers marked with `discoverModels` in models.json, with a persistent startup cache and a manual refresh command. | [English](./packages/pi-models-discovery/README.md) · [中文](./packages/pi-models-discovery/README.zh-CN.md) |
-| [`pi-extensions-i18n`](./packages/pi-extensions-i18n) | Provides shared locale selection, catalog loading, interpolation, and the `/config:language` command. | [English](./packages/pi-extensions-i18n/README.md) · [中文](./packages/pi-extensions-i18n/README.zh-CN.md) |
+| [`pi-utils`](./packages/pi-utils) | Shared portable JSON config I/O, locale/catalog runtime with source-tagged notices, and deterministic test fixtures. | [English](./packages/pi-utils/README.md) · [中文](./packages/pi-utils/README.zh-CN.md) |
 | [`@maplezzk/pi-web-search`](./packages/pi-web-search) | Combines LLM built-in web search, independent Search APIs, Gemini/Vertex URL Context, bounded web fetching, and opt-in GitHub repository extraction. | [English](./packages/pi-web-search/README.md) · [中文](./packages/pi-web-search/README.zh-CN.md) |
 | [`@maplezzk/pi-advisor`](./packages/pi-advisor) | Configured second-opinion model calls through the native model registry; no reviewer is enabled by default. | [English](./packages/pi-advisor/README.md) · [中文](./packages/pi-advisor/README.zh-CN.md) |
 | [`@maplezzk/pi-todo`](./packages/pi-todo) | Branch-replayed task lists, dependency validation and a compact owned task panel. | [English](./packages/pi-todo/README.md) · [中文](./packages/pi-todo/README.zh-CN.md) |
 | [`@maplezzk/pi-ask-user-question`](./packages/pi-ask-user-question) | Structured questionnaires with TUI previews/notes and RPC-native dialog fallback. | [English](./packages/pi-ask-user-question/README.md) · [中文](./packages/pi-ask-user-question/README.zh-CN.md) |
-| [`@maplezzk/pi-subagents`](./packages/pi-subagents) | Unified Agent/RPC, above-editor AgentWidget and `/config:subagents` management with embedded or terminal Pi execution. Included in the Git/local profile; npm publication is separate. | [English](./packages/pi-subagents/README.md) · [中文](./packages/pi-subagents/README.zh-CN.md) |
-| [`@maplezzk/pi-workflow`](./packages/pi-workflow) | Independent workflow DSL, `/wf`, journals, cancellation and recovery, using the unified execution runtime. Included in the Git/local profile. | [English](./packages/pi-workflow/README.md) · [中文](./packages/pi-workflow/README.zh-CN.md) |
 
-Shared libraries are published for feature-package dependencies but are not loaded as extensions: [`pi-extensions-config`](./packages/pi-extensions-config) provides portable JSON config I/O, while [`pi-terminal-mux`](./packages/pi-terminal-mux) provides terminal surface operations.
+Shared libraries are published for feature-package dependencies. [`pi-utils`](./packages/pi-utils) owns portable JSON config I/O, the locale/catalog runtime, the shared notice renderer, and deterministic test fixtures; feature packages load its extension entry through a shipped `i18n-entry.ts` shim. [`pi-terminal-mux`](./packages/pi-terminal-mux) provides terminal surface operations.
 
 > `pi-naming` is now part of `pi-spark`. Remove the old standalone extension before reloading; Spark reads its old config only when `spark.json` does not define `naming`. See [migration instructions](./packages/pi-spark/README.md#migrating-from-pi-naming).
 
 > `pi-session-tools` has been retired and removed from this repository. Existing sessions with its historical `session-squash` entries remain readable by compatibility code in packages that explicitly support them.
 
-> `pi-interactive-subagents` is retired from the default profile and release chain. Stop old work and remove separately installed old entries before reloading. See the [migration guide](./packages/pi-subagents/docs/migration.md); old tools and `/plan`/`/iterate`/`/subagent` aliases are not retained.
+> `pi-interactive-subagents`, `pi-subagents`, and `pi-workflow` are retired and removed from this repository. Stop old work and remove separately installed old entries before reloading; the old subagent tools, `/plan`/`/iterate`/`/subagent` aliases, and `/wf` commands are not retained.
 
-Extension management slash commands use the `/config:<feature>[-action]` convention. Workflow execution uses `/wf` and `/wf-cancel`.
+Extension management slash commands use the `/config:<feature>[-action]` convention.
 
 ## Install everything
 
@@ -48,7 +46,7 @@ pi install git:github.com/maplezzk/pi-extensions
 
 The repository root is also an explicit full-suite Pi profile. Its manifest allowlists every extension and includes the `pi-spark` themes; library-only packages such as `pi-terminal-mux` are never loaded as extensions. Adding a workspace package does not automatically add it to this profile.
 
-The full profile intentionally enables invasive features together: `pi-spark` replaces the editor/footer and folds transcript activity, `pi-blackhole` owns automatic compaction, `pi-distill` transforms tool results, `pi-rewind` manages Git-backed checkpoints, and unified subagents can create terminal surfaces when terminal execution is selected. Prefer single-package npm installs for published capabilities when you do not want the complete composition.
+The full profile intentionally enables invasive features together: `pi-spark` replaces the editor/footer and folds transcript activity, `pi-blackhole` owns automatic compaction, `pi-distill` transforms tool results, and `pi-rewind` manages Git-backed checkpoints. Prefer single-package npm installs for published capabilities when you do not want the complete composition.
 
 `pi-action-fusion` is also loaded by the profile but stays disabled until explicitly enabled with `/config:action-fusion enable` followed by `/reload`. It does not replace `pi-distill` or add another compaction owner.
 
@@ -58,7 +56,7 @@ Reload Pi after installation:
 /reload
 ```
 
-To install a published package independently, use its npm package name (the two unified products remain unpublished):
+To install a published package independently, use its npm package name:
 
 ```bash
 pi install npm:<package-name>
@@ -77,7 +75,7 @@ npm run check
 
 The check command runs workspace type checks, tests, and the portability/i18n gates.
 
-The root profile loads [`pi-subagents`](./packages/pi-subagents/README.md) and [`pi-workflow`](./packages/pi-workflow/README.md). They remain npm-private products, not inactive workspaces: Agent/RPC, `/config:subagents` management and configurable Pi execution belong to subagents; the independent DSL, runner, journals and `/wf` belong to workflow. They communicate through a versioned event bus. The retired interactive source is archived outside this repository; it is no longer a workspace, build/test target or release candidate. Absorbed-code attribution remains in unified subagents. Publication readiness and inherited UI localization remain separate from this runtime switch.
+The retired subagent/workflow products are not workspaces, root-profile entries, or release candidates. Their external archive is not a repository dependency.
 
 The repository pins `https://registry.npmjs.org/` in `.npmrc` so lockfile tarball URLs stay portable. Installing through a mirror registry rewrites those URLs and makes `npm ci` fail on npm 12+ with `EALLOWREMOTE`; `node scripts/check-lockfile-registry.mjs` (part of `npm run check`) blocks that before merge.
 

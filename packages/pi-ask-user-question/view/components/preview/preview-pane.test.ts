@@ -1,6 +1,6 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { CURSOR_MARKER, visibleWidth } from "@earendil-works/pi-tui";
-import { makeTheme } from "@maplezzk/pi-test-utils/rpiv";
+import { makeTheme } from "pi-utils/rpiv";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 let markdownConstructed = 0;
@@ -23,7 +23,7 @@ vi.mock("@earendil-works/pi-tui", async (orig) => {
 	return { ...actual, Markdown: FakeMarkdown };
 });
 
-import { applyLocale } from "pi-extensions-i18n";
+import { applyLocale } from "pi-utils";
 import type { QuestionData } from "../../../tool/types.js";
 import { OptionListView } from "../option-list-view.js";
 import type { WrappingSelectItem } from "../wrapping-select.js";

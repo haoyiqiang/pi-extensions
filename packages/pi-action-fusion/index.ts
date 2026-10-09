@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { updateJsonObjectAtomic } from "pi-extensions-config";
-import { notifyWithSource } from "pi-extensions-i18n";
+import { updateJsonObjectAtomic } from "pi-utils";
+import { notifyWithSource } from "pi-utils";
 import { createActionFusionExtension } from "./src/action-fusion.ts";
 import { loadActionFusionConfig } from "./src/config.ts";
 import { i18n, NOTICE_SOURCE } from "./src/i18n.ts";

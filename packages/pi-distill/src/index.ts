@@ -36,13 +36,13 @@ import {
   registerDistillFallbackRenderer,
 } from "./fallback-renderer.ts";
 import { getTextContent, hasNonTextContent } from "./output-limit.ts";
-import { updateJsonObjectAtomic, resolveAgentDir } from "pi-extensions-config";
+import { updateJsonObjectAtomic, resolveAgentDir } from "pi-utils";
 import { archiveSource, type SourceArtifact } from "./archive.ts";
 import { buildEvidencePrompt, validateEvidence, formatEvidence } from "./evidence.ts";
 import { processingConfig, processingEnabled, isMutationTool, processingReceipt, processingI18n } from "./processing-config.ts";
 import { selectSourceScope, loadSource, isDiagnosticCommand, LIKELY_SECRET } from "./source.ts";
 import { cleanupSessionResources, uuidv7, type Api, type Context, type Model, type Usage } from "@earendil-works/pi-ai";
-import { NOTICE_TAG_COLOR, installNoticeRenderer, notifyWithSource, type NoticeColor, type NoticeSource } from "pi-extensions-i18n";
+import { NOTICE_TAG_COLOR, installNoticeRenderer, notifyWithSource, type NoticeColor, type NoticeSource } from "pi-utils";
 import {
   buildSummaryPrompt,
   buildSummarySystemPrompt,

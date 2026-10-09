@@ -1,4 +1,4 @@
-import { applyLocale, clearLocaleOverride } from "pi-extensions-i18n";
+import { applyLocale, clearLocaleOverride } from "pi-utils";
 import { afterEach, describe, expect, it } from "vitest";
 import { formatStatusLabel, t } from "./i18n-bridge.js";
 

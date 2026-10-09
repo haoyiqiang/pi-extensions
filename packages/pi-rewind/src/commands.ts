@@ -11,7 +11,7 @@ import type { RewindState } from "./state.js";
 import type { CheckpointData } from "./core.js";
 import { restoreCheckpoint, createCheckpoint, diffCheckpoints, sanitizeForRef, git } from "./core.js";
 import { i18n, NOTICE_SOURCE } from "./i18n.js";
-import { notifyWithSource } from "pi-extensions-i18n";
+import { notifyWithSource } from "pi-utils";
 
 // ============================================================================
 // Helpers

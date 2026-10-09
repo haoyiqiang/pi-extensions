@@ -4,7 +4,7 @@ import { isTitleEffort, parseConfig, TITLE_EFFORT_LEVELS, type NamingConfig } fr
 import { loadNamingConfig, namingConfigPath, saveNamingConfig } from "../../config/naming-store.ts";
 import { NOTICE_SOURCE } from "../../i18n.ts";
 import { i18n } from "./i18n.ts";
-import { notifyWithSource } from "pi-extensions-i18n";
+import { notifyWithSource } from "pi-utils";
 import { getCurrentSessionUserMessages, requestSessionNameWithTimeout, type SessionNameRequester } from "./session-name.ts";
 
 const RENAME_COMMAND = "rename";

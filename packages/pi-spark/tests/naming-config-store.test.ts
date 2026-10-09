@@ -3,8 +3,8 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { dirname, join } from "node:path";
 import test from "node:test";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { withTempAgentDir } from "@maplezzk/pi-test-utils";
-import { applyLocale, clearLocaleOverride } from "pi-extensions-i18n";
+import { withTempAgentDir } from "pi-utils";
+import { applyLocale, clearLocaleOverride } from "pi-utils";
 import { clearConfigCache, loadConfig } from "../src/config/index.ts";
 import { loadNamingConfig, namingConfigPath, saveNamingConfig } from "../src/config/naming-store.ts";
 import { projectSparkConfigPath, readConfigObject, sparkConfigPath } from "../src/config/store.ts";

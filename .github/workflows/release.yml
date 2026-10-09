@@ -57,10 +57,10 @@ jobs:
       - name: Run repository gate
         run: npm run check
 
-  # Wave 1: the side-effect-free config foundation has no workspace dependency.
-  publish-config:
+  # Wave 1: the shared config/locale/test foundation has no workspace dependency.
+  publish-pi-utils:
     needs: [release-please, release-verify]
-    if: ${{ always() && github.event_name == 'push' && contains(needs.release-please.outputs.paths_released, 'packages/pi-extensions-config') && needs.release-verify.result == 'success' }}
+    if: ${{ always() && github.event_name == 'push' && contains(needs.release-please.outputs.paths_released, 'packages/pi-utils') && needs.release-verify.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -77,11 +77,11 @@ jobs:
           npm --version
 
       - name: Verify tarball
-        working-directory: packages/pi-extensions-config
+        working-directory: packages/pi-utils
         run: npm pack --dry-run --json --ignore-scripts > /dev/null
 
       - name: Publish to npm
-        working-directory: packages/pi-extensions-config
+        working-directory: packages/pi-utils
         run: |
           VERSION=$(node -p "require('./package.json').version")
           if [[ "$VERSION" =~ -[a-zA-Z] ]]; then
@@ -90,46 +90,10 @@ jobs:
             npm publish --provenance
           fi
 
-  # Wave 2: the locale/notice foundation uses the config library.
-  publish-i18n:
-    needs: [release-please, release-verify, publish-config]
-    if: ${{ always() && github.event_name == 'push' && contains(needs.release-please.outputs.paths_released, 'packages/pi-extensions-i18n') && needs.release-verify.result == 'success' && (needs.publish-config.result == 'success' || needs.publish-config.result == 'skipped') }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
-
-      - name: Update npm for OIDC support
-        run: |
-          corepack enable npm
-          corepack prepare npm@latest --activate
-          npm --version
-
-      - name: Verify published workspace dependencies
-        run: node scripts/verify-published-workspace-deps.mjs packages/pi-extensions-i18n
-
-      - name: Verify tarball
-        working-directory: packages/pi-extensions-i18n
-        run: npm pack --dry-run --json --ignore-scripts > /dev/null
-
-      - name: Publish to npm
-        working-directory: packages/pi-extensions-i18n
-        run: |
-          VERSION=$(node -p "require('./package.json').version")
-          if [[ "$VERSION" =~ -[a-zA-Z] ]]; then
-            npm publish --provenance --tag beta
-          else
-            npm publish --provenance
-          fi
-
-  # Wave 3a: feature packages whose workspace foundations are now available.
+  # Wave 2: feature packages whose shared foundation is now available.
   publish-independent:
-    needs: [release-please, release-verify, publish-i18n]
-    if: ${{ always() && github.event_name == 'push' && needs.release-please.outputs.paths_released && needs.release-verify.result == 'success' && (needs.publish-i18n.result == 'success' || needs.publish-i18n.result == 'skipped') }}
+    needs: [release-please, release-verify, publish-pi-utils]
+    if: ${{ always() && github.event_name == 'push' && needs.release-please.outputs.paths_released && needs.release-verify.result == 'success' && (needs.publish-pi-utils.result == 'success' || needs.publish-pi-utils.result == 'skipped') }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -179,10 +143,10 @@ jobs:
             npm publish --provenance
           fi
 
-  # Wave 3b: terminal-mux waits for i18n, then unlocks its consumers.
+  # Wave 2b: terminal-mux waits for the shared foundation, then unlocks its consumers.
   publish-terminal-mux:
-    needs: [release-please, release-verify, publish-i18n]
-    if: ${{ always() && github.event_name == 'push' && contains(needs.release-please.outputs.paths_released, 'packages/pi-terminal-mux') && needs.release-verify.result == 'success' && (needs.publish-i18n.result == 'success' || needs.publish-i18n.result == 'skipped') }}
+    needs: [release-please, release-verify, publish-pi-utils]
+    if: ${{ always() && github.event_name == 'push' && contains(needs.release-please.outputs.paths_released, 'packages/pi-terminal-mux') && needs.release-verify.result == 'success' && (needs.publish-pi-utils.result == 'success' || needs.publish-pi-utils.result == 'skipped') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -215,10 +179,10 @@ jobs:
             npm publish --provenance
           fi
 
-  # Wave 4: Spark imports terminal-mux at runtime.
+  # Wave 3: Spark imports terminal-mux at runtime.
   publish-terminal-consumers:
-    needs: [release-please, release-verify, publish-i18n, publish-terminal-mux]
-    if: ${{ always() && github.event_name == 'push' && needs.release-please.outputs.paths_released && needs.release-verify.result == 'success' && (needs.publish-i18n.result == 'success' || needs.publish-i18n.result == 'skipped') && (needs.publish-terminal-mux.result == 'success' || needs.publish-terminal-mux.result == 'skipped') }}
+    needs: [release-please, release-verify, publish-pi-utils, publish-terminal-mux]
+    if: ${{ always() && github.event_name == 'push' && needs.release-please.outputs.paths_released && needs.release-verify.result == 'success' && (needs.publish-pi-utils.result == 'success' || needs.publish-pi-utils.result == 'skipped') && (needs.publish-terminal-mux.result == 'success' || needs.publish-terminal-mux.result == 'skipped') }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

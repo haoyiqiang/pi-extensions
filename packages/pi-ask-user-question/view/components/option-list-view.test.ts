@@ -1,6 +1,6 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { CURSOR_MARKER } from "@earendil-works/pi-tui";
-import { makeTheme } from "@maplezzk/pi-test-utils/rpiv";
+import { makeTheme } from "pi-utils/rpiv";
 import { describe, expect, it } from "vitest";
 import { MAX_VISIBLE_OPTIONS, OptionListView, type OptionListViewProps } from "./option-list-view.js";
 import type { WrappingSelectItem } from "./wrapping-select.js";

@@ -11,7 +11,7 @@ Requirements: Node.js 22+ and Pi 0.87.1 or a tested compatible runtime.
 This package is included explicitly in the repository's Git/local profile, **disabled by default**. For standalone local use:
 
 ```bash
-pi -e ./packages/pi-extensions-i18n/index.ts -e ./packages/pi-action-fusion/index.ts
+pi -e ./packages/pi-utils/index.ts -e ./packages/pi-action-fusion/index.ts
 ```
 
 A package-directory install also loads the shared i18n extension:

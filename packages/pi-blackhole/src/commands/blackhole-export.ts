@@ -8,7 +8,7 @@ import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { i18n, NOTICE_SOURCE } from "../i18n.js";
-import { notifyWithSource } from "pi-extensions-i18n";
+import { notifyWithSource } from "pi-utils";
 
 function defaultOutPath(cwd: string, now: Date): string {
   const iso = now.toISOString();

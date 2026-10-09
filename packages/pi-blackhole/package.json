@@ -8,6 +8,7 @@
     ".": "./index.ts"
   },
   "files": [
+    "i18n-entry.ts",
     "index.ts",
     "src",
     "!src/**/*.test.ts",
@@ -28,8 +29,8 @@
   },
   "pi": {
     "extensions": [
-      "./index.ts",
-      "../pi-extensions-i18n/index.ts"
+      "./i18n-entry.ts",
+      "./index.ts"
     ]
   },
   "engines": {
@@ -78,6 +79,6 @@
     "vitest": "5.0.1"
   },
   "dependencies": {
-    "pi-extensions-i18n": "^0.8.0"
+    "pi-utils": "^0.1.0"
   }
 }

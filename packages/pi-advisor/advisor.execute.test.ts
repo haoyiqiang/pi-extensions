@@ -1,5 +1,5 @@
 import { registerSessionResourceCleanup, type AssistantMessage, type Usage } from "@earendil-works/pi-ai";
-import { buildSessionEntries, createMockCtx, createMockPi, makeAssistantMessage, makeUserMessage } from "@maplezzk/pi-test-utils/rpiv";
+import { buildSessionEntries, createMockCtx, createMockPi, makeAssistantMessage, makeUserMessage } from "pi-utils/rpiv";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => {

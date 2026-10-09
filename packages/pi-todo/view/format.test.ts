@@ -1,5 +1,5 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { makeTheme } from "@maplezzk/pi-test-utils/rpiv";
+import { makeTheme } from "pi-utils/rpiv";
 import { describe, expect, it } from "vitest";
 import type { Task } from "../tool/types.js";
 import { formatOverlayTaskLine } from "./format.js";

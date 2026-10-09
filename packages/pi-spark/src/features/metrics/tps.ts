@@ -16,7 +16,7 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { notifyWithSource } from "pi-extensions-i18n";
+import { notifyWithSource } from "pi-utils";
 import { i18n, NOTICE_SOURCE } from "../../i18n.ts";
 import type { MetricsDisplay } from "./config.ts";
 import { computeRateUsdPerM, formatDuration, formatNumber } from "./format-utils.ts";

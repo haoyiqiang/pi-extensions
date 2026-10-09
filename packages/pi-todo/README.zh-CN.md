@@ -17,7 +17,7 @@
 pi install npm:@maplezzk/pi-todo
 ```
 
-安装后重新加载 Pi。本包也会加载 `pi-extensions-i18n`，提供 `/config:language` 和 `/languages`。
+安装后重新加载 Pi。本包也会加载 `pi-utils`，提供 `/config:language` 和 `/languages`。
 
 ## 工具
 

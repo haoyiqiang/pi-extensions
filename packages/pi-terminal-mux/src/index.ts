@@ -16,7 +16,7 @@
  * 后端探测：
  *   - getMuxBackend()                  当前命中的后端（含 PI_TERMINAL_MUX / PI_SUBAGENT_MUX 偏好）
  *   - isMuxAvailable() / isHeadlessMode()
- *   - muxSetupHint()                   面向用户的安装提示（中英文，走 pi-extensions-i18n）
+ *   - muxSetupHint()                   面向用户的安装提示（中英文，走 pi-utils）
  *
  * 各后端原生函数（createHerdrSurface、sendOttyCommand 等）也可按需直接引用。
  */

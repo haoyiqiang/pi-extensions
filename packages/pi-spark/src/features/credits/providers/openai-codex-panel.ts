@@ -4,7 +4,7 @@ import { Box, Container, matchesKey, SelectList, Spacer, Text } from "@earendil-
 import { Loader } from "../../../components/loader";
 import { renderCredits } from "../status";
 import { i18n, NOTICE_SOURCE } from "../../../i18n";
-import { notifyWithSource } from "pi-extensions-i18n";
+import { notifyWithSource } from "pi-utils";
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { SelectItem, TuiMouseEvent } from "@earendil-works/pi-tui";

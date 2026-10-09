@@ -24,7 +24,7 @@ import {
   OM_REFLECTIONS_RECORDED,
 } from "../om/ledger/index.js";
 import { i18n, NOTICE_SOURCE } from "../i18n.js";
-import { notifyWithSource } from "pi-extensions-i18n";
+import { notifyWithSource } from "pi-utils";
 
 /**
  * One message per host refusal, shared by the pre-check and the onError

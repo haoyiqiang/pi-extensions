@@ -1,4 +1,4 @@
-import { createTranslator, loadCatalog, type MessageParams } from "pi-extensions-i18n";
+import { createTranslator, loadCatalog, type MessageParams } from "pi-utils";
 import { ROW_INTENT_META, type SentinelKind } from "./row-intent.js";
 
 export const I18N_NAMESPACE = "pi-ask-user-question";

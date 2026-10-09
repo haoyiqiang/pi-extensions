@@ -1,4 +1,4 @@
-import { createTranslator, loadCatalog } from "pi-extensions-i18n";
+import { createTranslator, loadCatalog } from "pi-utils";
 
 export const processingI18n = createTranslator(loadCatalog(new URL("./processing-catalog.json", import.meta.url)));
 

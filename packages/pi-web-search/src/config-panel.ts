@@ -4,7 +4,7 @@ import {
   NOTICE_TAG_COLOR,
   notifyWithSource,
   type NoticeSource,
-} from "pi-extensions-i18n";
+} from "pi-utils";
 import { PROVIDERS } from "./api-providers/index.ts";
 import type { ProviderMeta } from "./api-providers/types.ts";
 import {

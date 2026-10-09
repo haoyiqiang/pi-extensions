@@ -15,8 +15,7 @@ const publishRun = "npm publish --provenance";
 test("真实发布工作流覆盖分波 matrix 与专用自动发布 job，并去重", () => {
   const source = readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
   assert.deepEqual(collectPublishedPackageDirectories(source), [
-    "packages/pi-extensions-config",
-    "packages/pi-extensions-i18n",
+    "packages/pi-utils",
     "packages/pi-web-search",
     "packages/pi-advisor",
     "packages/pi-todo",

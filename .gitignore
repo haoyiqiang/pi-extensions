@@ -4,5 +4,3 @@ node_modules/
 *.jsonl.exit
 *.tgz
 .pi/
-!packages/pi-subagents/test/fixtures/.pi/
-!packages/pi-subagents/test/fixtures/.pi/**

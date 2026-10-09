@@ -29,7 +29,7 @@ import {
 } from "pi-terminal-mux";
 
 if (!isMuxAvailable()) {
-  console.warn(muxSetupHint()); // localized setup hint via pi-extensions-i18n
+  console.warn(muxSetupHint()); // localized setup hint via pi-utils
 }
 
 // Smart placement: split / stack / new tab depending on the backend strategy
@@ -116,7 +116,7 @@ All platforms keep **Bash as the default** scripting runtime to preserve existin
 - **Long commands (`sendLongCommand`)**: pass `interpreter: "powershell"` to generate a `.ps1` and run it via `powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File <path>` (mux) or `-Command "& <path>"` (headless). Explicit `scriptPath` is preserved as-is; auto paths choose `.ps1`/`.sh` by interpreter. Omitted `interpreter` keeps the existing Bash command, `.sh` paths and `$?` numeric sentinels unchanged.
 - **Screen capture (`readScreen` / `readScreenAsync`)**: pass `{ source: "recent_unwrapped" }` (herdr-only) to select herdr's soft-wrap merged capture; omitted options keep herdr `recent` and other backends keep their own read semantics.
 
-These are opt-in capabilities. Existing Bash callers keep the default Bash runtime; unified `pi-subagents` uses Pi execution with its documented platform limits. The old interactive-subagents workspace is retired.
+These are opt-in capabilities. Existing Bash callers keep the default Bash runtime; the old interactive-subagents workspace is retired.
 
 ## Environment variables
 
@@ -127,12 +127,12 @@ These are opt-in capabilities. Existing Bash callers keep the default Bash runti
 | `PI_SUBAGENT_RENAME_TMUX_WINDOW` / `PI_SUBAGENT_RENAME_TMUX_SESSION` | Compatibility switches for legacy `getRenameCapability` / `renameCurrentTab` / `renameWorkspace` on tmux; ignored by explicit target resolution |
 | `PI_SUBAGENT_HERDR_MODE` | Herdr surface placement: `split` (default) or `tab` |
 | `PI_SUBAGENT_RENAME_HERDR_WORKSPACE` | Compatibility switch for legacy `getRenameCapability` / `renameWorkspace` on herdr; ignored by explicit target resolution |
-| `PI_EXTENSIONS_LOCALE` | Hint language (`zh-CN` / `en-US` / `auto`), provided by pi-extensions-i18n |
+| `PI_EXTENSIONS_LOCALE` | Hint language (`zh-CN` / `en-US` / `auto`), provided by pi-utils |
 
 ## Design constraints
 
 - **No machine coupling**: every backend is selected via runtime detection (env vars + command availability); no hardcoded local paths; missing CLIs degrade backend-by-backend down to headless.
-- **Localized user-facing text**: setup hints go through the [pi-extensions-i18n](https://www.npmjs.com/package/pi-extensions-i18n) catalog with complete `zh-CN` and `en-US` entries.
+- **Localized user-facing text**: setup hints go through the [pi-utils](https://www.npmjs.com/package/pi-utils) catalog with complete `zh-CN` and `en-US` entries.
 - **Agent pane anchoring**: the agent's own pane ID on muxy/herdr/otty/orca is captured at module load (`AGENT_MUXY_PANE_ID`, `AGENT_ORCA_TERMINAL_HANDLE` etc.), immune to later focus switches.
 
 ## License

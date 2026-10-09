@@ -1,4 +1,4 @@
-import { createMockCtx, createMockPi } from "@maplezzk/pi-test-utils/rpiv";
+import { createMockCtx, createMockPi } from "pi-utils/rpiv";
 import { expect, it, vi } from "vitest";
 import registerTodo from "./index.js";
 import type { TaskDetails } from "./todo.js";

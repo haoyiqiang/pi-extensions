@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { getLocale, LOCALE_CHANGED_EVENT } from "pi-extensions-i18n";
+import { getLocale, LOCALE_CHANGED_EVENT } from "pi-utils";
 import {
 	createAdvisorState,
 	registerAdvisorBeforeAgentStart,

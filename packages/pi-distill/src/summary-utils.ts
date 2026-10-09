@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { extensionConfigPath, readJsonObjectResult, resolveAgentDir } from "pi-extensions-config";
+import { extensionConfigPath, readJsonObjectResult, resolveAgentDir } from "pi-utils";
 import { promptI18n as i18n } from "./i18n.ts";
 import { parseProcessingConfig, type ProcessingConfig } from "./processing-config.ts";
 

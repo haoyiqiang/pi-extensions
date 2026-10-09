@@ -1,6 +1,6 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { makeTheme } from "@maplezzk/pi-test-utils/rpiv";
+import { makeTheme } from "pi-utils/rpiv";
 import { describe, expect, it } from "vitest";
 import { makeMultiSelectViewProps as makeProps } from "../../test-fixtures.js";
 import type { QuestionData } from "../../tool/types.js";

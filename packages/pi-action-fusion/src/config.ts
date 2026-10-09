@@ -1,4 +1,4 @@
-import { extensionConfigPath, readJsonObjectResult } from "pi-extensions-config";
+import { extensionConfigPath, readJsonObjectResult } from "pi-utils";
 import { i18n } from "./i18n.ts";
 
 export interface ActionFusionConfig {

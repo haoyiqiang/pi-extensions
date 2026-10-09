@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { withTempDir } from "@maplezzk/pi-test-utils";
+import { withTempDir } from "pi-utils";
 import {
   patchGlobalFeature,
   projectOverridesFeature,

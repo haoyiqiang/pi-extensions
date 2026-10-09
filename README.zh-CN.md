@@ -9,7 +9,7 @@
 
 ## 包清单
 
-已发布的包可以通过 npm 独立安装；统一子代理与工作流产品已加入 Git／本地套件，但尚未发布 npm。具体行为、配置、示例和测试请查看各包 README。
+已发布的包可以通过 npm 独立安装。具体行为、配置、示例和测试请查看各包 README。
 
 | 包 | 说明 | 文档 |
 | --- | --- | --- |
@@ -20,23 +20,21 @@
 | [`pi-distill`](./packages/pi-distill) | 已启用工具结果先归档再摘要，可选本地核验的诊断证据提取。 | [English](./packages/pi-distill/README.md) · [中文](./packages/pi-distill/README.zh-CN.md) |
 | [`pi-action-fusion`](./packages/pi-action-fusion) | 将单文件编辑／写入与后续命令合并为一次工具调用，改编自 SoL-Pi，默认关闭。新包待首次 npm 发布，现可通过 Git／本地套件使用。 | [English](./packages/pi-action-fusion/README.md) · [中文](./packages/pi-action-fusion/README.zh-CN.md) |
 | [`pi-models-discovery`](./packages/pi-models-discovery) | 自动发现 models.json 中标记 `discoverModels` 的 provider 的模型列表，启动走持久化缓存，并提供手动刷新命令。 | [English](./packages/pi-models-discovery/README.md) · [中文](./packages/pi-models-discovery/README.zh-CN.md) |
-| [`pi-extensions-i18n`](./packages/pi-extensions-i18n) | 提供共享的语言选择、catalog 加载、插值和 `/config:language` 命令。 | [English](./packages/pi-extensions-i18n/README.md) · [中文](./packages/pi-extensions-i18n/README.zh-CN.md) |
+| [`pi-utils`](./packages/pi-utils) | 提供可移植的 JSON 配置读写、locale/catalog 运行时与带来源标签提示，以及确定性的测试 fixture。 | [English](./packages/pi-utils/README.md) · [中文](./packages/pi-utils/README.zh-CN.md) |
 | [`@maplezzk/pi-web-search`](./packages/pi-web-search) | 整合 LLM 内置网络搜索、独立 Search API、Gemini/Vertex URL Context、有界网页抓取和可选 GitHub 仓库提取。 | [English](./packages/pi-web-search/README.md) · [中文](./packages/pi-web-search/README.zh-CN.md) |
 | [`@maplezzk/pi-advisor`](./packages/pi-advisor) | 通过原生 model registry 请求第二意见，默认不启用审查模型。 | [English](./packages/pi-advisor/README.md) · [中文](./packages/pi-advisor/README.zh-CN.md) |
 | [`@maplezzk/pi-todo`](./packages/pi-todo) | 随当前分支回放的任务列表、依赖校验及独立任务面板。 | [English](./packages/pi-todo/README.md) · [中文](./packages/pi-todo/README.zh-CN.md) |
 | [`@maplezzk/pi-ask-user-question`](./packages/pi-ask-user-question) | 支持预览／备注的结构化问卷，RPC 使用原生对话框回退。 | [English](./packages/pi-ask-user-question/README.md) · [中文](./packages/pi-ask-user-question/README.zh-CN.md) |
-| [`@maplezzk/pi-subagents`](./packages/pi-subagents) | 统一 Agent/RPC、编辑器上方的 AgentWidget 和 `/config:subagents` 管理面板，在设置中选择 embedded 或 terminal Pi 执行。已加入 Git／本地 profile，npm 发布另行处理。 | [English](./packages/pi-subagents/README.md) · [中文](./packages/pi-subagents/README.zh-CN.md) |
-| [`@maplezzk/pi-workflow`](./packages/pi-workflow) | 独立工作流 DSL、`/wf`、日志、取消与恢复，使用统一执行运行时。已加入 Git／本地 profile。 | [English](./packages/pi-workflow/README.md) · [中文](./packages/pi-workflow/README.zh-CN.md) |
 
-共享库会发布到 npm 供功能包依赖，但不会被当作扩展加载：[`pi-extensions-config`](./packages/pi-extensions-config) 提供可移植的 JSON 配置读写，[`pi-terminal-mux`](./packages/pi-terminal-mux) 提供终端 surface 操作。
+共享库会发布到 npm 供功能包依赖。[`pi-utils`](./packages/pi-utils) 负责可移植的 JSON 配置读写、locale/catalog 运行时、共享提示渲染器和确定性测试 fixture；功能包通过自带的 `i18n-entry.ts` shim 加载它的扩展入口。[`pi-terminal-mux`](./packages/pi-terminal-mux) 提供终端 surface 操作。
 
 > `pi-naming` 已合并到 `pi-spark`。重新加载前请移除旧的独立扩展；只有 `spark.json` 没有 `naming` 时才兼容读取旧配置。详见 [迁移说明](./packages/pi-spark/README.zh-CN.md#从-pi-naming-迁移)。
 
 > `pi-session-tools` 已退役并从本仓库移除。对于历史会话中的 `session-squash` 条目，明确提供兼容逻辑的包仍可读取。
 
-> `pi-interactive-subagents` 已退出默认 profile 与发布链。重新加载前，请先停止旧任务，并移除单独安装的旧入口。详见[迁移指南](./packages/pi-subagents/docs/migration.zh-CN.md)；不保留旧工具及 `/plan`／`/iterate`／`/subagent` 别名。
+> `pi-interactive-subagents`、`pi-subagents` 与 `pi-workflow` 已退役并从本仓库移除。重新加载前，请先停止旧任务，并移除单独安装的旧入口；不保留旧子代理工具、`/plan`／`/iterate`／`/subagent` 别名及 `/wf` 命令。
 
-插件管理类斜杠命令统一采用 `/config:<功能>[-动作]` 命名。工作流使用 `/wf` 与 `/wf-cancel`。
+插件管理类斜杠命令统一采用 `/config:<功能>[-动作]` 命名。
 
 ## 一键安装全部扩展
 
@@ -48,7 +46,7 @@ pi install git:github.com/maplezzk/pi-extensions
 
 仓库根目录本身也是一个显式维护的全量 Pi profile。manifest 逐项列出扩展入口，并包含 `pi-spark` 主题；`pi-terminal-mux` 等纯库包不会被当成扩展加载。新增 workspace 包不会自动进入这个 profile。
 
-全量 profile 会有意同时启用若干侵入性能力：`pi-spark` 替换 editor/footer 并折叠运行过程，`pi-blackhole` 接管自动压缩，`pi-distill` 改写工具结果，`pi-rewind` 管理 Git 检查点，统一子代理在选择 terminal 后端时会创建终端 surface。如果不需要完整组合，已发布的能力包可以通过 npm 单独安装。
+全量 profile 会有意同时启用若干侵入性能力：`pi-spark` 替换 editor/footer 并折叠运行过程，`pi-blackhole` 接管自动压缩，`pi-distill` 改写工具结果，`pi-rewind` 管理 Git 检查点。如果不需要完整组合，已发布的能力包可以通过 npm 单独安装。
 
 profile 也加载 `pi-action-fusion`，但功能保持关闭，需明确运行 `/config:action-fusion enable` 并 `/reload` 才启用。它不替换 `pi-distill`，也不接管自动压缩。
 
@@ -58,7 +56,7 @@ profile 也加载 `pi-action-fusion`，但功能保持关闭，需明确运行 `
 /reload
 ```
 
-如果只想独立安装某个已发布的包，可以使用对应的 npm 包名（两个统一产品仍未发布 npm）：
+如果只想独立安装某个已发布的包，可以使用对应的 npm 包名：
 
 ```bash
 pi install npm:<package-name>
@@ -77,7 +75,7 @@ npm run check
 
 `check` 会执行 workspace 类型检查、测试，以及可移植性和 i18n 门禁。
 
-根 profile 已加载 [`pi-subagents`](./packages/pi-subagents/README.zh-CN.md) 与 [`pi-workflow`](./packages/pi-workflow/README.zh-CN.md)。它们仍是 npm 私有产品，但不再是未启用的工作区：Agent/RPC、`/config:subagents` 管理和可配置 Pi 执行属于 subagents；独立 DSL、编排、日志与 `/wf` 属于 workflow，两者通过版本化事件总线协作。旧交互源码已移出仓库归档，不再作为 workspace、构建／测试目标或发布候选；统一子代理继续保留所吸收代码的归属信息。npm 发布准备和导入界面的完整本地化，与本次运行入口切换分开处理。
+已退役的 subagent/workflow 产品不再是 workspace、根 profile 入口或发布候选；其外部归档不是本仓库依赖。
 
 仓库根 `.npmrc` 固定 `https://registry.npmjs.org/`，保证 lockfile 里的 tarball 地址可移植。用镜像 registry 安装会把地址改写成镜像域名，导致 npm 12+ 的 `npm ci` 报 `EALLOWREMOTE`；`node scripts/check-lockfile-registry.mjs`（已纳入 `npm run check`）在合并前拦下这类改动。
 

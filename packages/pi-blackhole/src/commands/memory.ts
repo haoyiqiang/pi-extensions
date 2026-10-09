@@ -40,7 +40,7 @@ import {
   isWindowRatio,
 } from "../core/unified-config.js";
 import { i18n, NOTICE_SOURCE } from "../i18n.js";
-import { notifyWithSource } from "pi-extensions-i18n";
+import { notifyWithSource } from "pi-utils";
 
 function firstArg(args: unknown): string | undefined {
   if (Array.isArray(args)) return typeof args[0] === "string" ? args[0] : undefined;

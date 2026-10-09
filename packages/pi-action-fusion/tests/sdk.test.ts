@@ -8,7 +8,7 @@ import {
   createAgentSessionFromServices, createAgentSessionServices, ModelRuntime, SessionManager, SettingsManager,
   type AgentSession, type ExtensionFactory,
 } from "@earendil-works/pi-coding-agent";
-import { withTempAgentDir } from "@maplezzk/pi-test-utils";
+import { withTempAgentDir } from "pi-utils";
 import { createActionFusionExtension } from "../index.ts";
 
 test("real SDK preserves native edit shims, exposes fused results and emits no nested Bash tool event", { timeout: 30_000 }, async () => {

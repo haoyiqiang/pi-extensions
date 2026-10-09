@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { applyLocale, clearLocaleOverride, createTranslator, loadCatalog } from "pi-extensions-i18n";
+import { applyLocale, clearLocaleOverride, createTranslator, loadCatalog } from "pi-utils";
 import {
   buildEvidencePrompt,
   formatEvidence,

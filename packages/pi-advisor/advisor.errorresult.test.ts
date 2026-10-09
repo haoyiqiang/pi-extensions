@@ -1,4 +1,4 @@
-import { createMockCtx, createMockPi } from "@maplezzk/pi-test-utils/rpiv";
+import { createMockCtx, createMockPi } from "pi-utils/rpiv";
 import { describe, expect, it } from "vitest";
 
 import { registerAdvisorTool, setAdvisorEffort, setAdvisorModel } from "./tests/advisor-test-state.js";

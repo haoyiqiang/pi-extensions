@@ -1,4 +1,4 @@
-import { createMockCtx, createMockPi, mockStdout } from "@maplezzk/pi-test-utils/rpiv";
+import { createMockCtx, createMockPi, mockStdout } from "pi-utils/rpiv";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { QuestionnaireResult } from "./tool/types.js";
 

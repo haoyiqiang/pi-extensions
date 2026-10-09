@@ -8,6 +8,7 @@
     ".": "./index.ts"
   },
   "files": [
+    "i18n-entry.ts",
     "index.ts",
     "src",
     "locales",
@@ -24,8 +25,8 @@
   },
   "pi": {
     "extensions": [
-      "./index.ts",
-      "../pi-extensions-i18n/index.ts"
+      "./i18n-entry.ts",
+      "./index.ts"
     ],
     "image": "https://media.githubusercontent.com/media/dimk90/pi-context-view/9a9f9f4fafaa09c77759485d53c42f8694650755/doc/images/pi-context-view.png"
   },
@@ -68,6 +69,6 @@
     "tsx": "4.23.1"
   },
   "dependencies": {
-    "pi-extensions-i18n": "^0.8.0"
+    "pi-utils": "^0.1.0"
   }
 }

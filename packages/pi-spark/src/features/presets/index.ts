@@ -4,7 +4,7 @@ import { PresetManager } from "./manager";
 import { showPresetSelector } from "./selector";
 import { loadConfig } from "../../config";
 import { i18n, NOTICE_SOURCE } from "../../i18n";
-import { notifyWithSource } from "pi-extensions-i18n";
+import { notifyWithSource } from "pi-utils";
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 

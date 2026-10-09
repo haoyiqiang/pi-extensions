@@ -1,6 +1,6 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { type Component, type Editor, visibleWidth } from "@earendil-works/pi-tui";
-import { makeTheme } from "@maplezzk/pi-test-utils/rpiv";
+import { makeTheme } from "pi-utils/rpiv";
 import { describe, expect, it } from "vitest";
 import {
 	makeQuestionnaireState,

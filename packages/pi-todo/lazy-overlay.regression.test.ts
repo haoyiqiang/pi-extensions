@@ -1,4 +1,4 @@
-import { buildSessionEntries, createMockCtx as createBaseMockCtx, createMockPi, makeTodoToolResult } from "@maplezzk/pi-test-utils/rpiv";
+import { buildSessionEntries, createMockCtx as createBaseMockCtx, createMockPi, makeTodoToolResult } from "pi-utils/rpiv";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 function createMockCtx(options: Parameters<typeof createBaseMockCtx>[0] = {}) {

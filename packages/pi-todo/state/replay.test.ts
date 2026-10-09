@@ -1,4 +1,4 @@
-import { buildSessionEntries, createMockCtx, makeTodoToolResult, makeUserMessage } from "@maplezzk/pi-test-utils/rpiv";
+import { buildSessionEntries, createMockCtx, makeTodoToolResult, makeUserMessage } from "pi-utils/rpiv";
 import { describe, expect, it } from "vitest";
 import type { Task, TaskDetails } from "../tool/types.js";
 import { isTaskDetails, replayFromBranch } from "./replay.js";

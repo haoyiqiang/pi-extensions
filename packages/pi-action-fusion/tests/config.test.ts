@@ -3,8 +3,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import type { ExtensionAPI, ExtensionContext, ExtensionCommandContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { withTempAgentDir } from "@maplezzk/pi-test-utils";
-import { createTranslator, loadCatalog } from "pi-extensions-i18n";
+import { withTempAgentDir } from "pi-utils";
+import { createTranslator, loadCatalog } from "pi-utils";
 import actionFusion, { loadActionFusionConfig } from "../index.ts";
 
 function harness() {

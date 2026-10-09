@@ -1,4 +1,4 @@
-import { verifyShipManifest } from "@maplezzk/pi-test-utils/rpiv";
+import { verifyShipManifest } from "pi-utils/rpiv";
 import { describe, expect, it } from "vitest";
 
 describe("publish manifest", () => {

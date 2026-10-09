@@ -3,7 +3,7 @@ import { clampThinkingLevel, cleanupSessionResources } from "@earendil-works/pi-
 
 import { formatModel } from "./format";
 import { i18n, NOTICE_SOURCE } from "../i18n";
-import { notifyWithSource } from "pi-extensions-i18n";
+import { notifyWithSource } from "pi-utils";
 
 import type { Api, AssistantMessage, Context, Model, ModelsSimpleStreamOptions, ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";

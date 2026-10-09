@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { AssistantMessageComponent } from "@earendil-works/pi-coding-agent";
 import { Container } from "@earendil-works/pi-tui";
-import { NOTICE_ENTRY_TYPE } from "pi-extensions-i18n";
+import { NOTICE_ENTRY_TYPE } from "pi-utils";
 import {
 	applyEntryRail,
 	dropLeadingBlankLines,

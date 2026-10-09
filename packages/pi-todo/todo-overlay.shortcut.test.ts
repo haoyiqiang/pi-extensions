@@ -1,6 +1,6 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { createMockCtx as createBaseMockCtx, createMockPi } from "@maplezzk/pi-test-utils/rpiv";
+import { createMockCtx as createBaseMockCtx, createMockPi } from "pi-utils/rpiv";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import registerTodo from "./index.js";
 import { __resetState } from "./todo.js";

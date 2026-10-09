@@ -5,7 +5,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { TuiMouseEvent } from "@earendil-works/pi-tui";
 import type { PresetManager } from "./manager";
 import { i18n, NOTICE_SOURCE } from "../../i18n";
-import { notifyWithSource } from "pi-extensions-i18n";
+import { notifyWithSource } from "pi-utils";
 
 export async function showPresetSelector(ctx: ExtensionContext, presetManager: PresetManager): Promise<string | undefined> {
   if (presetManager.keys.length === 0) {

@@ -1,4 +1,4 @@
-import { applyLocale } from "pi-extensions-i18n";
+import { applyLocale } from "pi-utils";
 import { afterEach, describe, expect, it } from "vitest";
 import { i18n } from "./state/i18n-bridge.js";
 import { QuestionParamsSchema } from "./tool/types.js";

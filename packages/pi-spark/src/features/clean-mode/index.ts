@@ -23,7 +23,7 @@ import {
 	notifyWithSource,
 	type NoticeColor,
 	type NoticeOwnerRelease,
-} from "pi-extensions-i18n";
+} from "pi-utils";
 import { loadConfig, saveConfig } from "./config-store.js";
 import { parseToggleValue, withBooleanConfigField } from "./config-fields.js";
 import { openConfigPanel } from "./config-panel.js";

@@ -8,6 +8,7 @@
     ".": "./index.ts"
   },
   "files": [
+    "i18n-entry.ts",
     "index.ts",
     "src",
     "locales",
@@ -28,8 +29,8 @@
   },
   "pi": {
     "extensions": [
-      "./index.ts",
-      "../pi-extensions-i18n/index.ts"
+      "./i18n-entry.ts",
+      "./index.ts"
     ],
     "themes": [
       "./themes"
@@ -79,9 +80,8 @@
     "parse-duration": "^2.1.8",
     "pretty-ms": "^9.3.0",
     "zod": "^4.4.3",
-    "pi-extensions-config": "^0.1.0",
-    "pi-extensions-i18n": "^0.8.0",
-    "pi-terminal-mux": "^0.6.5"
+    "pi-terminal-mux": "^0.6.5",
+    "pi-utils": "^0.1.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-agent-core": ">=0.87.0 <1.0.0",
@@ -92,7 +92,6 @@
   },
   "devDependencies": {
     "@earendil-works/pi-agent-core": "0.87.1",
-    "@maplezzk/pi-test-utils": "0.0.0",
     "@earendil-works/pi-ai": "0.87.1",
     "@earendil-works/pi-coding-agent": "0.87.1",
     "@earendil-works/pi-tui": "0.87.1",

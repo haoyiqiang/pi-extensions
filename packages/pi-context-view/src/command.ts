@@ -16,7 +16,7 @@ import type { InitialSnapshot } from "./model.ts";
 import { runWithProbeToken } from "./probe-token.ts";
 import { normalizePreviewText } from "./text.ts";
 import { i18n, NOTICE_SOURCE } from "./i18n.ts";
-import { notifyWithSource, type NoticeLevel } from "pi-extensions-i18n";
+import { notifyWithSource, type NoticeLevel } from "pi-utils";
 
 /** Cap for reported messages, which may quote configuration files and OS error text. */
 const MAX_REPORTED_MESSAGE_LENGTH = 500;

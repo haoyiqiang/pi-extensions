@@ -6,6 +6,7 @@
   "main": "./index.ts",
   "exports": "./index.ts",
   "files": [
+    "i18n-entry.ts",
     "index.ts",
     "src",
     "locales",
@@ -25,8 +26,8 @@
   },
   "pi": {
     "extensions": [
-      "./index.ts",
-      "../pi-extensions-i18n/index.ts"
+      "./i18n-entry.ts",
+      "./index.ts"
     ]
   },
   "engines": {
@@ -56,8 +57,8 @@
     "vertex-ai"
   ],
   "dependencies": {
-    "pi-extensions-i18n": "^0.8.0",
-    "undici": "^7.29.1"
+    "undici": "^7.29.1",
+    "pi-utils": "^0.1.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": ">=0.80.0",

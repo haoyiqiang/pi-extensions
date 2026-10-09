@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { notifyWithSource } from "pi-extensions-i18n";
+import { notifyWithSource } from "pi-utils";
 import { NOTICE_SOURCE } from "../src/i18n.ts";
 import { loadAdvisorConfigResult, modelKey, parseModelKey, validateDisabledForModels } from "./config.ts";
 import { reconcileAdvisorTool } from "./handlers.ts";

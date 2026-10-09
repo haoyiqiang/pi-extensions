@@ -1,7 +1,7 @@
 import { getSupportedThinkingLevels, type Api, type Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext, RegisteredCommand } from "@earendil-works/pi-coding-agent";
 import type { SelectItem } from "@earendil-works/pi-tui";
-import { notifyWithSource } from "pi-extensions-i18n";
+import { notifyWithSource } from "pi-utils";
 import { NOTICE_SOURCE } from "../src/i18n.ts";
 import { showAdvisorPicker, showEffortPicker } from "../advisor-ui.js";
 import { modelKey, saveAdvisorConfig } from "./config.ts";

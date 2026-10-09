@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { notifyWithSource } from "pi-extensions-i18n";
+import { notifyWithSource } from "pi-utils";
 import { loadConfig, type TodoConfig, validateGuidanceFields } from "./config.js";
 import { formatStatusLabel, NOTICE_SOURCE, t } from "./state/i18n-bridge.js";
 import { selectTasksByStatus, selectTodoCounts, selectVisibleTasks } from "./state/selectors.js";

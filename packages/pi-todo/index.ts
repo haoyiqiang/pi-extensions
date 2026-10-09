@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionContext, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import type { KeyId } from "@earendil-works/pi-tui";
-import { getLocale, LOCALE_CHANGED_EVENT, notifyWithSource } from "pi-extensions-i18n";
+import { getLocale, LOCALE_CHANGED_EVENT, notifyWithSource } from "pi-utils";
 import { COLLAPSE_KEY_OFF, loadConfigResult, resolveCollapseKey } from "./config.js";
 import { NOTICE_SOURCE, t } from "./state/i18n-bridge.js";
 import { replayFromBranch } from "./state/replay.js";

@@ -1,5 +1,5 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { createMockCtx, createMockPi } from "@maplezzk/pi-test-utils/rpiv";
+import { createMockCtx, createMockPi } from "pi-utils/rpiv";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { __resetState, registerTodosCommand, registerTodoTool, TOOL_NAME } from "./todo.js";
 

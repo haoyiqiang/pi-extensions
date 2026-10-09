@@ -1,4 +1,4 @@
-import { createMockPi } from "@maplezzk/pi-test-utils/rpiv";
+import { createMockPi } from "pi-utils/rpiv";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import registerTodo from "./index.js";
 import { getState, replaceState } from "./state/store.js";

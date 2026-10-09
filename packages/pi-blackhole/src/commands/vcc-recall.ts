@@ -23,7 +23,7 @@ import {
 } from "../om/reverse-recall.js";
 import type { Entry } from "../om/ledger/recall.js";
 import { i18n, NOTICE_SOURCE } from "../i18n.js";
-import { notifyWithSource } from "pi-extensions-i18n";
+import { notifyWithSource } from "pi-utils";
 
 const PAGE_SIZE = 5;
 const DEFAULT_RECENT = 25;

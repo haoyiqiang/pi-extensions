@@ -1,4 +1,4 @@
-import { createMockCtx, createMockPi } from "@maplezzk/pi-test-utils/rpiv";
+import { createMockCtx, createMockPi } from "pi-utils/rpiv";
 import { describe, expect, it, vi } from "vitest";
 import { ASK_USER_QUESTION_TOOL_NAME } from "./ask-user-question.js";
 import factory from "./index.js";

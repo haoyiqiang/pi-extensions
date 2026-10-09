@@ -1,5 +1,5 @@
 import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
-import { createMockCtx, createMockPi, createMockUI } from "@maplezzk/pi-test-utils/rpiv";
+import { createMockCtx, createMockPi, createMockUI } from "pi-utils/rpiv";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { __resetState, registerTodoTool, setActiveRenderSession } from "./todo.js";
 import { TodoOverlay } from "./todo-overlay.js";

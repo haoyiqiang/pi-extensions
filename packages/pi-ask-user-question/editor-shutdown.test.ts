@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getKeybindings } from "@earendil-works/pi-tui";
-import { createMockCtx, createMockPi, makeTheme } from "@maplezzk/pi-test-utils/rpiv";
+import { createMockCtx, createMockPi, makeTheme } from "pi-utils/rpiv";
 import { beforeAll, expect, it, vi } from "vitest";
 import { registerAskUserQuestionTool } from "./ask-user-question.js";
 import type { QuestionnaireSessionComponent } from "./state/questionnaire-session.js";

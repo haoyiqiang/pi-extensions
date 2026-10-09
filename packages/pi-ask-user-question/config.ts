@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { extensionConfigPath, readJsonObjectResult, type JsonObject } from "pi-extensions-config";
+import { extensionConfigPath, readJsonObjectResult, type JsonObject } from "pi-utils";
 import { i18n } from "./state/i18n-bridge.js";
 
 export interface GuidanceFields {

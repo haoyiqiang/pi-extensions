@@ -1,11 +1,11 @@
 /**
  * 本扩展在会话区里的提示来源标签与固定颜色。
  *
- * 只用于一次性提示（由 pi-extensions-i18n 的提示块渲染）：那种块夹在成排的消息里，
+ * 只用于一次性提示（由 pi-utils 的提示块渲染）：那种块夹在成排的消息里，
  * 需要 `[xxx]` 标明是谁发的。折叠头不加前缀 —— 它每轮都在、位置固定，前缀只是噪音。
  */
 
-import { NOTICE_TAG_COLOR, type NoticeColor, type NoticeSource } from "pi-extensions-i18n";
+import { NOTICE_TAG_COLOR, type NoticeColor, type NoticeSource } from "pi-utils";
 
 /** 本扩展的短标签，同时用作提示来源的 tag。 */
 export const NOTICE_TAG = "clean";

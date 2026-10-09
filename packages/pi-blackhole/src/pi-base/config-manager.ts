@@ -33,7 +33,7 @@ import { validateFieldValue } from "./settings/validate-field.ts";
 import type { Field } from "./settings/types.ts";
 import type { ExtensionContext, FileEntry } from "@earendil-works/pi-coding-agent";
 import { i18n, NOTICE_SOURCE } from "../i18n.js";
-import { notifyWithSource } from "pi-extensions-i18n";
+import { notifyWithSource } from "pi-utils";
 
 // ── Types ──────────────────────────────────────────────────────────────
 

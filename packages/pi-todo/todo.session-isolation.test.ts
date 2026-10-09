@@ -1,4 +1,4 @@
-import { createMockCtx as createBaseMockCtx, createMockPi } from "@maplezzk/pi-test-utils/rpiv";
+import { createMockCtx as createBaseMockCtx, createMockPi } from "pi-utils/rpiv";
 import { afterEach, beforeEach, describe, expect, it, type vi } from "vitest";
 import registerTodo from "./index.js";
 import { EMPTY_STATE } from "./state/state.js";

@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { notifyWithSource } from "pi-extensions-i18n";
+import { notifyWithSource } from "pi-utils";
 import { loadConfig } from "../../config/index.ts";
 import { i18n, NOTICE_SOURCE } from "../../i18n.ts";
 import { DEFAULT_METRICS_DISPLAY, type MetricsDisplay } from "./config.ts";

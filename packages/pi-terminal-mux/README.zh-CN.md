@@ -29,7 +29,7 @@ import {
 } from "pi-terminal-mux";
 
 if (!isMuxAvailable()) {
-  console.warn(muxSetupHint()); // 中英文安装提示，由 pi-extensions-i18n 决定语言
+  console.warn(muxSetupHint()); // 中英文安装提示，由 pi-utils 决定语言
 }
 
 // 智能放置：按后端策略分屏 / 堆叠 / 开 tab（headless 时返回 headless surface）
@@ -115,7 +115,7 @@ export PI_SUBAGENT_HERDR_MODE=tab
 - **长命令（`sendLongCommand`）**：传 `interpreter: "powershell"` 会生成 `.ps1`，mux 通过 `powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File <path>` 执行、headless 走 `-Command "& <path>"`。显式 `scriptPath` 原样保留；自动路径按解释器选 `.ps1`/`.sh`。未传 interpreter 时保持既有 Bash command、`.sh` 路径与 `$?` 数值哨兵不变。
 - **读屏（`readScreen` / `readScreenAsync`）**：传 `{ source: "recent_unwrapped" }`（仅 herdr）选择 herdr 的软换行合并捕获；不传 options 时 herdr 保持 `recent`，其他后端保持各自读屏语义。
 
-这些都是可选项。既有 Bash 调用方仍使用默认 Bash 运行时；统一 `pi-subagents` 使用 Pi 执行，平台限制以其文档为准。旧 interactive-subagents workspace 已退役。
+这些都是可选项。既有 Bash 调用方仍使用默认 Bash 运行时。旧 interactive-subagents workspace 已退役。
 
 ## 环境变量
 
@@ -126,12 +126,12 @@ export PI_SUBAGENT_HERDR_MODE=tab
 | `PI_SUBAGENT_RENAME_TMUX_WINDOW` / `PI_SUBAGENT_RENAME_TMUX_SESSION` | tmux 下旧 `getRenameCapability` / `renameCurrentTab` / `renameWorkspace` 的兼容开关；明确目标解析忽略 |
 | `PI_SUBAGENT_HERDR_MODE` | herdr surface 放置模式：`split`（默认）或 `tab` |
 | `PI_SUBAGENT_RENAME_HERDR_WORKSPACE` | herdr 下旧 `getRenameCapability` / `renameWorkspace` 的兼容开关；明确目标解析忽略 |
-| `PI_EXTENSIONS_LOCALE` | 提示文案语言（`zh-CN` / `en-US` / `auto`），由 pi-extensions-i18n 提供 |
+| `PI_EXTENSIONS_LOCALE` | 提示文案语言（`zh-CN` / `en-US` / `auto`），由 pi-utils 提供 |
 
 ## 设计约束
 
 - **不绑定具体机器**：全部后端通过运行时探测（环境变量 + 命令存在性）选择，零硬编码本机路径；外部 CLI 缺失时按后端逐个降级，最终落到 headless。
-- **用户文案国际化**：面向用户的提示走 [pi-extensions-i18n](https://www.npmjs.com/package/pi-extensions-i18n) catalog，中英文齐全。
+- **用户文案国际化**：面向用户的提示走 [pi-utils](https://www.npmjs.com/package/pi-utils) catalog，中英文齐全。
 - **agent pane 锚定**：muxy/herdr/otty/orca 的 agent 自身 pane ID 在模块加载时捕获（`AGENT_MUXY_PANE_ID`、`AGENT_ORCA_TERMINAL_HANDLE` 等），不受用户后续焦点切换影响。
 
 ## License

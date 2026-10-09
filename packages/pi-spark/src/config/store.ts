@@ -1,5 +1,5 @@
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
-import { readJsonObject, updateJsonObjectAtomic } from "pi-extensions-config";
+import { readJsonObject, updateJsonObjectAtomic } from "pi-utils";
 import { join } from "node:path";
 import type { SparkConfig, SparkConfigInput } from "./schema.ts";
 import { clearConfigCache } from "./index.ts";

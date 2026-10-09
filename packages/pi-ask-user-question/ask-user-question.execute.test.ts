@@ -1,4 +1,4 @@
-import { createMockCtx, createMockPi, mockStdout } from "@maplezzk/pi-test-utils/rpiv";
+import { createMockCtx, createMockPi, mockStdout } from "pi-utils/rpiv";
 import { describe, expect, it, vi } from "vitest";
 import { BEL, registerAskUserQuestionTool } from "./ask-user-question.js";
 import { MAX_QUESTIONS, type QuestionnaireResult } from "./tool/types.js";

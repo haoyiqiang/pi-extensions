@@ -17,7 +17,7 @@ A branch-aware todo extension for Pi. It registers the model-facing `todo` tool,
 pi install npm:@maplezzk/pi-todo
 ```
 
-Reload Pi after installation. The package also loads `pi-extensions-i18n`, which provides `/config:language` and `/languages`.
+Reload Pi after installation. The package also loads `pi-utils`, which provides `/config:language` and `/languages`.
 
 ## Tool
 

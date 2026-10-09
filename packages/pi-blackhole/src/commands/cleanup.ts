@@ -25,7 +25,7 @@ import {
   type PendingFile,
 } from "../om/cleanup.js";
 import { i18n, NOTICE_SOURCE } from "../i18n.js";
-import { notifyWithSource } from "pi-extensions-i18n";
+import { notifyWithSource } from "pi-utils";
 
 // ── TUI Picker Component ────────────────────────────────────────────────────
 

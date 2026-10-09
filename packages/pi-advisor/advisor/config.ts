@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
-import { extensionConfigPath, readJsonObjectResult, writeJsonAtomic, type JsonObject } from "pi-extensions-config";
+import { extensionConfigPath, readJsonObjectResult, writeJsonAtomic, type JsonObject } from "pi-utils";
 import { EFFORT_ORDINAL, messages, type GradedEffort } from "./messages.ts";
 
 export interface GuidanceFields {
