@@ -1,4 +1,3 @@
-import { i18n } from "../i18n.ts";
 import { emptyFetch, missingCredential, providerApiError, providerOperationError } from "./provider-errors.ts";
 import type { FetchResponse, FullProvider, SearchResponse, SearchResult } from "./types.ts";
 
@@ -102,7 +101,7 @@ export class FirecrawlProvider implements FullProvider {
 		const raw = (await res.json()) as FirecrawlScrapeResponse;
 
 		if (!raw.success) {
-			throw providerOperationError(this.label, "fetch", raw.error ?? i18n.t("provider.error.scrapeFailed"));
+			throw providerOperationError(this.label, "fetch", raw.error ?? "scrape failed");
 		}
 
 		if (!raw.data?.markdown) {

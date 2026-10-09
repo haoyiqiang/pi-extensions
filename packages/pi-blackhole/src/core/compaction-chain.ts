@@ -1,16 +1,7 @@
 import type { PiVccCompactionDetailsV2, PiVccSegment, PiVccSegmentCoverage } from "../details.js";
 import { isPiVccCompactionDetailsV2 } from "../details.js";
-import {
-  applyRetainedToolOutputProjection,
-  isRetainedToolOutputProjection,
-  type RetainedToolOutputProjection,
-} from "./tool-output-budget.js";
-import {
-  buildSessionContext,
-  convertToLlm,
-  estimateTokens,
-  type SessionEntry,
-} from "@earendil-works/pi-coding-agent";
+import { applyRetainedToolOutputProjection, isRetainedToolOutputProjection, type RetainedToolOutputProjection } from "./tool-output-budget.js";
+import { buildSessionContext, convertToLlm, estimateTokens, type SessionEntry } from "@earendil-works/pi-coding-agent";
 import { getUsageTokens } from "../om/tokens.js";
 
 export interface SessionEntryLike {

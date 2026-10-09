@@ -8,10 +8,8 @@
     ".": "./index.ts"
   },
   "files": [
-    "i18n-entry.ts",
     "index.ts",
     "src",
-    "locales",
     "assets",
     "config.example.json",
     "README.md",
@@ -27,7 +25,6 @@
   },
   "pi": {
     "extensions": [
-      "./i18n-entry.ts",
       "./index.ts"
     ]
   },

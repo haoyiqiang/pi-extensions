@@ -16,13 +16,12 @@
  *   tool-supervisor 审计行、pi-spark 的逐轮遥测；
  * - 会话恢复窗口（session_start 之后、首次 agent_start 之前）—— 历史轮次留下的
  *   条目，与历史工具行一样属于工作过程。
- * 运行结束后才出现的条目（提示、汇总）保持可见；pi-utils 的通知条目按级别区分
- * —— `info` 级（metrics 的逐轮遥测、配置保存成功）属于过程噪声，跟着工作过程一起收起；
- * `warning` / `error` 是扩展出错时唯一能说话的地方，无论何时都留着，否则警告会被静默吞掉。
+ * 运行结束后才出现的条目（提示、汇总）保持可见。历史会话里退役的
+ * `pi-extensions-notice` 条目仍按级别区分：`info` 跟着工作过程收起，
+ * `warning` / `error` 留着，避免把旧警告静默吞掉。
  */
 
 import { Container, visibleWidth } from "@earendil-works/pi-tui";
-import { NOTICE_ENTRY_TYPE } from "pi-utils";
 import { installMethodPatch, type PatchablePrototype } from "./prototype-patch.js";
 import type { CleanModeConfig, CleanModeState } from "./types.js";
 
@@ -35,6 +34,8 @@ const NO_LINES: string[] = [];
  * 整行宽度才不会溢出。数值与 `GUTTER_PREFIX_WIDTH` 一致。
  */
 const ENTRY_RAIL_WIDTH = 2;
+/** 退役的 pi-utils 提示块类型；只为重放历史会话保留。 */
+export const NOTICE_ENTRY_TYPE = "pi-extensions-notice";
 
 /**
  * 条目组件对外可见的最小结构。
@@ -108,7 +109,7 @@ export function readExtensionEntryCustomType(host: ExtensionEntryHost): string |
 /**
  * 读通知条目的级别。
  *
- * 通知条目由 pi-utils 写成 `{ tag, color, level, message, ... }`。读不出来
+ * 历史通知条目写成 `{ tag, color, level, message, ... }`。读不出来
  * （别的包用了同一个 customType、字段改过、老版本）时返回 undefined，调用方按「留着」处理
  * —— 宁可多显示一条，也不能把警告静默吞掉。
  */

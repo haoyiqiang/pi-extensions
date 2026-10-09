@@ -16,8 +16,7 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { notifyWithSource } from "pi-utils";
-import { i18n, NOTICE_SOURCE } from "../../i18n.ts";
+
 import type { MetricsDisplay } from "./config.ts";
 import { computeRateUsdPerM, formatDuration, formatNumber } from "./format-utils.ts";
 import { composeRunSummary, createRunAccumulator, type RunAccumulator } from "./run-summary.ts";
@@ -255,23 +254,20 @@ function buildTelemetry(
 function composeDisplayString(telemetry: TurnTelemetry): string {
   const parts = [
     telemetry.tps === null
-      ? i18n.t("tpsUnknown")
-      : i18n.t("tpsValue", { value: telemetry.tps.toFixed(1) }),
+      ? "TPS —"
+      : `TPS ${telemetry.tps.toFixed(1)} tok/s`,
   ];
   if (telemetry.timing.ttftMs !== null) {
-    parts.push(i18n.t("tpsTtft", { value: formatDuration(telemetry.timing.ttftMs / 1000) }));
+    parts.push(`TTFT ${formatDuration(telemetry.timing.ttftMs / 1000)}`);
   }
   parts.push(formatDuration(telemetry.timing.totalMs / 1000));
-  parts.push(i18n.t("tpsInput", { value: formatNumber(telemetry.tokens.input) }));
-  parts.push(i18n.t("tpsOutput", { value: formatNumber(telemetry.tokens.output) }));
+  parts.push(`in ${formatNumber(telemetry.tokens.input)}`);
+  parts.push(`out ${formatNumber(telemetry.tokens.output)}`);
   if (telemetry.timing.stallMs > 0) {
-    parts.push(i18n.t("tpsStall", {
-      value: formatDuration(telemetry.timing.stallMs / 1000),
-      count: telemetry.timing.stallCount,
-    }));
+    parts.push(`stall ${formatDuration(telemetry.timing.stallMs / 1000)}×${telemetry.timing.stallCount}`);
   }
   if (telemetry.rateUsdPerMTokens !== null) {
-    parts.push(i18n.t("tpsRate", { value: telemetry.rateUsdPerMTokens.toFixed(2) }));
+    parts.push(`$${telemetry.rateUsdPerMTokens.toFixed(2)}/M`);
   }
   return parts.join(" · ");
 }
@@ -288,11 +284,11 @@ function restoreTPSNotification(
     const data = entry.data as Record<string, unknown> | null | undefined;
     if (!data) continue;
     if (typeof data.model === "object" && data.model !== null) {
-      schedule(() => notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: composeDisplayString(data as unknown as TurnTelemetry) }));
+      schedule(() => ctx.ui.notify(composeDisplayString(data as unknown as TurnTelemetry), "info"));
       return;
     }
     if (typeof data.message === "string") {
-      schedule(() => notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: data.message as string }));
+      schedule(() => ctx.ui.notify(data.message as string, "info"));
       return;
     }
   }
@@ -372,12 +368,7 @@ export default function tpsExtension(pi: ExtensionAPI, options: TpsOptions = {})
     summary.effectiveCostUsd = costUsd;
     const aggregate = summary.accumulator.summarize();
     if (aggregate === null || !summary.ctx.hasUI) return;
-    notifyWithSource({
-      ctx: summary.ctx,
-      source: NOTICE_SOURCE,
-      level: "info",
-      message: composeRunSummary(aggregate, summary.elapsedMs),
-    });
+    summary.ctx.ui.notify(composeRunSummary(aggregate, summary.elapsedMs), "info");
   };
 
   const scheduleRestore = (callback: () => void) => {
@@ -415,7 +406,7 @@ export default function tpsExtension(pi: ExtensionAPI, options: TpsOptions = {})
       applyLateBilledCost(committed.turnIndex, costUsd);
       return;
     }
-    if (committed.ctx.hasUI) notifyWithSource({ ctx: committed.ctx, source: NOTICE_SOURCE, level: "info", message: composeDisplayString(corrected) });
+    if (committed.ctx.hasUI) committed.ctx.ui.notify(composeDisplayString(corrected), "info");
   });
 
   pi.on("session_shutdown", () => {
@@ -552,7 +543,7 @@ export default function tpsExtension(pi: ExtensionAPI, options: TpsOptions = {})
       lastRunTurn = { turnIndex: event.turnIndex, effectiveCostUsd };
       return;
     }
-    if (ctx.hasUI) notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: composeDisplayString(telemetry) });
+    if (ctx.hasUI) ctx.ui.notify(composeDisplayString(telemetry), "info");
   });
 
   pi.on("agent_settled", (_event, ctx: ExtensionContext) => {
@@ -575,12 +566,7 @@ export default function tpsExtension(pi: ExtensionAPI, options: TpsOptions = {})
     runAccumulator = createRunAccumulator();
     lastRunTurn = null;
     if (!ctx.hasUI) return;
-    notifyWithSource({
-      ctx,
-      source: NOTICE_SOURCE,
-      level: "info",
-      message: composeRunSummary(aggregate, elapsedMs),
-    });
+    ctx.ui.notify(composeRunSummary(aggregate, elapsedMs), "info");
   });
 
 }

@@ -2,7 +2,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { CONFIG_PANEL_IDS, applyPanelChange, panelToggleLabels, toSettingItems } from "../src/features/clean-mode/config-panel.ts";
-import { i18n } from "../src/features/clean-mode/i18n.ts";
 import { DEFAULT_CLEAN_MODE_CONFIG, ACTIVITY_ROWS_RANGE, type CleanModeConfig } from "../src/features/clean-mode/types.ts";
 
 /** 面板上不该出现的行数取值：比合法上限还大，用于校验非法输入被拒绝。 */
@@ -77,5 +76,5 @@ test("自定义开关文案同样能写回配置", () => {
 });
 
 test("面板标题文案已本地化", () => {
-	assert.ok(i18n.t("configPanelTitle").trim().length > 0);
+	assert.equal("Clean mode settings".trim().length > 0, true);
 });

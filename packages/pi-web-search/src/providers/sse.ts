@@ -1,5 +1,4 @@
 import { TextDecoder } from "util";
-import { i18n } from "../i18n.ts";
 
 export type SseEvent = {
     event: string;
@@ -12,7 +11,7 @@ export async function readSseEvents(
     onEvent: (event: SseEvent) => boolean | void | Promise<boolean | void>
 ): Promise<void> {
     if (!response.body) {
-        throw new Error(i18n.t("llm.noResponseBody"));
+        throw new Error("The response has no body.");
     }
 
     const reader = response.body.getReader();
@@ -43,7 +42,7 @@ export async function readSseEvents(
     try {
         readLoop: while (true) {
             if (signal?.aborted) {
-                throw new Error(i18n.t("llm.aborted"));
+                throw new Error("The request was aborted.");
             }
 
             const { done, value } = await reader.read();

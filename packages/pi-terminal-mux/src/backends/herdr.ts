@@ -14,7 +14,6 @@
 
 import { execFileSync } from "node:child_process";
 import { rmSync } from "node:fs";
-import { i18n } from "../i18n.ts";
 import { createBackendLogger, withFileLock, BfsSplitStateManager, hasCommand } from "./shared.ts";
 
 // ── 日志（统一格式，写入 /tmp/pi-mux-herdr.log） ──
@@ -47,7 +46,7 @@ export function resolveHerdrSurfaceMode(value = process.env.PI_SUBAGENT_HERDR_MO
   const normalized = value?.trim().toLowerCase();
   if (!normalized || normalized === HERDR_SURFACE_MODE_SPLIT) return DEFAULT_HERDR_SURFACE_MODE;
   if (normalized === HERDR_SURFACE_MODE_TAB) return HERDR_SURFACE_MODE_TAB;
-  throw new Error(i18n.t("error.invalidHerdrMode", { value: value ?? "" }));
+  throw new Error(`Unsupported Herdr surface mode: ${value ?? ""}. Choose split or tab.`);
 }
 
 /**
@@ -497,7 +496,7 @@ function parseWorkspaceIdFromPaneId(paneId: string): string | null {
  */
 export function herdrSetupHint(preferred: boolean): string {
   if (preferred) {
-    return i18n.t("setupHint.herdrPreferred");
+    return "Start pi inside herdr (HERDR_ENV=1 must be set; run herdr, then start pi in a pane).";
   }
   return "";
 }

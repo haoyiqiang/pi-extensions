@@ -1,7 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { type Component, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { DistillRenderConfig } from "./summary-utils.ts";
-import { rendererI18n as i18n } from "./i18n.ts";
 
 export const DISTILL_AUDIT_ENTRY_TYPE = "pi-distill-audit";
 
@@ -229,33 +228,51 @@ export function buildDistillAuditLines(
   const outputRequest = getString(details.outputSummaryPrompt);
   const summaryText = getString(details.summaryText);
   const statusView = statusViews[status] ?? { icon: "○", tone: "muted" as const };
-  const statusText = statusView.textKey ? i18n.t(statusView.textKey) : status in statusViews ? "" : status;
+  const renderText: Record<string, string> = {
+    summaryFallback: "Original restored",
+    disabled: "Disabled",
+    off: "Off",
+    original: "Original",
+    raw: "RAW",
+    belowThreshold: "Below threshold",
+    nonTextOutput: "Non-text output",
+    readFailed: "Read failed",
+    summaryFailed: "Summary failed",
+    evidenceVerified: "Source quotes verified",
+    evidenceFailed: "Evidence rejected",
+    archiveFailed: "Archive failed",
+    incompleteSource: "Incomplete source",
+    inputOverBudget: "Model context budget exceeded",
+    sensitiveSource: "Sensitive source skipped",
+    errorsDisabled: "Error processing off",
+  };
+  const statusText = statusView.textKey ? renderText[statusView.textKey] ?? statusView.textKey : status in statusViews ? "" : status;
 
   let mainMetric = "";
   if (estimatedOriginalTokens !== undefined && estimatedSummaryTokens !== undefined) {
-    mainMetric = `${formatCompactCount(estimatedOriginalTokens)} → ${formatCompactCount(estimatedSummaryTokens)} ${i18n.t("tokens")}`;
+    mainMetric = `${formatCompactCount(estimatedOriginalTokens)} → ${formatCompactCount(estimatedSummaryTokens)} ${"tok"}`;
     if (estimatedTokensSaved !== undefined && estimatedTokensSaved > 0 && compressionSavedPercent !== undefined) {
       mainMetric += ` ↓${compressionSavedPercent.toFixed(1)}%`;
     }
   } else if (originalChars !== undefined && summaryChars !== undefined) {
-    mainMetric = `${formatCount(originalChars)} → ${formatCount(summaryChars)} ${i18n.t("chars")}`;
+    mainMetric = `${formatCount(originalChars)} → ${formatCount(summaryChars)} ${"chars"}`;
     if (compressionSavedPercent !== undefined) {
       mainMetric += ` ↓${compressionSavedPercent.toFixed(1)}%`;
     }
   } else if (originalChars !== undefined) {
-    mainMetric = `${formatCount(originalChars)} ${i18n.t("chars")}`;
+    mainMetric = `${formatCount(originalChars)} ${"chars"}`;
   }
 
   const secondaryMetrics: string[] = [];
   if (summaryTotalTokens !== undefined && summaryTotalTokens > 0) {
-    secondaryMetrics.push(`${i18n.t("compressionTokens")} ${formatCompactCount(summaryTotalTokens)}`);
+    secondaryMetrics.push(`${"usage"} ${formatCompactCount(summaryTotalTokens)}`);
   }
   if (toolExecutionMs !== undefined && toolExecutionMs >= MIN_TOOL_DURATION_DISPLAY_MS) {
-    secondaryMetrics.push(`${i18n.t("tool")} ${formatDuration(toolExecutionMs)}`);
+    secondaryMetrics.push(`${"tool"} ${formatDuration(toolExecutionMs)}`);
   }
-  if (summaryDurationMs !== undefined) secondaryMetrics.push(`${i18n.t("distill")} ${formatDuration(summaryDurationMs)}`);
+  if (summaryDurationMs !== undefined) secondaryMetrics.push(`${"distill"} ${formatDuration(summaryDurationMs)}`);
 
-  const expandHint = expanded ? "" : i18n.t("expand");
+  const expandHint = expanded ? "" : " • Ctrl+O to expand";
   const metricParts = [mainMetric, ...secondaryMetrics].filter((part) => part.length > 0);
   const headerSegments = [`${statusView.icon} Distill`];
   if (statusText) headerSegments.push(statusText);
@@ -263,12 +280,12 @@ export function buildDistillAuditLines(
   const lines = [`${headerSegments.join("  ")}${expandHint}`];
   if (expanded) {
     const sections: Array<{ label: string; text: string }> = [];
-    if (render.showPrompt && outputRequest) sections.push({ label: i18n.t("outputRequest"), text: outputRequest });
-    if (render.showResult && summaryText) sections.push({ label: i18n.t("summary"), text: summaryText });
-    if (fullOutputPath) sections.push({ label: i18n.t("file"), text: fullOutputPath });
-    if (anomalies.length > 0) sections.push({ label: i18n.t("warning"), text: anomalies.join(", ") });
-    if (advice) sections.push({ label: i18n.t("warning"), text: advice });
-    if (error) sections.push({ label: i18n.t("error"), text: error });
+    if (render.showPrompt && outputRequest) sections.push({ label: "outputRequest", text: outputRequest });
+    if (render.showResult && summaryText) sections.push({ label: "Summary", text: summaryText });
+    if (fullOutputPath) sections.push({ label: "File", text: fullOutputPath });
+    if (anomalies.length > 0) sections.push({ label: "Warning", text: anomalies.join(", ") });
+    if (advice) sections.push({ label: "Warning", text: advice });
+    if (error) sections.push({ label: "Error", text: error });
     sections.forEach((section, index) => {
       appendSection(
         lines,

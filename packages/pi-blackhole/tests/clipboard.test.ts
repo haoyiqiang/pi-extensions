@@ -7,11 +7,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import {
-  copyTextToClipboard,
-  getClipboardCommands,
-  type ClipboardCommand,
-} from "../src/om/clipboard.js";
+import { copyTextToClipboard, getClipboardCommands, type ClipboardCommand } from "../src/om/clipboard.js";
 
 describe("clipboard helper", () => {
   it("uses pbcopy on macOS", () => {

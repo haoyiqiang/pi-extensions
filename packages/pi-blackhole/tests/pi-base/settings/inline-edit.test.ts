@@ -5,23 +5,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import {
-  clampInlineCursor,
-  codeUnitToCharIndex,
-  deleteInlineRange,
-  handleInlineEditInput,
-  inlineCharKind,
-  inlineEditChars,
-  insertInlineText,
-  moveInlineCursorByChars,
-  moveInlineCursorWordLeft,
-  moveInlineCursorWordRight,
-  renderInlineEditValue,
-  getInlineYankBuffer,
-  setInlineYankBuffer,
-  isPlainSearchInput,
-  type InlineEditState,
-} from "../../../src/pi-base/settings/inline-edit.ts";
+import { clampInlineCursor, codeUnitToCharIndex, deleteInlineRange, handleInlineEditInput, inlineCharKind, inlineEditChars, insertInlineText, moveInlineCursorByChars, moveInlineCursorWordLeft, moveInlineCursorWordRight, renderInlineEditValue, getInlineYankBuffer, setInlineYankBuffer, isPlainSearchInput, type InlineEditState } from "../../../src/pi-base/settings/inline-edit.ts";
 
 const make = (buffer: string, cursor: number = buffer.length): InlineEditState => ({
   buffer,

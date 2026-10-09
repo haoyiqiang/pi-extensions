@@ -8,12 +8,7 @@
 import { describe, expect, it } from "vitest";
 import { validateToolArguments } from "@earendil-works/pi-ai";
 
-import {
-  normalizeSupportingObservationIds,
-  observationToReflectorLine,
-  runReflector,
-  summarizeSupportIdCounts,
-} from "../src/om/agents/reflector/agent.js";
+import { normalizeSupportingObservationIds, observationToReflectorLine, runReflector, summarizeSupportIdCounts } from "../src/om/agents/reflector/agent.js";
 import { hashId } from "../src/om/ids.js";
 import { estimateStringTokens } from "../src/om/tokens.js";
 import { observation, reflection } from "./fixtures/session.js";

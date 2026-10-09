@@ -17,13 +17,7 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
   getAgentDir: () => agentDir,
 }));
 
-import {
-  DEBUG_LOG_MAX_BYTES,
-  DEBUG_LOG_RELATIVE_PATH,
-  debugLog,
-  flushDebugLog,
-  withDebugLogContext,
-} from "../src/om/debug-log.js";
+import { DEBUG_LOG_MAX_BYTES, DEBUG_LOG_RELATIVE_PATH, debugLog, flushDebugLog, withDebugLogContext } from "../src/om/debug-log.js";
 
 describe("debug-log", () => {
   beforeEach(() => {

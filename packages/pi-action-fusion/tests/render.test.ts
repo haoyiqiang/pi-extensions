@@ -3,7 +3,6 @@ import test, { type TestContext } from "node:test";
 import { createEditToolDefinition, createWriteToolDefinition, initTheme, type ExtensionAPI, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { createActionFusionExtension, THEN_RUN_SUCCEEDED, THEN_RUN_FAILED, THEN_RUN_RUNNING, THEN_RUN_SKIPPED } from "../index.ts";
-import { catalog } from "../src/i18n.ts";
 
 initTheme("dark", false);
 type RenderContext = Parameters<NonNullable<ToolDefinition["renderCall"]>>[2];
@@ -128,13 +127,15 @@ for (const [footer, expected] of [["Command timed out after 12 seconds", "Timed 
   });
 }
 
-for (const storedLocale of ["en-US", "zh-CN"] as const) {
-  test(`skipped mutation failure survives ${storedLocale} transcript viewed in English`, (t) => {
-    locale(t);
+for (const storedMessage of [
+  "The file mutation did not complete successfully; the command was not run.",
+  "文件修改未成功完成，未执行后续命令。",
+] as const) {
+  test(`skipped mutation failure survives stored message ${storedMessage}`, () => {
     const tool = tools().get("write")!;
     const input = args();
     const context = renderContext(input); context.isError = true;
-    const result = { content: [{ type: "text" as const, text: `permission denied\n\n${THEN_RUN_SKIPPED} ${catalog.mutationSkipped[storedLocale]}` }], details: undefined };
+    const result = { content: [{ type: "text" as const, text: `permission denied\n\n${THEN_RUN_SKIPPED} ${storedMessage}` }], details: undefined };
     const text = row(tool, input, result, context, true).join("\n");
     assert.match(text, /Mutation failed/);
     assert.match(text, /Not run/);
@@ -143,12 +144,11 @@ for (const storedLocale of ["en-US", "zh-CN"] as const) {
   });
 }
 
-test("interference skips only the command and preserves mutation confirmation", (t) => {
-  locale(t);
+test("interference skips only the command and preserves mutation confirmation", () => {
   const tool = tools().get("write")!;
   const input = args();
   const context = renderContext(input); context.isError = true;
-  const result = { content: [{ type: "text" as const, text: `Successfully wrote target.txt\n\n${THEN_RUN_SKIPPED} ${catalog.targetChanged["zh-CN"]} ${catalog.commandSkipped["zh-CN"]}` }], details: undefined };
+  const result = { content: [{ type: "text" as const, text: `Successfully wrote target.txt\n\n${THEN_RUN_SKIPPED} 执行后续命令前，目标文件内容发生了变化。 未执行后续命令。` }], details: undefined };
   const text = row(tool, input, result, context, true).join("\n");
   assert.match(text, /Changes saved/);
   assert.match(text, /Not run/);
@@ -209,8 +209,7 @@ test("collapsed command previews normalize carriage returns and control characte
   assert.doesNotMatch(preview, /[\u0000-\u001f\u007f]/);
 });
 
-test("Chinese labels and wide content fit narrow columns without changing tool results", (t) => {
-  locale(t, "zh-CN");
+test("English labels and wide content fit narrow columns without changing tool results", () => {
   const tool = tools().get("write")!;
   const input = args();
   const result = success("中文 ⚠️ 日志\n第二行");
@@ -219,7 +218,8 @@ test("Chinese labels and wide content fit narrow columns without changing tool r
     const lines = row(tool, input, result, renderContext(input), expanded, width);
     for (const line of lines) assert.ok(visibleWidth(line) <= width, `${width}: ${line}`);
   }
-  assert.match(row(tool, input, result, renderContext(input)).join("\n"), /修改已保存/);
-  assert.match(row(tool, input, result, renderContext(input)).join("\n"), /退出 0/);
+  const text = row(tool, input, result, renderContext(input)).join("\n");
+  assert.match(text, /Changes saved/);
+  assert.match(text, /exit 0/);
   assert.equal(JSON.stringify(result), before);
 });

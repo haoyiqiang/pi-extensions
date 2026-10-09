@@ -10,80 +10,21 @@
  * - TUI 句柄在 session_start 通过一个空 widget 工厂取得，render 补丁保持纯函数。
  */
 
-import {
-	type ExtensionAPI,
-	type ExtensionCommandContext,
-	type ExtensionContext,
-	AssistantMessageComponent,
-} from "@earendil-works/pi-coding-agent";
+import { type ExtensionAPI, type ExtensionCommandContext, type ExtensionContext, AssistantMessageComponent } from "@earendil-works/pi-coding-agent";
 import { Container, type Component, type TUI } from "@earendil-works/pi-tui";
-import {
-	bindNoticeOwner,
-	installNoticeRenderer,
-	notifyWithSource,
-	type NoticeColor,
-	type NoticeOwnerRelease,
-} from "pi-utils";
+
 import { loadConfig, saveConfig } from "./config-store.js";
 import { parseToggleValue, withBooleanConfigField } from "./config-fields.js";
 import { openConfigPanel } from "./config-panel.js";
 import { debugLog, debugLogPath } from "./debug-logger.js";
-import {
-	activityClassLabel,
-	buildActivityLines,
-	buildRunStatusLines,
-	classifyToolActivity,
-	createActivitySnapshot,
-	dominantActivityClass,
-	extractOutputTail,
-	extractThoughtHead,
-	toolActivityDetail,
-	toolActivityLabel,
-	type ActivityCounters,
-	type ActivitySnapshot,
-} from "./activity.js";
-import {
-	clearActivityArea,
-	createActivityAreaRuntime,
-	startActivityTimer,
-	type ActivityAreaDeps,
-	type ActivityAreaRuntime,
-	type ActivityUiHost,
-} from "./activity-area.js";
+import { activityClassLabel, buildActivityLines, buildRunStatusLines, classifyToolActivity, createActivitySnapshot, dominantActivityClass, extractOutputTail, extractThoughtHead, toolActivityDetail, toolActivityLabel, type ActivityCounters, type ActivitySnapshot } from "./activity.js";
+import { clearActivityArea, createActivityAreaRuntime, startActivityTimer, type ActivityAreaDeps, type ActivityAreaRuntime, type ActivityUiHost } from "./activity-area.js";
 import { installComponentPatches, type ToolRowGroupInfo } from "./component-patches.js";
 import { installExtensionEntryPatch, resolveContainerPrototypes } from "./extension-entry-patch.js";
 import { createHeaderStyler, renderGutterPrefix, type HeaderStyler, type ThemePainter } from "./header-style.js";
-import {
-	areAllActionGroupsExpanded,
-	beginActionGroupStep,
-	createActionGroupState,
-	findActionGroupMembership,
-	getActionGroupActivityCounts,
-	getActionGroupSize,
-	hasNarrationText,
-	isActionGroupExpanded,
-	isAssistantMessage,
-	registerActionToolCall,
-	setAllActionGroupsExpanded,
-	toggleActionGroup,
-	type ActionGroupState,
-} from "./action-groups.js";
-import {
-	applyStreamedMessage,
-	beginStreamedMessage,
-	createStreamRegistration,
-	type StreamRegistration,
-	type StreamedToolCall,
-} from "./stream-registration.js";
-import { i18n } from "./i18n.js";
-import { NOTICE_SOURCE } from "./source-tag.js";
-import {
-	applyCollapsed,
-	createInitialState,
-	restoreHistory,
-	settleRun,
-	startRun,
-} from "./run-state.js";
+import { areAllActionGroupsExpanded, beginActionGroupStep, createActionGroupState, findActionGroupMembership, getActionGroupActivityCounts, getActionGroupSize, hasNarrationText, isActionGroupExpanded, isAssistantMessage, registerActionToolCall, setAllActionGroupsExpanded, toggleActionGroup, type ActionGroupState } from "./action-groups.js";
+import { applyStreamedMessage, beginStreamedMessage, createStreamRegistration, type StreamRegistration, type StreamedToolCall } from "./stream-registration.js";
+import { applyCollapsed, createInitialState, restoreHistory, settleRun, startRun } from "./run-state.js";
 import { DEFAULT_CLEAN_MODE_CONFIG, type CleanModeConfig, type CleanModeState } from "./types.js";
 
 /** 折叠/展开快捷键；f2 未被 Pi 内置键位占用。 */
@@ -558,12 +499,7 @@ function toggleRuntime(runtime: Runtime): boolean {
 function toggleCollapsed(runtime: Runtime, ctx: ExtensionContext | ExtensionCommandContext): void {
 	const next = toggleRuntime(runtime);
 
-	notifyWithSource({
-		ctx,
-		source: NOTICE_SOURCE,
-		level: "info",
-		message: i18n.t(next ? "collapsedNotice" : "expandedNotice", { key: TOGGLE_SHORTCUT }),
-	});
+	ctx.ui.notify(next ? `Clean mode: work collapsed, press ${TOGGLE_SHORTCUT} to expand` : `Clean mode: work expanded, press ${TOGGLE_SHORTCUT} to collapse`, "info");
 }
 
 /**
@@ -605,14 +541,7 @@ function toggleAllActionGroups(
 	setAllActionGroupsExpanded(runtime.actionGroups, expand);
 	requestRender(runtime);
 
-	notifyWithSource({
-		ctx,
-		source: NOTICE_SOURCE,
-		level: "info",
-		message: i18n.t(expand ? "groupsExpandedNotice" : "groupsCollapsedNotice", {
-			key: TOGGLE_GROUPS_SHORTCUT,
-		}),
-	});
+	ctx.ui.notify(expand ? `Clean mode: all action groups expanded, press ${TOGGLE_GROUPS_SHORTCUT} to collapse` : `Clean mode: all action groups collapsed, press ${TOGGLE_GROUPS_SHORTCUT} to expand`, "info");
 }
 
 /** 写入配置时的附加选项。 */
@@ -638,22 +567,12 @@ function applyLiveConfig(
 	requestRender(runtime);
 
 	if (!result.success) {
-		notifyWithSource({
-			ctx,
-			source: NOTICE_SOURCE,
-			level: "error",
-			message: i18n.t("configSaveFailed", { error: result.error ?? "" }),
-		});
+		ctx.ui.notify(`Failed to save clean mode configuration: ${result.error ?? ""}`, "error");
 		return;
 	}
 
 	if (options.announceSaved) {
-		notifyWithSource({
-			ctx,
-			source: NOTICE_SOURCE,
-			level: "info",
-			message: i18n.t("configSaved"),
-		});
+		ctx.ui.notify("Clean mode configuration saved", "info");
 	}
 }
 
@@ -694,13 +613,8 @@ function handleToggleCommand(
 /** 扩展工厂：注册事件、快捷键与命令。 */
 export default function registerCleanMode(pi: ExtensionAPI): void {
 	const runtime = createRuntime();
-	const noticeOwner = installNoticeRenderer(pi);
-	let releaseNoticeOwner: NoticeOwnerRelease | undefined;
 
 	pi.on("session_start", async (event, ctx) => {
-		releaseNoticeOwner?.();
-		releaseNoticeOwner = bindNoticeOwner(ctx, noticeOwner);
-
 		const loaded = loadConfig(ctx);
 		runtime.config = loaded.config;
 		runtime.ownsTui = ctx.mode === "tui";
@@ -733,12 +647,7 @@ export default function registerCleanMode(pi: ExtensionAPI): void {
 		);
 
 		if (loaded.diagnostic) {
-			notifyWithSource({
-				ctx,
-				source: NOTICE_SOURCE,
-				level: "warning",
-				message: i18n.t("loadFailed", { error: loaded.diagnostic }),
-			});
+			ctx.ui.notify(`Failed to read clean mode configuration, using defaults: ${loaded.diagnostic}`, "warning");
 		}
 	});
 
@@ -870,27 +779,25 @@ export default function registerCleanMode(pi: ExtensionAPI): void {
 		runtime.activityHost = undefined;
 		runtime.tui = undefined;
 		runtime.ownsTui = false;
-		releaseNoticeOwner?.();
-		releaseNoticeOwner = undefined;
 	});
 
 	pi.registerShortcut(TOGGLE_SHORTCUT, {
-		description: i18n.t("toggleDescription"),
+		description: "Clean mode: collapse or expand this run's work",
 		handler: (ctx) => toggleCollapsed(runtime, ctx),
 	});
 
 	pi.registerCommand(TOGGLE_COMMAND, {
-		description: i18n.t("toggleDescription"),
+		description: "Clean mode: collapse or expand this run's work",
 		handler: async (args, ctx) => handleToggleCommand(runtime, args, ctx),
 	});
 
 	pi.registerShortcut(TOGGLE_GROUPS_SHORTCUT, {
-		description: i18n.t("toggleGroupsDescription"),
+		description: "Clean mode: expand or collapse all action groups",
 		handler: (ctx) => toggleAllActionGroups(runtime, ctx),
 	});
 
 	pi.registerCommand(CONFIG_COMMAND, {
-		description: i18n.t("configDescription"),
+		description: "Clean mode: open the settings panel, or pass key=on/off",
 		handler: async (args, ctx) => handleConfigCommand(runtime, args, ctx),
 	});
 }

@@ -4,7 +4,6 @@ import { PROVIDERS } from "./api-providers/index.ts";
 import type { SearchResult } from "./api-providers/types.ts";
 import type { WebSearchConfig } from "./config.ts";
 import { resolveApiProviderName } from "./config.ts";
-import { i18n } from "./i18n.ts";
 import type {
   ApiSearchProviderName,
   ApiWebSearchDetails,
@@ -29,7 +28,7 @@ function nonEmpty(value: string | undefined): string | undefined {
 
 export function resolveProviderCredentials(config: WebSearchConfig, provider: ApiSearchProviderName) {
   const meta = PROVIDERS.find((candidate) => candidate.name === provider);
-  if (!meta) throw new Error(i18n.t("error.unknownApiProvider", { provider }));
+  if (!meta) throw new Error(`Unknown API search provider: ${provider}`);
   const apiKey = nonEmpty(meta.envVar ? process.env[meta.envVar] : undefined)
     ?? nonEmpty(config.api?.apiKeys?.[provider]);
   const baseUrl = nonEmpty(meta.baseUrlEnvVar ? process.env[meta.baseUrlEnvVar] : undefined)
@@ -44,11 +43,11 @@ function clampResultCount(value: number | undefined): number {
 }
 
 function formatResults(query: string, results: SearchResult[]): string {
-  if (results.length === 0) return i18n.t("webSearch.noResults", { query });
+  if (results.length === 0) return `No results found for “${query}”.`;
   const body = results.map((result, index) =>
     `${index + 1}. **${result.title}**\n   ${result.url}\n   ${result.snippet}`,
   ).join("\n\n");
-  return `**${i18n.t("webSearch.resultsHeading", { query })}**\n\n${body}`;
+  return `**${`Search results for “${query}”:`}**\n\n${body}`;
 }
 
 export async function runApiSearch(
@@ -67,7 +66,7 @@ export async function runApiSearch(
   onUpdate?.({
     content: [{
       type: "text",
-      text: i18n.t("webSearch.apiSearching", { provider: provider.label, query: params.query }),
+      text: `Searching ${provider.label} for “${params.query}”…`,
     }],
     details: { query: params.query, modeRequested, modeUsed: "api", backend: providerName, resultCount: 0 },
   });

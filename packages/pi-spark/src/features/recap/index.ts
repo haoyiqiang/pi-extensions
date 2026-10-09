@@ -1,7 +1,6 @@
 import { IdleListener } from "./idle";
 import { RecapManager } from "./manager";
 import { loadConfig } from "../../config";
-import { i18n } from "../../i18n";
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
@@ -16,7 +15,7 @@ export function registerRecap(pi: ExtensionAPI): void {
     recapManager = new RecapManager(pi, config);
 
     pi.registerCommand("recap", {
-      description: i18n.t("recapCommandDescription"),
+      description: "Generate a short recap of the current session",
       handler: async (_args, ctx) => await recapManager?.run(ctx, { force: true }),
     });
 

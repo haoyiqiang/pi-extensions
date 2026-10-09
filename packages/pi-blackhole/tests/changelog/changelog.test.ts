@@ -4,16 +4,7 @@ import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import type { TUI } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import {
-  getOwnPackageRoot,
-  getPackageVersion,
-  stripMarkdownInline,
-  parseChangelogEntries,
-  entriesToPlainLines,
-  renderChangelogEntries,
-  readChangelogText,
-  createChangelogViewer,
-} from "../../src/changelog/changelog.ts";
+import { getOwnPackageRoot, getPackageVersion, stripMarkdownInline, parseChangelogEntries, entriesToPlainLines, renderChangelogEntries, readChangelogText, createChangelogViewer } from "../../src/changelog/changelog.ts";
 
 function fakeTui(rows = 24): TUI {
   return {

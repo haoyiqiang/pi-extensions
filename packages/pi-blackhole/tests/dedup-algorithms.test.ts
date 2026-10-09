@@ -1,17 +1,6 @@
 import { describe, it, expect } from "vitest";
-import {
-  stemToken,
-  tokenizeContent,
-  tokenizeSurfaceContent,
-  computeSimHash64,
-  simHashHammingDistance,
-  sorensenDiceTokenSimilarity,
-  clusterObservations,
-} from "../src/project-recall/dedup.js";
-import {
-  buildExportMarkdown,
-  technicalDensityFactor,
-} from "../src/project-recall/format-export.js";
+import { stemToken, tokenizeContent, tokenizeSurfaceContent, computeSimHash64, simHashHammingDistance, sorensenDiceTokenSimilarity, clusterObservations } from "../src/project-recall/dedup.js";
+import { buildExportMarkdown, technicalDensityFactor } from "../src/project-recall/format-export.js";
 import type { CorpusObservation } from "../src/project-recall/corpus.js";
 
 describe("dedup algorithms", () => {

@@ -11,7 +11,6 @@
  */
 
 import { appendFileSync } from "node:fs";
-import { i18n } from "./i18n.ts";
 import { isHerdrRuntimeAvailable } from "./herdr.ts";
 import { isOttyRuntimeAvailable, ottySetupHint } from "./otty.ts";
 import { isOrcaRuntimeAvailable } from "./orca.ts";
@@ -162,12 +161,25 @@ export function isMuxAvailable(): boolean {
 export function muxSetupHint(): string {
   const pref = muxPreference();
   if (pref) {
-    const hint = i18n.t(`setupHint.${pref}`);
+    const hint = {
+      none: "No supported terminal multiplexer found.",
+      cmux: "Start pi inside cmux (`cmux pi`).",
+      muxy: "Start pi inside Muxy terminal.",
+      tmux: "Start pi inside tmux (`tmux new -A -s pi 'pi'`).",
+      zellij: "Start pi inside zellij (`zellij --session pi`, then run `pi`).",
+      wezterm: "Start pi inside WezTerm.",
+      herdr: "Start herdr in your terminal (`herdr`), split a pane (prefix+v or prefix+-), then run `pi` in that pane. herdr auto-injects HERDR_ENV=1 + HERDR_PANE_ID for pi to detect.",
+      otty: "Run pi inside Otty (Otty sets TERM_PROGRAM=otty automatically).",
+      orca: "Run pi inside Orca (Orca sets TERM_PROGRAM=Orca and ORCA_TERMINAL_HANDLE automatically).",
+      generic: "Start pi inside Muxy, cmux (`cmux pi`), tmux (`tmux new -A -s pi 'pi'`), zellij (`zellij --session pi`, then run `pi`), WezTerm, herdr (run `herdr`, split a pane, then run `pi` in it), Otty (Otty sets TERM_PROGRAM=otty automatically), or Orca (Orca sets TERM_PROGRAM=Orca automatically).",
+      herdrPreferred: "Start pi inside herdr (HERDR_ENV=1 must be set; run herdr, then start pi in a pane).",
+      ottySendKeys: "Otty's `ipc-allow-send-keys` is disabled. To let pi drive subagent panes, add `ipc-allow-send-keys = true` to ~/.config/otty/config.toml and reload Otty.",
+    }[pref];
     // otty 在 send-keys 未启用时补充更具体的提示
     if (pref === "otty") {
       return ottySetupHint() || hint;
     }
     return hint;
   }
-  return i18n.t("setupHint.generic");
+  return "Start pi inside Muxy, cmux (`cmux pi`), tmux (`tmux new -A -s pi 'pi'`), zellij (`zellij --session pi`, then run `pi`), WezTerm, herdr (run `herdr`, split a pane, then run `pi` in it), Otty (Otty sets TERM_PROGRAM=otty automatically), or Orca (Orca sets TERM_PROGRAM=Orca automatically).";
 }

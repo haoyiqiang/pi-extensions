@@ -6,35 +6,8 @@
  */
 import { describe, expect, it } from "vitest";
 
-import {
-  earlierCoverageMarkerId,
-  entryIndexById,
-  isSourceEntry,
-  lastValidUsageIndex,
-  latestCoverageIndex,
-  latestCoverageMarkerId,
-  rawTokensAfterIndex,
-  rawTokensSinceDropCoverage,
-  rawTokensSinceLastCompaction,
-  rawTokensSinceObservationCoverage,
-  rawTokensSinceReflectionCoverage,
-  realContextTokens,
-} from "../src/om/ledger/index.js";
-import {
-  V3_OBSERVATIONS_DROPPED,
-  V3_OBSERVATIONS_RECORDED,
-  V3_REFLECTIONS_RECORDED,
-  branchSummary,
-  compactionEntry,
-  observation,
-  observationsDroppedEntry,
-  observationsRecordedEntry,
-  oldV2ObservationEntry,
-  rawMessage,
-  reflection,
-  reflectionsRecordedEntry,
-  textCustomMessage,
-} from "./fixtures/session.js";
+import { earlierCoverageMarkerId, entryIndexById, isSourceEntry, lastValidUsageIndex, latestCoverageIndex, latestCoverageMarkerId, rawTokensAfterIndex, rawTokensSinceDropCoverage, rawTokensSinceLastCompaction, rawTokensSinceObservationCoverage, rawTokensSinceReflectionCoverage, realContextTokens } from "../src/om/ledger/index.js";
+import { V3_OBSERVATIONS_DROPPED, V3_OBSERVATIONS_RECORDED, V3_REFLECTIONS_RECORDED, branchSummary, compactionEntry, observation, observationsDroppedEntry, observationsRecordedEntry, oldV2ObservationEntry, rawMessage, reflection, reflectionsRecordedEntry, textCustomMessage } from "./fixtures/session.js";
 
 describe("session-ledger V3 progress helpers", () => {
   it("detects only raw/source entries as source entries", () => {

@@ -9,22 +9,9 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync
 import { basename, dirname, join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { ConfigManager, type ConfigManagerOptions } from "../../src/pi-base/config-manager.ts";
-import {
-  deepEqual,
-  checkConfigFile,
-  getExtensionsDir,
-  setSessionConfig,
-  clearAllSessionConfigs,
-  clearConfigFileCache,
-  writeConfig,
-} from "../../src/pi-base/config.ts";
+import { deepEqual, checkConfigFile, getExtensionsDir, setSessionConfig, clearAllSessionConfigs, clearConfigFileCache, writeConfig } from "../../src/pi-base/config.ts";
 import { resetPiAgentDirCache } from "../../src/pi-base/paths.ts";
-import {
-  createTestConfigDir,
-  createTestConfigManager,
-  resetConfigTestState,
-  createTestAgentDir,
-} from "../../src/pi-base/config-test-helpers.ts";
+import { createTestConfigDir, createTestConfigManager, resetConfigTestState, createTestAgentDir } from "../../src/pi-base/config-test-helpers.ts";
 import { parseSessionEntries } from "@earendil-works/pi-coding-agent";
 import { createSettingsModal } from "../../src/pi-base/settings/modal.ts";
 

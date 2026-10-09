@@ -15,8 +15,6 @@ import { createScopeSelector, type ScopeSelectorResult } from "./scope-selector.
 import { createSettingsModalBody } from "./body.ts";
 import type { SettingsModalBodyComponent } from "./types.ts";
 import { frame, frameContentWidth, responsiveInnerRows, DEFAULT_PADDING_X } from "./frame.ts";
-import { i18n, NOTICE_SOURCE } from "../../i18n.js";
-import { notifyWithSource } from "pi-utils";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -59,15 +57,15 @@ const SCOPE_IDS = ["global", "project", "session"] as const;
 function scopeLabel(id: string): string {
   switch (id) {
     case "global":
-      return i18n.t("scopeGlobal");
+      return "Global";
     case "project":
-      return i18n.t("scopeProject");
+      return "Project Local";
     case "env":
-      return i18n.t("scopeEnv");
+      return "Env";
     case "session":
-      return i18n.t("scopeSession");
+      return "Session";
     case "defaults":
-      return i18n.t("scopeDefaults");
+      return "Defaults";
     default:
       return id;
   }
@@ -76,16 +74,16 @@ function scopeLabel(id: string): string {
 function winnerLabel(winner: string): string {
   switch (winner) {
     case "global":
-      return i18n.t("scopeGlobal");
+      return "Global";
     case "project":
-      return i18n.t("scopeProject");
+      return "Project Local";
     case "env":
-      return i18n.t("scopeWinnerEnv");
+      return "env";
     case "session":
-      return i18n.t("scopeSession");
+      return "Session";
     case "defaults":
     case "default":
-      return i18n.t("scopeWinnerDefault");
+      return "default";
     default:
       return winner;
   }
@@ -94,11 +92,11 @@ function winnerLabel(winner: string): string {
 function editModeTitle(scope: string): string {
   switch (scope) {
     case "global":
-      return i18n.t("scopeGlobal");
+      return "Global";
     case "project":
-      return i18n.t("scopeProject");
+      return "Project Local";
     case "session":
-      return i18n.t("scopeSession");
+      return "Session";
     default:
       return scope;
   }
@@ -107,11 +105,11 @@ function editModeTitle(scope: string): string {
 function selectorEntryLabel(id: string): string {
   switch (id) {
     case "global":
-      return i18n.t("selectorConfigureGlobal");
+      return "Configure Global settings";
     case "project":
-      return i18n.t("selectorConfigureProject");
+      return "Configure Project local settings";
     case "session":
-      return i18n.t("selectorConfigureSession");
+      return "Configure Session settings";
     default:
       return id;
   }
@@ -142,7 +140,7 @@ function buildSelectorEntries(
   const entries: Array<{ id: string; label: string; available: boolean; note?: string }> = [];
 
   if (includeDisplayAll) {
-    entries.push({ id: "display-all", label: i18n.t("selectorDisplayAll"), available: true });
+    entries.push({ id: "display-all", label: "Display all settings", available: true });
   }
 
   for (const id of SCOPE_IDS) {
@@ -154,9 +152,9 @@ function buildSelectorEntries(
       note: !ok
         ? id === "session"
           ? params.scopes.session
-            ? i18n.t("selectorSessionNotInitialized")
-            : i18n.t("selectorDisabledByExtension")
-          : i18n.t("selectorDisabledByExtension")
+            ? "(session not initialized)"
+            : "(disabled by extension)"
+          : "(disabled by extension)"
         : undefined,
     };
     entries.push(entry);
@@ -248,7 +246,7 @@ async function openEditMode(params: ConfigFlowParams, scope: string): Promise<vo
     const key = String(field.key);
     const winner = inspection.winners[key];
     if (!winner || winner === scope) return undefined;
-    if (!dirtyKeys.has(key)) return i18n.t("valueFromScope", { scope: winnerLabel(winner) });
+    if (!dirtyKeys.has(key)) return `(from ${winnerLabel(winner)})`;
     return undefined;
   }
 
@@ -260,9 +258,9 @@ async function openEditMode(params: ConfigFlowParams, scope: string): Promise<vo
   // path (or pending note) for file-based scopes.
   const editPathNote =
     scope === "env"
-      ? i18n.t("envReadOnly")
+      ? "environment variables (read-only)"
       : scope === "defaults"
-        ? i18n.t("builtInDefaults")
+        ? "built-in defaults"
         : scope === "session"
           ? (sourceEntry?.path ?? sourceEntry?.note ?? "")
           : sourceEntry?.exists && sourceEntry.path
@@ -281,8 +279,8 @@ async function openEditMode(params: ConfigFlowParams, scope: string): Promise<vo
     const confirmed = await new Promise<boolean>((resolve) => {
       const c = createConfirm(
         {
-          message: [i18n.t("confirmSaveTo", { scope: currentScope })],
-          confirmLabel: i18n.t("confirmSave"),
+          message: [`Really save to ${currentScope}?`],
+          confirmLabel: "Save",
           danger: false,
         },
         resolve,
@@ -290,7 +288,7 @@ async function openEditMode(params: ConfigFlowParams, scope: string): Promise<vo
       );
       (activeEditBody ?? ({} as SettingsModalBodyComponent)).mountOverlay(
         c,
-        i18n.t("confirmSaveToTitle", { scope: currentScope }),
+        `Save to ${currentScope}`,
       );
     });
 
@@ -305,13 +303,13 @@ async function openEditMode(params: ConfigFlowParams, scope: string): Promise<vo
         scope as "global" | "project" | "session",
       );
       if (res.created && scope === "project") {
-        notifyWithSource({ ctx: params.ctx, source: NOTICE_SOURCE, level: "info", message: i18n.t("projectConfigWritten", { path: res.path }) });
+        params.ctx.ui.notify(`Project config written to ${res.path}`, "info");
       }
       params.onSaved(currentValues);
       dirtyKeys.clear();
       done(undefined);
     } catch (err) {
-      notifyWithSource({ ctx: params.ctx, source: NOTICE_SOURCE, level: "error", message: err instanceof Error ? err.message : String(err) });
+      params.ctx.ui.notify(err instanceof Error ? err.message : String(err), "error");
     }
   }
 
@@ -319,8 +317,8 @@ async function openEditMode(params: ConfigFlowParams, scope: string): Promise<vo
     const confirmed = await new Promise<boolean>((resolve) => {
       const c = createConfirm(
         {
-          message: [i18n.t("confirmDiscardChanges")],
-          confirmLabel: i18n.t("confirmDiscard"),
+          message: ["Discard changes?"],
+          confirmLabel: "Discard",
           danger: true,
         },
         resolve,
@@ -341,8 +339,8 @@ async function openEditMode(params: ConfigFlowParams, scope: string): Promise<vo
     const confirmed = await new Promise<boolean>((resolve) => {
       const c = createConfirm(
         {
-          message: [i18n.t("confirmResetToDefaults", { scope: currentScope })],
-          confirmLabel: i18n.t("confirmReset"),
+          message: [`Really reset ${currentScope} to defaults?`],
+          confirmLabel: "Reset",
           danger: true,
         },
         resolve,
@@ -364,7 +362,7 @@ async function openEditMode(params: ConfigFlowParams, scope: string): Promise<vo
       inspection = params.inspect();
       activeEditBody?.dismissOverlay();
     } catch (err) {
-      notifyWithSource({ ctx: params.ctx, source: NOTICE_SOURCE, level: "error", message: err instanceof Error ? err.message : String(err) });
+      params.ctx.ui.notify(err instanceof Error ? err.message : String(err), "error");
     }
   }
 
@@ -373,8 +371,8 @@ async function openEditMode(params: ConfigFlowParams, scope: string): Promise<vo
     const confirmed = await new Promise<boolean>((resolve) => {
       const c = createConfirm(
         {
-          message: [i18n.t("confirmDeleteConfig", { scope: currentScope })],
-          confirmLabel: i18n.t("confirmDelete"),
+          message: [`Really delete the ${currentScope} config file?`],
+          confirmLabel: "Delete",
           danger: true,
         },
         resolve,
@@ -396,7 +394,7 @@ async function openEditMode(params: ConfigFlowParams, scope: string): Promise<vo
       inspection = params.inspect();
       activeEditBody?.dismissOverlay();
     } catch (err) {
-      notifyWithSource({ ctx: params.ctx, source: NOTICE_SOURCE, level: "error", message: err instanceof Error ? err.message : String(err) });
+      params.ctx.ui.notify(err instanceof Error ? err.message : String(err), "error");
     }
   }
 
@@ -416,22 +414,22 @@ async function openEditMode(params: ConfigFlowParams, scope: string): Promise<vo
       switch (id) {
         case "save":
           void saveEdit(tui, theme, done).catch((err) =>
-            notifyWithSource({ ctx: params.ctx, source: NOTICE_SOURCE, level: "error", message: err instanceof Error ? err.message : String(err) }),
+            params.ctx.ui.notify(err instanceof Error ? err.message : String(err), "error"),
           );
           break;
         case "discard":
           void discardEdit(tui, theme, done).catch((err) =>
-            notifyWithSource({ ctx: params.ctx, source: NOTICE_SOURCE, level: "error", message: err instanceof Error ? err.message : String(err) }),
+            params.ctx.ui.notify(err instanceof Error ? err.message : String(err), "error"),
           );
           break;
         case "reset":
           void resetEdit(tui, theme).catch((err) =>
-            notifyWithSource({ ctx: params.ctx, source: NOTICE_SOURCE, level: "error", message: err instanceof Error ? err.message : String(err) }),
+            params.ctx.ui.notify(err instanceof Error ? err.message : String(err), "error"),
           );
           break;
         case "delete":
           void deleteEdit(tui, theme).catch((err) =>
-            notifyWithSource({ ctx: params.ctx, source: NOTICE_SOURCE, level: "error", message: err instanceof Error ? err.message : String(err) }),
+            params.ctx.ui.notify(err instanceof Error ? err.message : String(err), "error"),
           );
           break;
       }
@@ -453,15 +451,15 @@ async function openEditMode(params: ConfigFlowParams, scope: string): Promise<vo
           actions:
             scope === "session"
               ? [
-                  { id: "save", label: i18n.t("confirmSave") },
-                  { id: "discard", label: i18n.t("confirmDiscard") },
-                  { id: "reset", label: i18n.t("confirmReset"), danger: true },
+                  { id: "save", label: "Save" },
+                  { id: "discard", label: "Discard" },
+                  { id: "reset", label: "Reset", danger: true },
                 ]
               : [
-                  { id: "save", label: i18n.t("confirmSave") },
-                  { id: "discard", label: i18n.t("confirmDiscard") },
-                  { id: "reset", label: i18n.t("confirmReset"), danger: true },
-                  { id: "delete", label: i18n.t("confirmDelete"), danger: true },
+                  { id: "save", label: "Save" },
+                  { id: "discard", label: "Discard" },
+                  { id: "reset", label: "Reset", danger: true },
+                  { id: "delete", label: "Delete", danger: true },
                 ],
           onSave: () => handlers.onSave(tui, theme, done),
           onChange: handlers.onChange,
@@ -517,8 +515,8 @@ async function openDisplayAll(params: ConfigFlowParams): Promise<void> {
     }
   }
   // Static labels for scopes not covered by scopeSources().
-  tabPathNotes["env"] = i18n.t("envReadOnly");
-  tabPathNotes["defaults"] = i18n.t("builtInDefaults");
+  tabPathNotes["env"] = "environment variables (read-only)";
+  tabPathNotes["defaults"] = "built-in defaults";
 
   // Pre-build field arrays per tab (same field keys, different values + notes).
   const tabFields: Record<string, Field[]> = {};
@@ -557,8 +555,8 @@ async function openDisplayAll(params: ConfigFlowParams): Promise<void> {
           readOnly: true,
           pathNote: pathNoteRef.current,
           actions: [
-            { id: "edit", label: i18n.t("confirmEdit") },
-            { id: "cancel", label: i18n.t("confirmCancel") },
+            { id: "edit", label: "Edit" },
+            { id: "cancel", label: "Cancel" },
           ],
           onAction(id: string) {
             switch (id) {
@@ -573,7 +571,7 @@ async function openDisplayAll(params: ConfigFlowParams): Promise<void> {
                   (currentTabId === "session" && params.scopes.session);
                 if (isEditableScope) {
                   void openEditMode(params, currentTabId).catch((err) =>
-                    notifyWithSource({ ctx: params.ctx, source: NOTICE_SOURCE, level: "error", message: err instanceof Error ? err.message : String(err) }),
+                    params.ctx.ui.notify(err instanceof Error ? err.message : String(err), "error"),
                   );
                 } else {
                   void openSelector(params, false)
@@ -587,7 +585,7 @@ async function openDisplayAll(params: ConfigFlowParams): Promise<void> {
                       return undefined;
                     })
                     .catch((err) =>
-                      notifyWithSource({ ctx: params.ctx, source: NOTICE_SOURCE, level: "error", message: err instanceof Error ? err.message : String(err) }),
+                      params.ctx.ui.notify(err instanceof Error ? err.message : String(err), "error"),
                     );
                 }
                 break;
@@ -641,7 +639,7 @@ function displayValueNote(
 
   if (winner === tabId) return "▸ effective";
 
-  if (winner) return i18n.t("valueFromScope", { scope: winnerLabel(winner) });
+  if (winner) return `(from ${winnerLabel(winner)})`;
   return undefined;
 }
 

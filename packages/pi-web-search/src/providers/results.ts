@@ -1,9 +1,8 @@
-import { i18n } from "../i18n.ts";
 import type { SearchResultDetail, Source } from "./types.ts";
 
 export function pushUniqueSource(sources: Source[], source: Source): number {
     const url = source.url || "";
-    const title = source.title || i18n.t("llm.unknownSource");
+    const title = source.title || "Unknown";
     const existingIndex = sources.findIndex((s) => s.url === url && s.title === title);
     if (existingIndex >= 0) return existingIndex;
     sources.push({ title, url });

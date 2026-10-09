@@ -21,17 +21,7 @@
  * 否则屏幕上什么都没有，看起来就是卡住。
  */
 
-import {
-	activityCountersNote,
-	appendActivityCountersNote,
-	blankActivityRow,
-	renderActivityRows,
-	withoutActionRows,
-	type ActivityLines,
-	type ActivityPainter,
-	type ActivityRow,
-	type ActivitySnapshot,
-} from "./activity.js";
+import { activityCountersNote, appendActivityCountersNote, blankActivityRow, renderActivityRows, withoutActionRows, type ActivityLines, type ActivityPainter, type ActivityRow, type ActivitySnapshot } from "./activity.js";
 
 /** 开启动画时的刷新间隔：约 6.7fps，跟 cli-spinners 点状动画的手感对齐。 */
 const ANIMATED_INTERVAL_MS = 150;

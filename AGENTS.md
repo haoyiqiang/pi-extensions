@@ -8,10 +8,9 @@ This repository contains small, independently installable extensions for the [Pi
 pi-extensions/
 ├── packages/
 │   ├── pi-action-fusion/        # Opt-in edit/write + follow-up command (SoL-Pi adaptation)
-│   ├── pi-utils/                # Shared config I/O, locale/notice runtime, and test fixtures
+│   ├── pi-utils/                # Library: config I/O, locale helpers, and test fixtures
 │   ├── pi-web-search/    # LLM/API search, URL Context, and bounded web fetch
 │   ├── pi-distill/              # Tool-output distillation
-│   ├── pi-todo/                 # Branch-replayed task state and panel
 │   ├── pi-terminal-mux/         # Terminal multiplexer abstraction (muxy/cmux/tmux/zellij/wezterm/herdr/otty/orca + headless fallback)
 │   ├── pi-models-discovery/     # Dynamic model discovery for providers marked with discoverModels
 │   ├── pi-blackhole/            # Deterministic compaction, observational memory, and recall
@@ -36,7 +35,7 @@ The layer model, allowed workspace dependency edges, UI ownership, and root dist
 
 - `pi-action-fusion` owns opt-in native `edit`/`write` replacements with `then_run`; it does not summarize outputs or compact context. Internal follow-up commands emit only the outer mutation's tool events, not a separate Bash call. Do not co-load another mutation-tool replacement or assume Bash-only guards cover fused commands.
 - `pi-distill` discovers active tools with object parameter schemas and observes their results through Pi's native `tool_call` and `tool_result` events. It owns ordinary summaries and opt-in exact-quote diagnostic evidence, requiring source archival before any lossy replacement. RAW and failures retain received content; native `read` with RAW handles source readback. Fusion handling is opt-in and command-log-only; never summarize mutation confirmations or diff/patch. It does not register duplicate or readback tools and renders audit information through its own UI-only session entry.
-- `pi-utils` owns portable agent-dir/JSON config I/O, locale selection, catalog validation, interpolation, the shared source-tagged notice renderer and `/pi-language` command, plus the deterministic test fixtures (`createExtensionRegistrationHarness`, temp-directory isolation, and `pi-utils/rpiv`). Feature packages use it instead of implementing separate config, locale, or test-harness runtimes. Feature schemas, defaults, migrations, and settings UI remain in feature packages.
+- `pi-utils` is a library, not a Pi extension. It owns portable agent-dir/JSON config I/O and the deterministic test fixtures (`createExtensionRegistrationHarness`, temp-directory isolation, and `pi-utils/rpiv`). It does not own locale selection, notice rendering, or a Pi extension entry. Feature packages call `ctx.ui.notify` directly and keep user-facing text in English.
 - Background chat requests from an extension go through `ctx.modelRegistry.streamSimple(...).result()`, the same way `pi-spark` recap does. `ModelRuntime.prepareRequest` resolves auth and a resolved `baseUrl`. `openai-codex` background calls use an isolated `uuidv7` session and clean it up afterwards. Raw HTTP transports use `modelRegistry.getApiKeyAndHeaders` directly. Do not add another shared request wrapper, and do not call `pi-ai` `complete` / `completeSimple` for these side requests.
 - `pi-web-search` owns the public `web_search`, `url_context`, and `web_fetch` tools. It routes explicitly between LLM built-in web search and one configured Search API, keeps URL Context limited to supported Google/Vertex transports, and returns bounded fetch output with an opt-in rpiv-compatible GitHub repository interceptor, without adding general PDF or local-video pipelines.
 - `pi-terminal-mux` owns terminal multiplexer detection and pane/surface operations. Extensions that need terminal interaction depend on it instead of re-implementing backend detection.
@@ -59,19 +58,9 @@ Keep packages composable and independently installable. Avoid coupling one exten
 
 ## User-facing text and localization
 
-User-visible messages, command descriptions, tool descriptions, and agent-facing prompts must be backed by a catalog containing both `zh-CN` and `en-US` entries. Use `pi-utils`'s `createTranslator` and `loadCatalog` helpers.
+User-visible messages, command descriptions, tool descriptions, and agent-facing prompts are English string literals in the owning package. Do not add a locale catalog, translator, or `/pi-language` command.
 
-User-visible notices must go through `pi-utils`'s `notifyWithSource`, not `ctx.ui.notify` directly. Pi renders `info` notices as one line of dim, unprefixed text, so every package carries a short source tag and the notice is drawn as a filled background block in the transcript (the same `customMessageBg` block Pi uses for extension messages):
-
-```ts
-const NOTICE_TAG = "distill";
-const NOTICE_COLOR: NoticeColor = NOTICE_TAG_COLOR;
-const NOTICE_SOURCE: NoticeSource = { tag: NOTICE_TAG, color: NOTICE_COLOR };
-
-notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("failed") });
-```
-
-Keep the tag short and unique per package, keep the level accurate, and do not add colors outside TUI mode — the helper already handles that. The tag color (`NOTICE_TAG_COLOR`) is deliberately the same muted color for every package: nine theme color slots cannot distinguish sixteen packages, so the tag text identifies the source and the color never does. Level colors (warning/error body text) remain semantic and unchanged. The transcript block is registered once by `pi-utils`'s own extension entry. Feature packages must load it through a shipped `i18n-entry.ts` shim (`export { default } from "pi-utils"`) listed before their own entry in `pi.extensions`. Resolve the declared dependency, not a workspace sibling path: scoped npm installs do not preserve that layout. The shared entry deduplicates these entries per runtime event bus. Verdict-style notices with their own semantic color pass `textColor` instead of building a footer status line.
+User-visible notices call `ctx.ui.notify(message, level)` directly. Do not add a shared notice renderer or source-tag wrapper. `pi-utils` is a library, not a Pi extension.
 
 Keep developer comments and implementation notes concise. Keep the English and Chinese README files separate so each language has a complete, readable entrypoint.
 

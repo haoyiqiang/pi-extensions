@@ -8,7 +8,6 @@
     ".": "./index.ts"
   },
   "files": [
-    "i18n-entry.ts",
     "index.ts",
     "src",
     "config.example.json",
@@ -25,7 +24,6 @@
   },
   "pi": {
     "extensions": [
-      "./i18n-entry.ts",
       "./index.ts"
     ]
   },

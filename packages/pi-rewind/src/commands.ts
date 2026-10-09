@@ -10,8 +10,6 @@ import { Key } from "@earendil-works/pi-tui";
 import type { RewindState } from "./state.js";
 import type { CheckpointData } from "./core.js";
 import { restoreCheckpoint, createCheckpoint, diffCheckpoints, sanitizeForRef, git } from "./core.js";
-import { i18n, NOTICE_SOURCE } from "./i18n.js";
-import { notifyWithSource } from "pi-utils";
 
 // ============================================================================
 // Helpers
@@ -28,25 +26,22 @@ function formatTimestamp(ts: number): string {
 function formatCheckpointLabel(cp: CheckpointData, index: number, _state: RewindState, currentBranch?: string): string {
   const time = formatTimestamp(cp.timestamp);
   const branchTag = (cp.branch && currentBranch && cp.branch !== currentBranch)
-    ? i18n.t("branchTagCross", { branch: cp.branch })
-    : (cp.branch ? i18n.t("branchTagSame", { branch: cp.branch }) : "");
-  const shared = { index: index + 1, time, branchTag };
-  if (cp.description) {
-    return i18n.t("checkpointLabel", { ...shared, description: cp.description });
-  }
-  // Fallback for old checkpoints without description
-  if (cp.trigger === "resume") return i18n.t("checkpointLabel", { ...shared, description: i18n.t("sessionStart") });
-  if (cp.trigger === "tool" && cp.toolName) return i18n.t("toolLabel", { ...shared, tool: cp.toolName });
-  return i18n.t("checkpointLabel", { ...shared, description: i18n.t("turnFallback", { index: cp.turnIndex }) });
+    ? ` ⚠️ ${cp.branch}`
+    : (cp.branch ? ` [${cp.branch}]` : "");
+  const prefix = `#${index + 1} [${time}]${branchTag}`;
+  if (cp.description) return `${prefix} ${cp.description}`;
+  if (cp.trigger === "resume") return `${prefix} Session start`;
+  if (cp.trigger === "tool" && cp.toolName) return `${prefix} → ${cp.toolName}`;
+  return `${prefix} Turn ${cp.turnIndex}`;
 }
 
 type RestoreMode = "all" | "files" | "conversation" | "cancel";
 
-const RESTORE_OPTIONS: { labelKey: "restoreAll" | "restoreFilesOnly" | "restoreConversationOnly" | "cancel"; value: RestoreMode }[] = [
-  { labelKey: "restoreAll", value: "all" },
-  { labelKey: "restoreFilesOnly", value: "files" },
-  { labelKey: "restoreConversationOnly", value: "conversation" },
-  { labelKey: "cancel", value: "cancel" },
+const RESTORE_OPTIONS: { label: string; value: RestoreMode }[] = [
+  { label: "Restore all (files + conversation)", value: "all" },
+  { label: "Files only (keep conversation)", value: "files" },
+  { label: "Conversation only (keep files)", value: "conversation" },
+  { label: "Cancel", value: "cancel" },
 ];
 
 // ============================================================================
@@ -58,7 +53,7 @@ async function runRewindFlow(
   ctx: import("@earendil-works/pi-coding-agent").ExtensionCommandContext,
 ): Promise<void> {
   if (!state.gitAvailable || !state.repoRoot || !state.sessionId) {
-    notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("notAvailable") });
+    ctx.ui.notify("Rewind not available (no git repo or session)", "warning");
     return;
   }
 
@@ -69,7 +64,7 @@ async function runRewindFlow(
     .slice(0, MAX_DISPLAY);
 
   if (checkpoints.length === 0) {
-    notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("noCheckpoints") });
+    ctx.ui.notify("No checkpoints available", "warning");
     return;
   }
 
@@ -78,23 +73,23 @@ async function runRewindFlow(
   const currentBranch = await git("rev-parse --abbrev-ref HEAD", state.repoRoot).catch(() => "unknown");
   const undoRef = state.redoStack.length > 0 ? state.redoStack[state.redoStack.length - 1] : null;
   if (undoRef) {
-    items.push(i18n.t("undoLastRewind"));
+    items.push("↩ Undo last rewind");
   }
   for (let i = 0; i < checkpoints.length; i++) {
     items.push(formatCheckpointLabel(checkpoints[i], i, state, currentBranch));
   }
 
-  const choice = await ctx.ui.select(i18n.t("selectCheckpointTitle"), items);
+  const choice = await ctx.ui.select("Rewind to checkpoint:", items);
   if (!choice) {
-    notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: i18n.t("cancelled") });
+    ctx.ui.notify("Rewind cancelled", "info");
     return;
   }
 
   // Handle undo
-  if (choice === i18n.t("undoLastRewind") && undoRef) {
+  if (choice === "↩ Undo last rewind" && undoRef) {
     await performRestore(state, ctx, undoRef, "files");
     state.redoStack.pop();
-    notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: i18n.t("undoSuccess") });
+    ctx.ui.notify("Undo successful — files restored to before last rewind", "info");
     return;
   }
 
@@ -116,21 +111,23 @@ async function runRewindFlow(
 
   if (diffText) {
     const proceed = await ctx.ui.confirm(
-      i18n.t("confirmDiffTitle", { index: idx + 1, diff: diffText }),
-      i18n.t("confirmProceed"),
+      `Files changed since checkpoint #${idx + 1}:
+
+${diffText}`,
+      "Proceed with restore?",
     );
     if (!proceed) {
-      notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: i18n.t("cancelled") });
+      ctx.ui.notify("Rewind cancelled", "info");
       return;
     }
   }
 
   // Ask restore mode
-  const restoreLabels = RESTORE_OPTIONS.map((option) => i18n.t(option.labelKey));
-  const modeChoice = await ctx.ui.select(i18n.t("restoreModeTitle"), restoreLabels);
-  const mode = RESTORE_OPTIONS.find((option, index) => restoreLabels[index] === modeChoice)?.value ?? "cancel";
+  const restoreLabels = RESTORE_OPTIONS.map((option) => option.label);
+  const modeChoice = await ctx.ui.select("Restore mode:", restoreLabels);
+  const mode = RESTORE_OPTIONS.find((option) => option.label === modeChoice)?.value ?? "cancel";
   if (mode === "cancel") {
-    notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: i18n.t("cancelled") });
+    ctx.ui.notify("Rewind cancelled", "info");
     return;
   }
 
@@ -155,19 +152,14 @@ async function runRewindFlow(
       try {
         await ctx.navigateTree(targetEntry.id, { summarize: true });
       } catch {
-        notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("conversationPartialFailure") });
+        ctx.ui.notify("Conversation rewind partially failed", "warning");
       }
     }
   }
 
-  const what = mode === "all" ? i18n.t("whatAll")
-    : mode === "files" ? i18n.t("whatFiles") : i18n.t("whatConversation");
-  notifyWithSource({
-    ctx,
-    source: NOTICE_SOURCE,
-    level: "info",
-    message: i18n.t("rewound", { what, index: idx + 1 }),
-  });
+  const what = mode === "all" ? "files + conversation"
+    : mode === "files" ? "files" : "conversation";
+  ctx.ui.notify(`Rewound ${what} to checkpoint #${idx + 1}`, "info");
 }
 
 async function performRestore(
@@ -197,12 +189,7 @@ async function performRestore(
   try {
     await restoreCheckpoint(state.repoRoot, target);
   } catch (err) {
-    notifyWithSource({
-      ctx,
-      source: NOTICE_SOURCE,
-      level: "error",
-      message: i18n.t("restoreFailed", { error: err instanceof Error ? err.message : String(err) }),
-    });
+    ctx.ui.notify(`Restore failed: ${err instanceof Error ? err.message : String(err)}`, "error");
   }
 }
 
@@ -231,11 +218,11 @@ export async function handleForkRestore(
 
   const cp = target || state.resumeCheckpoint;
 
-  const optionRestoreAll = i18n.t("restoreAll");
-  const optionCodeOnly = i18n.t("codeOnly");
-  const optionConversationOnly = i18n.t("restoreConversationOnly");
-  const optionUndo = i18n.t("undoLastRewind");
-  const optionCancel = i18n.t("cancel");
+  const optionRestoreAll = "Restore all (files + conversation)";
+  const optionCodeOnly = "Code only (restore files, keep conversation)";
+  const optionConversationOnly = "Conversation only (keep files)";
+  const optionUndo = "↩ Undo last rewind";
+  const optionCancel = "Cancel";
 
   const options: string[] = [optionConversationOnly];
   if (cp) {
@@ -247,7 +234,7 @@ export async function handleForkRestore(
   }
   options.push(optionCancel);
 
-  const choice = await ctx.ui.select(i18n.t("restoreOptionsTitle"), options);
+  const choice = await ctx.ui.select("Restore Options", options);
 
   if (!choice || choice === optionCancel) return { cancel: true };
   if (choice === optionConversationOnly) return undefined;
@@ -255,17 +242,17 @@ export async function handleForkRestore(
   if (choice === optionUndo && state.redoStack.length > 0) {
     const undoCp = state.redoStack.pop()!;
     await performRestore(state, ctx, undoCp, "files");
-    notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: i18n.t("restoredFromBeforeUndo") });
+    ctx.ui.notify("Files restored to before last rewind", "info");
     return { cancel: true };
   }
 
   if (!cp) {
-    notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("noCheckpointAvailable") });
+    ctx.ui.notify("No checkpoint available", "warning");
     return undefined;
   }
 
   await performRestore(state, ctx, cp, "files");
-  notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: i18n.t("filesRestoredFromCheckpoint") });
+  ctx.ui.notify("Files restored from checkpoint", "info");
 
   if (choice === optionCodeOnly) {
     return { skipConversationRestore: true };
@@ -288,17 +275,17 @@ export async function handleTreeRestore(
   const sorted = [...state.checkpoints.values()].sort((a, b) => b.timestamp - a.timestamp);
   const cp = sorted.find((c) => c.timestamp <= targetTs) ?? state.resumeCheckpoint;
 
-  const optionKeepCurrent = i18n.t("keepCurrentFiles");
-  const optionRestoreFiles = i18n.t("restoreFilesToThatPoint");
-  const optionUndo = i18n.t("undoLastRewind");
-  const optionCancelNavigation = i18n.t("cancelNavigation");
+  const optionKeepCurrent = "Keep current files";
+  const optionRestoreFiles = "Restore files to that point";
+  const optionUndo = "↩ Undo last rewind";
+  const optionCancelNavigation = "Cancel navigation";
 
   const options: string[] = [optionKeepCurrent];
   if (cp) options.push(optionRestoreFiles);
   if (state.redoStack.length > 0) options.push(optionUndo);
   options.push(optionCancelNavigation);
 
-  const choice = await ctx.ui.select(i18n.t("restoreOptionsTitle"), options);
+  const choice = await ctx.ui.select("Restore Options", options);
 
   if (!choice || choice === optionCancelNavigation) return { cancel: true };
   if (choice === optionKeepCurrent) return undefined;
@@ -306,12 +293,12 @@ export async function handleTreeRestore(
   if (choice === optionUndo && state.redoStack.length > 0) {
     const undoCp = state.redoStack.pop()!;
     await performRestore(state, ctx, undoCp, "files");
-    notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: i18n.t("restoredFromBeforeUndo") });
+    ctx.ui.notify("Files restored to before last rewind", "info");
     return { cancel: true };
   }
   if (cp) {
     await performRestore(state, ctx, cp, "files");
-    notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: i18n.t("filesRestoredToCheckpoint") });
+    ctx.ui.notify("Files restored to checkpoint", "info");
   }
 
   return undefined;
@@ -323,7 +310,7 @@ export async function handleTreeRestore(
 
 export function registerCommands(pi: ExtensionAPI, state: RewindState): void {
   pi.registerCommand("rewind", {
-    description: i18n.t("commandDescription"),
+    description: "Rewind file changes and/or conversation to a checkpoint",
     handler: async (_args, ctx) => {
       await runRewindFlow(state, ctx);
     },
@@ -331,12 +318,12 @@ export function registerCommands(pi: ExtensionAPI, state: RewindState): void {
 
   // Ctrl+Shift+R opens a files-only quick rewind.
   pi.registerShortcut(Key.ctrlShift("r"), {
-    description: i18n.t("shortcutDescription"),
+    description: "Rewind (same as /rewind)",
     handler: async (ctx) => {
       // Shortcut handler gets ExtensionContext, not CommandContext.
       // We can't call navigateTree from here, so do files-only quick rewind.
       if (!state.gitAvailable || !state.repoRoot || !state.sessionId) {
-        notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("notAvailableShort") });
+        ctx.ui.notify("Rewind not available", "warning");
         return;
       }
 
@@ -345,25 +332,20 @@ export function registerCommands(pi: ExtensionAPI, state: RewindState): void {
         .slice(0, 25);
 
       if (checkpoints.length === 0) {
-        notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("noCheckpoints") });
+        ctx.ui.notify("No checkpoints available", "warning");
         return;
       }
 
       const currentBranch = await git("rev-parse --abbrev-ref HEAD", state.repoRoot).catch(() => "unknown");
       const items = checkpoints.map((cp, i) => formatCheckpointLabel(cp, i, state, currentBranch));
-      const choice = await ctx.ui.select(i18n.t("quickRewindTitle"), items);
+      const choice = await ctx.ui.select("Quick rewind (files only):", items);
       if (!choice) return;
 
       const idx = items.indexOf(choice);
       if (idx < 0) return;
 
       await performRestore(state, ctx, checkpoints[idx], "files");
-      notifyWithSource({
-        ctx,
-        source: NOTICE_SOURCE,
-        level: "info",
-        message: i18n.t("filesRewoundToCheckpoint", { index: idx + 1 }),
-      });
+      ctx.ui.notify(`Files rewound to checkpoint #${idx + 1}`, "info");
     },
   });
 }

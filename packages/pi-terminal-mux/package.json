@@ -1,7 +1,7 @@
 {
   "name": "pi-terminal-mux",
   "version": "0.6.5",
-  "description": "Terminal multiplexer abstraction for pi extensions — unified surface API across muxy, cmux, tmux, zellij, wezterm, herdr, otty and orca, with headless fallback",
+  "description": "Terminal multiplexer abstraction for pi extensions \u2014 unified surface API across muxy, cmux, tmux, zellij, wezterm, herdr, otty and orca, with headless fallback",
   "type": "module",
   "main": "./index.ts",
   "exports": {
@@ -15,7 +15,6 @@
   "files": [
     "index.ts",
     "src",
-    "locales",
     "README.md",
     "README.zh-CN.md",
     "tsconfig.json"

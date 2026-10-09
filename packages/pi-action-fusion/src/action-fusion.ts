@@ -3,14 +3,9 @@
  * SPDX-License-Identifier: MIT
  * Adapted from NVlabs/SoL-Pi, extensions/action-fusion/index.ts.
  */
-import {
-  createEditToolDefinition, createWriteToolDefinition,
-  type BashToolOptions, type EditToolDetails, type EditToolOptions,
-  type ExtensionFactory, type WriteToolOptions,
-} from "@earendil-works/pi-coding-agent";
+import { createEditToolDefinition, createWriteToolDefinition, type BashToolOptions, type EditToolDetails, type EditToolOptions, type ExtensionFactory, type WriteToolOptions } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { resolveToolPath } from "./file-queue.ts";
-import { i18n } from "./i18n.ts";
 import { fusionRenderers } from "./render.ts";
 import { createThenRunSchema, executeMutationThenRun, type FusedDetails } from "./then-run.ts";
 
@@ -38,16 +33,16 @@ export function createActionFusionExtension(options: ActionFusionOptions = {}): 
     const write = baseWrite(process.cwd());
     const editParameters = Type.Object({
       ...edit.parameters.properties,
-      then_run: createThenRunSchema(i18n.t("editThenRun")),
+      then_run: createThenRunSchema("Optional command to run after this file edit succeeds, such as a test or build. A failed edit skips the command; a failed command keeps the edit. This command executes inside edit, not as a separate bash tool call."),
     });
     const writeParameters = Type.Object({
       ...write.parameters.properties,
-      then_run: createThenRunSchema(i18n.t("writeThenRun")),
+      then_run: createThenRunSchema("Optional command to run after this file write succeeds, such as a test or build. A failed write skips the command; a failed command keeps the write. This command executes inside write, not as a separate bash tool call."),
     });
     pi.registerTool<typeof editParameters, FusedDetails<EditToolDetails | undefined>>({
       ...edit,
       parameters: editParameters,
-      promptGuidelines: [...(edit.promptGuidelines ?? []), i18n.t("guideline")],
+      promptGuidelines: [...(edit.promptGuidelines ?? []), "Use then_run only when the follow-up command is already known and safe to run after this single-file mutation. Omit it when inspecting the edit result must come first."],
       async execute(toolCallId, input, signal, onUpdate, ctx) {
         const { then_run, ...editInput } = input;
         return executeMutationThenRun({
@@ -61,7 +56,7 @@ export function createActionFusionExtension(options: ActionFusionOptions = {}): 
     pi.registerTool<typeof writeParameters, FusedDetails<undefined>>({
       ...write,
       parameters: writeParameters,
-      promptGuidelines: [...(write.promptGuidelines ?? []), i18n.t("guideline")],
+      promptGuidelines: [...(write.promptGuidelines ?? []), "Use then_run only when the follow-up command is already known and safe to run after this single-file mutation. Omit it when inspecting the edit result must come first."],
       async execute(toolCallId, input, signal, onUpdate, ctx) {
         const { then_run, ...writeInput } = input;
         return executeMutationThenRun({

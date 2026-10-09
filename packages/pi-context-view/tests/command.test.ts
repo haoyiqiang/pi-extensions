@@ -8,15 +8,7 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-c
 
 import { CompactionState, InitialCaptureState, SilentProbeState } from "../src/capture.ts";
 import { readProbeToken } from "../src/probe-token.ts";
-import {
-	contextCommandDescription,
-	getContextArgumentCompletions,
-	parseContextCommand,
-	reportCommandMessage,
-	reportConfigCreation,
-	reportTuiOnly,
-	resolveInitialCapture,
-} from "../src/command.ts";
+import { contextCommandDescription, getContextArgumentCompletions, parseContextCommand, reportCommandMessage, reportConfigCreation, reportTuiOnly, resolveInitialCapture } from "../src/command.ts";
 
 /** Collect what a command reports through the TUI notification path. */
 function createNotifyingContext(): {
@@ -72,10 +64,8 @@ test("reportCommandMessage sanitizes and caps untrusted message text", () => {
 	reportCommandMessage(context, 'Ignoring unknown key "\u001b[31mred\u0007"', "warning");
 	reportCommandMessage(context, "x".repeat(600), "error");
 
-	assert.deepEqual(notified[0], { message: '[context] Ignoring unknown key "red"', type: "warning" });
-	// The source tag prefixes the message before the cap is applied by the shared helper.
-	assert.ok(notified[1]?.message.startsWith("[context] "));
-	assert.equal(notified[1]?.message.length, "[context] ".length + 500);
+	assert.deepEqual(notified[0], { message: 'Ignoring unknown key "red"', type: "warning" });
+	assert.equal(notified[1]?.message.length, 500);
 	assert.ok(notified[1]?.message.endsWith("\u2026"));
 });
 
@@ -87,8 +77,8 @@ test("reportTuiOnly names the refused view instead of the whole command", () => 
 
 	// Only views are refused; /context config needs no UI and runs in every mode.
 	assert.deepEqual(notified, [
-		{ message: "[context] /context usage is available in TUI mode only.", type: "warning" },
-		{ message: "[context] /context injections is available in TUI mode only.", type: "warning" },
+		{ message: "/context usage is available in TUI mode only.", type: "warning" },
+		{ message: "/context injections is available in TUI mode only.", type: "warning" },
 	]);
 });
 
@@ -102,9 +92,9 @@ test("reportConfigCreation reports every create outcome with its own severity", 
 	reportConfigCreation(context, { type: "failed", filePath, reason: "EACCES: \u001b[31mdenied\u0007" });
 
 	assert.deepEqual(notified, [
-		{ message: `[context] Created default configuration: ${filePath}`, type: "info" },
-		{ message: `[context] Configuration already exists; left unchanged: ${filePath}`, type: "warning" },
-		{ message: `[context] Cannot create configuration at ${filePath}: EACCES: denied`, type: "error" },
+		{ message: `Created default configuration: ${filePath}`, type: "info" },
+		{ message: `Configuration already exists; left unchanged: ${filePath}`, type: "warning" },
+		{ message: `Cannot create configuration at ${filePath}: EACCES: denied`, type: "error" },
 	]);
 });
 

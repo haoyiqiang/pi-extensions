@@ -9,13 +9,7 @@
  */
 import type { Message } from "@earendil-works/pi-ai";
 import type { RenderedEntry } from "./render-entries";
-import {
-  textOf,
-  toolCallArgsText,
-  extractToolCallArgsText,
-  isContentBearing,
-  clip,
-} from "./content";
+import { textOf, toolCallArgsText, extractToolCallArgsText, isContentBearing, clip } from "./content";
 import { estimateWordCount, hasCJK, isWordSegment, wordSegments } from "./segment.js";
 import type { RecallMode } from "./recall-scope";
 

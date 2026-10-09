@@ -25,13 +25,7 @@
 
 import { getSelectListTheme } from "@earendil-works/pi-coding-agent";
 import type { Api, Model, ModelThinkingLevel, ThinkingLevelMap } from "@earendil-works/pi-ai";
-import {
-  matchesKey,
-  SelectList,
-  truncateToWidth,
-  type Component,
-  type SelectItem,
-} from "@earendil-works/pi-tui";
+import { matchesKey, SelectList, truncateToWidth, type Component, type SelectItem } from "@earendil-works/pi-tui";
 import { formatHintLine, type KeyHint } from "../frame";
 import { handleInlineEditInput, type InlineEditState } from "../inline-edit";
 import type {

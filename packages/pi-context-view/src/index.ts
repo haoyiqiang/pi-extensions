@@ -7,24 +7,8 @@
 import { buildSessionContext, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import { ConfigStore, createDefaultConfigFile } from "./config.ts";
-import {
-	contextCommandDescription,
-	getContextArgumentCompletions,
-	parseContextCommand,
-	reportCommandMessage,
-	reportConfigCreation,
-	reportTuiOnly,
-	resolveInitialCapture,
-} from "./command.ts";
-import {
-	buildUsageSnapshot,
-	collectPromptSources,
-	CompactionState,
-	InitialCaptureState,
-	parsePersistedIdentities,
-	PROBE_IDENTITIES_CUSTOM_TYPE,
-	SilentProbeState,
-} from "./capture.ts";
+import { contextCommandDescription, getContextArgumentCompletions, parseContextCommand, reportCommandMessage, reportConfigCreation, reportTuiOnly, resolveInitialCapture } from "./command.ts";
+import { buildUsageSnapshot, collectPromptSources, CompactionState, InitialCaptureState, parsePersistedIdentities, PROBE_IDENTITIES_CUSTOM_TYPE, SilentProbeState } from "./capture.ts";
 import { readProbeToken } from "./probe-token.ts";
 import { readAutoCompactReserveTokens } from "./settings.ts";
 import { showInjectionsView } from "./ui/injections-view.ts";

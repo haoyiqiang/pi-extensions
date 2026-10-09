@@ -14,26 +14,8 @@ import { existsSync, readFileSync, rmSync, mkdirSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-import {
-  getMuxBackend,
-  isMuxAvailable,
-  muxLog,
-  muxSetupHint,
-  AGENT_MUXY_PANE_ID,
-} from "./detection.ts";
-import { i18n } from "./i18n.ts";
-import {
-  isHeadlessSurface,
-  isHeadlessMode,
-  createHeadlessSurface,
-  closeHeadlessSurface,
-  sendHeadlessEscape,
-  readHeadlessScreen,
-  readHeadlessScreenAsync,
-  spawnHeadlessProcess,
-  getHeadlessProcessExit,
-  drainHeadlessProcess,
-} from "./headless.ts";
+import { getMuxBackend, isMuxAvailable, muxLog, muxSetupHint, AGENT_MUXY_PANE_ID } from "./detection.ts";
+import { isHeadlessSurface, isHeadlessMode, createHeadlessSurface, closeHeadlessSurface, sendHeadlessEscape, readHeadlessScreen, readHeadlessScreenAsync, spawnHeadlessProcess, getHeadlessProcessExit, drainHeadlessProcess } from "./headless.ts";
 import { shellEscape, powershellEscape } from "./shell.ts";
 import type { MuxBackend } from "./detection.ts";
 import type { BackendOps } from "./backends/types.ts";
@@ -80,7 +62,7 @@ const backendOps: Record<MuxBackend, BackendOps> = {
 function requireMuxBackend(): MuxBackend {
   const backend = getMuxBackend();
   if (!backend) {
-    throw new Error(`${i18n.t("setupHint.none")} ${muxSetupHint()}`);
+    throw new Error(`${"No supported terminal multiplexer found."} ${muxSetupHint()}`);
   }
   return backend;
 }
@@ -509,16 +491,16 @@ export function renameCurrentTab(title: string): RenameResult {
       execFileSync("wezterm", args, { encoding: "utf8" });
     } else if (backend === "herdr") {
       if (!renameHerdrTab(AGENT_HERDR_PANE_ID ?? "", title)) {
-        throw new Error(i18n.t("error.renameIncomplete", { backend: "Herdr" }));
+        throw new Error(`${"Herdr"} did not complete terminal renaming.`);
       }
     } else if (backend === "otty") {
       if (!renameOttyTab(AGENT_OTTY_PANE_ID ?? "", title)) {
-        throw new Error(i18n.t("error.renameIncomplete", { backend: "Otty" }));
+        throw new Error(`${"Otty"} did not complete terminal renaming.`);
       }
     } else if (backend === "orca") {
       if (!AGENT_ORCA_TERMINAL_HANDLE) throw new Error("ORCA_TERMINAL_HANDLE not set");
       if (!renameOrcaTerminal(AGENT_ORCA_TERMINAL_HANDLE, title)) {
-        throw new Error(i18n.t("error.renameIncomplete", { backend: "Orca" }));
+        throw new Error(`${"Orca"} did not complete terminal renaming.`);
       }
     } else {
       const paneId = process.env.ZELLIJ_PANE_ID;
@@ -560,7 +542,7 @@ export function renameWorkspace(title: string): RenameResult {
       execFileSync("wezterm", args, { encoding: "utf8" });
     } else if (backend === "herdr") {
       if (!renameHerdrWorkspace(title)) {
-        throw new Error(i18n.t("error.renameIncomplete", { backend: "Herdr" }));
+        throw new Error(`${"Herdr"} did not complete terminal renaming.`);
       }
     }
     return { status: "renamed", backend, operation: capability.operation, target: capability.target };

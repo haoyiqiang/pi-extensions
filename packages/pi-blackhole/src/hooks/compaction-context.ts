@@ -1,9 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { findLatestCompactionEntry, projectAppendOnlyContext } from "../core/compaction-chain.js";
-import {
-  applyRetainedToolOutputProjection,
-  isRetainedToolOutputProjection,
-} from "../core/tool-output-budget.js";
+import { applyRetainedToolOutputProjection, isRetainedToolOutputProjection } from "../core/tool-output-budget.js";
 import { isPiVccCompactionDetailsV2 } from "../details.js";
 import { debugLog } from "../om/debug-log.js";
 import type { Runtime } from "../om/runtime.js";

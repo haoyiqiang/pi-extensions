@@ -2,10 +2,7 @@ import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
-import {
-  extractResourceQuery,
-  resourceSuggestions,
-} from "../src/features/session-resources/autocomplete.ts";
+import { extractResourceQuery, resourceSuggestions } from "../src/features/session-resources/autocomplete.ts";
 import type { SessionResource } from "../src/features/session-resources/collector.ts";
 
 /** Creates one stable resource fixture for suggestion tests. */

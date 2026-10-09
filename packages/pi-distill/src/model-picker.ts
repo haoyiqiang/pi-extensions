@@ -1,17 +1,6 @@
-import {
-  type ExtensionCommandContext,
-  getSelectListTheme,
-  keyHint,
-  rawKeyHint,
-  DynamicBorder,
-} from "@earendil-works/pi-coding-agent";
+import { type ExtensionCommandContext, getSelectListTheme, keyHint, rawKeyHint, DynamicBorder } from "@earendil-works/pi-coding-agent";
 import { Container, Input, SelectList, Spacer, Text } from "@earendil-works/pi-tui";
-import {
-  buildDistillModelChoices,
-  filterDistillModelChoices,
-  type DistillModelChoice,
-  type DistillSelectableModel,
-} from "./model-choice.ts";
+import { buildDistillModelChoices, filterDistillModelChoices, type DistillModelChoice, type DistillSelectableModel } from "./model-choice.ts";
 
 /** 模型选择器上的本地化文案。 */
 export interface DistillModelPickerLabels {

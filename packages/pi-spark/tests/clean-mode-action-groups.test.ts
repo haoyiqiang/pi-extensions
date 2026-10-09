@@ -1,22 +1,7 @@
 // @ts-nocheck
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-	beginActionGroupStep,
-	areAllActionGroupsExpanded,
-	createActionGroupState,
-	extractToolCalls,
-	findActionGroupMembership,
-	getActionGroupActivityCounts,
-	getActionGroupSize,
-	hasNarrationText,
-	isAssistantMessage,
-	isActionGroupExpanded,
-	reassignActionToolCall,
-	registerActionToolCall,
-	setAllActionGroupsExpanded,
-	toggleActionGroup,
-} from "../src/features/clean-mode/action-groups.ts";
+import { beginActionGroupStep, areAllActionGroupsExpanded, createActionGroupState, extractToolCalls, findActionGroupMembership, getActionGroupActivityCounts, getActionGroupSize, hasNarrationText, isAssistantMessage, isActionGroupExpanded, reassignActionToolCall, registerActionToolCall, setAllActionGroupsExpanded, toggleActionGroup } from "../src/features/clean-mode/action-groups.ts";
 
 /** 一个从未被分配过的组号，用于验证未知组的查询行为。 */
 const UNKNOWN_GROUP_ID = 99;

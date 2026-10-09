@@ -10,10 +10,7 @@ import { describe, test, expect, beforeEach, afterEach, beforeAll, afterAll, vi 
 import { existsSync, unlinkSync, readFileSync, mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import {
-  registerBeforeCompactHook,
-  PI_VCC_COMPACT_INSTRUCTION,
-} from "../src/hooks/before-compact.js";
+import { registerBeforeCompactHook, PI_VCC_COMPACT_INSTRUCTION } from "../src/hooks/before-compact.js";
 
 let tmpDir: string;
 let CONFIG_PATH: string;

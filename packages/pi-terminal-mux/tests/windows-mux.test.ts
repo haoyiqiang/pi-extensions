@@ -3,12 +3,7 @@ import assert from "node:assert/strict";
 import { commandTerminator, weztermActivateArgs } from "../src/backends/wezterm.ts";
 import { powershellEscape } from "../src/shell.ts";
 import { herdrSourceFlag } from "../src/backends/herdr.ts";
-import {
-  resolveSendInterpreter,
-  sendScriptExtension,
-  buildSendScriptContent,
-  buildMuxInvocation,
-} from "../src/surface.ts";
+import { resolveSendInterpreter, sendScriptExtension, buildSendScriptContent, buildMuxInvocation } from "../src/surface.ts";
 
 // U-001：Windows WezTerm 命令提交终止符
 describe("commandTerminator (U-001)", () => {

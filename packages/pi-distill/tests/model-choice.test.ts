@@ -4,12 +4,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { processToolResult } from "../src/index.ts";
-import {
-  buildDistillModelChoices,
-  filterDistillModelChoices,
-  resolveConfiguredDistillModel,
-  resolveDistillRuntimeModel,
-} from "../src/model-choice.ts";
+import { buildDistillModelChoices, filterDistillModelChoices, resolveConfiguredDistillModel, resolveDistillRuntimeModel } from "../src/model-choice.ts";
 
 process.env.PI_EXTENSIONS_LOCALE = "en-US";
 

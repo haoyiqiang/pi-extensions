@@ -16,29 +16,15 @@
  * 按子组件高度计算 y 偏移；用拼接字符串会让偏移错位。
  */
 
-import {
-	AssistantMessageComponent,
-	ToolExecutionComponent,
-} from "@earendil-works/pi-coding-agent";
+import { AssistantMessageComponent, ToolExecutionComponent } from "@earendil-works/pi-coding-agent";
 import { MouseRegion, truncateToWidth, visibleWidth, type Component, type TuiMouseEvent } from "@earendil-works/pi-tui";
 import { activityCompositionLabel, renderTreePrefix, type ActivityCounters } from "./activity.js";
-import {
-	TOOL_ROW_GROUP_HEADER,
-	TOOL_ROW_HIDDEN,
-	TOOL_ROW_SUMMARY,
-	type ActionGroupMembership,
-} from "./action-groups.js";
+import { TOOL_ROW_GROUP_HEADER, TOOL_ROW_HIDDEN, TOOL_ROW_SUMMARY, type ActionGroupMembership } from "./action-groups.js";
 import { formatDuration } from "./duration.js";
 import { debugLog } from "./debug-logger.js";
 import type { HeaderStyler } from "./header-style.js";
 import { GUTTER_GAP, GROUP_GUTTER, renderGutterPrefix, RUN_GUTTER } from "./header-style.js";
-import { i18n } from "./i18n.js";
-import {
-	resolveAssistantMessageRender,
-	resolveRunHeader,
-	resolveToolRowMode,
-	type AssistantMessageKind,
-} from "./render-policy.js";
+import { resolveAssistantMessageRender, resolveRunHeader, resolveToolRowMode, type AssistantMessageKind } from "./render-policy.js";
 import { installMethodPatch, type PatchablePrototype } from "./prototype-patch.js";
 import type { CleanModeConfig, CleanModeState } from "./types.js";
 
@@ -300,9 +286,9 @@ function buildRunHeaderLine(
 	return [
 		RUN_GUTTER,
 		GUTTER_GAP,
-		deps.styler.bold(deps.styler.primary(i18n.t("runHeader", { duration }))),
+		deps.styler.bold(deps.styler.primary(`Took ${duration}`)),
 		" ",
-		deps.styler.muted(i18n.t("runHeaderSteps", { count: String(deps.getRunSteps(host) ?? 0) })),
+		deps.styler.muted(`· ${String(deps.getRunSteps(host) ?? 0)} steps`),
 		ARROW_GAP,
 		deps.styler.accent(chevron),
 	].join("");
@@ -533,12 +519,12 @@ function buildSummaryLabel(group: ToolRowGroupInfo, deps: ComponentPatchDeps): s
 	const count = String(group.groupSize);
 	const activity = deps.getGroupActivityLabel(group.membership.groupId);
 	if (activity !== undefined) {
-		return i18n.t("actionGroupSteps", { label: activity, count });
+		return `${activity} · ${count} steps`;
 	}
 
 	return (
 		activityCompositionLabel(deps.getGroupActivityCounts(group.membership.groupId)) ??
-		i18n.t("actionGroupHeader", { count })
+		`Explored · ${count} steps`
 	);
 }
 
@@ -564,7 +550,7 @@ function buildActionGroupHeaderRow(
 	const showsStepCount = group.groupSize >= MIN_GROUP_SIZE_FOR_SUMMARY;
 	const label = showsStepCount
 		? buildSummaryLabel(group, deps)
-		: (group.summary ?? i18n.t("actionGroupHeader", { count: String(group.groupSize) }));
+		: (group.summary ?? `Explored · ${String(group.groupSize)} steps`);
 	const chevron = group.groupExpanded ? EXPANDED_CHEVRON : COLLAPSED_CHEVRON;
 	const prefix = renderGutterPrefix(deps.styler);
 	const tail = `${ARROW_GAP}${deps.styler.accent(chevron)}`;

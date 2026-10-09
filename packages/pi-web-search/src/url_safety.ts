@@ -1,6 +1,5 @@
 import { lookup } from "node:dns/promises";
 import { isIP, type LookupFunction } from "node:net";
-import { i18n } from "./i18n.ts";
 
 const SUPPORTED_PROTOCOLS = new Set(["http:", "https:"]);
 
@@ -52,23 +51,23 @@ export function parseAndAssertHttpUrl(raw: string): URL {
   try {
     url = new URL(raw);
   } catch {
-    throw new Error(i18n.t("error.invalidUrl", { url: raw }));
+    throw new Error(`Invalid URL: ${raw}`);
   }
   if (!SUPPORTED_PROTOCOLS.has(url.protocol)) {
-    throw new Error(i18n.t("error.unsupportedUrlProtocol", { protocol: url.protocol }));
+    throw new Error(`Unsupported URL protocol: ${url.protocol}`);
   }
-  if (url.username || url.password) throw new Error(i18n.t("error.urlCredentials"));
+  if (url.username || url.password) throw new Error("Credentials in fetched URLs are not supported.");
   if (isPrivateOrLoopbackHostname(url.hostname)) {
-    throw new Error(i18n.t("error.privateAddress", { host: url.hostname }));
+    throw new Error(`Refusing to fetch private/loopback address: ${url.hostname}`);
   }
   return url;
 }
 
 function assertPublicAddresses(hostname: string, addresses: Array<{ address: string; family: number }>): void {
-  if (addresses.length === 0) throw new Error(i18n.t("error.noDnsAddress", { host: hostname }));
+  if (addresses.length === 0) throw new Error(`No DNS addresses found for ${hostname}.`);
   for (const entry of addresses) {
     if (isPrivateOrLoopbackHostname(entry.address)) {
-      throw new Error(i18n.t("error.privateDnsAddress", { host: hostname, address: entry.address }));
+      throw new Error(`Refusing to fetch ${hostname}: DNS resolved to private/loopback address ${entry.address}.`);
     }
   }
 }

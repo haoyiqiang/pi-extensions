@@ -1,10 +1,6 @@
 import { Text, stripTerminalSequences, truncateToWidth, visibleWidth, type Component } from "@earendil-works/pi-tui";
 import { createBashToolDefinition, type ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { catalog, i18n } from "./i18n.ts";
-import {
-  THEN_RUN_FAILED, THEN_RUN_RUNNING, THEN_RUN_SKIPPED, THEN_RUN_SUCCEEDED,
-  type ActionFusionDetails, type ThenRunInput,
-} from "./then-run.ts";
+import { THEN_RUN_FAILED, THEN_RUN_RUNNING, THEN_RUN_SKIPPED, THEN_RUN_SUCCEEDED, type ActionFusionDetails, type ThenRunInput } from "./then-run.ts";
 
 type NativeTool = ToolDefinition<any, any>;
 type RenderContext = Parameters<NonNullable<NativeTool["renderCall"]>>[2];
@@ -37,9 +33,10 @@ const textOf = (result: Result) => result.content.map((part) => part.type === "t
 const textResult = (text: string, details?: unknown): Result => ({ content: [{ type: "text", text }], details });
 
 function endsWithMessage(text: string, key: "mutationSkipped" | "commandSkipped"): boolean {
-  // Normalized errors can be reopened in another locale. Recognize both stored
-  // catalog variants without guessing from an arbitrary mutation error string.
-  return Object.values(catalog[key] ?? {}).some((message) => text.endsWith(message));
+  const messages = key === "mutationSkipped"
+    ? ["The file mutation did not complete successfully; the command was not run.", "文件修改未成功完成，未执行后续命令。"]
+    : ["The command was not run.", "未执行后续命令。"];
+  return messages.some((message) => text.endsWith(message));
 }
 
 /** Interpret only public Fusion boundaries, including Pi-normalized thrown errors. */
@@ -96,15 +93,29 @@ function rows(view: FusionView | undefined, command: ThenRunInput, theme: Theme,
     : view.status === "running" ? "uiCommandRunning" : view.status === "timeout" ? "uiCommandTimeout"
     : view.status === "aborted" ? "uiCommandAborted" : view.status === "skipped" ? "uiCommandSkipped"
     : view.exitCode ? "uiCommandExit" : "uiCommandFailed";
-  const commandLabel = i18n.t(commandKey, commandKey === "uiCommandExit" ? { code: view?.exitCode ?? "0" } : undefined);
+  const commandLabel = commandKey === "uiCommandExit" ? `exit ${view?.exitCode ?? "0"}` : {
+    uiCommandPending: "Waiting",
+    uiCommandRunning: "Running",
+    uiCommandTimeout: "Timed out",
+    uiCommandAborted: "Cancelled",
+    uiCommandSkipped: "Not run",
+    uiCommandFailed: "Failed",
+  }[commandKey];
   const commandIcon = !view ? "○" : view.status === "running" ? "◌" : view.status === "succeeded" ? "✓" : view.status === "skipped" ? "–" : "✕";
   const commandTone = !view ? "dim" : view.status === "succeeded" ? "success" : view.status === "running" ? "accent" : view.status === "skipped" ? "warning" : "error";
   const preview = typeof command.command === "string" && command.command.trim()
     ? stripTerminalSequences(command.command).replace(/\r?\n/g, " ↵ ").replace(/\r/g, " ↵ ").replace(/\t/g, "  ")
-      .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "") : i18n.t("uiCommandPlaceholder");
+      .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "") : "Command arguments pending";
   return [
-    theme.fg(mutationTone, `${mutationIcon} ${i18n.t(mutationKey)}`),
-    `${theme.fg(commandTone, `${commandIcon} ${i18n.t("followUp")} · ${commandLabel}`)}${showCommand ? `  ${theme.fg("muted", `$ ${preview}`)}` : ""}`,
+    theme.fg(mutationTone, `${mutationIcon} ${
+      mutationKey === "uiMutationRunning" ? "Modifying"
+      : mutationKey === "uiMutationPending" ? "Waiting to modify"
+      : mutationKey === "uiMutationRetained" ? "Changes saved; not rolled back"
+      : mutationKey === "uiMutationSaved" ? "Changes saved"
+      : mutationKey === "uiMutationFailed" ? "Mutation failed"
+      : "Mutation status unconfirmed; see details"
+    }`),
+    `${theme.fg(commandTone, `${commandIcon} ${"Follow-up command"} · ${commandLabel}`)}${showCommand ? `  ${theme.fg("muted", `$ ${preview}`)}` : ""}`,
   ];
 }
 
@@ -136,9 +147,9 @@ class FusionCall implements Component {
   render(width: number): string[] {
     const columns = Math.max(1, width);
     const lines = nativeParts(this.base, columns).header.map((line) => fit(line, columns));
-    const badge = this.theme.fg("dim", ` · ${i18n.t("uiFusion")}`);
+    const badge = this.theme.fg("dim", ` · ${"Fusion"}`);
     if (lines.length && visibleWidth(lines[0]) + visibleWidth(badge) <= columns) lines[0] += badge;
-    else lines.push(fit(this.theme.fg("dim", i18n.t("uiFusion")), columns));
+    else lines.push(fit(this.theme.fg("dim", "Fusion"), columns));
     if (!this.state.resultSeen) lines.push(...rows(undefined, this.command, this.theme, this.started).map((line) => fit(line, columns)));
     return lines;
   }
@@ -190,9 +201,9 @@ export function fusionRenderers(native: (cwd: string) => NativeTool): Required<P
       if (!view || !command) return base;
       const sections: Component[] = [];
       if (options.expanded) {
-        sections.push(new Text(theme.fg("dim", i18n.t("uiMutation")), 0, 0),
+        sections.push(new Text(theme.fg("dim", "Mutation"), 0, 0),
           new MutationSection(state, base, textOf(view.mutationResult), theme));
-        sections.push(new Text(theme.fg("dim", i18n.t("followUp")), 0, 0));
+        sections.push(new Text(theme.fg("dim", "Follow-up command"), 0, 0));
         state.bash ??= newBashState();
         const bash = createBashToolDefinition(context.cwd);
         state.bashCall = bash.renderCall!(command, theme, {
@@ -207,7 +218,7 @@ export function fusionRenderers(native: (cwd: string) => NativeTool): Required<P
           });
           sections.push(state.bashResult);
         }
-        if (view.status === "succeeded") sections.push(new Text(theme.fg("dim", i18n.t("savedRoundTrip")), 0, 0));
+        if (view.status === "succeeded") sections.push(new Text(theme.fg("dim", "1 model round-trip avoided"), 0, 0));
       }
       return new FusionResult(rows(view, command, theme, context.executionStarted, !options.expanded), sections);
     },

@@ -4,10 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { fauxAssistantMessage, fauxToolCall, InMemoryCredentialStore, getCurrentTools } from "@earendil-works/pi-ai";
 import { registerFauxProvider, streamSimple as fauxStreamSimple } from "@earendil-works/pi-ai/compat";
-import {
-  createAgentSessionFromServices, createAgentSessionServices, ModelRuntime, SessionManager, SettingsManager,
-  type AgentSession, type ExtensionFactory,
-} from "@earendil-works/pi-coding-agent";
+import { createAgentSessionFromServices, createAgentSessionServices, ModelRuntime, SessionManager, SettingsManager, type AgentSession, type ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { withTempAgentDir } from "pi-utils";
 import { createActionFusionExtension } from "../index.ts";
 

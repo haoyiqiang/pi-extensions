@@ -1,7 +1,6 @@
 {
   "packages/pi-utils": "0.1.0",
   "packages/pi-web-search": "1.6.0",
-  "packages/pi-todo": "0.1.0",
   "packages/pi-distill": "1.9.2",
   "packages/pi-action-fusion": "0.1.0",
   "packages/pi-terminal-mux": "0.6.5",

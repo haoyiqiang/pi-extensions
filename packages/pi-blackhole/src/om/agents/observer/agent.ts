@@ -13,11 +13,7 @@ import { agentLoop, type AgentLoopConfig, type AgentTool } from "@earendil-works
 import type { CacheRetention, Message, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { buildAgentContext } from "../agent-context.js";
 import { createTurnCap, type LegacyTurnCapOption } from "../turn-cap.js";
-import {
-  createBridgeStreamFn,
-  createProviderFetch,
-  type ProviderFetchOption,
-} from "../../provider-stream.js";
+import { createBridgeStreamFn, createProviderFetch, type ProviderFetchOption } from "../../provider-stream.js";
 import { streamSimple } from "@earendil-works/pi-ai/compat";
 import { Type } from "typebox";
 import type { Static } from "typebox";
@@ -27,11 +23,7 @@ import { OBSERVER_SYSTEM } from "./prompts.js";
 import { nowTimestamp, truncateRecordContent } from "../../serialize.js";
 import type { Observation, Relevance } from "../../ledger/index.js";
 import { estimateStringTokens } from "../../tokens.js";
-import {
-  withDiscardedCount,
-  WorkerStreamError,
-  workerStreamErrorMessage,
-} from "../../retryable-error.js";
+import { withDiscardedCount, WorkerStreamError, workerStreamErrorMessage } from "../../retryable-error.js";
 
 interface RunObserverArgs {
   model: Model<any>;

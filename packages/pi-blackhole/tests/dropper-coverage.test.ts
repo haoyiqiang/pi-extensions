@@ -7,13 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import {
-  observationToDropperLine,
-  reflectionCoverageMap,
-  reflectionCoverageTierForCount,
-  summarizeCoverageByRelevance,
-  summarizeCoverageTransitionsByRelevance,
-} from "../src/om/agents/dropper/coverage.js";
+import { observationToDropperLine, reflectionCoverageMap, reflectionCoverageTierForCount, summarizeCoverageByRelevance, summarizeCoverageTransitionsByRelevance } from "../src/om/agents/dropper/coverage.js";
 import { observation, reflection } from "./fixtures/session.js";
 
 describe("V3 dropper reflection coverage helpers", () => {

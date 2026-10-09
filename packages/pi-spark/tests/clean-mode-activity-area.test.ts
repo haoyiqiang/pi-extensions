@@ -1,24 +1,8 @@
 // @ts-nocheck
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-	clearActivityArea,
-	createActivityAreaRuntime,
-	refreshActivityArea,
-	startActivityTimer,
-	stopActivityTimer,
-	type ActivityAreaDeps,
-	type ActivityUiHost,
-} from "../src/features/clean-mode/activity-area.ts";
-import {
-	BRANCH_CONTINUATION_PADDING,
-	TREE_INDENT,
-	activityCountersNote,
-	createActivitySnapshot,
-	renderActivityRows,
-	type ActivityRow,
-	type ActivitySnapshot,
-} from "../src/features/clean-mode/activity.ts";
+import { clearActivityArea, createActivityAreaRuntime, refreshActivityArea, startActivityTimer, stopActivityTimer, type ActivityAreaDeps, type ActivityUiHost } from "../src/features/clean-mode/activity-area.ts";
+import { BRANCH_CONTINUATION_PADDING, TREE_INDENT, activityCountersNote, createActivitySnapshot, renderActivityRows, type ActivityRow, type ActivitySnapshot } from "../src/features/clean-mode/activity.ts";
 import { ACTIVITY_ROWS_DEFAULT } from "../src/features/clean-mode/types.ts";
 
 /** 树形行前缀（`├─ ` / `└─ `）与续行前缀；从源码常量算，缩进变了断言跟着走。 */

@@ -12,31 +12,16 @@ import { agentLoop, type AgentLoopConfig, type AgentTool } from "@earendil-works
 import type { CacheRetention, Message, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { buildAgentContext } from "../agent-context.js";
 import { createTurnCap, type LegacyTurnCapOption } from "../turn-cap.js";
-import {
-  createBridgeStreamFn,
-  createProviderFetch,
-  type ProviderFetchOption,
-} from "../../provider-stream.js";
+import { createBridgeStreamFn, createProviderFetch, type ProviderFetchOption } from "../../provider-stream.js";
 import { streamSimple } from "@earendil-works/pi-ai/compat";
 import { Type } from "typebox";
 import type { Static } from "typebox";
 import { debugLog } from "../../debug-log.js";
-import {
-  withDiscardedCount,
-  WorkerStreamError,
-  workerStreamErrorMessage,
-} from "../../retryable-error.js";
+import { withDiscardedCount, WorkerStreamError, workerStreamErrorMessage } from "../../retryable-error.js";
 import { AGENT_LOOP_MAX_TOKENS, boundedMaxTokens } from "../../model-budget.js";
 import { reflectionToSummaryLine, type Observation, type Reflection } from "../../ledger/index.js";
 import { DROPPER_SYSTEM } from "./prompts.js";
-import {
-  REFLECTION_COVERAGE_DROP_RANK,
-  coverageTierForObservation,
-  observationToDropperLine,
-  reflectionCoverageMap,
-  summarizeCoverageByRelevance,
-  summarizeCoverageByRelevanceForIds,
-} from "./coverage.js";
+import { REFLECTION_COVERAGE_DROP_RANK, coverageTierForObservation, observationToDropperLine, reflectionCoverageMap, summarizeCoverageByRelevance, summarizeCoverageByRelevanceForIds } from "./coverage.js";
 
 interface RunDropperArgs {
   model: Model<any>;

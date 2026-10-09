@@ -1,12 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  DEFAULT_TITLE_CONFIG,
-  TITLE_EFFORT_LEVELS,
-  isTitleEffort,
-  namingConfigSchema,
-  parseConfig,
-} from "../src/features/naming/config.ts";
+import { DEFAULT_TITLE_CONFIG, TITLE_EFFORT_LEVELS, isTitleEffort, namingConfigSchema, parseConfig } from "../src/features/naming/config.ts";
 
 const DEFAULTS = {
   automaticNaming: true,

@@ -4,7 +4,6 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { withTempAgentDir } from "pi-utils";
-import { applyLocale, clearLocaleOverride } from "pi-utils";
 import { clearConfigCache, loadConfig } from "../src/config/index.ts";
 import { loadNamingConfig, namingConfigPath, saveNamingConfig } from "../src/config/naming-store.ts";
 import { projectSparkConfigPath, readConfigObject, sparkConfigPath } from "../src/config/store.ts";
@@ -110,7 +109,6 @@ for (const scope of ["global", "project"] as const) {
         assert.equal(notices.length, 1);
         assert.equal(notices[0].level, "error");
         assert.ok(notices[0].message.includes(path));
-        assert.match(notices[0].message, /\[spark\]/);
       }
     });
   });
@@ -163,23 +161,15 @@ test("unreadable canonical and legacy paths fail closed", async () => {
   }
 });
 
-test("naming errors use the Spark source and localized naming diagnostics in both locales", async () => {
-  try {
-    for (const [locale, pattern] of [["en-US", /Invalid configuration field/], ["zh-CN", /配置字段无效/]] as const) {
-      applyLocale(locale);
-      await withConfig(({ ctx, globalPath, notices }) => {
-        writeJson(globalPath, { naming: { typo: true } });
-        assert.equal(loadNamingConfig(ctx), false);
-        assert.match(notices[0].message, pattern);
-        assert.match(notices[0].message, /\[spark\]/);
-        assert.equal(notices[0].level, "error");
-        loadNamingConfig(ctx);
-        assert.equal(notices.length, 1, "cached invalid config must not repeat notices");
-      });
-    }
-  } finally {
-    clearLocaleOverride();
-  }
+test("naming errors report English diagnostics", async () => {
+  await withConfig(({ ctx, globalPath, notices }) => {
+    writeJson(globalPath, { naming: { typo: true } });
+    assert.equal(loadNamingConfig(ctx), false);
+    assert.match(notices[0].message, /Invalid configuration field/);
+    assert.equal(notices[0].level, "error");
+    loadNamingConfig(ctx);
+    assert.equal(notices.length, 1, "cached invalid config must not repeat notices");
+  });
 });
 
 test("project naming merges global leaves before defaults and cross-field validation", async () => {

@@ -51,32 +51,9 @@ import { getAgentDir, readStoredCredential } from "@earendil-works/pi-coding-age
 import type { ExtensionAPI, ProviderModelConfig } from "@earendil-works/pi-coding-agent";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { NOTICE_TAG_COLOR, installNoticeRenderer, notifyWithSource, scope, type MessageParams, type NoticeColor, type NoticeSource } from "pi-utils";
-import { registerLocalesFromDir } from "pi-utils/loader";
-
-const NAMESPACE = "pi-models-discovery";
-const loadedLocales = registerLocalesFromDir(NAMESPACE, new URL("../locales/", import.meta.url));
-if (loadedLocales.diagnostics.length > 0) {
-	throw new Error(
-		`Failed to load pi-models-discovery locales: ${loadedLocales.diagnostics.map((item) => `${item.locale}: ${item.error}`).join("; ")}`,
-	);
-}
-const translate = scope(NAMESPACE);
-const i18n = {
-	t(key: string, params?: MessageParams): string {
-		return translate(key, key, params);
-	},
-};
-
 const FETCH_TIMEOUT_MS = 5000;
 const DISCOVERY_MARKER = "discoverModels";
 const LOG_PREFIX = "[model-discovery]";
-/** 本扩展的提示标签；短且唯一，便于在会话里定位来源。 */
-const NOTICE_TAG = "models";
-/** 提示标签颜色：所有扩展统一用弱化色，来源靠 tag 文本区分，不靠颜色。 */
-const NOTICE_COLOR: NoticeColor = NOTICE_TAG_COLOR;
-/** 本扩展的提示来源。 */
-const NOTICE_SOURCE: NoticeSource = { tag: NOTICE_TAG, color: NOTICE_COLOR };
 const API_CHOICES = ["openai-completions", "anthropic-messages", "openai-responses", "google-generative-ai"] as const;
 
 /** 用户可见消息（级别与 ctx.ui.notify 的 type 对齐）；供通知中继与无 ctx 的收集队列共用 */
@@ -175,7 +152,7 @@ async function readCache(notices: Notice[]): Promise<CacheFile> {
 		if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
 			notices.push({
 				level: "warning",
-				message: `${LOG_PREFIX} ${i18n.t("cacheReadFailed", { reason: err instanceof Error ? err.message : String(err) })}`,
+				message: `${LOG_PREFIX} ${`Failed to read the model cache (ignored; will rediscover): ${err instanceof Error ? err.message : String(err)}`}`,
 			});
 		}
 		return { version: 1, providers: {} };
@@ -189,7 +166,7 @@ async function readCache(notices: Notice[]): Promise<CacheFile> {
 	} catch (err) {
 		notices.push({
 			level: "warning",
-			message: `${LOG_PREFIX} ${i18n.t("cacheReadFailed", { reason: err instanceof Error ? err.message : String(err) })}`,
+			message: `${LOG_PREFIX} ${`Failed to read the model cache (ignored; will rediscover): ${err instanceof Error ? err.message : String(err)}`}`,
 		});
 		return { version: 1, providers: {} };
 	}
@@ -213,7 +190,7 @@ async function persistCachedModels(
 	} catch (err) {
 		notices.push({
 			level: "warning",
-			message: `${LOG_PREFIX} ${entry.id}: ${i18n.t("cacheWriteFailed", { reason: err instanceof Error ? err.message : String(err) })}`,
+			message: `${LOG_PREFIX} ${entry.id}: ${`Failed to write the model cache: ${err instanceof Error ? err.message : String(err)}`}`,
 		});
 	}
 }
@@ -229,7 +206,7 @@ async function removeCachedModels(id: string, notices: Notice[]): Promise<void> 
 	} catch (err) {
 		notices.push({
 			level: "warning",
-			message: `${LOG_PREFIX} ${id}: ${i18n.t("cacheWriteFailed", { reason: err instanceof Error ? err.message : String(err) })}`,
+			message: `${LOG_PREFIX} ${id}: ${`Failed to write the model cache: ${err instanceof Error ? err.message : String(err)}`}`,
 		});
 	}
 }
@@ -243,13 +220,13 @@ async function readModelsFile(): Promise<{ data: Record<string, unknown>; error:
 		if ((err as NodeJS.ErrnoException).code === "ENOENT") {
 			return { data: {}, error: null };
 		}
-		return { data: {}, error: i18n.t("readFailed", { reason: err instanceof Error ? err.message : String(err) }) };
+		return { data: {}, error: `Failed to read models.json: ${err instanceof Error ? err.message : String(err)}` };
 	}
 	try {
 		const parsed = JSON.parse(stripJsonComments(raw)) as Record<string, unknown>;
 		return { data: parsed, error: null };
 	} catch (err) {
-		return { data: {}, error: i18n.t("parseFailed", { reason: err instanceof Error ? err.message : String(err) }) };
+		return { data: {}, error: `Failed to parse models.json: ${err instanceof Error ? err.message : String(err)}` };
 	}
 }
 
@@ -261,7 +238,7 @@ async function writeModelsFile(data: Record<string, unknown>): Promise<{ backup:
 		await writeFile(backup, await readFile(path, "utf-8"), "utf-8");
 	} catch (err) {
 		if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-			throw new Error(i18n.t("backupFailed", { reason: err instanceof Error ? err.message : String(err) }));
+			throw new Error(`Failed to back up models.json: ${err instanceof Error ? err.message : String(err)}`);
 		}
 	}
 	await writeFile(path, `${JSON.stringify(data, null, 4)}\n`, "utf-8");
@@ -356,7 +333,7 @@ function pickDiscoveryProviders(data: Record<string, unknown>): DiscoveryProvide
  */
 function resolveEnvValue(raw: string): { value: string | null; error: string | null } {
 	if (raw.startsWith("!")) {
-		return { value: null, error: i18n.t("commandValueUnsupported") };
+		return { value: null, error: "Discovery requests do not support \"!command\" configuration values" };
 	}
 	const missing: string[] = [];
 	const value = raw
@@ -374,7 +351,7 @@ function resolveEnvValue(raw: string): { value: string | null; error: string | n
 		.replaceAll("\0DOLLAR\0", "$")
 		.replaceAll("\0BANG\0", "!");
 	if (missing.length > 0) {
-		return { value: null, error: i18n.t("envMissing", { names: missing.join(", ") }) };
+		return { value: null, error: `Environment variables not set: ${missing.join(", ")}` };
 	}
 	return { value, error: null };
 }
@@ -430,7 +407,7 @@ async function fetchModels(
 	notices: Notice[],
 ): Promise<ProviderModelConfig[]> {
 	if (!entry.baseUrl) {
-		throw new Error(i18n.t("missingBaseUrl"));
+		throw new Error("Missing baseUrl");
 	}
 	const headers: Record<string, string> = {};
 	for (const [key, rawValue] of Object.entries(entry.headers ?? {})) {
@@ -438,7 +415,7 @@ async function fetchModels(
 		if (resolved.error) {
 			notices.push({
 				level: "warning",
-				message: `${LOG_PREFIX} ${i18n.t("headerSkipped", { id: entry.id, key, reason: resolved.error })}`,
+				message: `${LOG_PREFIX} ${`${entry.id}: header "${key}" ${resolved.error}; this header was not sent with the discovery request`}`,
 			});
 			continue;
 		}
@@ -451,10 +428,10 @@ async function fetchModels(
 	try {
 		response = await fetch(url, { headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
 	} catch (err) {
-		throw new Error(i18n.t("fetchFailed", { url, reason: err instanceof Error ? err.message : String(err) }));
+		throw new Error(`Request to ${url} failed: ${err instanceof Error ? err.message : String(err)}`);
 	}
 	if (!response.ok) {
-		throw new Error(i18n.t("fetchHttpError", { url, status: response.status }));
+		throw new Error(`Request to ${url} returned HTTP ${response.status}`);
 	}
 	const payload = (await response.json()) as ModelsResponse | Array<ModelsResponse["data"] extends (infer T)[] ? T : never>;
 	const entries = Array.isArray(payload) ? payload : (payload.data ?? []);
@@ -472,7 +449,7 @@ async function fetchModels(
 			),
 		);
 	if (models.length === 0) {
-		throw new Error(i18n.t("emptyModelList", { url }));
+		throw new Error(`${url} returned an empty model list`);
 	}
 	return models;
 }
@@ -503,7 +480,7 @@ function createRefreshModels(entry: DiscoveryProviderEntry, notices: Notice[], s
 	return async (context: { allowNetwork: boolean }) => {
 		if (!context.allowNetwork) {
 			if (state.lastModels.length === 0) {
-				throw new Error(i18n.t("offlineNoCache"));
+				throw new Error("No discovered models yet (last discovery failed); skipping offline initialization");
 			}
 			return state.lastModels;
 		}
@@ -519,7 +496,7 @@ function validateEntry(entry: DiscoveryProviderEntry, notices: Notice[]): entry 
 	if (!entry.baseUrl || !entry.api) {
 		notices.push({
 			level: "warning",
-			message: `${LOG_PREFIX} ${entry.id}: ${i18n.t("missingConfig", { field: !entry.baseUrl ? "baseUrl" : "api" })}`,
+			message: `${LOG_PREFIX} ${entry.id}: ${`Missing ${!entry.baseUrl ? "baseUrl" : "api"}; cannot register model discovery`}`,
 		});
 		return false;
 	}
@@ -558,7 +535,7 @@ async function discoverAndRegister(
 		const reason = err instanceof Error ? err.message : String(err);
 		notices.push({
 			level: "warning",
-			message: `${LOG_PREFIX} ${i18n.t("discoveryFailed", { id: entry.id, reason })}`,
+			message: `${LOG_PREFIX} ${`${entry.id}: model discovery failed (${reason}); falling back to handwritten models in models.json, or no models available`}`,
 		});
 		pi.registerProvider(entry.id, {
 			baseUrl: entry.baseUrl,
@@ -590,7 +567,7 @@ function registerFromCache(
 /** /config:model-discovery 交互式配置命令；旧名称保留为兼容别名。 */
 function registerDiscoveryCommand(pi: ExtensionAPI, fetchCache: FetchCache, sink: NoticeSink) {
 	const command = {
-		description: i18n.t("commandDescription"),
+		description: "Interactively manage model-discovery providers (add/remove/rediscover); changes are written to models.json and take effect immediately",
 		handler: async (_args, ctx) => {
 			if (!ctx.hasUI) return;
 			while (true) {
@@ -600,15 +577,15 @@ function registerDiscoveryCommand(pi: ExtensionAPI, fetchCache: FetchCache, sink
 					return;
 				}
 				const providers = pickDiscoveryProviders(data);
-				const ADD = i18n.t("add");
-				const EXIT = i18n.t("exit");
+				const ADD = "➕ Add provider";
+				const EXIT = "Exit";
 				const choices = [
 					...providers.map((p) => `${p.id} — ${p.baseUrl ?? "?"}（${p.api ?? "?"}）`),
 					ADD,
 					EXIT,
 				];
 				const choice = await ctx.ui.select(
-					providers.length > 0 ? i18n.t("title", { count: providers.length }) : i18n.t("emptyTitle"),
+					providers.length > 0 ? `Model-discovery providers (${providers.length})` : "Model-discovery providers (none)",
 					choices,
 				);
 				if (choice === undefined || choice === EXIT) return;
@@ -632,7 +609,7 @@ function registerDiscoveryCommand(pi: ExtensionAPI, fetchCache: FetchCache, sink
 /** /config:model-discovery-refresh 强制刷新命令；旧名称保留为兼容别名。 */
 function registerRefreshCommand(pi: ExtensionAPI, sink: NoticeSink) {
 	const command = {
-		description: i18n.t("refreshDescription"),
+		description: "Force rediscovery of all model-discovery providers and update the local cache (startup uses the cache and performs no network requests by default)",
 		handler: async (_args, ctx) => {
 			if (!ctx.hasUI) return;
 			const { data, error } = await readModelsFile();
@@ -642,7 +619,7 @@ function registerRefreshCommand(pi: ExtensionAPI, sink: NoticeSink) {
 			}
 			const providers = pickDiscoveryProviders(data);
 			if (providers.length === 0) {
-				sink({ level: "info", message: i18n.t("refreshEmpty") }, ctx);
+				sink({ level: "info", message: "No provider in models.json is marked with discoverModels; add one with /config:model-discovery" }, ctx);
 				return;
 			}
 			// 每次刷新用新的请求级缓存：同 baseUrl 的 provider 仍共享一次请求，但不复用启动期结果
@@ -656,7 +633,7 @@ function registerRefreshCommand(pi: ExtensionAPI, sink: NoticeSink) {
 					sink(
 						{
 							level: "info",
-							message: `${LOG_PREFIX} ${i18n.t("discoveredInfo", { id: entry.id, count: result.count, models: result.models.map((m) => m.id).join(", ") })}`,
+							message: `${LOG_PREFIX} ${`${entry.id}: discovered ${result.count} models (${result.models.map((m) => m.id).join(", ")})`}`,
 						},
 						ctx,
 					);
@@ -666,7 +643,7 @@ function registerRefreshCommand(pi: ExtensionAPI, sink: NoticeSink) {
 			sink(
 				{
 					level: ok === providers.length ? "info" : "warning",
-					message: i18n.t("refreshDone", { ok, total: providers.length }),
+					message: `Model refresh finished: ${ok}/${providers.length} providers succeeded`,
 				},
 				ctx,
 			);
@@ -681,45 +658,49 @@ type CommandCtx = Parameters<Parameters<ExtensionAPI["registerCommand"]>[1]["han
 
 /** 将收集到的 Notice 逐条经来源包装后 flush 到 UI */
 function flushNotices(ctx: CommandCtx, notices: Notice[]): void {
-	for (const notice of notices) notifyWithSource({ ctx, source: NOTICE_SOURCE, level: notice.level, message: notice.message });
+	for (const notice of notices) ctx.ui.notify(notice.message, notice.level);
 }
 
 /** /config:model-discovery 添加 provider 交互流程 */
 async function addProviderFlow(pi: ExtensionAPI, ctx: CommandCtx, data: Record<string, unknown>, fetchCache: FetchCache, sink: NoticeSink) {
 	const existingIds = new Set(Object.keys((data.providers ?? {}) as Record<string, unknown>));
-	const id = (await ctx.ui.input(i18n.t("providerId")))?.trim();
+	const id = (await ctx.ui.input("Provider id (letters, numbers, hyphens; e.g. my-proxy)"))?.trim();
 	if (!id) return;
 	if (!/^[a-z0-9][a-z0-9-]*$/i.test(id)) {
-		sink({ level: "error", message: i18n.t("invalidId") }, ctx);
+		sink({ level: "error", message: "The id may contain only letters, numbers, and hyphens, and cannot start with a hyphen" }, ctx);
 		return;
 	}
 	if (existingIds.has(id)) {
-		sink({ level: "error", message: i18n.t("exists", { id }) }, ctx);
+		sink({ level: "error", message: `Provider "${id}" already exists in models.json` }, ctx);
 		return;
 	}
-	const baseUrl = (await ctx.ui.input(i18n.t("baseUrl")))?.trim();
+	const baseUrl = (await ctx.ui.input("baseUrl (e.g. http://127.0.0.1:9000/pi/v1)"))?.trim();
 	if (!baseUrl) return;
 	if (!/^https?:\/\//.test(baseUrl)) {
-		sink({ level: "error", message: i18n.t("invalidUrl") }, ctx);
+		sink({ level: "error", message: "baseUrl must start with http:// or https://" }, ctx);
 		return;
 	}
-	const api = await ctx.ui.select(i18n.t("api"), [...API_CHOICES]);
+	const api = await ctx.ui.select("API type", [...API_CHOICES]);
 	if (!api) return;
-	const apiKey = (await ctx.ui.input(i18n.t("apiKey")))?.trim();
-	const name = (await ctx.ui.input(i18n.t("displayName", { id })))?.trim();
+	const apiKey = (await ctx.ui.input("apiKey (optional; supports $ENV_VAR)"))?.trim();
+	const name = (await ctx.ui.input(`Display name (optional; defaults to ${id})`))?.trim();
 
 	const entry: Record<string, unknown> = { baseUrl, api, [DISCOVERY_MARKER]: true };
 	if (name) entry.name = name;
 	if (apiKey) entry.apiKey = apiKey;
-	const summary = i18n.t("summary", { id, baseUrl, api, apiKey: apiKey || i18n.t("noKey"), name: name || id });
-	if (!(await ctx.ui.confirm(i18n.t("confirmAdd"), summary))) return;
+	const summary = `id: ${id}
+baseUrl: ${baseUrl}
+api: ${api}
+apiKey: ${apiKey || "(none)"}
+name: ${name || id}`;
+	if (!(await ctx.ui.confirm("Add this provider and write it to models.json?", summary))) return;
 
 	const providers = (data.providers ?? {}) as Record<string, unknown>;
 	providers[id] = entry;
 	data.providers = providers;
 	try {
 		const { backup } = await writeModelsFile(data);
-		sink({ level: "info", message: i18n.t("written", { backup }) }, ctx);
+		sink({ level: "info", message: `Wrote models.json (backup: ${backup})` }, ctx);
 	} catch (err) {
 		sink({ level: "error", message: `${LOG_PREFIX} ${err instanceof Error ? err.message : err}` }, ctx);
 		return;
@@ -734,9 +715,9 @@ async function addProviderFlow(pi: ExtensionAPI, ctx: CommandCtx, data: Record<s
 	);
 	flushNotices(ctx, notices);
 	if (result) {
-		sink({ level: "info", message: i18n.t("discovered", { id, count: result.count }) }, ctx);
+		sink({ level: "info", message: `${id}: discovered and registered ${result.count} models; they are available in /model` }, ctx);
 	} else {
-		sink({ level: "warning", message: i18n.t("firstFailed", { id }) }, ctx);
+		sink({ level: "warning", message: `${id}: configuration saved, but initial discovery failed; rediscover with /config:model-discovery after the service recovers` }, ctx);
 	}
 }
 
@@ -749,11 +730,13 @@ async function manageProviderFlow(
 	fetchCache: FetchCache,
 	sink: NoticeSink,
 ) {
-	const REDISCOVER = i18n.t("rediscover");
-	const REMOVE = i18n.t("remove");
-	const BACK = i18n.t("back");
+	const REDISCOVER = "🔄 Rediscover models";
+	const REMOVE = "🗑 Remove provider";
+	const BACK = "Back";
 	const action = await ctx.ui.select(
-		i18n.t("manageTitle", { id: entry.id, baseUrl: entry.baseUrl ?? "?", api: entry.api ?? "?" }),
+		`${entry.id}
+baseUrl: ${entry.baseUrl ?? "?"}
+api: ${entry.api ?? "?"}`,
 		[REDISCOVER, REMOVE, BACK],
 	);
 	if (action === undefined || action === BACK) return;
@@ -763,13 +746,13 @@ async function manageProviderFlow(
 		const result = await discoverAndRegister(pi, entry, fetchCache, notices);
 		flushNotices(ctx, notices);
 		if (result) {
-			sink({ level: "info", message: i18n.t("rediscovered", { id: entry.id, count: result.count }) }, ctx);
+			sink({ level: "info", message: `${entry.id}: rediscovered ${result.count} models` }, ctx);
 		}
 		return;
 	}
 
 	// REMOVE
-	if (!(await ctx.ui.confirm(i18n.t("confirmRemove", { id: entry.id }), i18n.t("removeMessage")))) return;
+	if (!(await ctx.ui.confirm(`Remove provider "${entry.id}"?`, "This removes the provider and unregisters its models from models.json. It can be added again later."))) return;
 	const providers = (data.providers ?? {}) as Record<string, unknown>;
 	delete providers[entry.id];
 	data.providers = providers;
@@ -779,20 +762,18 @@ async function manageProviderFlow(
 		const notices: Notice[] = [];
 		await removeCachedModels(entry.id, notices);
 		flushNotices(ctx, notices);
-		sink({ level: "info", message: i18n.t("removed", { id: entry.id, backup }) }, ctx);
+		sink({ level: "info", message: `Removed ${entry.id} (backup: ${backup})` }, ctx);
 	} catch (err) {
 		sink({ level: "error", message: `${LOG_PREFIX} ${err instanceof Error ? err.message : err}` }, ctx);
 	}
 }
 
 export default async function (pi: ExtensionAPI) {
-	// 提示画成会话区里的带底色消息块；渲染器在本包这个模块实例里注册一次。
-	installNoticeRenderer(pi);
 	// 加载期没有 ctx，消息统一收集，session_start 时 flush（运行期后续追加的也会在下个 session 补发）
 	const pendingNotices: Notice[] = [];
-	// 有 UI 时走统一来源包装；无 UI 时退到日志前缀，不静默丢掉提示
+	// 有 UI 时走 ctx.ui.notify；无 UI 时先收集，session_start 再补发。
 	const sink: NoticeSink = (notice, ctx) => {
-		if (ctx) notifyWithSource({ ctx, source: NOTICE_SOURCE, level: notice.level, message: notice.message });
+		if (ctx) ctx.ui.notify(notice.message, notice.level);
 		else pendingNotices.push(notice);
 	};
 	const { data, error } = await readModelsFile();
@@ -825,7 +806,7 @@ export default async function (pi: ExtensionAPI) {
 
 	pi.on("session_start", (_event, ctx) => {
 		for (const notice of pendingNotices.splice(0)) {
-			notifyWithSource({ ctx, source: NOTICE_SOURCE, level: notice.level, message: notice.message });
+			ctx.ui.notify(notice.message, notice.level);
 		}
 	});
 }

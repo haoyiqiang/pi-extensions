@@ -12,12 +12,7 @@
 import { describe, expect, it } from "vitest";
 
 import { runDropper } from "../src/om/agents/dropper/agent.js";
-import {
-  getDiscardedCount,
-  isDeterministicError,
-  isRetryableError,
-  WorkerStreamError,
-} from "../src/om/retryable-error.js";
+import { getDiscardedCount, isDeterministicError, isRetryableError, WorkerStreamError } from "../src/om/retryable-error.js";
 import { observation, reflection } from "./fixtures/session.js";
 
 describe("runDropper failure guard", () => {

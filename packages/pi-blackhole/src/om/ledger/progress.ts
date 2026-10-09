@@ -1,17 +1,7 @@
 import { estimateEntryTokens, getUsageTokens } from "../tokens.js";
 import type { PendingOMState } from "../pending.js";
 import { foldLedger } from "./fold.js";
-import {
-  OM_OBSERVATIONS_DROPPED,
-  OM_OBSERVATIONS_RECORDED,
-  OM_REFLECTIONS_RECORDED,
-  isObservationsRecordedData,
-  isReflectionsRecordedData,
-  type Entry,
-  type Observation,
-  type Reflection,
-  type V3MemoryCustomType,
-} from "./types.js";
+import { OM_OBSERVATIONS_DROPPED, OM_OBSERVATIONS_RECORDED, OM_REFLECTIONS_RECORDED, isObservationsRecordedData, isReflectionsRecordedData, type Entry, type Observation, type Reflection, type V3MemoryCustomType } from "./types.js";
 
 const SOURCE_ENTRY_TYPES = new Set(["message", "custom_message", "branch_summary"]);
 

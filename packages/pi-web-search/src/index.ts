@@ -4,7 +4,6 @@ import { Text } from "@earendil-works/pi-tui";
 import { loadWebSearchConfig, resolveConfiguredLlm } from "./config.ts";
 import { openWebSearchConfigPanel } from "./config-panel.ts";
 import { getProviderKind, isGoogleDeveloperModel } from "./api.ts";
-import { i18n } from "./i18n.ts";
 import { urlContext, UrlContextSchema } from "./url_context.ts";
 import { webFetch, WebFetchSchema } from "./web_fetch.ts";
 import { webSearch, WebSearchSchema } from "./web_search.ts";
@@ -81,8 +80,8 @@ function renderResult(result: AgentToolResult<any>, expanded: boolean, theme: an
 export default function registerPiWebSearch(pi: ExtensionAPI) {
   pi.registerTool({
     name: WEB_SEARCH_TOOL,
-    label: i18n.t("webSearch.label"),
-    description: i18n.t("webSearch.description"),
+    label: "Web Search",
+    description: "Search the web with an LLM provider's built-in web search or a configured Search API. Auto mode prefers LLM search and falls back to API search as configured.",
     parameters: WebSearchSchema,
     execute: (id, params, signal = new AbortController().signal, onUpdate, ctx) =>
       webSearch(id, params, signal, onUpdate, ctx, pi.getThinkingLevel()),
@@ -97,23 +96,23 @@ export default function registerPiWebSearch(pi: ExtensionAPI) {
 
   pi.registerTool({
     name: URL_CONTEXT_TOOL,
-    label: i18n.t("urlContext.label"),
-    description: i18n.t("urlContext.description"),
+    label: "URL Context",
+    description: "Analyze up to 20 public URLs with built-in URL Context from Google Gemini Developer API or Vertex Express; public YouTube URLs are handled as video input.",
     parameters: UrlContextSchema,
     execute: urlContext,
   });
 
   pi.registerTool({
     name: WEB_FETCH_TOOL,
-    label: i18n.t("webFetch.label"),
-    description: i18n.t("webFetch.description"),
+    label: "Web Fetch",
+    description: "Read one HTTP(S) URL and return its content through a hosted fetch provider or built-in HTML-to-text extraction.",
     parameters: WebFetchSchema,
     execute: webFetch,
   });
 
   const manager = createModelScopedToolManager(pi);
   pi.registerCommand(CONFIG_COMMAND, {
-    description: i18n.t("configPanel.commandDescription"),
+    description: "Open the web search configuration panel",
     handler: (_args, ctx) => openWebSearchConfigPanel(ctx, {
       onSaved: () => manager.sync(ctx.model, ctx),
     }),

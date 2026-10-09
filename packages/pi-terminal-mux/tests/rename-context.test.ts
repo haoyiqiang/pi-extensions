@@ -1,10 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-  createSurfaceRenameContext, readSurfaceRenameContext, resolveTerminalRenameTargets,
-  renameTerminalTarget, TERMINAL_RENAME_CONTEXT_ENV, type MuxBackend,
-  type SurfaceRenameContext, type TerminalRenameTarget,
-} from "../src/index.ts";
+import { createSurfaceRenameContext, readSurfaceRenameContext, resolveTerminalRenameTargets, renameTerminalTarget, TERMINAL_RENAME_CONTEXT_ENV, type MuxBackend, type SurfaceRenameContext, type TerminalRenameTarget } from "../src/index.ts";
 
 /** 构造不依赖本机环境的协议输入。 */
 function contextEnv(context: SurfaceRenameContext): NodeJS.ProcessEnv {

@@ -1,20 +1,8 @@
 // @ts-nocheck
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-	TOOL_ROW_GROUP_HEADER,
-	TOOL_ROW_HIDDEN,
-	TOOL_ROW_NORMAL,
-	TOOL_ROW_SUMMARY,
-	type ActionGroupMembership,
-} from "../src/features/clean-mode/action-groups.ts";
-import {
-	resolveAssistantMessageRender,
-	resolveRunHeader,
-	resolveToolRowMode,
-	type AssistantRenderInput,
-	type ToolRowModeInput,
-} from "../src/features/clean-mode/render-policy.ts";
+import { TOOL_ROW_GROUP_HEADER, TOOL_ROW_HIDDEN, TOOL_ROW_NORMAL, TOOL_ROW_SUMMARY, type ActionGroupMembership } from "../src/features/clean-mode/action-groups.ts";
+import { resolveAssistantMessageRender, resolveRunHeader, resolveToolRowMode, type AssistantRenderInput, type ToolRowModeInput } from "../src/features/clean-mode/render-policy.ts";
 import { DEFAULT_CLEAN_MODE_CONFIG, type CleanModeState } from "../src/features/clean-mode/types.ts";
 
 /** 测试统一使用的已知耗时，避免在多处重复字面量。 */

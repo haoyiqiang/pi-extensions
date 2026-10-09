@@ -1,16 +1,7 @@
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
-import { i18n } from "./i18n.ts";
 import type { ApiSearchProviderName, FallbackReason, WebSearchMode } from "./types.ts";
 import { FALLBACK_REASONS, WEB_SEARCH_MODES } from "./types.ts";
 
@@ -104,7 +95,7 @@ function getLegacyRpivConfigPaths(): string[] {
 
 function expectObject(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(i18n.t("config.object", { label }));
+    throw new Error(`${label} must be a JSON object.`);
   }
   return value as Record<string, unknown>;
 }
@@ -112,7 +103,7 @@ function expectObject(value: unknown, label: string): Record<string, unknown> {
 function optionalString(value: unknown, label: string): string | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== "string" || value.trim() === "") {
-    throw new Error(i18n.t("config.nonEmptyString", { label }));
+    throw new Error(`${label} must be a non-empty string.`);
   }
   return value.trim();
 }
@@ -120,7 +111,7 @@ function optionalString(value: unknown, label: string): string | undefined {
 function optionalPositiveNumber(value: unknown, label: string): number | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
-    throw new Error(i18n.t("config.positiveNumber", { label }));
+    throw new Error(`${label} must be a number greater than 0.`);
   }
   return value;
 }
@@ -129,7 +120,7 @@ function parseGitHubInterceptor(value: unknown, label: string): boolean | GitHub
   if (typeof value === "boolean") return value;
   const github = expectObject(value, label);
   if (github.enabled !== undefined && typeof github.enabled !== "boolean") {
-    throw new Error(i18n.t("config.boolean", { label: `${label}.enabled` }));
+    throw new Error(`${`${label}.enabled`} must be a boolean.`);
   }
   return {
     enabled: github.enabled as boolean | undefined,
@@ -143,7 +134,7 @@ function parseLlmConfig(value: unknown, label: string): LlmSearchConfig {
   const llm = expectObject(value, label);
   const transport = optionalString(llm.transport, `${label}.transport`) as LlmTransport | undefined;
   if (transport && !LLM_TRANSPORTS.has(transport)) {
-    throw new Error(i18n.t("config.transport"));
+    throw new Error("llm.transport must be auto, google-developer, or vertex-express.");
   }
   return {
     provider: optionalString(llm.provider, `${label}.provider`),
@@ -158,16 +149,16 @@ function parseConfig(raw: unknown): WebSearchConfig {
 
   if (root.mode !== undefined) {
     if (typeof root.mode !== "string" || !WEB_SEARCH_MODES.includes(root.mode as WebSearchMode)) {
-      throw new Error(i18n.t("config.mode"));
+      throw new Error("mode must be auto, llm, or api.");
     }
     config.mode = root.mode as WebSearchMode;
   }
 
   if (root.fallbackOn !== undefined) {
-    if (!Array.isArray(root.fallbackOn)) throw new Error(i18n.t("config.fallbackArray"));
+    if (!Array.isArray(root.fallbackOn)) throw new Error("fallbackOn must be an array.");
     const values = root.fallbackOn.map((value) => {
       if (typeof value !== "string" || !FALLBACK_REASONS.includes(value as FallbackReason)) {
-        throw new Error(i18n.t("config.fallbackValue", { value: String(value) }));
+        throw new Error(`Unsupported fallbackOn value: ${String(value)}`);
       }
       return value as FallbackReason;
     });
@@ -190,7 +181,7 @@ function parseConfig(raw: unknown): WebSearchConfig {
     const api = expectObject(root.api, "api");
     const provider = optionalString(api.provider, "api.provider") as ApiSearchProviderName | undefined;
     if (provider && !API_PROVIDERS.has(provider)) {
-      throw new Error(i18n.t("config.apiProvider", { provider }));
+      throw new Error(`Unknown api.provider: ${provider}`);
     }
     const apiKeys = parseStringMap(api.apiKeys, "api.apiKeys");
     const baseUrls = parseStringMap(api.baseUrls, "api.baseUrls");
@@ -215,7 +206,7 @@ function parseStringMap(value: unknown, label: string): Record<string, string> |
   const output: Record<string, string> = {};
   for (const [key, entry] of Object.entries(object)) {
     if (typeof entry !== "string") {
-      throw new Error(i18n.t("config.stringMap", { label: `${label}.${key}` }));
+      throw new Error(`${`${label}.${key}`} must be a string.`);
     }
     const trimmed = entry.trim();
     if (trimmed) output[key] = trimmed;
@@ -418,7 +409,7 @@ export function resolveApiProviderName(config: WebSearchConfig, override?: strin
     || config.api?.provider
     || "brave";
   if (!API_PROVIDERS.has(raw as ApiSearchProviderName)) {
-    throw new Error(i18n.t("error.unknownApiProvider", { provider: raw }));
+    throw new Error(`Unknown API search provider: ${raw}`);
   }
   return raw as ApiSearchProviderName;
 }

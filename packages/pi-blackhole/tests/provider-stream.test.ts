@@ -1,16 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import {
-  captureRegisteredProviderStreams,
-  createAttributionTransform,
-  createBridgeStreamFn,
-  createProviderFetch,
-  getOpenCodeSessionHeaders,
-  isOpenCodeModel,
-  matchesProviderHost,
-  providerStreamKey,
-  withProviderAttributionHeaders,
-} from "../src/om/provider-stream.js";
+import { captureRegisteredProviderStreams, createAttributionTransform, createBridgeStreamFn, createProviderFetch, getOpenCodeSessionHeaders, isOpenCodeModel, matchesProviderHost, providerStreamKey, withProviderAttributionHeaders } from "../src/om/provider-stream.js";
 // Node's built-in Undici installs this symbol lazily and defines it
 // non-configurable, so it must exist before a test replaces the value: a plain
 // assignment then writes through the existing writable property, and cleanup can

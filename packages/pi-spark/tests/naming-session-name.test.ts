@@ -3,16 +3,7 @@ import { test } from "node:test";
 import type {
   SessionEntry,
 } from "@earendil-works/pi-coding-agent";
-import {
-  buildSessionNamePrompt,
-  getSessionUserMessages,
-  normalizeSessionName,
-  requestSessionName,
-  requestSessionNameWithTimeout,
-  type SessionNameCompletion,
-  type SessionNameRequest,
-  type SessionNameRequester,
-} from "../src/features/naming/session-name.ts";
+import { buildSessionNamePrompt, getSessionUserMessages, normalizeSessionName, requestSessionName, requestSessionNameWithTimeout, type SessionNameCompletion, type SessionNameRequest, type SessionNameRequester } from "../src/features/naming/session-name.ts";
 
 import { parseConfig } from "../src/features/naming/config.ts";
 import { registerSessionResourceCleanup, type AssistantMessage } from "@earendil-works/pi-ai";

@@ -1,12 +1,5 @@
-import { i18n } from "../i18n.ts";
 import { connectionRefused, emptyFetch, invalidBaseProtocol, invalidBaseUrl, missingBaseUrl, providerApiError } from "./provider-errors.ts";
-import {
-	type FetchResponse,
-	type FullProvider,
-	type ProviderMeta,
-	type SearchResponse,
-	type SearchResult,
-} from "./types.ts";
+import { type FetchResponse, type FullProvider, type ProviderMeta, type SearchResponse, type SearchResult } from "./types.ts";
 
 export const OLLAMA_API_KEY_ENV_VAR = "OLLAMA_API_KEY";
 export const OLLAMA_HOST_ENV_VAR = "OLLAMA_HOST";
@@ -201,10 +194,10 @@ export class OllamaProvider implements FullProvider {
 
 function hintForStatus(status: number): string {
 	if (status === 401) {
-		return i18n.t("provider.hint.ollamaAuth");
+		return " (run ollama signin to authenticate)";
 	}
 	if (status === 404) {
-		return i18n.t("provider.hint.ollamaUnsupported");
+		return " (the Ollama instance may not support web search; use a recent version)";
 	}
 	return "";
 }

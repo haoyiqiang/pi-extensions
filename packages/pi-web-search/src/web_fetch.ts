@@ -1,15 +1,7 @@
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  DEFAULT_MAX_BYTES,
-  DEFAULT_MAX_LINES,
-  formatSize,
-  truncateHead,
-  type AgentToolUpdateCallback,
-  type ExtensionContext,
-  type TruncationResult,
-} from "@earendil-works/pi-coding-agent";
+import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateHead, type AgentToolUpdateCallback, type ExtensionContext, type TruncationResult } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "typebox";
 import { createSearchProvider } from "./api-providers/factory.ts";
 import { fetchViaGenericHtml } from "./api-providers/fetch-helpers.ts";
@@ -17,15 +9,14 @@ import { getInterceptors } from "./api-providers/interceptors/index.ts";
 import type { FetchResponse, FullProvider } from "./api-providers/types.ts";
 import { resolveProviderCredentials } from "./api_search.ts";
 import { loadWebSearchConfig, resolveApiProviderName } from "./config.ts";
-import { i18n } from "./i18n.ts";
 import { assertPublicDns, parseAndAssertHttpUrl } from "./url_safety.ts";
 
 const FETCH_TEMP_DIR_PREFIX = "pi-web-search-fetch-";
 const FETCH_TEMP_FILE_NAME = "content.txt";
 
 export const WebFetchSchema = Type.Object({
-  url: Type.String({ description: i18n.t("webFetch.url") }),
-  raw: Type.Optional(Type.Boolean({ description: i18n.t("webFetch.raw") })),
+  url: Type.String({ description: "The HTTP(S) URL to fetch" }),
+  raw: Type.Optional(Type.Boolean({ description: "Return the raw response body when using built-in HTTP fetch" })),
 });
 export type WebFetchInput = Static<typeof WebFetchSchema>;
 
@@ -50,16 +41,16 @@ async function spillFullContent(content: string): Promise<string> {
 }
 
 function formatHeader(url: string, title?: string, contentType?: string): string {
-  const lines = [`**${i18n.t("webFetch.fetched", { url })}**`];
-  if (title) lines.push(`**${i18n.t("webFetch.title", { title })}**`);
-  if (contentType) lines.push(`**${i18n.t("webFetch.contentType", { contentType })}**`);
+  const lines = [`**${`Fetched: ${url}`}**`];
+  if (title) lines.push(`**${`Title: ${title}`}**`);
+  if (contentType) lines.push(`**${`Content-Type: ${contentType}`}**`);
   return `${lines.join("\n")}\n\n`;
 }
 
 function formatTruncation(truncation: TruncationResult, path: string): string {
   const omittedLines = truncation.totalLines - truncation.outputLines;
   const omittedBytes = truncation.totalBytes - truncation.outputBytes;
-  return `\n\n[${i18n.t("webFetch.truncated", { path })} ${truncation.outputLines}/${truncation.totalLines} lines, ${formatSize(truncation.outputBytes)}/${formatSize(truncation.totalBytes)}, ${omittedLines} lines and ${formatSize(omittedBytes)} omitted.]`;
+  return `\n\n[${`Content was truncated; full content saved to: ${path}`} ${truncation.outputLines}/${truncation.totalLines} lines, ${formatSize(truncation.outputBytes)}/${formatSize(truncation.totalBytes)}, ${omittedLines} lines and ${formatSize(omittedBytes)} omitted.]`;
 }
 
 export async function webFetch(
@@ -75,13 +66,13 @@ export async function webFetch(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return {
-      content: [{ type: "text" as const, text: i18n.t("webFetch.error", { message }) }],
+      content: [{ type: "text" as const, text: `Web fetch failed: ${message}` }],
       details: { url: params.url, error: message } satisfies WebFetchDetails,
     };
   }
 
   onUpdate?.({
-    content: [{ type: "text", text: i18n.t("webFetch.fetching", { url: url.toString() }) }],
+    content: [{ type: "text", text: `Fetching ${url.toString()}…` }],
     details: { url: url.toString() },
   });
 
@@ -98,7 +89,7 @@ export async function webFetch(
 
     const interceptors = getInterceptors(config.interceptors?.github, () => {
       onUpdate?.({
-        content: [{ type: "text", text: i18n.t("github.ghHint") }],
+        content: [{ type: "text", text: "[pi-web-search] Install the `gh` CLI for better GitHub repository access, including private repositories." }],
         details: { url: url.toString(), backend: "github" },
       });
     });
@@ -144,7 +135,7 @@ export async function webFetch(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return {
-      content: [{ type: "text" as const, text: i18n.t("webFetch.error", { message }) }],
+      content: [{ type: "text" as const, text: `Web fetch failed: ${message}` }],
       details: { url: url.toString(), error: message } satisfies WebFetchDetails,
     };
   }

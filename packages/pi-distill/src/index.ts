@@ -31,38 +31,19 @@ import type {
   ToolResultEvent,
 } from "@earendil-works/pi-coding-agent";
 import { performance } from "node:perf_hooks";
-import {
-  appendDistillFallbackAudit,
-  registerDistillFallbackRenderer,
-} from "./fallback-renderer.ts";
+import { appendDistillFallbackAudit, registerDistillFallbackRenderer } from "./fallback-renderer.ts";
 import { getTextContent, hasNonTextContent } from "./output-limit.ts";
 import { updateJsonObjectAtomic, resolveAgentDir } from "pi-utils";
 import { archiveSource, type SourceArtifact } from "./archive.ts";
 import { buildEvidencePrompt, validateEvidence, formatEvidence } from "./evidence.ts";
-import { processingConfig, processingEnabled, isMutationTool, processingReceipt, processingI18n } from "./processing-config.ts";
+import { processingConfig, processingEnabled, isMutationTool, processingReceipt } from "./processing-config.ts";
 import { selectSourceScope, loadSource, isDiagnosticCommand, LIKELY_SECRET } from "./source.ts";
 import { cleanupSessionResources, uuidv7, type Api, type Context, type Model, type Usage } from "@earendil-works/pi-ai";
-import { NOTICE_TAG_COLOR, installNoticeRenderer, notifyWithSource, type NoticeColor, type NoticeSource } from "pi-utils";
-import {
-  buildSummaryPrompt,
-  buildSummarySystemPrompt,
-  buildSummaryUserPrompt,
-  buildJsonRepairPrompt,
-  decideOutputSummary,
-  getDistillConfigPath,
-  isRawSummary,
-  loadDistillConfig,
-  MIN_EFFECTIVE_COMPRESSION_RATIO,
-  shouldFallbackToOriginal,
-  type BashSummaryConfig,
-  type DistillConfigFile,
-  type DistillRenderConfig,
-  type DistillToolConfig,
-} from "./summary-utils.ts";
+
+import { buildSummaryPrompt, buildSummarySystemPrompt, buildSummaryUserPrompt, buildJsonRepairPrompt, decideOutputSummary, getDistillConfigPath, isRawSummary, loadDistillConfig, MIN_EFFECTIVE_COMPRESSION_RATIO, shouldFallbackToOriginal, type BashSummaryConfig, type DistillConfigFile, type DistillRenderConfig, type DistillToolConfig } from "./summary-utils.ts";
 import { resolveDistillRuntimeModel } from "./model-choice.ts";
 import { listDistillSelectableModels, selectDistillModel } from "./model-picker.ts";
 import { estimateHeuristicTokens } from "./token-estimator.ts";
-import { i18n } from "./i18n.ts";
 
 type ToolResult = {
   content: Array<{ type?: string; text?: string }>;
@@ -106,14 +87,7 @@ type ToolResultEventPatch = {
   usage?: Usage;
 };
 
-export const OUTPUT_REQUEST_DESCRIPTION = processingI18n.t("outputRequest");
-
-/** 本扩展的提示标签；短且唯一，便于在会话里定位来源。 */
-const NOTICE_TAG = "distill";
-/** 提示标签颜色：所有扩展统一用弱化色，来源靠 tag 文本区分，不靠颜色。 */
-const NOTICE_COLOR: NoticeColor = NOTICE_TAG_COLOR;
-/** 本扩展的提示来源。 */
-const NOTICE_SOURCE: NoticeSource = { tag: NOTICE_TAG, color: NOTICE_COLOR };
+export const OUTPUT_REQUEST_DESCRIPTION = "Result handling request: exactly RAW bypasses processing; otherwise describe what to retain. Diagnostic evidence uses exact source quotes, not diagnoses. For fused edit/write this applies only to then_run output; when optional and omitted, use default evidence rules.";
 
 type SummaryDecisionMode = "RAW" | "SUMMARY";
 type SummaryReasonCode =
@@ -522,7 +496,7 @@ function formatDistillSessionStats(stats: DistillSessionStats): string {
   const compressionRatio = stats.summaryChars > 0
     ? (stats.originalOutputChars / stats.summaryChars).toFixed(2)
     : "-";
-  const cost = stats.hasSummaryCost ? stats.summaryCost.toFixed(6) : i18n.t("statsUnavailable");
+  const cost = stats.hasSummaryCost ? stats.summaryCost.toFixed(6) : "n/a";
   const summaryOperations = stats.modelOperations;
   const averageDurationMs = summaryOperations > 0
     ? Math.round(stats.summaryDurationMs / summaryOperations)
@@ -537,39 +511,22 @@ function formatDistillSessionStats(stats: DistillSessionStats): string {
         total: formatCompactCount(stats.summaryTotalTokens),
       }
     : {
-        input: i18n.t("statsUnavailable"),
-        output: i18n.t("statsUnavailable"),
-        reasoning: i18n.t("statsUnavailable"),
-        cacheRead: i18n.t("statsUnavailable"),
-        cacheWrite: i18n.t("statsUnavailable"),
-        total: i18n.t("statsUnavailable"),
+        input: "n/a",
+        output: "n/a",
+        reasoning: "n/a",
+        cacheRead: "n/a",
+        cacheWrite: "n/a",
+        total: "n/a",
       };
-  return i18n.t("statsReport", {
-    toolResults: formatCompactCount(stats.toolResults),
-    summarizedResults: formatCompactCount(stats.summarizedResults),
-    fallbackResults: formatCompactCount(stats.fallbackResults),
-    failedResults: formatCompactCount(stats.failedResults),
-    rawResults: formatCompactCount(stats.rawResults),
-    skippedResults: formatCompactCount(stats.skippedResults),
-    nonTextResults: formatCompactCount(stats.nonTextResults),
-    summaryAttempts: formatCompactCount(stats.summaryAttempts),
-    retryCount: formatCompactCount(stats.retryCount),
-    originalOutputChars: formatCompactCount(stats.originalOutputChars),
-    summaryChars: formatCompactCount(stats.summaryChars),
-    compressionRatio,
-    estimatedOriginalOutputTokens: formatCompactCount(stats.estimatedOriginalOutputTokens),
-    estimatedSummaryTokens: formatCompactCount(stats.estimatedSummaryTokens),
-    estimatedTokensSaved: formatCompactCount(stats.estimatedTokensSaved),
-    summaryDuration: formatSessionDuration(stats.summaryDurationMs),
-    summaryAverageDuration: formatSessionDuration(averageDurationMs),
-    summaryInputTokens: tokenUsage.input,
-    summaryOutputTokens: tokenUsage.output,
-    summaryReasoningTokens: tokenUsage.reasoning,
-    summaryCacheReadTokens: tokenUsage.cacheRead,
-    summaryCacheWriteTokens: tokenUsage.cacheWrite,
-    summaryTotalTokens: tokenUsage.total,
-    summaryCost: cost,
-  });
+  return `Distill session statistics
+Tool results ${formatCompactCount(stats.toolResults)} | summarized ${formatCompactCount(stats.summarizedResults)} | fallback ${formatCompactCount(stats.fallbackResults)} | failed ${formatCompactCount(stats.failedResults)}
+RAW ${formatCompactCount(stats.rawResults)} | skipped ${formatCompactCount(stats.skippedResults)} | non-text ${formatCompactCount(stats.nonTextResults)}
+Attempts ${formatCompactCount(stats.summaryAttempts)} | retries ${formatCompactCount(stats.retryCount)} | time ${formatSessionDuration(stats.summaryDurationMs)} (avg ${formatSessionDuration(averageDurationMs)})
+Chars: ${formatCompactCount(stats.originalOutputChars)} → ${formatCompactCount(stats.summaryChars)} (${compressionRatio}x)
+Tokens (estimated): ${formatCompactCount(stats.estimatedOriginalOutputTokens)} → ${formatCompactCount(stats.estimatedSummaryTokens)} (saved ${formatCompactCount(stats.estimatedTokensSaved)})
+Model total tokens: ${tokenUsage.total} (input ${tokenUsage.input} | output ${tokenUsage.output} | reasoning ${tokenUsage.reasoning})
+Cache tokens: read ${tokenUsage.cacheRead} | write ${tokenUsage.cacheWrite}
+Model cost: ${cost}`;
 }
 
 function attachDiagnostics(result: ToolResult, diagnostics: SummaryDiagnostics): ToolResult {
@@ -792,8 +749,8 @@ async function summarizeOutput(
   );
   if (!model) {
     throw new Error(configuredReference
-      ? i18n.t("modelNotFound", { model: configuredReference })
-      : i18n.t("sessionModelMissing"));
+      ? `Configured model ${configuredReference} is not available. Select an available model in /config:distill.`
+      : "No model is available in the current session. Select a session model with /model, or select a distillation model in /config:distill.");
   }
 
   const completionOptions = {
@@ -957,12 +914,7 @@ async function summarizeOutputWithRetries(
       }
       if (timedOut) timeoutRetries += 1;
       else errorRetries += 1;
-      notifyWithSource({ ctx: context.ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("retryingSummary", {
-        kind: i18n.t(timedOut ? "retryKindTimeout" : "retryKindError"),
-        retry: retriesUsed + 1,
-        limit: retryLimit,
-        error: error instanceof Error ? error.message : String(error),
-      }) });
+      context.ctx.ui.notify(`Distillation hit ${timedOut ? "a timeout" : "a non-timeout error"}; starting retry ${retriesUsed + 1}/${retryLimit}: ${error instanceof Error ? error.message : String(error)}`, "warning");
     } finally {
       clearTimeout(timeout);
       context.signal?.removeEventListener("abort", abortFromParent);
@@ -998,7 +950,7 @@ export async function processToolResult(
     ...getTokenCompressionDiagnostics(originalText, originalText),
     ...extra,
   });
-  if (loaded.warnings.length) notifyWithSource({ ctx: context.ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("configWarnings", { warnings: loaded.warnings.join(" ") }) });
+  if (loaded.warnings.length) context.ctx.ui.notify(`Configuration warnings; opening with usable values: ${loaded.warnings.join(" ")}`, "warning");
   if (!loaded.enabled || !config) return retain(loaded.enabled ? "disabled" : "disabled-by-config");
   if (!processingEnabled(config, context.toolName)) return result;
   if (hasNonTextContent(result)) return retain("non-text-output");
@@ -1047,7 +999,7 @@ export async function processToolResult(
       signal: context.signal,
     });
   } catch (error) {
-    return retain("archive-failed", { outputSummaryAdvice: processingI18n.t("archiveFailure"), outputSummaryError: String(error) });
+    return retain("archive-failed", { outputSummaryAdvice: "Source could not be archived; original tool output retained.", outputSummaryError: String(error) });
   }
   const started = performance.now();
   try {
@@ -1099,7 +1051,7 @@ export async function processToolResult(
       summaryJsonRepairAttempted: error instanceof SummaryJsonRepairError || undefined,
       summaryJsonRepairSucceeded: error instanceof SummaryJsonRepairError ? false : undefined,
       outputSummaryError: error instanceof Error ? error.message : String(error),
-      outputSummaryAdvice: processingI18n.t(evidence ? "evidenceRejected" : "processingFailure"),
+      outputSummaryAdvice: evidence ? "Evidence was rejected; original tool output retained without a summary fallback." : "Result processing failed or was cancelled; original tool output retained.",
     }), retry?.usage);
   }
 }
@@ -1136,14 +1088,14 @@ function extendOutputRequestParameter(
 ): boolean {
   const parameters = tool.parameters as unknown as Record<string, unknown> | undefined;
   if (!parameters || typeof parameters !== "object" || Array.isArray(parameters)) {
-    reportWarning(i18n.t("outputRequestUnavailable", { tool: tool.name }));
+    reportWarning(`Could not extend the ${tool.name} parameter schema; outputRequest is unavailable.`);
     return false;
   }
 
   if (!enabled) return restoreOutputRequestParameter(parameters);
 
   if (parameters.type !== "object") {
-    reportWarning(i18n.t("outputRequestUnavailable", { tool: tool.name }));
+    reportWarning(`Could not extend the ${tool.name} parameter schema; outputRequest is unavailable.`);
     return false;
   }
 
@@ -1152,7 +1104,7 @@ function extendOutputRequestParameter(
   if (properties === undefined) {
     parameters.properties = {};
   } else if (typeof properties !== "object" || properties === null || Array.isArray(properties)) {
-    reportWarning(i18n.t("outputRequestUnavailable", { tool: tool.name }));
+    reportWarning(`Could not extend the ${tool.name} parameter schema; outputRequest is unavailable.`);
     return false;
   }
 
@@ -1160,12 +1112,12 @@ function extendOutputRequestParameter(
   let state = outputRequestSchemaStates.get(parameters);
   if ((Object.hasOwn(currentProperties, "outputRequest") && (!state || currentProperties.outputRequest !== state.injectedProperty)) ||
       (!state && Array.isArray(parameters.required) && parameters.required.includes("outputRequest"))) {
-    reportWarning(processingI18n.t("schemaCollision", { tool: tool.name }));
+    reportWarning(`Tool ${tool.name} already owns outputRequest; Distill leaves its schema and execution untouched.`);
     return false;
   }
   if (!state) {
     state = { hadProperties, hadRequired: Object.hasOwn(parameters, "required"), addedRequired: false, injectedProperty: {
-      type: "string", minLength: 1, pattern: "\\S", description: processingI18n.t("outputRequest"),
+      type: "string", minLength: 1, pattern: "\\S", description: "Result handling request: exactly RAW bypasses processing; otherwise describe what to retain. Diagnostic evidence uses exact source quotes, not diagnoses. For fused edit/write this applies only to then_run output; when optional and omitted, use default evidence rules.",
     } };
     outputRequestSchemaStates.set(parameters, state);
   }
@@ -1251,7 +1203,7 @@ async function editDistillNumber(
   const value = await ctx.ui.input(title, String(current));
   if (value === undefined) return undefined;
   if (!/^\d+$/.test(value.trim()) || Number(value) <= 0) {
-    notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "error", message: i18n.t("positiveInteger") });
+    ctx.ui.notify("Enter a positive integer.", "error");
     return undefined;
   }
   return Number(value);
@@ -1267,7 +1219,7 @@ async function editDistillNonNegativeInteger(
   const normalized = value.trim();
   const parsed = Number(normalized);
   if (!/^\d+$/.test(normalized) || !Number.isSafeInteger(parsed)) {
-    notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "error", message: i18n.t("nonNegativeInteger") });
+    ctx.ui.notify("Enter a non-negative integer.", "error");
     return undefined;
   }
   return parsed;
@@ -1279,17 +1231,17 @@ async function editDistillModel(
 ): Promise<string | undefined> {
   const models = listDistillSelectableModels(ctx);
   if (models.length === 0) {
-    notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("modelPickerNoModels") });
+    ctx.ui.notify("No other models are available. You can switch back to the current session model.", "warning");
   }
   return selectDistillModel(ctx, models, current, {
-    title: i18n.t("modelPickerTitle"),
-    currentModel: i18n.t("currentModel"),
-    filterPlaceholder: i18n.t("modelPickerFilter"),
-    noMatch: i18n.t("modelPickerNoMatch"),
-    navigate: i18n.t("modelPickerNavigate"),
-    select: i18n.t("modelPickerSelect"),
-    cancel: i18n.t("modelPickerCancel"),
-    filter: i18n.t("modelPickerType"),
+    title: "Select distillation model",
+    currentModel: "Current session model",
+    filterPlaceholder: "Type to filter models",
+    noMatch: "No matching models.",
+    navigate: "navigate",
+    select: "select",
+    cancel: "cancel",
+    filter: "filter",
   });
 }
 
@@ -1314,7 +1266,7 @@ async function saveDistillConfigFile(
   });
   const saved = loadDistillConfig();
   if (saved.warnings.length > 0) {
-    notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("savedWarnings", { warnings: saved.warnings.join(" ") }) });
+    ctx.ui.notify(`Distill saved with warnings: ${saved.warnings.join(" ")}`, "warning");
   }
   onSaved?.();
 }
@@ -1336,16 +1288,13 @@ async function runDistillToolConfigUi(
 ): Promise<void> {
   const toolNames = getConfigurableToolNames(pi);
   if (toolNames.length === 0) {
-    notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("noConfigurableTools") });
+    ctx.ui.notify("No configurable tools are currently available.", "warning");
     return;
   }
 
   while (true) {
-    const choices = toolNames.map((toolName) => i18n.t("toolStatus", {
-      tool: toolName,
-      value: processingEnabled(config, toolName) ? i18n.t("on") : i18n.t("off"),
-    }));
-    const choice = await ctx.ui.select(i18n.t("toolSettingsTitle"), choices);
+    const choices = toolNames.map((toolName) => `${toolName}: ${processingEnabled(config, toolName) ? "On" : "Off"}`);
+    const choice = await ctx.ui.select("Tool outputRequest settings", choices);
     if (choice === undefined) return;
     const index = choices.indexOf(choice);
     if (index < 0) return;
@@ -1363,31 +1312,31 @@ async function runDistillConfigUi(
 ): Promise<void> {
   const loaded = loadDistillConfig();
   if (loaded.warnings.length > 0) {
-    notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("configWarnings", { warnings: loaded.warnings.join(" ") }) });
+    ctx.ui.notify(`Configuration warnings; opening with usable values: ${loaded.warnings.join(" ")}`, "warning");
   }
   if (!loaded.config) return; // Critical invalid fields require manual repair; never overwrite them with defaults.
   const config = getDistillUiConfig();
 
   while (true) {
     const choices = [
-      i18n.t("status", { value: config.enabled ? i18n.t("on") : i18n.t("off") }),
-      i18n.t("model", { value: config.model || i18n.t("currentModel") }),
-      i18n.t("minOutput", { value: config.minChars }),
-      i18n.t("summaryLimit", { value: config.maxChars }),
-      i18n.t("finalLimit", { value: config.maxOutputChars }),
-      i18n.t("timeout", { value: config.timeoutSeconds }),
-      i18n.t("timeoutRetryCount", { value: config.timeoutRetryCount }),
-      i18n.t("errorRetryCount", { value: config.errorRetryCount }),
-      i18n.t("threshold", { value: config.missedCompressionRatio }),
-      i18n.t("summarizeErrors", { value: config.summarizeErrors ? i18n.t("on") : i18n.t("off") }),
-      i18n.t("auditRenderer", { value: config.render.enabled ? i18n.t("on") : i18n.t("off") }),
-      i18n.t("showOutputRequest", { value: config.render.showPrompt ? i18n.t("on") : i18n.t("off") }),
-      i18n.t("showSummary", { value: config.render.showResult ? i18n.t("on") : i18n.t("off") }),
-      i18n.t("toolOverrides"),
-      processingI18n.t("evidenceSetting", { value: config.evidence.enabled ? i18n.t("on") : i18n.t("off") }),
-      processingI18n.t("fusionSetting", { value: config.evidence.fusion ? i18n.t("on") : i18n.t("off") }),
+      `Status: ${config.enabled ? "On" : "Off"}`,
+      `Model: ${config.model || "Current session model"}`,
+      `Min output: ${config.minChars} chars`,
+      `Processed body budget: ${config.maxChars} chars`,
+      `Replacement result budget (includes source): ${config.maxOutputChars} chars`,
+      `Timeout: ${config.timeoutSeconds}s`,
+      `Timeout retries: ${config.timeoutRetryCount}`,
+      `Error retries: ${config.errorRetryCount}`,
+      `Long-output threshold: ${config.missedCompressionRatio}x`,
+      `Summarize errors: ${config.summarizeErrors ? "On" : "Off"}`,
+      `Audit renderer: ${config.render.enabled ? "On" : "Off"}`,
+      `Show outputRequest: ${config.render.showPrompt ? "On" : "Off"}`,
+      `Show summary: ${config.render.showResult ? "On" : "Off"}`,
+      "Tool outputRequest",
+      `Diagnostic evidence: ${config.evidence.enabled ? "On" : "Off"}`,
+      `Fusion command evidence (requires diagnostic evidence): ${config.evidence.fusion ? "On" : "Off"}`,
     ];
-    const choice = await ctx.ui.select(i18n.t("settingsTitle"), choices);
+    const choice = await ctx.ui.select("Distill settings", choices);
     if (choice === undefined) return;
 
     if (choice === choices[0]) {
@@ -1400,25 +1349,25 @@ async function runDistillConfigUi(
         await saveDistillConfigFile(ctx, config, configPath, onSaved);
       }
     } else if (choice === choices[2]) {
-      const value = await editDistillNumber(ctx, i18n.t("minOutputTitle"), config.minChars);
+      const value = await editDistillNumber(ctx, "Minimum output chars", config.minChars);
       if (value !== undefined) {
         config.minChars = value;
         await saveDistillConfigFile(ctx, config, configPath, onSaved);
       }
     } else if (choice === choices[3]) {
-      const value = await editDistillNumber(ctx, i18n.t("summaryLimitTitle"), config.maxChars);
+      const value = await editDistillNumber(ctx, "Processed body character budget", config.maxChars);
       if (value !== undefined) {
         config.maxChars = value;
         await saveDistillConfigFile(ctx, config, configPath, onSaved);
       }
     } else if (choice === choices[4]) {
-      const value = await editDistillNumber(ctx, i18n.t("finalLimitTitle"), config.maxOutputChars);
+      const value = await editDistillNumber(ctx, "Replacement result character budget (not RAW)", config.maxOutputChars);
       if (value !== undefined) {
         config.maxOutputChars = value;
         await saveDistillConfigFile(ctx, config, configPath, onSaved);
       }
     } else if (choice === choices[5]) {
-      const value = await editDistillNumber(ctx, i18n.t("timeoutTitle"), config.timeoutSeconds);
+      const value = await editDistillNumber(ctx, "Summarizer timeout (seconds)", config.timeoutSeconds);
       if (value !== undefined) {
         config.timeoutSeconds = value;
         await saveDistillConfigFile(ctx, config, configPath, onSaved);
@@ -1426,7 +1375,7 @@ async function runDistillConfigUi(
     } else if (choice === choices[6]) {
       const value = await editDistillNonNegativeInteger(
         ctx,
-        i18n.t("timeoutRetryCountTitle"),
+        "Distillation timeout retry count",
         config.timeoutRetryCount,
       );
       if (value !== undefined) {
@@ -1436,7 +1385,7 @@ async function runDistillConfigUi(
     } else if (choice === choices[7]) {
       const value = await editDistillNonNegativeInteger(
         ctx,
-        i18n.t("errorRetryCountTitle"),
+        "Distillation non-timeout error retry count",
         config.errorRetryCount,
       );
       if (value !== undefined) {
@@ -1444,7 +1393,7 @@ async function runDistillConfigUi(
         await saveDistillConfigFile(ctx, config, configPath, onSaved);
       }
     } else if (choice === choices[8]) {
-      const value = await editDistillNumber(ctx, i18n.t("thresholdTitle"), config.missedCompressionRatio);
+      const value = await editDistillNumber(ctx, "Long-output threshold", config.missedCompressionRatio);
       if (value !== undefined) {
         config.missedCompressionRatio = value;
         await saveDistillConfigFile(ctx, config, configPath, onSaved);
@@ -1478,10 +1427,10 @@ function registerDistillConfigCommand(
   onSaved: (ctx: ExtensionCommandContext) => void,
 ): void {
   const command = {
-    description: i18n.t("commandDescription"),
+    description: "Configure tool-output distillation interactively",
     handler: async (_args: string, ctx: ExtensionCommandContext) => {
       if (!ctx.hasUI) {
-        notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("interactiveOnly") });
+        ctx.ui.notify("Interactive settings require a Pi session with UI.", "warning");
         return;
       }
       await runDistillConfigUi(ctx, pi, getDistillConfigPath(), () => onSaved(ctx));
@@ -1497,20 +1446,18 @@ function registerDistillStatsCommand(
   getStats: () => DistillSessionStats,
 ): void {
   pi.registerCommand("distill:stats", {
-    description: i18n.t("statsCommandDescription"),
+    description: "Show tool-output distillation statistics for this session",
     handler: async (_args: string, ctx: ExtensionCommandContext) => {
       if (!ctx.hasUI) {
-        notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("interactiveOnly") });
+        ctx.ui.notify("Interactive settings require a Pi session with UI.", "warning");
         return;
       }
-      notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: formatDistillSessionStats(getStats()) });
+      ctx.ui.notify(formatDistillSessionStats(getStats()), "info");
     },
   });
 }
 
 export default function piDistillExtension(pi: ExtensionAPI) {
-  // 提示画成会话区里的带底色消息块；渲染器在本包这个模块实例里注册一次。
-  installNoticeRenderer(pi);
   const pendingCalls = new Map<string, PendingDistillCall>();
   const reportedWarnings = new Set<string>();
   let sessionStats = createDistillSessionStats();
@@ -1520,14 +1467,12 @@ export default function piDistillExtension(pi: ExtensionAPI) {
     const reportWarning = (message: string) => {
       if (reportedWarnings.has(message)) return;
       reportedWarnings.add(message);
-      notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message });
+      ctx.ui.notify(message, "warning");
     };
     try {
       extendDistillToolParameters(pi, loadDistillConfig(), reportWarning);
     } catch (error) {
-      reportWarning(i18n.t("extendOutputRequestFailed", {
-        error: error instanceof Error ? error.message : String(error),
-      }));
+      reportWarning(`Failed to extend the outputRequest parameter: ${error instanceof Error ? error.message : String(error)}`);
     }
   };
 
@@ -1545,7 +1490,7 @@ export default function piDistillExtension(pi: ExtensionAPI) {
     return {
       systemPrompt: [
         typeof event.systemPrompt === "string" ? event.systemPrompt : "",
-        `<output-prompt-contract>\n${processingI18n.t("contract", { tools: controlled.join(", ") })}\n</output-prompt-contract>`,
+        `<output-prompt-contract>\n${`Distill-controlled tools: ${controlled.join(", ")}. Apply these rules only to this list, not other tools' business fields. For tools with a required outputRequest, always supply a nonempty request or exactly RAW. Optional outputRequest on fused edit/write controls only then_run diagnostic logs; omission uses default evidence rules. RAW bypasses Distill, not the underlying tool's own limits. Use native read with RAW to inspect source_artifact; source_lines supports one-call tail reads. Evidence receipts verify quotes, not completeness or test outcomes; ordinary summaries are not fact-verified.`}\n</output-prompt-contract>`,
       ].filter((value) => value.length > 0).join("\n\n"),
     };
   });

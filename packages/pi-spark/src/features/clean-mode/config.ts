@@ -1,9 +1,5 @@
 import * as z from "zod";
-import {
-  ACTIVITY_ROWS_RANGE,
-  DEFAULT_CLEAN_MODE_CONFIG,
-  type CleanModeConfig,
-} from "./types.ts";
+import { ACTIVITY_ROWS_RANGE, DEFAULT_CLEAN_MODE_CONFIG, type CleanModeConfig } from "./types.ts";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

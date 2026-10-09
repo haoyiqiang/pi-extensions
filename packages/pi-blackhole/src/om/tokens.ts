@@ -9,10 +9,7 @@
  * Amended: usage-aware helpers (hasUsageData, getUsageTokens) — real-usage
  * measurement core (approach: tavasti@360f24a, pi-vcc upstream PR #40).
  */
-import {
-  calculateContextTokens,
-  estimateTokens as estimateMessageTokens,
-} from "@earendil-works/pi-coding-agent";
+import { calculateContextTokens, estimateTokens as estimateMessageTokens } from "@earendil-works/pi-coding-agent";
 import { cjkScriptStats } from "../core/segment.js";
 
 export function estimateStringTokens(text: string): number {

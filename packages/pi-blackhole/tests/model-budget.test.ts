@@ -5,14 +5,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import {
-  BUILTIN_PRESETS,
-  compactThresholdTokens,
-  effectiveContextWindow,
-  effectivePresets,
-  presetRatioForWindow,
-  sessionContextWindow,
-} from "../src/om/model-budget.js";
+import { BUILTIN_PRESETS, compactThresholdTokens, effectiveContextWindow, effectivePresets, presetRatioForWindow, sessionContextWindow } from "../src/om/model-budget.js";
 
 const testDir = join(tmpdir(), `pi-blackhole-model-budget-test-${Date.now()}`);
 

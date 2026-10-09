@@ -20,11 +20,10 @@
 | [`pi-distill`](./packages/pi-distill) | 已启用工具结果先归档再摘要，可选本地核验的诊断证据提取。 | [English](./packages/pi-distill/README.md) · [中文](./packages/pi-distill/README.zh-CN.md) |
 | [`pi-action-fusion`](./packages/pi-action-fusion) | 将单文件编辑／写入与后续命令合并为一次工具调用，改编自 SoL-Pi，默认关闭。新包待首次 npm 发布，现可通过 Git／本地套件使用。 | [English](./packages/pi-action-fusion/README.md) · [中文](./packages/pi-action-fusion/README.zh-CN.md) |
 | [`pi-models-discovery`](./packages/pi-models-discovery) | 自动发现 models.json 中标记 `discoverModels` 的 provider 的模型列表，启动走持久化缓存，并提供手动刷新命令。 | [English](./packages/pi-models-discovery/README.md) · [中文](./packages/pi-models-discovery/README.zh-CN.md) |
-| [`pi-utils`](./packages/pi-utils) | 提供可移植的 JSON 配置读写、locale/catalog 运行时与带来源标签提示，以及确定性的测试 fixture。 | [English](./packages/pi-utils/README.md) · [中文](./packages/pi-utils/README.zh-CN.md) |
+| [`pi-utils`](./packages/pi-utils) | 工具库：可移植的 JSON 配置读写，以及确定性的测试 fixture。不是 Pi 扩展。 | [English](./packages/pi-utils/README.md) · [中文](./packages/pi-utils/README.zh-CN.md) |
 | [`@maplezzk/pi-web-search`](./packages/pi-web-search) | 整合 LLM 内置网络搜索、独立 Search API、Gemini/Vertex URL Context、有界网页抓取和可选 GitHub 仓库提取。 | [English](./packages/pi-web-search/README.md) · [中文](./packages/pi-web-search/README.zh-CN.md) |
-| [`@maplezzk/pi-todo`](./packages/pi-todo) | 随当前分支回放的任务列表、依赖校验及独立任务面板。 | [English](./packages/pi-todo/README.md) · [中文](./packages/pi-todo/README.zh-CN.md) |
 
-共享库会发布到 npm 供功能包依赖。[`pi-utils`](./packages/pi-utils) 负责可移植的 JSON 配置读写、locale/catalog 运行时、共享提示渲染器和确定性测试 fixture；功能包通过自带的 `i18n-entry.ts` shim 加载它的扩展入口。[`pi-terminal-mux`](./packages/pi-terminal-mux) 提供终端 surface 操作。
+共享库会发布到 npm 供功能包依赖。[`pi-utils`](./packages/pi-utils) 是工具库，不是 Pi 扩展，负责可移植的 JSON 配置读写和确定性测试 fixture。[`pi-terminal-mux`](./packages/pi-terminal-mux) 提供终端 surface 操作。
 
 > `pi-naming` 已合并到 `pi-spark`。重新加载前请移除旧的独立扩展；只有 `spark.json` 没有 `naming` 时才兼容读取旧配置。详见 [迁移说明](./packages/pi-spark/README.zh-CN.md#从-pi-naming-迁移)。
 

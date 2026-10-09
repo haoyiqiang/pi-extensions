@@ -1,29 +1,6 @@
 import { test, describe, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import {
-  shellEscape,
-  isFishShell,
-  exitStatusVar,
-  isHeadlessSurface,
-  createHeadlessSurface,
-  isHeadlessMode,
-  getMuxBackend,
-  muxSetupHint,
-  parseCmuxJson,
-  parseCmuxFocusedSnapshot,
-  parseCmuxFocusedSnapshotFromJson,
-  parseCmuxPaneRefForSurface,
-  parseCmuxPaneRefForSurfaceFromJson,
-  predictZellijSplitDirection,
-  canSplitZellijPane,
-  selectZellijPlacement,
-  selectZellijStackPlacement,
-  getAgentPaneId,
-  getRenameCapability,
-  renameCurrentTab,
-  renameWorkspace,
-  type ZellijPaneSnapshot,
-} from "../src/index.ts";
+import { shellEscape, isFishShell, exitStatusVar, isHeadlessSurface, createHeadlessSurface, isHeadlessMode, getMuxBackend, muxSetupHint, parseCmuxJson, parseCmuxFocusedSnapshot, parseCmuxFocusedSnapshotFromJson, parseCmuxPaneRefForSurface, parseCmuxPaneRefForSurfaceFromJson, predictZellijSplitDirection, canSplitZellijPane, selectZellijPlacement, selectZellijStackPlacement, getAgentPaneId, getRenameCapability, renameCurrentTab, renameWorkspace, type ZellijPaneSnapshot } from "../src/index.ts";
 
 /** 保存并清理会干扰探测的环境变量 */
 const MUX_ENV_KEYS = [
@@ -131,14 +108,9 @@ describe("后端偏好", () => {
   });
 });
 
-describe("muxSetupHint i18n", () => {
-  test("中文提示", () => {
+describe("muxSetupHint", () => {
+  test("提示保持英文", () => {
     process.env.PI_EXTENSIONS_LOCALE = "zh-CN";
-    process.env.PI_TERMINAL_MUX = "tmux";
-    assert.match(muxSetupHint(), /请在 tmux 中启动 pi/);
-  });
-  test("英文提示", () => {
-    process.env.PI_EXTENSIONS_LOCALE = "en-US";
     process.env.PI_TERMINAL_MUX = "tmux";
     assert.match(muxSetupHint(), /Start pi inside tmux/);
   });

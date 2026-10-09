@@ -12,7 +12,7 @@
 pi install npm:pi-distill
 ```
 
-包会同时加载共享 i18n 扩展。运行 `/reload`，再通过 `/config:distill` 选择模型和配置处理。`/pi-distill` 是兼容别名；`/distill:stats` 显示本会话结果、尝试次数、用量、预计上下文节省和成本。交互式命令需要带 UI 的会话，工具结果处理也支持无界面运行。
+运行 `/reload`，再通过 `/config:distill` 选择模型和配置处理。`/pi-distill` 是兼容别名；`/distill:stats` 显示本会话结果、尝试次数、用量、预计上下文节省和成本。交互式命令需要带 UI 的会话，工具结果处理也支持无界面运行。
 
 配置位于 `<Pi agent 目录>/extensions/pi-distill/config.json`，通常在 `~/.pi/agent` 下，支持 `PI_CODING_AGENT_DIR`。加载时不写配置，不迁移或修改用户全局设置。默认配置见 [config.example.json](./config.example.json)。
 

@@ -7,13 +7,7 @@
  */
 
 import { getSelectListTheme } from "@earendil-works/pi-coding-agent";
-import {
-  matchesKey,
-  SelectList,
-  truncateToWidth,
-  type Component,
-  type SelectItem,
-} from "@earendil-works/pi-tui";
+import { matchesKey, SelectList, truncateToWidth, type Component, type SelectItem } from "@earendil-works/pi-tui";
 import { formatHintLine } from "../frame";
 import { deleteWordBackward } from "../inline-edit";
 import type { EnumField, FieldRenderContext, FieldRenderer, SubmenuFactory } from "../types";

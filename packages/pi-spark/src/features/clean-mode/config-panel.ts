@@ -6,22 +6,9 @@
  * 行数项再开一层 `SelectList` 二级选择。改一项立刻写文件并重装补丁，关掉面板即已生效。
  */
 
-import {
-	type ExtensionCommandContext,
-	getSelectListTheme,
-	getSettingsListTheme,
-} from "@earendil-works/pi-coding-agent";
-import {
-	Container,
-	type Component,
-	type SelectItem,
-	type SettingItem,
-	SelectList,
-	SettingsList,
-	Text,
-} from "@earendil-works/pi-tui";
+import { type ExtensionCommandContext, getSelectListTheme, getSettingsListTheme } from "@earendil-works/pi-coding-agent";
+import { Container, type Component, type SelectItem, type SettingItem, SelectList, SettingsList, Text } from "@earendil-works/pi-tui";
 import { withActivityRows, withBooleanConfigField, type BooleanConfigKey } from "./config-fields.js";
-import { i18n } from "./i18n.js";
 import { ACTIVITY_ROWS_RANGE, type CleanModeConfig } from "./types.js";
 
 /** 解析十进制行数用的进制。 */
@@ -50,10 +37,8 @@ const ROW_MENU_MAX_VISIBLE = 8;
 interface PanelItemSpec {
 	/** 配置字段名。 */
 	id: BooleanConfigKey | typeof ACTIVITY_ROWS_ID;
-	/** 标题文案 key。 */
-	labelKey: string;
-	/** 说明文案 key。 */
-	descriptionKey: string;
+	label: string;
+	description: string;
 	/** 取值方式。 */
 	kind: (typeof PANEL_ITEM_KIND)[keyof typeof PANEL_ITEM_KIND];
 }
@@ -62,56 +47,56 @@ interface PanelItemSpec {
 const PANEL_ITEMS: readonly PanelItemSpec[] = [
 	{
 		id: "enabled",
-		labelKey: "configLabelEnabled",
-		descriptionKey: "configDescEnabled",
+		label: "Enable clean mode",
+		description: "When off, Pi renders tool output exactly as it does by default",
 		kind: PANEL_ITEM_KIND.toggle,
 	},
 	{
 		id: "showRunHeader",
-		labelKey: "configLabelShowRunHeader",
-		descriptionKey: "configDescShowRunHeader",
+		label: "Show duration header",
+		description: "Show \"Took Ns · N steps\" above the final answer when collapsed",
 		kind: PANEL_ITEM_KIND.toggle,
 	},
 	{
 		id: "autoExpandWhileRunning",
-		labelKey: "configLabelAutoExpand",
-		descriptionKey: "configDescAutoExpand",
+		label: "Auto-expand while running",
+		description: "Show work while the run is active and collapse it when the run settles",
 		kind: PANEL_ITEM_KIND.toggle,
 	},
 	{
 		id: "enableActionGroups",
-		labelKey: "configLabelActionGroups",
-		descriptionKey: "configDescActionGroups",
+		label: "Merge tool calls",
+		description: "Collapse a turn's tool calls into a single group header",
 		kind: PANEL_ITEM_KIND.toggle,
 	},
 	{
 		id: "showActivityArea",
-		labelKey: "configLabelActivityArea",
-		descriptionKey: "configDescActivityArea",
+		label: "Show activity area",
+		description: "Show what is running at the top of the current run",
 		kind: PANEL_ITEM_KIND.toggle,
 	},
 	{
 		id: ACTIVITY_ROWS_ID,
-		labelKey: "configLabelActivityRows",
-		descriptionKey: "configDescActivityRows",
+		label: "Activity rows",
+		description: "Maximum rows used by the activity area; press enter to pick a number",
 		kind: PANEL_ITEM_KIND.rows,
 	},
 	{
 		id: "animateActivity",
-		labelKey: "configLabelAnimateActivity",
-		descriptionKey: "configDescAnimateActivity",
+		label: "Animate activity area",
+		description: "When off, the activity area shows a static marker",
 		kind: PANEL_ITEM_KIND.toggle,
 	},
 	{
 		id: "hideThinking",
-		labelKey: "configLabelHideThinking",
-		descriptionKey: "configDescHideThinking",
+		label: "Hide thinking blocks",
+		description: "Strip the model's reasoning text and keep conclusions",
 		kind: PANEL_ITEM_KIND.toggle,
 	},
 	{
 		id: "hideExtensionEntries",
-		labelKey: "configLabelHideExtensionEntries",
-		descriptionKey: "configDescHideExtensionEntries",
+		label: "Collapse extension entries",
+		description: "Also collapse custom entries written by extensions (e.g. distill audit rows); info notices collapse too, warnings and errors stay visible",
 		kind: PANEL_ITEM_KIND.toggle,
 	},
 ];
@@ -129,7 +114,7 @@ export interface ToggleLabels {
 
 /** 取本地化后的开关文案。 */
 export function panelToggleLabels(): ToggleLabels {
-	return { on: i18n.t("configValueOn"), off: i18n.t("configValueOff") };
+	return { on: "on", off: "off" };
 }
 
 /** 活动区行数的二级选择列表：Enter 选定，Esc 不改动直接返回。 */
@@ -139,7 +124,7 @@ function createRowCountSubmenu(
 ): Component {
 	const items: SelectItem[] = ACTIVITY_ROW_VALUES.map((value) => ({
 		value,
-		label: i18n.t("configActivityRowsOption", { count: value }),
+		label: `${value} rows`,
 	}));
 	const list = new SelectList(
 		items,
@@ -170,8 +155,7 @@ export function toSettingItems(
 	labels: ToggleLabels = panelToggleLabels(),
 ): SettingItem[] {
 	return PANEL_ITEMS.map((item) => {
-		const label = i18n.t(item.labelKey);
-		const description = i18n.t(item.descriptionKey);
+		const { label, description } = item;
 		if (item.kind === PANEL_ITEM_KIND.rows) {
 			return {
 				id: item.id,
@@ -227,7 +211,7 @@ export async function openConfigPanel(
 ): Promise<void> {
 	await ctx.ui.custom<void>((tui, theme, _keybindings, done) => {
 		const container = new Container();
-		container.addChild(new Text(theme.fg("accent", theme.bold(i18n.t("configPanelTitle"))), 1, 1));
+		container.addChild(new Text(theme.fg("accent", theme.bold("Clean mode settings")), 1, 1));
 
 		const settingsList = new SettingsList(
 			toSettingItems(handlers.getConfig()),

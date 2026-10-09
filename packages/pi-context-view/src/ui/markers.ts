@@ -7,7 +7,6 @@
 import type { Theme, ThemeColor } from "@earendil-works/pi-coding-agent";
 import { wrapTextWithAnsi } from "@earendil-works/pi-tui";
 
-import { i18n } from "../i18n.ts";
 import { BODY_INDENT, fitLine } from "./layout.ts";
 
 /** Dim separator introducing a state marker after the estimate it explains. */
@@ -35,27 +34,27 @@ function markerLegend(marker: ContextMarker): MarkerLegend {
 	switch (marker) {
 		case "highlighted":
 			return {
-				keyword: i18n.t("markerHighlighted"),
+				keyword: "Highlighted",
 				color: "syntaxNumber",
-				explanation: i18n.t("markerHighlightedExplanation"),
+				explanation: " parts are injected by extensions into pi’s system prompt. They are excluded from the System Prompt token count and included in the injecting extension’s count.",
 			};
 		case "guess":
 			return {
-				keyword: i18n.t("markerGuess"),
+				keyword: "(guess)",
 				color: "dim",
-				explanation: i18n.t("markerGuessExplanation"),
+				explanation: " sources are inferred from the injected text itself.",
 			};
 		case "dropped":
 			return {
-				keyword: i18n.t("markerDropped"),
+				keyword: "Dropped",
 				color: "toolDiffRemoved",
-				explanation: i18n.t("markerDroppedExplanation"),
+				explanation: " parts were replaced by a custom system prompt and are counted nowhere.",
 			};
 		case "moved":
 			return {
-				keyword: i18n.t("markerMoved"),
+				keyword: "Moved",
 				color: "warning",
-				explanation: i18n.t("markerMovedExplanation"),
+				explanation: " blocks appear in a different position in the system prompt than usual. Their token counts are unchanged.",
 			};
 	}
 }

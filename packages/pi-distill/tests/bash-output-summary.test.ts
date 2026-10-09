@@ -4,32 +4,10 @@ import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { hasNonTextContent } from "../src/output-limit.ts";
-import {
-  appendDistillFallbackAudit,
-  buildDistillAuditLines,
-  DISTILL_AUDIT_ENTRY_TYPE,
-  renderDistillAuditText,
-  resolveDistillRenderConfig,
-} from "../src/fallback-renderer.ts";
+import { appendDistillFallbackAudit, buildDistillAuditLines, DISTILL_AUDIT_ENTRY_TYPE, renderDistillAuditText, resolveDistillRenderConfig } from "../src/fallback-renderer.ts";
 import { complete, fauxAssistantMessage, registerFauxProvider } from "@earendil-works/pi-ai/compat";
-import {
-  extendDistillToolParameters,
-  formatCompactCount,
-  formatSessionDuration,
-} from "../src/index.ts";
-import {
-  buildDecisionEvaluationPrompt,
-  buildJsonRepairPrompt,
-  buildSummaryEvaluationPrompt,
-  buildSummaryPrompt,
-  isDistillToolEnabled,
-  isRawSummary,
-  loadDistillConfig,
-  MIN_EFFECTIVE_COMPRESSION_RATIO,
-  parseBashSummaryConfig,
-  shouldFallbackToOriginal,
-  shouldSummarizeOutput,
-} from "../src/summary-utils.ts";
+import { extendDistillToolParameters, formatCompactCount, formatSessionDuration } from "../src/index.ts";
+import { buildDecisionEvaluationPrompt, buildJsonRepairPrompt, buildSummaryEvaluationPrompt, buildSummaryPrompt, isDistillToolEnabled, isRawSummary, loadDistillConfig, MIN_EFFECTIVE_COMPRESSION_RATIO, parseBashSummaryConfig, shouldFallbackToOriginal, shouldSummarizeOutput } from "../src/summary-utils.ts";
 import { processToolResult } from "../src/index.ts";
 
 process.env.PI_EXTENSIONS_LOCALE = "en-US";
@@ -799,7 +777,7 @@ test("提炼首次失败后默认重试一次并可成功返回", async () => {
     assert.equal(attempts, 2);
     await assertSummaryReceipt(result, output, "ERROR at checkout.ts:8; inspect the payment provider");
     assert.deepEqual(notices, [{
-      message: "[distill] Distillation hit a non-timeout error; starting retry 1/1: temporary provider failure",
+      message: "Distillation hit a non-timeout error; starting retry 1/1: temporary provider failure",
       type: "warning",
     }]);
   });
@@ -1162,22 +1140,11 @@ test("启发式 token 估算对 CJK 按字计数、其余按 chars/4", async () 
   assert.equal(estimateHeuristicTokens("拡張子 .ts"), 4);
 });
 
-test("提炼 prompt 完全跟随 pi-language，不被原始用户消息覆盖", () => {
-  const previousLocale = process.env.PI_EXTENSIONS_LOCALE;
-  try {
-    process.env.PI_EXTENSIONS_LOCALE = "zh-CN";
-    const configuredChinesePrompt = buildSummaryPrompt("summarize failures", "build failed", "Please explain the failure");
-    assert.match(configuredChinesePrompt, /你是通用工具输出提炼器/);
-    assert.match(configuredChinesePrompt, /使用简体中文输出提炼结果/);
-
-    process.env.PI_EXTENSIONS_LOCALE = "en-US";
-    const configuredEnglishPrompt = buildSummaryPrompt("找出错误", "编译失败", "请告诉我失败原因");
-    assert.match(configuredEnglishPrompt, /You are a general-purpose tool-output distiller/);
-    assert.match(configuredEnglishPrompt, /Write the distilled result in English/);
-  } finally {
-    if (previousLocale === undefined) delete process.env.PI_EXTENSIONS_LOCALE;
-    else process.env.PI_EXTENSIONS_LOCALE = previousLocale;
-  }
+test("提炼 prompt 保持英文，不被原始用户消息覆盖", () => {
+  const prompt = buildSummaryPrompt("找出错误", "编译失败", "请告诉我失败原因");
+  assert.match(prompt, /You are a general-purpose tool-output distiller/);
+  assert.match(prompt, /Write the distilled result in English/);
+  assert.doesNotMatch(prompt, /你是通用工具输出提炼器/);
 });
 
 test("包含图片等非文本内容时识别为非纯文本输出", () => {
@@ -1594,9 +1561,9 @@ test("pi-distill 独立扩展最终工具 schema，并通过 Pi 事件处理 out
       hasUI: true,
       ui: { notify: (message: string) => { statsMessage = message; } },
     });
-    assert.match(statsMessage, /^\[distill\] /);
-    assert.match(statsMessage, /Tool results|工具结果/);
-    assert.match(statsMessage, /Model total tokens|模型总 Token/);
+    assert.match(statsMessage, /Distill session statistics/);
+    assert.match(statsMessage, /Tool results/);
+    assert.match(statsMessage, /Model total tokens/);
     // 非 TUI 模式下不带 ANSI 颜色。
     assert.doesNotMatch(statsMessage, /\u001B\[/);
 

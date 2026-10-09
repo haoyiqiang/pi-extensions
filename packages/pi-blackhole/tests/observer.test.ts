@@ -8,17 +8,8 @@
 import { describe, expect, it } from "vitest";
 import { validateToolArguments } from "@earendil-works/pi-ai";
 
-import {
-  normalizeSourceEntryIds,
-  OBSERVATION_TIMESTAMP_PATTERN,
-  runObserver,
-} from "../src/om/agents/observer/agent.js";
-import {
-  getDiscardedCount,
-  isDeterministicError,
-  isRetryableError,
-  WorkerStreamError,
-} from "../src/om/retryable-error.js";
+import { normalizeSourceEntryIds, OBSERVATION_TIMESTAMP_PATTERN, runObserver } from "../src/om/agents/observer/agent.js";
+import { getDiscardedCount, isDeterministicError, isRetryableError, WorkerStreamError } from "../src/om/retryable-error.js";
 import { estimateStringTokens } from "../src/om/tokens.js";
 import { leadingSystemPrompt } from "./fixtures/agent-context.js";
 

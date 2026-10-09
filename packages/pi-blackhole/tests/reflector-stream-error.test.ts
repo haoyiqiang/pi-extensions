@@ -10,12 +10,7 @@
 import { describe, expect, it } from "vitest";
 
 import { runReflector } from "../src/om/agents/reflector/agent.js";
-import {
-  getDiscardedCount,
-  isDeterministicError,
-  isRetryableError,
-  WorkerStreamError,
-} from "../src/om/retryable-error.js";
+import { getDiscardedCount, isDeterministicError, isRetryableError, WorkerStreamError } from "../src/om/retryable-error.js";
 import { observation } from "./fixtures/session.js";
 
 describe("runReflector failure guard", () => {

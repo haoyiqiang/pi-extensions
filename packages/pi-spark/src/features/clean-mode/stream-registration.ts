@@ -11,16 +11,7 @@
  * 事件回调只负责把消息喂进来。
  */
 
-import {
-	beginActionGroupStep,
-	extractToolCalls,
-	findActionGroupMembership,
-	hasNarrationText,
-	isAssistantMessage,
-	reassignActionToolCall,
-	registerActionToolCall,
-	type ActionGroupState,
-} from "./action-groups.js";
+import { beginActionGroupStep, extractToolCalls, findActionGroupMembership, hasNarrationText, isAssistantMessage, reassignActionToolCall, registerActionToolCall, type ActionGroupState } from "./action-groups.js";
 import type { ActivityCounters } from "./activity.js";
 
 /** 一次已经出现的工具调用；与 `action-groups` 的扫描结果同一形状。 */

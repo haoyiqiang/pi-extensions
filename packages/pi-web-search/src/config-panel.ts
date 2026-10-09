@@ -1,23 +1,11 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import {
-  NOTICE_TAG_COLOR,
-  notifyWithSource,
-  type NoticeSource,
-} from "pi-utils";
+
 import { PROVIDERS } from "./api-providers/index.ts";
 import type { ProviderMeta } from "./api-providers/types.ts";
-import {
-  loadWebSearchConfig,
-  saveWebSearchConfig,
-  type LlmTransport,
-  type WebSearchConfig,
-} from "./config.ts";
-import { i18n } from "./i18n.ts";
+import { loadWebSearchConfig, saveWebSearchConfig, type LlmTransport, type WebSearchConfig } from "./config.ts";
 import { FALLBACK_REASONS, type ApiSearchProviderName, type FallbackReason, type WebSearchMode } from "./types.ts";
 import { isSupportedSearchModel } from "./utils.ts";
-
-const NOTICE_SOURCE: NoticeSource = { tag: "web", color: NOTICE_TAG_COLOR };
 const CLEAR_VALUE = "-";
 
 interface MenuChoice<T extends string = string> {
@@ -34,7 +22,7 @@ function notify(
   level: "info" | "warning" | "error",
   message: string,
 ): void {
-  notifyWithSource({ ctx, source: NOTICE_SOURCE, level, message });
+  ctx.ui.notify(message, level);
 }
 
 async function selectChoice<T extends string>(
@@ -47,21 +35,36 @@ async function selectChoice<T extends string>(
 }
 
 function maskSecret(value: string | undefined): string {
-  if (!value) return i18n.t("configPanel.notConfigured");
+  if (!value) return "Not configured";
   if (value.length <= 8) return "••••••••";
   return `${value.slice(0, 4)}…${value.slice(-4)}`;
 }
 
 function modeLabel(mode: WebSearchMode): string {
-  return i18n.t(`configPanel.mode.${mode}`);
+  return {
+    auto: "Auto: LLM first, then configured API fallback",
+    llm: "LLM: model built-in web search only",
+    api: "API: Search API only",
+  }[mode];
 }
 
 function transportLabel(transport: LlmTransport): string {
-  return i18n.t(`configPanel.transport.${transport}`);
+  return {
+    auto: "Auto",
+    "google-developer": "Google Developer API",
+    "vertex-express": "Vertex Express",
+  }[transport];
 }
 
 function fallbackLabel(reason: FallbackReason): string {
-  return i18n.t(`configPanel.fallback.${reason}`);
+  return {
+    unsupported: "Unsupported",
+    quota: "Quota",
+    "rate-limit": "Rate limit",
+    network: "Network",
+    timeout: "Timeout",
+    "invalid-response": "Invalid response",
+  }[reason];
 }
 
 function modelLabel(model: Model<Api>): string {
@@ -71,8 +74,8 @@ function modelLabel(model: Model<Api>): string {
 function configuredModelLabel(config: WebSearchConfig, ctx: ExtensionCommandContext): string {
   if (config.llm?.provider && config.llm.model) return `${config.llm.provider}/${config.llm.model}`;
   return ctx.model
-    ? i18n.t("configPanel.currentModelValue", { model: modelLabel(ctx.model) })
-    : i18n.t("configPanel.noCurrentModel");
+    ? `Current session model (${modelLabel(ctx.model)})`
+    : "No current model";
 }
 
 function selectedProvider(config: WebSearchConfig): ApiSearchProviderName {
@@ -93,23 +96,23 @@ function providerConfigured(meta: ProviderMeta, config: WebSearchConfig): boolea
 
 function credentialSummary(meta: ProviderMeta, config: WebSearchConfig): string {
   const envValue = meta.envVar ? process.env[meta.envVar]?.trim() : undefined;
-  if (envValue) return i18n.t("configPanel.fromEnvironment", { name: meta.envVar ?? "" });
+  if (envValue) return `From environment variable ${meta.envVar ?? ""}`;
   return maskSecret(config.api?.apiKeys?.[meta.name as ApiSearchProviderName]);
 }
 
 function baseUrlSummary(meta: ProviderMeta, config: WebSearchConfig): string {
   const envValue = meta.baseUrlEnvVar ? process.env[meta.baseUrlEnvVar]?.trim() : undefined;
-  if (envValue) return i18n.t("configPanel.fromEnvironment", { name: meta.baseUrlEnvVar ?? "" });
+  if (envValue) return `From environment variable ${meta.baseUrlEnvVar ?? ""}`;
   return config.api?.baseUrls?.[meta.name as ApiSearchProviderName]
     ?? meta.defaultBaseUrl
-    ?? i18n.t("configPanel.notConfigured");
+    ?? "Not configured";
 }
 
 function fallbackSummary(config: WebSearchConfig): string {
   const values = config.fallbackOn ?? ["unsupported"];
   return values.length > 0
     ? values.map(fallbackLabel).join(", ")
-    : i18n.t("configPanel.none");
+    : "None";
 }
 
 function githubInterceptorEnabled(config: WebSearchConfig): boolean {
@@ -125,7 +128,7 @@ function persist(
 ): boolean {
   const result = saveWebSearchConfig(config);
   if (!result.ok) {
-    notify(ctx, "error", i18n.t("configPanel.saveFailed", { path: result.path, error: result.error ?? "" }));
+    notify(ctx, "error", `Failed to save configuration to ${result.path}: ${result.error ?? ""}`);
     return false;
   }
   handlers.onSaved?.();
@@ -134,7 +137,7 @@ function persist(
 
 async function configureMode(ctx: ExtensionCommandContext, config: WebSearchConfig): Promise<WebSearchConfig> {
   const modes: WebSearchMode[] = ["auto", "llm", "api"];
-  const selected = await selectChoice(ctx, i18n.t("configPanel.modeTitle"), modes.map((mode) => ({
+  const selected = await selectChoice(ctx, "Select search mode", modes.map((mode) => ({
     id: mode,
     label: `${mode === (config.mode ?? "auto") ? "✓ " : ""}${modeLabel(mode)}`,
   })));
@@ -151,14 +154,14 @@ async function configureLlmModel(ctx: ExtensionCommandContext, config: WebSearch
   const currentId = "__current__";
   const choices: Array<MenuChoice> = [{
     id: currentId,
-    label: `${!config.llm?.provider || !config.llm.model ? "✓ " : ""}${i18n.t("configPanel.useCurrentModel")}`,
+    label: `${!config.llm?.provider || !config.llm.model ? "✓ " : ""}${"Follow the current session model"}`,
   }];
   for (const model of models) {
     const id = modelLabel(model);
     const active = config.llm?.provider === model.provider && config.llm.model === model.id;
     choices.push({ id, label: `${active ? "✓ " : ""}${id}` });
   }
-  const selected = await selectChoice(ctx, i18n.t("configPanel.llmModelTitle"), choices);
+  const selected = await selectChoice(ctx, "Select the LLM search model", choices);
   if (!selected) return config;
   if (selected === currentId) {
     return {
@@ -181,7 +184,7 @@ async function configureLlmModel(ctx: ExtensionCommandContext, config: WebSearch
 async function configureTransport(ctx: ExtensionCommandContext, config: WebSearchConfig): Promise<WebSearchConfig> {
   const transports: LlmTransport[] = ["auto", "google-developer", "vertex-express"];
   const current = config.llm?.transport ?? "auto";
-  const selected = await selectChoice(ctx, i18n.t("configPanel.transportTitle"), transports.map((transport) => ({
+  const selected = await selectChoice(ctx, "Select LLM transport", transports.map((transport) => ({
     id: transport,
     label: `${transport === current ? "✓ " : ""}${transportLabel(transport)}`,
   })));
@@ -194,9 +197,9 @@ async function configureApiProvider(ctx: ExtensionCommandContext, config: WebSea
   const current = selectedProvider(config);
   const choices = PROVIDERS.map((meta) => ({
     id: meta.name as ApiSearchProviderName,
-    label: `${meta.name === current ? "✓ " : ""}${meta.label}${providerConfigured(meta, config) ? ` ${i18n.t("configPanel.configured")}` : ""}`,
+    label: `${meta.name === current ? "✓ " : ""}${meta.label}${providerConfigured(meta, config) ? ` ${"(configured)"}` : ""}`,
   }));
-  const selected = await selectChoice(ctx, i18n.t("configPanel.apiProviderTitle"), choices);
+  const selected = await selectChoice(ctx, "Select Search API provider", choices);
   return selected
     ? { ...config, api: { ...config.api, provider: selected } }
     : config;
@@ -207,10 +210,10 @@ async function configureApiCredential(ctx: ExtensionCommandContext, config: WebS
   const meta = providerMeta(provider);
   const existing = config.api?.apiKeys?.[provider];
   const value = await ctx.ui.input(
-    i18n.t("configPanel.apiKeyTitle", { provider: meta.label }),
+    `${meta.label} API key`,
     existing
-      ? i18n.t("configPanel.secretKeepOrClear", { masked: maskSecret(existing), clear: CLEAR_VALUE })
-      : i18n.t("configPanel.secretEnterOrSkip", { clear: CLEAR_VALUE }),
+      ? `Enter a new value; leave empty to keep ${maskSecret(existing)}; enter ${CLEAR_VALUE} to clear`
+      : `Enter an API key; leave empty unchanged; enter ${CLEAR_VALUE} to clear`,
   );
   if (value === undefined || value === null) return config;
   const trimmed = value.trim();
@@ -227,10 +230,10 @@ async function configureApiBaseUrl(ctx: ExtensionCommandContext, config: WebSear
   if (!meta.baseUrlEnvVar && !meta.defaultBaseUrl) return config;
   const existing = config.api?.baseUrls?.[provider];
   const value = await ctx.ui.input(
-    i18n.t("configPanel.baseUrlTitle", { provider: meta.label }),
+    `${meta.label} API base URL`,
     existing
-      ? i18n.t("configPanel.valueKeepOrClear", { value: existing, clear: CLEAR_VALUE })
-      : i18n.t("configPanel.baseUrlDefault", { value: meta.defaultBaseUrl ?? "", clear: CLEAR_VALUE }),
+      ? `Enter a new URL; leave empty to keep ${existing}; enter ${CLEAR_VALUE} to clear`
+      : `Enter a URL; leave empty unchanged; default ${meta.defaultBaseUrl ?? ""}; enter ${CLEAR_VALUE} to clear`,
   );
   if (value === undefined || value === null) return config;
   const trimmed = value.trim();
@@ -257,12 +260,12 @@ async function configureFallback(ctx: ExtensionCommandContext, config: WebSearch
   const selected = new Set<FallbackReason>(config.fallbackOn ?? ["unsupported"]);
   while (true) {
     const doneId = "__done__";
-    const choice = await selectChoice(ctx, i18n.t("configPanel.fallbackTitle"), [
+    const choice = await selectChoice(ctx, "Select errors that may fall back in auto mode, then choose Done", [
       ...FALLBACK_REASONS.map((reason) => ({
         id: reason,
         label: `${selected.has(reason) ? "✓ " : "  "}${fallbackLabel(reason)}`,
       })),
-      { id: doneId, label: i18n.t("configPanel.done") },
+      { id: doneId, label: "Done" },
     ]);
     if (!choice || choice === doneId) break;
     const reason = choice as FallbackReason;
@@ -277,14 +280,14 @@ export async function openWebSearchConfigPanel(
   handlers: WebSearchConfigPanelHandlers = {},
 ): Promise<void> {
   if (!ctx.hasUI) {
-    notify(ctx, "error", i18n.t("configPanel.requiresUi"));
+    notify(ctx, "error", "/config:web-search requires interactive mode.");
     return;
   }
 
   const providerOverride = process.env.PI_WEB_SEARCH_API_PROVIDER?.trim()
     || process.env.WEB_SEARCH_PROVIDER?.trim();
   if (providerOverride) {
-    notify(ctx, "warning", i18n.t("configPanel.providerEnvOverride", { provider: providerOverride }));
+    notify(ctx, "warning", `An environment variable currently overrides the API provider with ${providerOverride}; the panel selection takes effect after that variable is removed.`);
   }
 
   let changed = false;
@@ -293,38 +296,33 @@ export async function openWebSearchConfigPanel(
     try {
       loaded = loadWebSearchConfig();
     } catch (error) {
-      notify(ctx, "error", i18n.t("configPanel.loadFailed", {
-        error: error instanceof Error ? error.message : String(error),
-      }));
+      notify(ctx, "error", `Failed to load web search configuration: ${error instanceof Error ? error.message : String(error)}`);
       return;
     }
     const config = loaded.config;
     const provider = selectedProvider(config);
     const meta = providerMeta(provider);
     const choices: Array<MenuChoice> = [
-      { id: "mode", label: i18n.t("configPanel.row", { label: i18n.t("configPanel.modeLabel"), value: modeLabel(config.mode ?? "auto") }) },
-      { id: "llmModel", label: i18n.t("configPanel.row", { label: i18n.t("configPanel.llmModelLabel"), value: configuredModelLabel(config, ctx) }) },
-      { id: "transport", label: i18n.t("configPanel.row", { label: i18n.t("configPanel.transportLabel"), value: transportLabel(config.llm?.transport ?? "auto") }) },
-      { id: "apiProvider", label: i18n.t("configPanel.row", { label: i18n.t("configPanel.apiProviderLabel"), value: meta.label }) },
-      { id: "apiKey", label: i18n.t("configPanel.row", { label: i18n.t("configPanel.apiKeyLabel"), value: credentialSummary(meta, config) }) },
+      { id: "mode", label: `${"Search mode"}: ${modeLabel(config.mode ?? "auto")}` },
+      { id: "llmModel", label: `${"LLM model"}: ${configuredModelLabel(config, ctx)}` },
+      { id: "transport", label: `${"LLM transport"}: ${transportLabel(config.llm?.transport ?? "auto")}` },
+      { id: "apiProvider", label: `${"API provider"}: ${meta.label}` },
+      { id: "apiKey", label: `${"API credential"}: ${credentialSummary(meta, config)}` },
       ...(meta.baseUrlEnvVar || meta.defaultBaseUrl ? [{
         id: "baseUrl",
-        label: i18n.t("configPanel.row", { label: i18n.t("configPanel.baseUrlLabel"), value: baseUrlSummary(meta, config) }),
+        label: `${"API base URL"}: ${baseUrlSummary(meta, config)}`,
       }] : []),
       {
         id: "githubInterceptor",
-        label: i18n.t("configPanel.row", {
-          label: i18n.t("configPanel.githubInterceptorLabel"),
-          value: i18n.t(githubInterceptorEnabled(config) ? "configPanel.enabled" : "configPanel.disabled"),
-        }),
+        label: `${"GitHub repository extraction"}: ${githubInterceptorEnabled(config) ? "Enabled" : "Disabled"}`,
       },
-      { id: "fallback", label: i18n.t("configPanel.row", { label: i18n.t("configPanel.fallbackLabel"), value: fallbackSummary(config) }) },
-      { id: "done", label: i18n.t("configPanel.done") },
+      { id: "fallback", label: `${"Automatic fallback"}: ${fallbackSummary(config)}` },
+      { id: "done", label: "Done" },
     ];
 
-    const action = await selectChoice(ctx, i18n.t("configPanel.title", { path: loaded.path }), choices);
+    const action = await selectChoice(ctx, `Web Search Configuration · ${loaded.path}`, choices);
     if (!action || action === "done") {
-      if (changed) notify(ctx, "info", i18n.t("configPanel.saved", { path: loaded.path }));
+      if (changed) notify(ctx, "info", `Web search configuration saved to ${loaded.path}.`);
       return;
     }
 

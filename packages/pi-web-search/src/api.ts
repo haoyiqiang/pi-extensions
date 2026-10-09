@@ -1,7 +1,6 @@
 import type { ExtensionContext, AgentToolUpdateCallback } from "@earendil-works/pi-coding-agent";
 import type { Api, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { LlmTransport } from "./config.ts";
-import { i18n } from "./i18n.ts";
 import { getProviderKind } from "./providers/config.ts";
 import { callGoogleStream, extractPromptFromGeminiBody } from "./providers/google.ts";
 import { callOpenAIStream } from "./providers/openai.ts";
@@ -28,7 +27,7 @@ export async function callApiStream(
 
     const prompt = extractPromptFromGeminiBody(body);
     if (!prompt) {
-        throw new Error(i18n.t("llm.noPrompt"));
+        throw new Error("No prompt text was found in the request body.");
     }
 
     if (kind === "openai" || kind === "xai") {
@@ -38,5 +37,5 @@ export async function callApiStream(
         return callAnthropicStream(ctx, model, prompt, onUpdate, signal);
     }
 
-    throw new Error(i18n.t("llm.unsupportedProvider", { provider: model.provider, api: model.api }));
+    throw new Error(`Provider does not support LLM web search: ${model.provider} (${model.api})`);
 }

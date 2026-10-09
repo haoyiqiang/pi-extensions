@@ -35,7 +35,6 @@
 import { spawnSync } from "node:child_process";
 import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { i18n } from "../i18n.ts";
 import { createBackendLogger, withFileLock, BfsSplitStateManager, hasCommand } from "./shared.ts";
 
 // ── 日志（统一格式，写入 /tmp/pi-mux-otty.log） ──
@@ -617,7 +616,7 @@ function cleanupOttyStateForPane(paneId: string): void {
  */
 export function ottySetupHint(): string {
   if (!isOttySendKeysEnabled()) {
-    return i18n.t("setupHint.ottySendKeys");
+    return "Otty's `ipc-allow-send-keys` is disabled. To let pi drive subagent panes, add `ipc-allow-send-keys = true` to ~/.config/otty/config.toml and reload Otty.";
   }
   return "";
 }

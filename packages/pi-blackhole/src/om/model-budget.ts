@@ -1,10 +1,5 @@
 import type { Model } from "@earendil-works/pi-ai";
-import {
-  isFixedTokenThreshold,
-  isReserveTokens,
-  isWindowRatio,
-  type OmModelConfig,
-} from "../core/unified-config.js";
+import { isFixedTokenThreshold, isReserveTokens, isWindowRatio, type OmModelConfig } from "../core/unified-config.js";
 
 export const AGENT_LOOP_MAX_TOKENS = 32_000;
 

@@ -12,7 +12,7 @@ One post-tool processing extension with two mutually exclusive strategies: **ord
 pi install npm:pi-distill
 ```
 
-The package also loads its shared i18n extension. Run `/reload`, then `/config:distill` to select a model and configure processing. `/pi-distill` remains a compatibility alias. `/distill:stats` reports per-session results, attempts, usage, estimated context savings and cost. UI commands require a UI-capable session; result processing also works headlessly.
+Run `/reload`, then `/config:distill` to select a model and configure processing. `/pi-distill` remains a compatibility alias. `/distill:stats` reports per-session results, attempts, usage, estimated context savings and cost. UI commands require a UI-capable session; result processing also works headlessly.
 
 Configuration is read from `<Pi agent directory>/extensions/pi-distill/config.json`, normally under `~/.pi/agent`; `PI_CODING_AGENT_DIR` is supported. Loading does not write or migrate global settings. See [config.example.json](./config.example.json).
 

@@ -4,17 +4,7 @@
  * Upstream: https://github.com/elpapi42/pi-observational-memory (src/session-ledger/fold.ts)
  * Unmodified.
  */
-import {
-  isObservationsDroppedData,
-  isObservationsRecordedData,
-  isReflectionsRecordedData,
-  OM_OBSERVATIONS_DROPPED,
-  OM_OBSERVATIONS_RECORDED,
-  OM_REFLECTIONS_RECORDED,
-  type Entry,
-  type Observation,
-  type Reflection,
-} from "./types.js";
+import { isObservationsDroppedData, isObservationsRecordedData, isReflectionsRecordedData, OM_OBSERVATIONS_DROPPED, OM_OBSERVATIONS_RECORDED, OM_REFLECTIONS_RECORDED, type Entry, type Observation, type Reflection } from "./types.js";
 import { debugLog } from "../debug-log.js";
 
 export type FoldLedgerOptions = {

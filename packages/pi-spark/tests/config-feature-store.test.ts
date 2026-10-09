@@ -3,13 +3,7 @@ import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { withTempDir } from "pi-utils";
-import {
-  patchGlobalFeature,
-  projectOverridesFeature,
-  projectSparkConfigPath,
-  readConfigObject,
-  sparkConfigPath,
-} from "../src/config/store.ts";
+import { patchGlobalFeature, projectOverridesFeature, projectSparkConfigPath, readConfigObject, sparkConfigPath } from "../src/config/store.ts";
 
 test("feature patches preserve sibling spark settings and leave no temporary file", async () => {
   await withTempDir("pi-spark-config-store-", (dir) => {

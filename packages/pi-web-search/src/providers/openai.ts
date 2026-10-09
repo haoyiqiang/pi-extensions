@@ -1,22 +1,10 @@
 import type { ExtensionContext, AgentToolUpdateCallback } from "@earendil-works/pi-coding-agent";
 import { clampThinkingLevel, type Api, type Model, type ModelThinkingLevel } from "@earendil-works/pi-ai";
-import { i18n } from "../i18n.ts";
 import { TextDecoder } from "util";
 import { getProviderKind } from "./config.ts";
 import { getAuth, type ResolvedAuth } from "./auth.ts";
 import { readSseEvents } from "./sse.ts";
-import {
-    applyIndexCitations,
-    deriveSources,
-    mergeSearchResultMetadata,
-    normalizeCitedSources,
-    preserveInlineCitations,
-    pushLlmSearchEvent,
-    pushUniqueSearchResult,
-    pushUniqueString,
-    sanitizeSearchResults,
-    titleFromUrl,
-} from "./results.ts";
+import { applyIndexCitations, deriveSources, mergeSearchResultMetadata, normalizeCitedSources, preserveInlineCitations, pushLlmSearchEvent, pushUniqueSearchResult, pushUniqueString, sanitizeSearchResults, titleFromUrl } from "./results.ts";
 import type { LlmSearchCallDetail, SearchResultDetail, StreamResult } from "./types.ts";
 
 function isOpenAICodexModel(model: Model<Api>): boolean {
@@ -82,7 +70,7 @@ function extractOpenAICodexAccountId(token: string): string {
         if (typeof accountId !== "string" || !accountId) throw new Error();
         return accountId;
     } catch {
-        throw new Error(i18n.t("llm.codexAccountExtract"));
+        throw new Error("Failed to extract the ChatGPT account ID from openai-codex credentials.");
     }
 }
 
@@ -110,7 +98,7 @@ export async function callOpenAIStream(
 ): Promise<StreamResult> {
     const auth = await getAuth(ctx, model);
     if (auth.ok === false) {
-        throw new Error(auth.error || i18n.t("llm.authFailed"));
+        throw new Error(auth.error || "Failed to get API key and authentication headers.");
     }
 
     const headers = new Headers();
@@ -125,11 +113,11 @@ export async function callOpenAIStream(
         const authorization = headers.get("Authorization");
         const hasBearerAuth = typeof authorization === "string" && /^Bearer\s+\S+/i.test(authorization);
         if (!auth.apiKey && !hasBearerAuth) {
-            throw new Error(i18n.t("llm.codexCredential"));
+            throw new Error("No OAuth credential is configured for the openai-codex model.");
         }
         if (!headers.has("chatgpt-account-id")) {
             if (!auth.apiKey) {
-                throw new Error(i18n.t("llm.codexAccount"));
+                throw new Error("No ChatGPT account ID is configured for the openai-codex model.");
             }
             headers.set("chatgpt-account-id", extractOpenAICodexAccountId(auth.apiKey));
         }
@@ -164,7 +152,7 @@ export async function callOpenAIStream(
         if (level !== "off") requestBody.reasoning = { effort };
     }
     if (isCodex) {
-        requestBody.instructions = i18n.t("llm.codexInstruction");
+        requestBody.instructions = "Answer the user's request using web search when needed.";
         requestBody.text = { verbosity: "low" };
         requestBody.tool_choice = "required";
         requestBody.parallel_tool_calls = true;
@@ -180,11 +168,7 @@ export async function callOpenAIStream(
     });
 
     if (!response.ok) {
-        throw new Error(i18n.t("llm.apiError", {
-            provider: isXai ? "xAI" : "OpenAI",
-            status: response.status,
-            message: await response.text(),
-        }));
+        throw new Error(`${isXai ? "xAI" : "OpenAI"} API error (${response.status}): ${await response.text()}`);
     }
 
     let accumulatedText = "";
@@ -290,14 +274,14 @@ export async function callOpenAIStream(
             else llmSearchCalls.push({ id: event.item_id, provider: searchProvider, status: event.type.replace("response.web_search_call.", ""), raw: event });
             if (event.type === "response.web_search_call.searching") {
                 onUpdate?.({
-                    content: [{ type: "text", text: accumulatedText || i18n.t("llm.searchingProvider", { provider: isXai ? "xAI" : "OpenAI" }) }],
+                    content: [{ type: "text", text: accumulatedText || `Searching the web with ${isXai ? "xAI" : "OpenAI"}...` }],
                     details: { streaming: true, searching: true }
                 });
             }
         }
     });
 
-    const answer = accumulatedText || i18n.t("llm.noAnswer");
+    const answer = accumulatedText || "No answer was returned.";
     const cited = isXai
         ? preserveInlineCitations(answer, citations)
         : applyIndexCitations(answer, citations);

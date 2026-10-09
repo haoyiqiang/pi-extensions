@@ -7,34 +7,8 @@
 
 import { describe, expect, it } from "vitest";
 
-import {
-  OM_FOLDED,
-  OM_OBSERVATIONS_DROPPED,
-  OM_OBSERVATIONS_RECORDED,
-  OM_REFLECTIONS_RECORDED,
-  buildObservationsDroppedData,
-  buildObservationsRecordedData,
-  buildReflectionsRecordedData,
-  isMemoryDetails,
-  isObservationsDroppedData,
-  isObservationsDroppedEntry,
-  isObservationsRecordedData,
-  isObservationsRecordedEntry,
-  isObservation,
-  isReflection,
-  isReflectionsRecordedData,
-  isReflectionsRecordedEntry,
-} from "../src/om/ledger/index.js";
-import {
-  memoryDetails,
-  observation,
-  observationsDroppedEntry,
-  observationsRecordedEntry,
-  oldV2CompactionDetails,
-  oldV2ObservationEntry,
-  reflection,
-  reflectionsRecordedEntry,
-} from "./fixtures/session.js";
+import { OM_FOLDED, OM_OBSERVATIONS_DROPPED, OM_OBSERVATIONS_RECORDED, OM_REFLECTIONS_RECORDED, buildObservationsDroppedData, buildObservationsRecordedData, buildReflectionsRecordedData, isMemoryDetails, isObservationsDroppedData, isObservationsDroppedEntry, isObservationsRecordedData, isObservationsRecordedEntry, isObservation, isReflection, isReflectionsRecordedData, isReflectionsRecordedEntry } from "../src/om/ledger/index.js";
+import { memoryDetails, observation, observationsDroppedEntry, observationsRecordedEntry, oldV2CompactionDetails, oldV2ObservationEntry, reflection, reflectionsRecordedEntry } from "./fixtures/session.js";
 
 describe("session-ledger V3 type guards and builders", () => {
   it("exports the V3 custom type constants", () => {

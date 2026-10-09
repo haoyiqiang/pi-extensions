@@ -13,19 +13,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { AssistantMessageComponent } from "@earendil-works/pi-coding-agent";
 import { Container } from "@earendil-works/pi-tui";
-import { NOTICE_ENTRY_TYPE } from "pi-utils";
-import {
-	applyEntryRail,
-	dropLeadingBlankLines,
-	installExtensionEntryPatch,
-	isExtensionEntryHost,
-	isExtensionEntryWorkWindow,
-	isExtensionMessageHost,
-	readExtensionEntryCustomType,
-	resolveContainerPrototypes,
-	shouldHideExtensionEntry,
-	shouldRailExtensionEntry,
-} from "../src/features/clean-mode/extension-entry-patch.ts";
+import { applyEntryRail, dropLeadingBlankLines, installExtensionEntryPatch, isExtensionEntryHost, NOTICE_ENTRY_TYPE, isExtensionEntryWorkWindow, isExtensionMessageHost, readExtensionEntryCustomType, resolveContainerPrototypes, shouldHideExtensionEntry, shouldRailExtensionEntry } from "../src/features/clean-mode/extension-entry-patch.ts";
 import { isMethodPatchInstalled } from "../src/features/clean-mode/prototype-patch.ts";
 import { DEFAULT_CLEAN_MODE_CONFIG, type CleanModeConfig, type CleanModeState } from "../src/features/clean-mode/types.ts";
 

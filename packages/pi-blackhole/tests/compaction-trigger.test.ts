@@ -12,18 +12,8 @@ import { join } from "node:path";
 import type { CompactionResult } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-  recordMidRunFailure,
-  recordStaleCtxSkip,
-  registerCompactionTrigger,
-  resetMidRunRetry,
-  STALE_SKIP_WARN_MAX_SESSIONS,
-} from "../src/om/compaction-trigger.js";
-import {
-  InlineCompactionUnavailableError,
-  installHostInlineCompactionAdapter,
-  installInlineCompactionAdapter,
-} from "../src/om/inline-compaction.js";
+import { recordMidRunFailure, recordStaleCtxSkip, registerCompactionTrigger, resetMidRunRetry, STALE_SKIP_WARN_MAX_SESSIONS } from "../src/om/compaction-trigger.js";
+import { InlineCompactionUnavailableError, installHostInlineCompactionAdapter, installInlineCompactionAdapter } from "../src/om/inline-compaction.js";
 import { compactionEntry, textCustomMessage, type TestEntry } from "./fixtures/session.js";
 import { installedPackageRoot } from "./fixtures/installed-package.js";
 

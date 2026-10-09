@@ -7,7 +7,6 @@
  * 聚合与格式化都是纯逻辑，便于不依赖 Pi 运行时做单元测试。
  */
 
-import { i18n } from "../../i18n.ts";
 import { computeRateUsdPerM, formatDone, formatDuration, formatNumber } from "./format-utils.ts";
 
 const TPS_DECIMAL_PLACES = 1;
@@ -191,24 +190,21 @@ export function createRunAccumulator(): RunAccumulator {
 export function composeRunSummary(summary: RunSummary, elapsedMs: number | null): string {
   const parts: string[] = [];
   if (elapsedMs !== null && elapsedMs > 0) {
-    parts.push(i18n.t("elapsedTotal", { value: formatDone(elapsedMs) }));
+    parts.push(`⏱ ${formatDone(elapsedMs)}`);
   }
   parts.push(summary.tps === null
-    ? i18n.t("tpsUnknown")
-    : i18n.t("tpsValue", { value: summary.tps.toFixed(TPS_DECIMAL_PLACES) }));
+    ? "TPS —"
+    : `TPS ${summary.tps.toFixed(TPS_DECIMAL_PLACES)} tok/s`);
   if (summary.ttftMs !== null) {
-    parts.push(i18n.t("tpsTtft", { value: formatDuration(summary.ttftMs / MS_PER_SECOND) }));
+    parts.push(`TTFT ${formatDuration(summary.ttftMs / MS_PER_SECOND)}`);
   }
-  parts.push(i18n.t("tpsInput", { value: formatNumber(summary.tokens.input) }));
-  parts.push(i18n.t("tpsOutput", { value: formatNumber(summary.tokens.output) }));
+  parts.push(`in ${formatNumber(summary.tokens.input)}`);
+  parts.push(`out ${formatNumber(summary.tokens.output)}`);
   if (summary.stallMs > 0) {
-    parts.push(i18n.t("tpsStall", {
-      value: formatDuration(summary.stallMs / MS_PER_SECOND),
-      count: summary.stallCount,
-    }));
+    parts.push(`stall ${formatDuration(summary.stallMs / MS_PER_SECOND)}×${summary.stallCount}`);
   }
   if (summary.rateUsdPerMTokens !== null) {
-    parts.push(i18n.t("tpsRate", { value: summary.rateUsdPerMTokens.toFixed(RATE_DECIMAL_PLACES) }));
+    parts.push(`$${summary.rateUsdPerMTokens.toFixed(RATE_DECIMAL_PLACES)}/M`);
   }
   return parts.join(" · ");
 }

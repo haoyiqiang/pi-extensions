@@ -3,12 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
-import {
-  MIGRATION_NOTICE_VERSION,
-  isThresholdMigrationCandidate,
-  maybeNotifyThresholdMigration,
-  resetMigrationNoticeForTests,
-} from "../src/changelog/migration-notice.js";
+import { MIGRATION_NOTICE_VERSION, isThresholdMigrationCandidate, maybeNotifyThresholdMigration, resetMigrationNoticeForTests } from "../src/changelog/migration-notice.js";
 import { getPackageVersion } from "../src/changelog/changelog.js";
 import { __setTestConfigDir, loadUnifiedConfig } from "../src/core/unified-config.js";
 

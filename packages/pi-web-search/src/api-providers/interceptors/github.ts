@@ -1,19 +1,7 @@
 import { execFile } from "node:child_process";
-import {
-	closeSync,
-	existsSync,
-	mkdirSync,
-	openSync,
-	readdirSync,
-	readFileSync,
-	readSync,
-	realpathSync,
-	rmSync,
-	statSync,
-} from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { extname, join, sep as pathSep, resolve as resolvePath } from "node:path";
-import { i18n } from "../../i18n.ts";
 import type { FetchResponse } from "../types.ts";
 import type { UrlInterceptor } from "./types.ts";
 
@@ -277,7 +265,7 @@ function isPathWithin(rootPath: string, candidatePath: string): boolean {
 
 export function resolveGitHubCloneDir(clonePath: string, owner: string, repo: string, ref?: string): string {
 	if (!isSafeCloneSegment(owner) || !isSafeCloneSegment(repo) || (ref !== undefined && !isSafeCloneSegment(ref))) {
-		throw new Error(i18n.t("github.unsafeClonePath"));
+		throw new Error("Refusing to use a path outside the GitHub clone root.");
 	}
 
 	const rootPath = resolvePath(clonePath);
@@ -287,7 +275,7 @@ export function resolveGitHubCloneDir(clonePath: string, owner: string, repo: st
 	const dirName = ref ? `${repo}@${ref}` : repo;
 	const candidate = resolvePath(ownerPath, dirName);
 	if (!isPathWithin(rootPath, ownerPath) || !isPathWithin(rootPath, candidate)) {
-		throw new Error(i18n.t("github.unsafeClonePath"));
+		throw new Error("Refusing to use a path outside the GitHub clone root.");
 	}
 
 	// Reject symlinked parents or destinations that resolve out of the configured
@@ -295,10 +283,10 @@ export function resolveGitHubCloneDir(clonePath: string, owner: string, repo: st
 	// directory also gives gh/git a valid parent for the final clone directory.
 	mkdirSync(ownerPath, { recursive: true, mode: 0o700 });
 	if (!isPathWithin(realRoot, realpathSync(ownerPath))) {
-		throw new Error(i18n.t("github.unsafeClonePath"));
+		throw new Error("Refusing to use a path outside the GitHub clone root.");
 	}
 	if (existsSync(candidate) && !isPathWithin(realRoot, realpathSync(candidate))) {
-		throw new Error(i18n.t("github.unsafeClonePath"));
+		throw new Error("Refusing to use a path outside the GitHub clone root.");
 	}
 	return candidate;
 }
@@ -438,7 +426,7 @@ export class GitHubInterceptor implements UrlInterceptor {
 					}
 					const truncated = paths.length > MAX_TREE_ENTRIES;
 					const display = paths.slice(0, MAX_TREE_ENTRIES).join("\n");
-					resolve(truncated ? `${display}\n${i18n.t("github.totalEntries", { count: paths.length })}` : display);
+					resolve(truncated ? `${display}\n${`... (${paths.length} total entries)`}` : display);
 				},
 			);
 		});
@@ -459,7 +447,7 @@ export class GitHubInterceptor implements UrlInterceptor {
 					try {
 						const decoded = Buffer.from(stdout.trim(), "base64").toString("utf-8");
 						resolve(
-							decoded.length > 8192 ? `${decoded.slice(0, 8192)}\n\n${i18n.t("github.readmeTruncated")}` : decoded,
+							decoded.length > 8192 ? `${decoded.slice(0, 8192)}\n\n${"[README truncated at 8K chars]"}` : decoded,
 						);
 					} catch {
 						resolve(null);
@@ -514,7 +502,7 @@ export class GitHubInterceptor implements UrlInterceptor {
 			lines.push(`## ${info.path}`);
 			if (content.length > MAX_INLINE_FILE_CHARS) {
 				lines.push(content.slice(0, MAX_INLINE_FILE_CHARS));
-				lines.push(`\n${i18n.t("github.fileTruncated")}`);
+				lines.push(`\n${"[File truncated at 100K chars]"}`);
 			} else {
 				lines.push(content);
 			}
@@ -531,7 +519,7 @@ export class GitHubInterceptor implements UrlInterceptor {
 		if (!tree && !readme) return null;
 
 		if (tree) {
-			lines.push(`## ${i18n.t("github.structure")}`);
+			lines.push(`## ${"Structure"}`);
 			lines.push(tree);
 			lines.push("");
 		}
@@ -540,7 +528,7 @@ export class GitHubInterceptor implements UrlInterceptor {
 			lines.push(readme);
 			lines.push("");
 		}
-		lines.push(i18n.t("github.apiOnly"));
+		lines.push("This is an API-only view. Clone the repository or use `read`/`bash` for deeper exploration.");
 
 		const title = info.path ? `${owner}/${repo} - ${info.path}` : `${owner}/${repo}`;
 		return { text: lines.join("\n"), title, contentType: "text/plain" };
@@ -636,7 +624,7 @@ export class GitHubInterceptor implements UrlInterceptor {
 
 		if (info.refIsFullSha) {
 			if (signal?.aborted) return null;
-			const sizeNote = i18n.t("github.shaApiNote");
+			const sizeNote = "Note: Commit SHA URLs use the GitHub API instead of cloning.";
 			return this.fetchViaApi(url, owner, repo, info, sizeNote);
 		}
 
@@ -647,10 +635,7 @@ export class GitHubInterceptor implements UrlInterceptor {
 				const sizeMB = sizeKB / 1024;
 				if (sizeMB > this.options.maxRepoSizeMB) {
 					if (signal?.aborted) return null;
-					const sizeNote = i18n.t("github.largeRepoNote", {
-						size: Math.round(sizeMB),
-						threshold: this.options.maxRepoSizeMB,
-					});
+					const sizeNote = `Note: Repository is ${Math.round(sizeMB)}MB (threshold: ${this.options.maxRepoSizeMB}MB). Showing API-fetched content instead of a full clone. To clone the full repository, call web_fetch again with the same URL.`;
 					const apiView = await this.fetchViaApi(url, owner, repo, info, sizeNote);
 					if (apiView) return apiView;
 					return null;
@@ -759,7 +744,7 @@ function buildTree(rootPath: string): string {
 			const rel = relPath ? `${relPath}/${item}` : item;
 			const safePath = resolveWithinRepo(rootPath, rel);
 			if (!safePath) {
-				entries.push(`${rel}  ${i18n.t("github.outsideSkipped")}`);
+				entries.push(`${rel}  ${"[outside repository skipped]"}`);
 				continue;
 			}
 			let stat: ReturnType<typeof statSync>;
@@ -770,7 +755,7 @@ function buildTree(rootPath: string): string {
 			}
 			if (stat.isDirectory()) {
 				if (NOISE_DIRS.has(item)) {
-					entries.push(`${rel}/  ${i18n.t("github.skipped")}`);
+					entries.push(`${rel}/  ${"[skipped]"}`);
 					continue;
 				}
 				entries.push(`${rel}/`);
@@ -783,34 +768,34 @@ function buildTree(rootPath: string): string {
 
 	walk(rootPath, "");
 	if (entries.length >= MAX_TREE_ENTRIES) {
-		entries.push(i18n.t("github.treeTruncated", { count: MAX_TREE_ENTRIES }));
+		entries.push(`... (truncated at ${MAX_TREE_ENTRIES} entries)`);
 	}
 	return entries.join("\n");
 }
 
 function buildDirListing(rootPath: string, subPath: string): string {
 	const targetPath = resolveWithinRepo(rootPath, subPath);
-	if (!targetPath) return i18n.t("github.pathEscapes");
+	if (!targetPath) return "(path escapes repository root)";
 	const lines: string[] = [];
 	let items: string[];
 	try {
 		items = readdirSync(targetPath).sort();
 	} catch /* c8 ignore next */ {
-		return i18n.t("github.directoryUnreadable");
+		return "(directory not readable)";
 	}
 	for (const item of items) {
 		if (item === ".git") continue;
 		const rel = subPath ? `${subPath}/${item}` : item;
 		const safePath = resolveWithinRepo(rootPath, rel);
 		if (!safePath) {
-			lines.push(`  ${item}  (${i18n.t("github.outsideRepo")})`);
+			lines.push(`  ${item}  (${"outside repository"})`);
 			continue;
 		}
 		try {
 			const stat = statSync(safePath);
 			lines.push(stat.isDirectory() ? `  ${item}/` : `  ${item}  (${formatFileSize(stat.size)})`);
 		} catch /* c8 ignore next */ {
-			lines.push(`  ${item}  (${i18n.t("github.unreadable")})`);
+			lines.push(`  ${item}  (${"unreadable"})`);
 		}
 	}
 	return lines.join("\n");
@@ -823,7 +808,7 @@ function readReadme(localPath: string): string | null {
 		if (existsSync(readmePath)) {
 			try {
 				const content = readFileSync(readmePath, "utf-8");
-				return content.length > 8192 ? `${content.slice(0, 8192)}\n\n${i18n.t("github.readmeTruncated")}` : content;
+				return content.length > 8192 ? `${content.slice(0, 8192)}\n\n${"[README truncated at 8K chars]"}` : content;
 			} catch {}
 		}
 	}
@@ -832,11 +817,11 @@ function readReadme(localPath: string): string | null {
 
 function generateCloneContent(localPath: string, info: GitHubUrlInfo): string {
 	const lines: string[] = [];
-	lines.push(i18n.t("github.clonedTo", { path: localPath }));
+	lines.push(`Repository cloned to: ${localPath}`);
 	lines.push("");
 
 	if (info.type === "root") {
-		lines.push(`## ${i18n.t("github.structure")}`);
+		lines.push(`## ${"Structure"}`);
 		lines.push(buildTree(localPath));
 		lines.push("");
 		const readme = readReadme(localPath);
@@ -845,7 +830,7 @@ function generateCloneContent(localPath: string, info: GitHubUrlInfo): string {
 			lines.push(readme);
 			lines.push("");
 		}
-		lines.push(i18n.t("github.explore"));
+		lines.push("Use the `read` and `bash` tools at the path above to explore further.");
 		return lines.join("\n");
 	}
 
@@ -853,16 +838,16 @@ function generateCloneContent(localPath: string, info: GitHubUrlInfo): string {
 		const dirPath = info.path || "";
 		const fullDirPath = resolveWithinRepo(localPath, dirPath);
 		if (!fullDirPath || !existsSync(fullDirPath)) {
-			lines.push(i18n.t("github.pathNotFound", { path: dirPath }));
+			lines.push(`Path \`${dirPath}\` was not found in the clone. Showing the repository root instead.`);
 			lines.push("");
-			lines.push(`## ${i18n.t("github.structure")}`);
+			lines.push(`## ${"Structure"}`);
 			lines.push(buildTree(localPath));
 		} else {
 			lines.push(`## ${dirPath || "/"}`);
 			lines.push(buildDirListing(localPath, dirPath));
 		}
 		lines.push("");
-		lines.push(i18n.t("github.explore"));
+		lines.push("Use the `read` and `bash` tools at the path above to explore further.");
 		return lines.join("\n");
 	}
 
@@ -870,12 +855,12 @@ function generateCloneContent(localPath: string, info: GitHubUrlInfo): string {
 	const filePath = info.path || "";
 	const fullFilePath = resolveWithinRepo(localPath, filePath);
 	if (!fullFilePath || !existsSync(fullFilePath)) {
-		lines.push(i18n.t("github.pathNotFound", { path: filePath }));
+		lines.push(`Path \`${filePath}\` was not found in the clone. Showing the repository root instead.`);
 		lines.push("");
-		lines.push(`## ${i18n.t("github.structure")}`);
+		lines.push(`## ${"Structure"}`);
 		lines.push(buildTree(localPath));
 		lines.push("");
-		lines.push(i18n.t("github.explore"));
+		lines.push("Use the `read` and `bash` tools at the path above to explore further.");
 		return lines.join("\n");
 	}
 
@@ -884,9 +869,9 @@ function generateCloneContent(localPath: string, info: GitHubUrlInfo): string {
 		stat = statSync(fullFilePath);
 	} catch (err) /* c8 ignore next */ {
 		const message = err instanceof Error ? err.message : String(err);
-		lines.push(i18n.t("github.inspectFailed", { path: filePath, message }));
+		lines.push(`Could not inspect \`${filePath}\`: ${message}`);
 		lines.push("");
-		lines.push(i18n.t("github.explore"));
+		lines.push("Use the `read` and `bash` tools at the path above to explore further.");
 		return lines.join("\n");
 	}
 
@@ -894,17 +879,14 @@ function generateCloneContent(localPath: string, info: GitHubUrlInfo): string {
 		lines.push(`## ${filePath || "/"}`);
 		lines.push(buildDirListing(localPath, filePath));
 		lines.push("");
-		lines.push(i18n.t("github.explore"));
+		lines.push("Use the `read` and `bash` tools at the path above to explore further.");
 		return lines.join("\n");
 	}
 
 	if (isBinaryFile(fullFilePath)) {
 		const ext = extname(filePath).replace(".", "");
 		lines.push(`## ${filePath}`);
-		lines.push(i18n.t("github.binaryFile", {
-			extension: ext,
-			size: formatFileSize(stat.size),
-		}));
+		lines.push(`Binary file (${ext}, ${formatFileSize(stat.size)}). Use \`read\` or \`bash\` at the path above to inspect it.`);
 		return lines.join("\n");
 	}
 
@@ -912,20 +894,20 @@ function generateCloneContent(localPath: string, info: GitHubUrlInfo): string {
 	try {
 		content = readFileSync(fullFilePath, "utf-8");
 	} catch {
-		lines.push(i18n.t("github.readFailed", { path: filePath }));
+		lines.push(`Could not read \`${filePath}\` as UTF-8 text.`);
 		lines.push("");
-		lines.push(i18n.t("github.explore"));
+		lines.push("Use the `read` and `bash` tools at the path above to explore further.");
 		return lines.join("\n");
 	}
 
 	lines.push(`## ${filePath}`);
 	if (content.length > MAX_INLINE_FILE_CHARS) {
 		lines.push(content.slice(0, MAX_INLINE_FILE_CHARS));
-		lines.push(`\n${i18n.t("github.fullFile", { path: fullFilePath })}`);
+		lines.push(`\n${`[File truncated at 100K chars. Full file: ${fullFilePath}]`}`);
 	} else {
 		lines.push(content);
 	}
 	lines.push("");
-	lines.push(i18n.t("github.explore"));
+	lines.push("Use the `read` and `bash` tools at the path above to explore further.");
 	return lines.join("\n");
 }

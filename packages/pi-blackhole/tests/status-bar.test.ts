@@ -13,12 +13,7 @@ vi.mock("../src/om/debug-log.js", () => ({
 }));
 
 import { registerStatusBar } from "../src/om/status-bar.js";
-import {
-  OM_OBSERVATIONS_DROPPED,
-  OM_OBSERVATIONS_RECORDED,
-  OM_REFLECTIONS_RECORDED,
-  observationPoolTokens,
-} from "../src/om/ledger/index.js";
+import { OM_OBSERVATIONS_DROPPED, OM_OBSERVATIONS_RECORDED, OM_REFLECTIONS_RECORDED, observationPoolTokens } from "../src/om/ledger/index.js";
 
 // ── fixtures ─────────────────────────────────────────────────────────────────
 

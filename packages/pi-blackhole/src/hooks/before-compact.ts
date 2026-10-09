@@ -10,13 +10,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { convertToLlm } from "@earendil-works/pi-coding-agent";
 import { writeFileSync } from "fs";
-import {
-  compile,
-  compileSegment,
-  extractRecallNote,
-  stripOMContent,
-  stripRecallNotes,
-} from "../core/summarize";
+import { compile, compileSegment, extractRecallNote, stripOMContent, stripRecallNotes } from "../core/summarize";
 import { buildAppendOnlyDetails, coverageForMessages } from "../core/compaction-chain.js";
 import { getModelProvider, matchesSkippedProvider } from "../core/provider-skip.js";
 import type { PiVccCompactionDetails } from "../details";
@@ -29,8 +23,6 @@ import { buildRetainedToolOutputProjection } from "../core/tool-output-budget.js
 import { buildGlobalIndexById, loadGlobalIndexById } from "../core/global-indices.js";
 import { loadGitFileTags } from "../extract/git-status.js";
 import { collectFilesTouched } from "../extract/file-touch.js";
-import { i18n, NOTICE_SOURCE } from "../i18n.js";
-import { notifyWithSource, type NoticeLevel } from "pi-utils";
 
 export const PI_VCC_COMPACT_INSTRUCTION = "__pi_vcc__";
 
@@ -45,13 +37,13 @@ const migrationNotifyCount = new Map<string, number>();
  */
 export function notifyMigrationReminder(
   sessionId: string,
-  notify: (msg: string, level: NoticeLevel) => void,
+  notify: (msg: string, level: "info" | "warning" | "error") => void,
 ): void {
   const count = migrationNotifyCount.get(sessionId) ?? 0;
   if (count >= 2) return;
   if (!configFileNeedsMigration()) return;
   migrationNotifyCount.set(sessionId, count + 1);
-  notify(i18n.t("migrationReminder"), "info");
+  notify("blackhole: Use `/blackhole configure` to save your updated configuration.", "info");
 }
 
 const formatTokens = (n: number): string => {
@@ -83,17 +75,10 @@ export const formatCompactionStats = (stats: CompactionStats): string => {
   const kept = stats.keptUserTurns ?? stats.kept;
   const total = stats.totalUserTurns ?? kept;
   const smart = stats.smartKeepAdjusted
-    ? i18n.t("compactionStatsSmart", { from: stats.smartFromKeep, to: kept })
+    ? `; smart keep:${stats.smartFromKeep}→${kept}`
     : "";
-  const all = stats.keepFallbackToCompactAll ? i18n.t("compactionStatsAll") : "";
-  return i18n.t("compactionStats", {
-    summarized: stats.summarized,
-    kept,
-    total,
-    smart,
-    all,
-    tokens: formatTokens(stats.keptTokensEst),
-  });
+  const all = stats.keepFallbackToCompactAll ? "; compact-all" : "";
+  return `blackhole: ${stats.summarized} source entries processed; tail kept ${kept}/${total} user turns${smart}${all} (~${formatTokens(stats.keptTokensEst)} tok).`;
 };
 
 const dbg = (debug: boolean, data: Record<string, unknown>) => {
@@ -302,8 +287,8 @@ export function buildOwnCut(
 
 const ownCutReasonMessage = (reason: OwnCutCancelReason): string =>
   reason === "no_live_messages"
-    ? i18n.t("ownCutNoLiveMessages")
-    : i18n.t("ownCutTooFewLiveMessages");
+    ? "blackhole: Nothing to compact (no live messages)"
+    : "blackhole: Too few live messages — Pi's default logic preserves visible context. Set tailBehavior to \"minimal\" in config to force compaction with fewer messages.";
 
 export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) => {
   pi.on("session_before_compact", (event, ctx) => {
@@ -314,7 +299,7 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
     // throw. Every attempt overwrites stale state; success/failure hooks consume it.
     omRuntime.compactWasPiVcc = isPiVcc;
     omRuntime.lastCompactCancelled = false;
-    omRuntime.ensureConfig(ctx.cwd ?? process.cwd(), (msg) => notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: msg }));
+    omRuntime.ensureConfig(ctx.cwd ?? process.cwd(), (msg) => ctx.ui.notify(msg, "warning"));
     const trace = (ev: string, d?: Record<string, unknown>) =>
       debugLog(ev, d, omRuntime.config.debugLog === true);
 
@@ -477,7 +462,7 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
 
       trace("before_compact.cancel", { reason: ownCut.reason, isPiVcc });
       try {
-        notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: ownCutReasonMessage(ownCut.reason) });
+        ctx.ui.notify(ownCutReasonMessage(ownCut.reason), "warning");
       } catch {}
       omRuntime.lastCompactCancelled = true;
       return { cancel: true };
@@ -751,7 +736,7 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
       trace("before_compact.append_fallback", { reason });
       if (omRuntime.appendFallbackNotified) return;
       omRuntime.appendFallbackNotified = true;
-      notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("appendSummaryFallback", { reason }) });
+      ctx.ui.notify(`pi-blackhole: append summary mode fell back to a complete replacement summary (${reason}); run /blackhole to rebase back into append segments`, "warning");
     };
     let details: PiVccCompactionDetails = legacyDetails;
     if (omRuntime.config.compactionSummaryMode === "append") {
@@ -802,7 +787,7 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
               omRuntime.config.reflectionsPoolMaxTokens ?? DEFAULTS.reflectionsPoolMaxTokens,
           });
           if (result.decision.insufficientRecovery) {
-            notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("contextStillTooLarge") });
+            ctx.ui.notify("blackhole: estimated context still exceeds available capacity after compaction; Pi overflow retry/error handling remains in control", "warning");
           }
         } catch (error) {
           warnAppendFallback(
@@ -841,8 +826,8 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
     const sessionId = ctx.sessionManager.getSessionId();
     setTimeout(() => {
       try {
-        notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: formatCompactionStats(stats) });
-        notifyMigrationReminder(sessionId, (msg, level) => notifyWithSource({ ctx, source: NOTICE_SOURCE, level, message: msg }));
+        ctx.ui.notify(formatCompactionStats(stats), "info");
+        notifyMigrationReminder(sessionId, (msg, level) => ctx.ui.notify(msg, level));
       } catch {}
     }, 500);
   });

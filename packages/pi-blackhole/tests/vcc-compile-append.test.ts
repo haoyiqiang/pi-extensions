@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  compile,
-  compileSegment,
-  extractRecallNote,
-  stripRecallNotes,
-} from "../src/core/summarize.js";
+import { compile, compileSegment, extractRecallNote, stripRecallNotes } from "../src/core/summarize.js";
 
 const fileOps = { readFiles: [], modifiedFiles: [] };
 

@@ -16,21 +16,10 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import {
-  isGitRepo,
-  getRepoRoot,
-  createCheckpoint,
-  deleteCheckpoint,
-  loadAllCheckpoints,
-  pruneCheckpoints,
-  pruneOldSessions,
-  MUTATING_TOOLS,
-  DEFAULT_MAX_CHECKPOINTS,
-} from "./core.js";
+import { isGitRepo, getRepoRoot, createCheckpoint, deleteCheckpoint, loadAllCheckpoints, pruneCheckpoints, pruneOldSessions, MUTATING_TOOLS, DEFAULT_MAX_CHECKPOINTS } from "./core.js";
 import { createInitialState, resetState } from "./state.js";
 import { updateStatus, clearStatus } from "./ui.js";
 import { registerCommands, handleForkRestore, handleTreeRestore } from "./commands.js";
-import { i18n } from "./i18n.js";
 
 /** Truncate a string to maxLen, adding ellipsis if needed */
 function truncate(s: string, maxLen: number): string {
@@ -94,7 +83,7 @@ export default function (pi: ExtensionAPI) {
         sessionId: state.sessionId,
         trigger: "resume",
         turnIndex: 0,
-        description: i18n.t("sessionStart"),
+        description: "Session start",
       });
       state.resumeCheckpoint = cp;
       state.checkpoints.set(cp.id, cp);

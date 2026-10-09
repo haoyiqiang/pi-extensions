@@ -21,33 +21,9 @@
  *   every request, so it is measured as the Current Dir part. Text after it
  *   is an extension addition unless it is a structurally recovered tool block.
  */
-import {
-	AGGREGATE_SOURCE,
-	BUILT_IN_TOOLS_LABEL,
-	extensionSource,
-	type InjectedReference,
-	INSTRUCTION_FILES_LABEL,
-	type InjectionItem,
-	type InjectionKind,
-	type InjectionSection,
-	type InjectionSource,
-	type JsonSpan,
-	PI_SOURCE,
-	SKILLS_LABEL,
-	SYSTEM_PROMPT_LABEL,
-} from "./model.ts";
+import { AGGREGATE_SOURCE, BUILT_IN_TOOLS_LABEL, extensionSource, type InjectedReference, INSTRUCTION_FILES_LABEL, type InjectionItem, type InjectionKind, type InjectionSection, type InjectionSource, type JsonSpan, PI_SOURCE, SKILLS_LABEL, SYSTEM_PROMPT_LABEL } from "./model.ts";
 import { type PromptAdditionOptions, splitPromptAdditions } from "./prompt-additions.ts";
-import {
-	AVAILABLE_TOOLS_BLOCK,
-	BASE_PROMPT_BLOCKS,
-	DOCUMENTATION_BLOCK,
-	findPromptBlocks,
-	findPromptSections,
-	findSectionToolBlocks,
-	GUIDELINES_BLOCK,
-	type LocatedPromptBlock,
-	type PromptSection,
-} from "./prompt-blocks.ts";
+import { AVAILABLE_TOOLS_BLOCK, BASE_PROMPT_BLOCKS, DOCUMENTATION_BLOCK, findPromptBlocks, findPromptSections, findSectionToolBlocks, GUIDELINES_BLOCK, type LocatedPromptBlock, type PromptSection } from "./prompt-blocks.ts";
 
 /** Part names shared by a tool's carved prompt lines and pi's own prompt blocks. */
 const AVAILABLE_TOOLS_LABEL = AVAILABLE_TOOLS_BLOCK.label;

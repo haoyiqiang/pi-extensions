@@ -5,14 +5,7 @@ import type { KeybindingsManager } from "@earendil-works/pi-coding-agent";
 import type { EditorComponent, TuiMouseEvent } from "@earendil-works/pi-tui";
 import { Container, setCapabilities, visibleWidth } from "@earendil-works/pi-tui";
 import type { SessionResource } from "../src/features/session-resources/collector.ts";
-import {
-  isFullscreenTui,
-  renderResourcePicker,
-  resourceButtonSegments,
-  resourceTabSegments,
-  type ResourcePickerTheme,
-  SessionResourceEditor,
-} from "../src/features/session-resources/picker.ts";
+import { isFullscreenTui, renderResourcePicker, resourceButtonSegments, resourceTabSegments, type ResourcePickerTheme, SessionResourceEditor } from "../src/features/session-resources/picker.ts";
 
 const SELECTED_BACKGROUND_START = "\x1b[7m";
 const SELECTED_BACKGROUND_END = "\x1b[27m";

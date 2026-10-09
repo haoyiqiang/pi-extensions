@@ -11,10 +11,10 @@
 仓库 Git／本地 profile 已显式加载本包，但**功能默认关闭**。独立本地试用：
 
 ```bash
-pi -e ./packages/pi-utils/index.ts -e ./packages/pi-action-fusion/index.ts
+pi -e ./packages/pi-action-fusion/index.ts
 ```
 
-按包目录安装时，也会加载共享 i18n 扩展：
+按包目录安装：
 
 ```bash
 pi install ./packages/pi-action-fusion

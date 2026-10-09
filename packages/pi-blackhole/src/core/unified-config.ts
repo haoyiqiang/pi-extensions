@@ -7,18 +7,11 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import {
-  applyEnvOverrides,
-  CACHE_RETENTION_VALUES,
-  DECLARATIVE_ENV_OVERRIDES,
-  MAX_TIMER_DELAY_MS,
-  normalizeCacheRetention,
-} from "./config-env.js";
+import { applyEnvOverrides, CACHE_RETENTION_VALUES, DECLARATIVE_ENV_OVERRIDES, MAX_TIMER_DELAY_MS, normalizeCacheRetention } from "./config-env.js";
 
 export { CACHE_RETENTION_VALUES, normalizeCacheRetention };
 import { getAgentDir as originalGetAgentDir } from "@earendil-works/pi-coding-agent";
 import type { CacheRetention, ModelThinkingLevel } from "@earendil-works/pi-ai";
-import { i18n } from "../i18n.js";
 
 // ── getAgentDir with PI_CODING_AGENT_DIR override ───────────────────────────
 
@@ -738,7 +731,7 @@ function readJson(path: string): {
   try {
     return { data: JSON.parse(readFileSync(path, "utf-8")), error: null };
   } catch (e) {
-    const msg = i18n.t("configInvalidJson", { path, error: (e as Error).message });
+    const msg = `blackhole: config file at ${path} has invalid JSON: ${(e as Error).message}. Using defaults.`;
     console.warn(msg);
     return { data: null, error: msg };
   }
@@ -746,7 +739,7 @@ function readJson(path: string): {
 
 /** Optional warning callback invoked when the primary config file has invalid JSON.
  * Receives the warning message string. Used by callers with UI access to surface
- * the error through the caller's source-tagged notification path.
+ * the error through the caller's notification path.
  */
 type WarnFn = (message: string) => void;
 

@@ -1,23 +1,9 @@
 import { describe, it, expect } from "vitest";
-import {
-  observationToSummaryLine,
-  selectPriorObservations,
-} from "../src/om/ledger/render-summary.js";
+import { observationToSummaryLine, selectPriorObservations } from "../src/om/ledger/render-summary.js";
 import { estimateStringTokens } from "../src/om/tokens.js";
 import { foldLedger } from "../src/om/ledger/fold.js";
-import {
-  buildCompactionProjection,
-  fullProjection,
-  visibleProjection,
-} from "../src/om/ledger/projection.js";
-import {
-  OM_OBSERVATIONS_RECORDED,
-  OM_REFLECTIONS_RECORDED,
-  OM_OBSERVATIONS_DROPPED,
-  type Entry,
-  type Observation,
-  type Reflection,
-} from "../src/om/ledger/types.js";
+import { buildCompactionProjection, fullProjection, visibleProjection } from "../src/om/ledger/projection.js";
+import { OM_OBSERVATIONS_RECORDED, OM_REFLECTIONS_RECORDED, OM_OBSERVATIONS_DROPPED, type Entry, type Observation, type Reflection } from "../src/om/ledger/types.js";
 
 const id = (i: number) => i.toString(16).padStart(12, "0");
 

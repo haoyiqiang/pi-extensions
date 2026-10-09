@@ -22,20 +22,9 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => {
 import { foldLedger, observationPoolTokens, type Entry } from "../src/om/ledger/index.js";
 import { anyStageDue } from "../src/om/consolidation.js";
 import { Runtime } from "../src/om/runtime.js";
-import {
-  clearPendingState,
-  readPendingState,
-  savePendingObservation,
-  type PendingOMState,
-} from "../src/om/pending.js";
+import { clearPendingState, readPendingState, savePendingObservation, type PendingOMState } from "../src/om/pending.js";
 import { registerMemoryCommand } from "../src/commands/memory.js";
-import {
-  observation,
-  observationsDroppedEntry,
-  observationsRecordedEntry,
-  textCustomMessage,
-  type TestEntry,
-} from "./fixtures/session.js";
+import { observation, observationsDroppedEntry, observationsRecordedEntry, textCustomMessage, type TestEntry } from "./fixtures/session.js";
 
 const SESSION = "pool-consistency-session";
 const POOL_MAX = 2_800;

@@ -6,7 +6,6 @@
  */
 
 import { Agent } from "undici";
-import { i18n } from "../i18n.ts";
 import { lookupPublicAddress, parseAndAssertHttpUrl } from "../url_safety.ts";
 import type { FetchResponse } from "./types.ts";
 
@@ -89,7 +88,7 @@ export function isHtmlContentType(contentType: string): boolean {
 
 export function assertTextContentType(contentType: string): void {
 	if (BINARY_CONTENT_TYPE_PREFIXES.some((prefix) => contentType.includes(prefix))) {
-		throw new Error(i18n.t("error.unsupportedContentType", { contentType }));
+		throw new Error(`Unsupported content type: ${contentType}. web_fetch supports text pages only.`);
 	}
 }
 
@@ -124,29 +123,25 @@ export async function fetchUrlOrThrow(url: string, signal: AbortSignal | undefin
 		if (res.status >= 300 && res.status < 400) {
 			const location = res.headers.get("location");
 			await disposeResponseBody(res);
-			if (!location) throw new Error(i18n.t("error.redirectWithoutLocation", { url: current.toString() }));
-			if (redirects === 5) throw new Error(i18n.t("error.tooManyRedirects", { url }));
+			if (!location) throw new Error(`HTTP redirect without Location for ${current.toString()}.`);
+			if (redirects === 5) throw new Error(`Too many redirects while fetching ${url}.`);
 			current = parseAndAssertHttpUrl(new URL(location, current).toString());
 			continue;
 		}
 		if (!res.ok) {
 			await disposeResponseBody(res);
-			throw new Error(i18n.t("error.httpStatus", {
-				status: res.status,
-				statusText: res.statusText,
-				url: current.toString(),
-			}));
+			throw new Error(`HTTP ${res.status} ${res.statusText} for ${current.toString()}.`);
 		}
 		return res;
 	}
-	throw new Error(i18n.t("error.tooManyRedirects", { url }));
+	throw new Error(`Too many redirects while fetching ${url}.`);
 }
 
 async function readBoundedText(res: Response): Promise<string> {
 	const declaredLength = Number(res.headers.get("content-length"));
 	if (Number.isFinite(declaredLength) && declaredLength > MAX_FETCH_RESPONSE_BYTES) {
 		await disposeResponseBody(res);
-		throw new Error(i18n.t("error.responseTooLarge", { maxBytes: MAX_FETCH_RESPONSE_BYTES }));
+		throw new Error(`Response body exceeds ${MAX_FETCH_RESPONSE_BYTES} bytes.`);
 	}
 	if (!res.body) return "";
 
@@ -161,7 +156,7 @@ async function readBoundedText(res: Response): Promise<string> {
 			total += value.byteLength;
 			if (total > MAX_FETCH_RESPONSE_BYTES) {
 				await reader.cancel();
-				throw new Error(i18n.t("error.responseTooLarge", { maxBytes: MAX_FETCH_RESPONSE_BYTES }));
+				throw new Error(`Response body exceeds ${MAX_FETCH_RESPONSE_BYTES} bytes.`);
 			}
 			text += decoder.decode(value, { stream: true });
 		}

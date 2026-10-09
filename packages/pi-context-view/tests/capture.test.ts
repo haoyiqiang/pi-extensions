@@ -10,17 +10,7 @@ import type {
 	ToolInfo,
 } from "@earendil-works/pi-coding-agent";
 
-import {
-	captureActiveTools,
-	collectPromptSources,
-	CompactionState,
-	copyPromptOptions,
-	InitialCaptureState,
-	measureInjectedMessages,
-	mergeRequestOnlyMessages,
-	parsePersistedIdentities,
-	SilentProbeState,
-} from "../src/capture.ts";
+import { captureActiveTools, collectPromptSources, CompactionState, copyPromptOptions, InitialCaptureState, measureInjectedMessages, mergeRequestOnlyMessages, parsePersistedIdentities, SilentProbeState } from "../src/capture.ts";
 import { buildSnapshot, type InjectionItem } from "../src/model.ts";
 
 /** Minimal custom-role message fixture. */

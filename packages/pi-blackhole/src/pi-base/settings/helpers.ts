@@ -1,13 +1,11 @@
 import type { BodyState } from "./body.ts";
 import type { Field } from "./types.ts";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { NOTICE_SOURCE } from "../../i18n.js";
-import { notifyWithSource } from "pi-utils";
 
 export function notifyError(_state: BodyState, ctx: ExtensionContext, err: unknown): void {
   const message = err instanceof Error ? err.message : String(err);
   try {
-    notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "error", message });
+    ctx.ui.notify(message, "error");
   } catch {
     // Defensive: never let a bad notify call break the modal loop.
   }

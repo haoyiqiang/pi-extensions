@@ -11,11 +11,7 @@ import { mkdtempSync, writeFileSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { registerRecallTool, clipExpandedEntry } from "../src/tools/recall.js";
-import {
-  expandAllocation,
-  capRecallBlocks,
-  EXPAND_FLOOR_CHARS,
-} from "../src/core/recall-budget.js";
+import { expandAllocation, capRecallBlocks, EXPAND_FLOOR_CHARS } from "../src/core/recall-budget.js";
 import { searchEntriesDetailed } from "../src/core/search-entries.js";
 import { parseDrillDown } from "../src/core/drill-down.js";
 import { capDrillDownText } from "../src/core/recall-budget.js";

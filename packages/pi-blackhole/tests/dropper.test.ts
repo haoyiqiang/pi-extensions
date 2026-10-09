@@ -10,13 +10,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import {
-  maxDropCountForPool,
-  normalizeDropObservationIds,
-  observationPoolFullness,
-  runDropper,
-  selectDropCandidates,
-} from "../src/om/agents/dropper/agent.js";
+import { maxDropCountForPool, normalizeDropObservationIds, observationPoolFullness, runDropper, selectDropCandidates } from "../src/om/agents/dropper/agent.js";
 import { observation, reflection } from "./fixtures/session.js";
 import { leadingSystemPrompt } from "./fixtures/agent-context.js";
 

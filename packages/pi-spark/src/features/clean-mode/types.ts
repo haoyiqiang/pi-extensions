@@ -38,8 +38,8 @@ export interface CleanModeConfig {
 	 * 折叠时是否把扩展写入的条目（custom entry）一并收起来。
 	 *
 	 * 只收「工作条目」：运行期间与会话恢复窗口内出现的条目，例如 distill 的审计行、
-	 * tool-supervisor 的审计行、pi-spark 的遥测行。通知提示（pi-utils）
-	 * 无论何时都保持可见，避免把「配置读取失败」这类警告一起收掉。
+	 * tool-supervisor 的审计行、pi-spark 的遥测行。历史 `pi-extensions-notice`
+	 * 里的 warning/error 仍保持可见，避免把旧警告一起收掉。
 	 */
 	hideExtensionEntries: boolean;
 }

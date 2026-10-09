@@ -2,7 +2,6 @@ import type { ExtensionContext, AgentToolUpdateCallback } from "@earendil-works/
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { TextEncoder, TextDecoder } from "util";
 import type { LlmTransport } from "../config.ts";
-import { i18n } from "../i18n.ts";
 import { getConfig } from "./config.ts";
 import { getAuth } from "./auth.ts";
 import { readSseEvents } from "./sse.ts";
@@ -48,7 +47,7 @@ async function resolveGoogleGroundingRedirectUrls(searchResults: SearchResultDet
         const canonicalUrl = resolved.get(item.url);
         if (!canonicalUrl) continue;
         item.url = canonicalUrl;
-        if (!item.title || item.title === i18n.t("llm.unknownSource") || item.title === "Unknown") {
+        if (!item.title || item.title === "Unknown" || item.title === "Unknown") {
             item.title = titleFromUrl(canonicalUrl);
         }
     }
@@ -64,7 +63,7 @@ function extractGoogleSearchDetails(groundingMetadata: any): { searchQueries: st
     chunks.forEach((chunk: any, index: number) => {
         if (!chunk?.web) return;
         pushUniqueSearchResult(searchResults, {
-            title: chunk.web.title || i18n.t("llm.unknownSource"),
+            title: chunk.web.title || "Unknown",
             url: chunk.web.uri || "",
             source: "google.groundingChunks",
             type: "web",
@@ -77,7 +76,7 @@ function extractGoogleSearchDetails(groundingMetadata: any): { searchQueries: st
             const web = chunks[index]?.web;
             if (!web) continue;
             pushUniqueSearchResult(citations, {
-                title: web.title || i18n.t("llm.unknownSource"),
+                title: web.title || "Unknown",
                 url: web.uri || "",
                 citedText: support?.segment?.text,
                 source: "google.groundingSupports",
@@ -100,12 +99,12 @@ export async function callGoogleStream(
 ): Promise<StreamResult> {
     const config = getConfig(model, transport);
     if (!config.buildRequest) {
-        throw new Error(i18n.t("llm.unsupportedGoogleProvider", { provider: model.provider }));
+        throw new Error(`Unsupported Google provider: ${model.provider}`);
     }
 
     const auth = await getAuth(ctx, model);
     if (auth.ok === false) {
-        throw new Error(auth.error || i18n.t("llm.authFailed"));
+        throw new Error(auth.error || "Failed to get API key and authentication headers.");
     }
 
     const requestModel = auth.baseUrl ? { ...model, baseUrl: auth.baseUrl } : model;
@@ -127,11 +126,7 @@ export async function callGoogleStream(
     });
 
     if (!response.ok) {
-        throw new Error(i18n.t("llm.apiError", {
-            provider: "Google",
-            status: response.status,
-            message: await response.text(),
-        }));
+        throw new Error(`${"Google"} API error (${response.status}): ${await response.text()}`);
     }
 
     let accumulatedText = "";
@@ -141,11 +136,7 @@ export async function callGoogleStream(
     await readSseEvents(response, signal, ({ data: chunk }) => {
         if (chunk.error) {
             const errorMsg = chunk.error.message || JSON.stringify(chunk.error);
-            throw new Error(i18n.t("llm.apiError", {
-                provider: "Google",
-                status: chunk.error.code || chunk.error.status || i18n.t("provider.error.unknown"),
-                message: errorMsg,
-            }));
+            throw new Error(`${"Google"} API error (${chunk.error.code || chunk.error.status || "unknown error"}): ${errorMsg}`);
         }
 
         // Unwrap response for internal APIs
@@ -179,7 +170,7 @@ export async function callGoogleStream(
     const searchResults = sanitizeSearchResults(searchDetails.searchResults);
     const citations = sanitizeSearchResults(searchDetails.citations);
     return {
-        text: accumulatedText || i18n.t("llm.noAnswer"),
+        text: accumulatedText || "No answer was returned.",
         sources: deriveSources(searchResults, citations),
         providerKind: "google",
         llmSearchUsed: searchDetails.searchQueries.length > 0 || searchResults.length > 0,
@@ -200,7 +191,7 @@ export function applyCitations(text: string, groundingMetadata: any): { text: st
 
     const sources = chunks
         .filter((c: any) => c.web)
-        .map((c: any) => ({ title: c.web.title || i18n.t("llm.unknownSource"), url: c.web.uri || "" }));
+        .map((c: any) => ({ title: c.web.title || "Unknown", url: c.web.uri || "" }));
 
     if (!supports.length || !sources.length) return { text, sources };
 

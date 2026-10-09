@@ -16,18 +16,7 @@
  * rewards substantive observations.
  */
 import type { CorpusObservation, CorpusReflection, ProjectCorpus } from "./corpus.js";
-import {
-  clusterObservations,
-  clusterReflections,
-  computeSimHash64,
-  normalizeContent,
-  simHashHammingDistance,
-  stemToken,
-  tokenizeContent,
-  tokenizeSurfaceContent,
-  sorensenDiceSets,
-  type MemoryCluster,
-} from "./dedup.js";
+import { clusterObservations, clusterReflections, computeSimHash64, normalizeContent, simHashHammingDistance, stemToken, tokenizeContent, tokenizeSurfaceContent, sorensenDiceSets, type MemoryCluster } from "./dedup.js";
 import type { Relevance } from "../om/ledger/types.js";
 
 const TIER_WEIGHT: Record<Relevance, number> = {

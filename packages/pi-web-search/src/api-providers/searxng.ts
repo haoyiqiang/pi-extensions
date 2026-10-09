@@ -1,11 +1,5 @@
-import { i18n } from "../i18n.ts";
 import { invalidBaseProtocol, invalidBaseUrl, missingBaseUrl, providerApiError } from "./provider-errors.ts";
-import {
-	type ProviderMeta,
-	type SearchProvider,
-	type SearchResponse,
-	type SearchResult,
-} from "./types.ts";
+import { type ProviderMeta, type SearchProvider, type SearchResponse, type SearchResult } from "./types.ts";
 
 export const SEARXNG_API_KEY_ENV_VAR = "SEARXNG_API_KEY";
 export const SEARXNG_URL_ENV_VAR = "SEARXNG_URL";
@@ -68,10 +62,10 @@ function assertHttpUrl(url: string): void {
 // Forbidden error". Surface the actionable fix for each.
 function hintForSearchStatus(status: number): string {
 	if (status === 401) {
-		return i18n.t("provider.hint.searxngAuth");
+		return " (the SearXNG reverse proxy rejected the Bearer token; check SEARXNG_API_KEY or api.apiKeys.searxng)";
 	}
 	if (status === 403) {
-		return i18n.t("provider.hint.searxngJson");
+		return " (the SearXNG instance may have JSON output disabled; enable json under search.formats in settings.yml)";
 	}
 	return "";
 }

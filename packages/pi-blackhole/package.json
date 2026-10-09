@@ -8,11 +8,9 @@
     ".": "./index.ts"
   },
   "files": [
-    "i18n-entry.ts",
     "index.ts",
     "src",
     "!**/*.test.ts",
-    "locales",
     "docs",
     "README.md",
     "README.zh-CN.md",
@@ -29,7 +27,6 @@
   },
   "pi": {
     "extensions": [
-      "./i18n-entry.ts",
       "./index.ts"
     ]
   },

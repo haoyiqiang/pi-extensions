@@ -8,19 +8,8 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-	beginActionGroupStep,
-	createActionGroupState,
-	findActionGroupMembership,
-	getActionGroupSize,
-	registerActionToolCall,
-} from "../src/features/clean-mode/action-groups.ts";
-import {
-	applyStreamedMessage,
-	beginStreamedMessage,
-	createStreamRegistration,
-	type StreamedToolCall,
-} from "../src/features/clean-mode/stream-registration.ts";
+import { beginActionGroupStep, createActionGroupState, findActionGroupMembership, getActionGroupSize, registerActionToolCall } from "../src/features/clean-mode/action-groups.ts";
+import { applyStreamedMessage, beginStreamedMessage, createStreamRegistration, type StreamedToolCall } from "../src/features/clean-mode/stream-registration.ts";
 
 /** 所有调用都算「运行命令」，分类与摘要不是这组用例的重点。 */
 function describe(call: StreamedToolCall): { summary: string; activity: "command" } {

@@ -5,20 +5,6 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { buildModel, modelMatchesDiscovery } from "../src/index.ts";
 
-test("per-locale catalogs provide the same non-empty keys", () => {
-	const english = JSON.parse(
-		readFileSync(new URL("../locales/en-US.json", import.meta.url), "utf-8"),
-	) as Record<string, string>;
-	const chinese = JSON.parse(
-		readFileSync(new URL("../locales/zh-CN.json", import.meta.url), "utf-8"),
-	) as Record<string, string>;
-	assert.deepEqual(Object.keys(english).sort(), Object.keys(chinese).sort());
-	for (const key of Object.keys(english)) {
-		assert.ok(english[key].length > 0, `${key} missing en-US`);
-		assert.ok(chinese[key].length > 0, `${key} missing zh-CN`);
-	}
-});
-
 test("default export is an extension factory", async () => {
 	const mod = await import("../index.ts");
 	assert.equal(typeof mod.default, "function");

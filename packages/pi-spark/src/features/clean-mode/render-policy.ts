@@ -7,14 +7,7 @@
  * 命名与 types.ts 保持一致：折叠单位是「一次 agent 运行」，统一用 run。
  */
 
-import {
-	TOOL_ROW_GROUP_HEADER,
-	TOOL_ROW_HIDDEN,
-	TOOL_ROW_NORMAL,
-	TOOL_ROW_SUMMARY,
-	type ActionGroupMembership,
-	type ToolRowMode,
-} from "./action-groups.js";
+import { TOOL_ROW_GROUP_HEADER, TOOL_ROW_HIDDEN, TOOL_ROW_NORMAL, TOOL_ROW_SUMMARY, type ActionGroupMembership, type ToolRowMode } from "./action-groups.js";
 import type { CleanModeConfig, CleanModeState } from "./types.js";
 
 /** assistant 消息的业务分类：工作过程，或本次运行的最终答案。 */

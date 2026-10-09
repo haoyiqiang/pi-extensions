@@ -15,11 +15,7 @@ import { agentLoop, type AgentLoopConfig, type AgentTool } from "@earendil-works
 import type { CacheRetention, Message, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { buildAgentContext } from "../agent-context.js";
 import { createTurnCap, type LegacyTurnCapOption } from "../turn-cap.js";
-import {
-  createBridgeStreamFn,
-  createProviderFetch,
-  type ProviderFetchOption,
-} from "../../provider-stream.js";
+import { createBridgeStreamFn, createProviderFetch, type ProviderFetchOption } from "../../provider-stream.js";
 import { streamSimple } from "@earendil-works/pi-ai/compat";
 import { Type } from "typebox";
 import type { Static } from "typebox";
@@ -28,18 +24,9 @@ import { AGENT_LOOP_MAX_TOKENS, boundedMaxTokens } from "../../model-budget.js";
 import { truncateRecordContent } from "../../serialize.js";
 import { REFLECTOR_SYSTEM } from "./prompts.js";
 import { estimateStringTokens } from "../../tokens.js";
-import {
-  observationToSummaryLine,
-  reflectionToSummaryLine,
-  type Observation,
-  type Reflection,
-} from "../../ledger/index.js";
+import { observationToSummaryLine, reflectionToSummaryLine, type Observation, type Reflection } from "../../ledger/index.js";
 import type { ReflectionCoverageTier } from "../dropper/coverage.js";
-import {
-  withDiscardedCount,
-  WorkerStreamError,
-  workerStreamErrorMessage,
-} from "../../retryable-error.js";
+import { withDiscardedCount, WorkerStreamError, workerStreamErrorMessage } from "../../retryable-error.js";
 
 interface RunReflectorArgs {
   model: Model<any>;

@@ -5,17 +5,7 @@
  * Modified: nested snapshots, bounded output, and compact-all coverage.
  */
 import { selectPriorObservations, selectPriorReflections } from "./render-summary.js";
-import {
-  OM_FOLDED,
-  isMemoryDetails,
-  isObservationsDroppedEntry,
-  isObservationsRecordedEntry,
-  isReflectionsRecordedEntry,
-  type Entry,
-  type MemoryDetails,
-  type Observation,
-  type Reflection,
-} from "./types.js";
+import { OM_FOLDED, isMemoryDetails, isObservationsDroppedEntry, isObservationsRecordedEntry, isReflectionsRecordedEntry, type Entry, type MemoryDetails, type Observation, type Reflection } from "./types.js";
 
 export type Projection = {
   observations: Observation[];

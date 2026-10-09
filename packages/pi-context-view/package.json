@@ -8,10 +8,8 @@
     ".": "./index.ts"
   },
   "files": [
-    "i18n-entry.ts",
     "index.ts",
     "src",
-    "locales",
     "doc",
     "README.md",
     "README.zh-CN.md",
@@ -25,7 +23,6 @@
   },
   "pi": {
     "extensions": [
-      "./i18n-entry.ts",
       "./index.ts"
     ],
     "image": "https://media.githubusercontent.com/media/dimk90/pi-context-view/9a9f9f4fafaa09c77759485d53c42f8694650755/doc/images/pi-context-view.png"

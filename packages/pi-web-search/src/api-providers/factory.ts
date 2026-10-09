@@ -1,4 +1,3 @@
-import { i18n } from "../i18n.ts";
 import { BraveProvider } from "./brave.ts";
 import { ExaProvider } from "./exa.ts";
 import { FirecrawlProvider } from "./firecrawl.ts";
@@ -44,6 +43,6 @@ export function createSearchProvider(name: string, creds: ProviderCredentials): 
 		case "ollama":
 			return new OllamaProvider({ apiKey: creds.apiKey, baseUrl: creds.baseUrl ?? "" });
 		default:
-			throw new Error(i18n.t("error.unknownApiProvider", { provider: name }));
+			throw new Error(`Unknown API search provider: ${name}`);
 	}
 }

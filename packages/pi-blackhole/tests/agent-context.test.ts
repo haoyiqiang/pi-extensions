@@ -1,12 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import {
-  buildAgentContext,
-  buildLegacyAgentContext,
-  buildTranscriptAgentContext,
-  supportsTranscriptSystemMessages,
-} from "../src/om/agents/agent-context.js";
+import { buildAgentContext, buildLegacyAgentContext, buildTranscriptAgentContext, supportsTranscriptSystemMessages } from "../src/om/agents/agent-context.js";
 import { leadingSystemPrompt } from "./fixtures/agent-context.js";
 
 const tool: AgentTool<any> = {

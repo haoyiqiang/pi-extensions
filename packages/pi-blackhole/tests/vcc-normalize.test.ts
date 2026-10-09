@@ -1,12 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { normalize } from "../src/core/normalize.js";
-import {
-  userMsg,
-  assistantText,
-  assistantWithThinking,
-  assistantWithToolCall,
-  toolResult,
-} from "./vcc-fixtures.js";
+import { userMsg, assistantText, assistantWithThinking, assistantWithToolCall, toolResult } from "./vcc-fixtures.js";
 
 describe("normalize", () => {
   it("returns empty for empty input", () => {

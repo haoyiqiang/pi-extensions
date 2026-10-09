@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  applyRetainedToolOutputProjection,
-  applyToolOutputBudget,
-  buildRetainedToolOutputProjection,
-} from "../src/core/tool-output-budget.js";
+import { applyRetainedToolOutputProjection, applyToolOutputBudget, buildRetainedToolOutputProjection } from "../src/core/tool-output-budget.js";
 
 describe("applyToolOutputBudget", () => {
   it("freezes omissions while preserving pending results and non-text content", () => {

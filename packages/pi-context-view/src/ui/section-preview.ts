@@ -7,18 +7,11 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { wrapTextWithAnsi } from "@earendil-works/pi-tui";
 
-import { i18n } from "../i18n.ts";
 import type { InjectedReference, InjectionSection, JsonSpan } from "../model.ts";
 import { normalizeInlineText, normalizePreviewText } from "../text.ts";
 import { shiftJsonSpan } from "./json-preview.ts";
 import { BODY_INDENT, calculateViewport, descriptionBlockRows } from "./layout.ts";
-import {
-	type ContextMarker,
-	droppedMarker,
-	guessMarker,
-	markerLegendLines,
-	movedMarker,
-} from "./markers.ts";
+import { type ContextMarker, droppedMarker, guessMarker, markerLegendLines, movedMarker } from "./markers.ts";
 
 /**
  * Arrow introducing a restored line's source label. Non-breaking spaces bind
@@ -206,7 +199,7 @@ function sectionHeaderLines(theme: Theme, section: InjectionSection, wrapWidth: 
 	const label = theme.fg("syntaxKeyword", theme.bold(normalizeInlineText(section.label)));
 	const tokens = theme.fg(
 		"muted",
-		` · ${i18n.t("tokensCount", { count: section.tokens.toLocaleString("en-US") })}`,
+		` · ${`${section.tokens.toLocaleString("en-US")} tokens`}`,
 	);
 	const marker = section.dropped === true ? droppedMarker(theme) : section.moved === true ? movedMarker(theme) : "";
 	return wrapTextWithAnsi(`${label}${tokens}${marker}`, wrapWidth).map((line) => `${BODY_INDENT}${line}`);

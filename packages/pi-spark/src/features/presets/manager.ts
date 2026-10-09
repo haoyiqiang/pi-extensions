@@ -1,7 +1,5 @@
 import { PRESET_CHANGE } from "../../events";
 import { formatModel } from "../../utils/format";
-import { i18n, NOTICE_SOURCE } from "../../i18n";
-import { notifyWithSource } from "pi-utils";
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { PresetConfig, PresetsConfig } from "./config";
@@ -37,29 +35,21 @@ export class PresetManager {
   async apply(key: string, ctx: ExtensionContext): Promise<boolean> {
     const preset = this.presets[key];
     if (!preset) {
-      notifyWithSource({
-        ctx,
-        source: NOTICE_SOURCE,
-        level: "error",
-        message: i18n.t("unknownPreset", {
-          key,
-          available: this.keys.length
-            ? i18n.t("availablePresets", { keys: this.keys.join(", ") })
-            : i18n.t("noPresetsDefined"),
-        }),
-      });
+      ctx.ui.notify(`Unknown preset ${key} (${this.keys.length
+            ? `available: ${this.keys.join(", ")}`
+            : "none defined"})`, "error");
       return false;
     }
 
     const model = ctx.modelRegistry.find(preset.provider, preset.model);
     if (!model) {
-      notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "error", message: i18n.t("presetModelNotFound", { key, model: `${preset.provider}/${preset.model}` }) });
+      ctx.ui.notify(`Preset ${key}: model ${`${preset.provider}/${preset.model}`} not found`, "error");
       return false;
     }
 
     const success = await this.pi.setModel(model);
     if (!success) {
-      notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "error", message: i18n.t("presetNoApiKey", { key, model: `${preset.provider}/${preset.model}` }) });
+      ctx.ui.notify(`Preset ${key}: no API key for ${`${preset.provider}/${preset.model}`}`, "error");
       return false;
     }
 
@@ -73,9 +63,9 @@ export class PresetManager {
     this.pi.events.emit(PRESET_CHANGE, this.active);
 
     if (this.active === key) {
-      notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: i18n.t("presetApplied", { key, description: this.describe(key) }) });
+      ctx.ui.notify(`Preset: ${key} (${this.describe(key)})`, "info");
     } else {
-      notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("presetThinkingClamped", { key, requested: preset.thinkingLevel, applied: this.pi.getThinkingLevel() }) });
+      ctx.ui.notify(`Preset ${key}: thinking level ${preset.thinkingLevel} was clamped to ${this.pi.getThinkingLevel()}`, "warning");
     }
 
     return true;
@@ -83,7 +73,7 @@ export class PresetManager {
 
   async cycle(ctx: ExtensionContext, direction: "forward" | "backward"): Promise<void> {
     if (this.keys.length === 0) {
-      notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("noPresets") });
+      ctx.ui.notify("No presets defined in spark.json", "warning");
       return;
     }
 

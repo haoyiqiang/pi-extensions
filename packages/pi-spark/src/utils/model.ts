@@ -2,8 +2,6 @@ import { uuidv7 } from "@earendil-works/pi-agent-core";
 import { clampThinkingLevel, cleanupSessionResources } from "@earendil-works/pi-ai";
 
 import { formatModel } from "./format";
-import { i18n, NOTICE_SOURCE } from "../i18n";
-import { notifyWithSource } from "pi-utils";
 
 import type { Api, AssistantMessage, Context, Model, ModelsSimpleStreamOptions, ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -56,7 +54,7 @@ export async function completeBackground(ctx: ExtensionContext, model: Model<Api
 export async function resolveModelSettings(ctx: ExtensionContext, config: OptionalModelConfig, feature: string, options: { notifyOnMissingModel?: boolean } = {}): Promise<ModelSettings | undefined> {
   const fallbackModel = ctx.model;
   if (!fallbackModel) {
-    if (options.notifyOnMissingModel ?? true) notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("noModelSelected", { feature }) });
+    if (options.notifyOnMissingModel ?? true) ctx.ui.notify(`No model selected for ${feature}`, "warning");
     return;
   }
 

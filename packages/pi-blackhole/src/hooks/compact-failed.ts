@@ -14,7 +14,7 @@
  * when a hook cancels with `{ cancel: true }` (it only flags content-bearing
  * compactions), so we derive `attributedFromExtension` from our own flags.
  */
-import { i18n, notifyBlackhole } from "../i18n.js";
+import { notifyBlackhole } from "../notify.js";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { Runtime } from "../om/runtime.js";
 import { debugLog } from "../om/debug-log.js";
@@ -135,7 +135,7 @@ function handleCompactFailed(event: any, ctx: any, runtime: Runtime): void {
   // Overflow-retry visibility: pi aborts the turn's compaction and retries the
   // turn after compaction — previously this was completely invisible.
   if (reason === "overflow" && aborted && willRetry) {
-    notifySafely(hasUI, ui, i18n.t("compactOverflowRetry"), "info");
+    notifySafely(hasUI, ui, "overflow compaction aborted, retrying turn", "info");
   }
 
   // Noise filter: with compactionEngine "pi-default" the failure belongs to
@@ -149,6 +149,6 @@ function handleCompactFailed(event: any, ctx: any, runtime: Runtime): void {
   // Gated on attribution — a pi-default/threshold failure we didn't produce
   // (no extension content, no /blackhole trigger, no hook cancel) isn't ours.
   if (!aborted && errorMessage && attributedFromExtension) {
-    notifySafely(hasUI, ui, i18n.t("compactFailedError", { message: errorMessage }), "error");
+    notifySafely(hasUI, ui, `compaction failed — ${errorMessage}`, "error");
   }
 }

@@ -7,15 +7,7 @@
 import { describe, expect, it } from "vitest";
 
 import { foldLedger } from "../src/om/ledger/index.js";
-import {
-  observation,
-  observationsDroppedEntry,
-  observationsRecordedEntry,
-  oldV2ObservationEntry,
-  reflection,
-  reflectionsRecordedEntry,
-  textCustomMessage,
-} from "./fixtures/session.js";
+import { observation, observationsDroppedEntry, observationsRecordedEntry, oldV2ObservationEntry, reflection, reflectionsRecordedEntry, textCustomMessage } from "./fixtures/session.js";
 
 describe("session-ledger V3 folding", () => {
   it("folds observations and reflections from branch root through the target entry", () => {

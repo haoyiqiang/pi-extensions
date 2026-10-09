@@ -1,11 +1,7 @@
 // @ts-nocheck
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-	parseToggleValue,
-	withActivityRows,
-	withBooleanConfigField,
-} from "../src/features/clean-mode/config-fields.ts";
+import { parseToggleValue, withActivityRows, withBooleanConfigField } from "../src/features/clean-mode/config-fields.ts";
 import { ACTIVITY_ROWS_RANGE, DEFAULT_CLEAN_MODE_CONFIG } from "../src/features/clean-mode/types.ts";
 
 /** 全部布尔配置字段，写回测试逐个覆盖。 */

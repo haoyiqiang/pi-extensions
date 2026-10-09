@@ -15,10 +15,7 @@ vi.mock("../src/om/debug-log.js", () => ({
 
 import { debugLog } from "../src/om/debug-log.js";
 import { registerCompactFailedHook } from "../src/hooks/compact-failed.js";
-import {
-  PI_VCC_COMPACT_INSTRUCTION,
-  registerBeforeCompactHook,
-} from "../src/hooks/before-compact.js";
+import { PI_VCC_COMPACT_INSTRUCTION, registerBeforeCompactHook } from "../src/hooks/before-compact.js";
 import { registerCompactionTrigger } from "../src/om/compaction-trigger.js";
 
 function traceEvents(): string[] {
@@ -162,7 +159,7 @@ describe("compact-failed hook", () => {
     handler(failedEvent({ reason: "overflow", aborted: true, willRetry: true }), ctx);
 
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "[blackhole] overflow compaction aborted, retrying turn",
+      "overflow compaction aborted, retrying turn",
       "info",
     );
   });
@@ -209,7 +206,7 @@ describe("compact-failed hook", () => {
     );
 
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "[blackhole] compaction failed — summary too long",
+      "compaction failed — summary too long",
       "error",
     );
   });
@@ -249,7 +246,7 @@ describe("compact-failed hook", () => {
     // compactWasPiVcc means the current failure is ours: not skipped, error
     // surfaced, and the attempt marker consumed before a later failure arrives.
     expect(traceEvents()).not.toContain("compact_failed.skipped_pi_default");
-    expect(ctx.ui.notify).toHaveBeenCalledWith("[blackhole] compaction failed — boom", "error");
+    expect(ctx.ui.notify).toHaveBeenCalledWith("compaction failed — boom", "error");
     expect(traceData("compact_failed.received")).toMatchObject({
       fromExtension: false,
       compactWasPiVcc: true,

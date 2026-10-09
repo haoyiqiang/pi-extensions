@@ -5,12 +5,7 @@
  * Modified: re-exports unified types instead of standalone config.
  */
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
-import {
-  loadUnifiedConfig,
-  DEFAULTS as UNIFIED_DEFAULTS,
-  type OmModelConfig,
-  type UnifiedConfig,
-} from "../core/unified-config.js";
+import { loadUnifiedConfig, DEFAULTS as UNIFIED_DEFAULTS, type OmModelConfig, type UnifiedConfig } from "../core/unified-config.js";
 
 export type ConfiguredModel = OmModelConfig;
 export type Config = UnifiedConfig;

@@ -1,9 +1,6 @@
 import { buildSessionContext, convertToLlm, estimateTokens } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
-import {
-  PI_VCC_COMPACT_INSTRUCTION,
-  registerBeforeCompactHook,
-} from "../src/hooks/before-compact.js";
+import { PI_VCC_COMPACT_INSTRUCTION, registerBeforeCompactHook } from "../src/hooks/before-compact.js";
 import { projectAppendOnlyContext } from "../src/core/compaction-chain.js";
 import { isPiVccCompactionDetailsV2 } from "../src/details.js";
 

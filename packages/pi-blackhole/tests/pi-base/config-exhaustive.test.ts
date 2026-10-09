@@ -9,14 +9,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import {
-  deepMerge,
-  deleteConfig,
-  getExtensionsDir,
-  loadConfig,
-  readConfig,
-  writeConfig,
-} from "../../src/pi-base/config.js";
+import { deepMerge, deleteConfig, getExtensionsDir, loadConfig, readConfig, writeConfig } from "../../src/pi-base/config.js";
 
 // ── Helpers ─────────────────────────────────────────────────────────
 

@@ -3,13 +3,12 @@ import { Type, type Static } from "typebox";
 import { callApiStream, getConfig, isGoogleDeveloperModel } from "./api.ts";
 import { loadWebSearchConfig, resolveConfiguredLlm } from "./config.ts";
 import { formatResult, formatUrlContextResult } from "./format.ts";
-import { i18n } from "./i18n.ts";
 import { describeModel, getUrlContextModel } from "./utils.ts";
 
 export const UrlContextSchema = Type.Object({
-  query: Type.String({ description: i18n.t("urlContext.query") }),
+  query: Type.String({ description: "Question or task to perform on the URLs" }),
   urls: Type.Array(Type.String(), {
-    description: i18n.t("urlContext.urls"),
+    description: "Public URLs to analyze, from 1 to 20",
     minItems: 1,
     maxItems: 20,
   }),
@@ -40,7 +39,7 @@ export async function urlContext(
   try {
     config = loadWebSearchConfig().config;
   } catch (error) {
-    return formatResult(i18n.t("webSearch.error", { message: error instanceof Error ? error.message : String(error) }), {
+    return formatResult(`Search failed: ${error instanceof Error ? error.message : String(error)}`, {
       error: "invalid_config",
     });
   }
@@ -51,8 +50,8 @@ export async function urlContext(
   const isVertexExpress = transport === "vertex-express";
 
   if (!model || !isGoogleDeveloperModel(model) || providerConfig?.kind !== "google") {
-    const current = ctx.model ? describeModel(ctx.model) : i18n.t("llm.noModel");
-    return formatResult(i18n.t("urlContext.unsupported", { model: current }), {
+    const current = ctx.model ? describeModel(ctx.model) : "none";
+    return formatResult(`url_context requires a Google Gemini Developer API or Vertex Express model. Current model: ${current}.`, {
       error: "unsupported_provider",
       model: current,
       supportedTransports: ["google-developer", "vertex-express"],
@@ -61,7 +60,7 @@ export async function urlContext(
   }
 
   onUpdate?.({
-    content: [{ type: "text", text: i18n.t("urlContext.analyzing", { count: params.urls.length }) }],
+    content: [{ type: "text", text: `Analyzing ${params.urls.length} URL(s)…` }],
     details: {},
   });
 
@@ -69,7 +68,7 @@ export async function urlContext(
     const youtubeUrls = params.urls.filter(isYouTubeUrl);
     const otherUrls = params.urls.filter((url) => !isYouTubeUrl(url));
     if (youtubeUrls.length > 1) {
-      return formatResult(i18n.t("urlContext.singleYouTube"), {
+      return formatResult("Gemini supports only one public YouTube URL per request. Call url_context separately for each video.", {
         error: "invalid_request",
         model: model.id,
         youtubeUrlCount: youtubeUrls.length,
@@ -83,7 +82,7 @@ export async function urlContext(
     }
 
     let prompt = params.query;
-    if (otherUrls.length > 0) prompt += `\n\n${i18n.t("llm.urlsHeading")}\n${otherUrls.join("\n")}`;
+    if (otherUrls.length > 0) prompt += `\n\n${"URLs:"}\n${otherUrls.join("\n")}`;
     parts.push({ text: prompt });
 
     const tools = [{ [providerConfig.urlContextTool!]: {} }];
@@ -98,7 +97,7 @@ export async function urlContext(
     );
     return formatUrlContextResult(result, { modelId: model.id });
   } catch (error) {
-    return formatResult(i18n.t("webSearch.error", { message: error instanceof Error ? error.message : String(error) }), {
+    return formatResult(`Search failed: ${error instanceof Error ? error.message : String(error)}`, {
       error: true,
       message: error instanceof Error ? error.message : String(error),
     });

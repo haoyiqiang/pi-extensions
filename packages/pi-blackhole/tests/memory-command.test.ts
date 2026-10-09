@@ -12,17 +12,7 @@ vi.mock("../src/om/clipboard.js", () => ({
 
 import { registerMemoryCommand } from "../src/commands/memory.js";
 import { copyTextToClipboard } from "../src/om/clipboard.js";
-import {
-  compactionEntry,
-  memoryDetails,
-  observation,
-  observationsRecordedEntry,
-  reflection,
-  reflectionsRecordedEntry,
-  observationsDroppedEntry,
-  textCustomMessage,
-  type TestEntry,
-} from "./fixtures/session.js";
+import { compactionEntry, memoryDetails, observation, observationsRecordedEntry, reflection, reflectionsRecordedEntry, observationsDroppedEntry, textCustomMessage, type TestEntry } from "./fixtures/session.js";
 
 /** Build a minimal mock pi + runtime for testing commands */
 function createMockEnvironment() {

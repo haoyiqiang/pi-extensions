@@ -3,29 +3,11 @@
  * model. Event registration remains in index.ts; this module is independently
  * unit-testable.
  */
-import {
-	type BuildSystemPromptOptions,
-	type ContextEvent,
-	convertToLlm,
-	estimateTokens,
-	formatSize,
-	type InputSource,
-	type SlashCommandInfo,
-	type SourceInfo,
-	type ToolInfo,
-} from "@earendil-works/pi-coding-agent";
+import { type BuildSystemPromptOptions, type ContextEvent, convertToLlm, estimateTokens, formatSize, type InputSource, type SlashCommandInfo, type SourceInfo, type ToolInfo } from "@earendil-works/pi-coding-agent";
 
 import { analyzeSystemPrompt, type PromptOptionsSlice, textTokens, type ToolSlice } from "./measure.ts";
 import { copySystemMessage, replaySystemMessages, systemMessageText } from "./transcript.ts";
-import {
-	AGGREGATE_SOURCE,
-	buildSnapshot,
-	type CaptureOrigin,
-	type InitialSnapshot,
-	type InjectionItem,
-	type InjectionSource,
-	type JsonSpan,
-} from "./model.ts";
+import { AGGREGATE_SOURCE, buildSnapshot, type CaptureOrigin, type InitialSnapshot, type InjectionItem, type InjectionSource, type JsonSpan } from "./model.ts";
 import { createProbeToken, type ProbeToken } from "./probe-token.ts";
 import type { PromptSourceSlice } from "./prompt-additions.ts";
 

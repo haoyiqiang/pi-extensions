@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  shellQuote,
-  splitShellBoundary,
-  stripQuotes,
-  tokenizeCommand,
-} from "../../src/pi-base/shell.js";
+import { shellQuote, splitShellBoundary, stripQuotes, tokenizeCommand } from "../../src/pi-base/shell.js";
 
 describe("shell utilities exhaustive", () => {
   describe("shellQuote", () => {

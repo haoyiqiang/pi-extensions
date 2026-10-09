@@ -2,12 +2,31 @@ import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@e
 import type { TerminalRenameOutcome, TerminalRenameTarget, ResolveRenameOptions } from "pi-terminal-mux";
 import { isTitleEffort, parseConfig, TITLE_EFFORT_LEVELS, type NamingConfig } from "./config.ts";
 import { loadNamingConfig, namingConfigPath, saveNamingConfig } from "../../config/naming-store.ts";
-import { NOTICE_SOURCE } from "../../i18n.ts";
-import { i18n } from "./i18n.ts";
-import { notifyWithSource } from "pi-utils";
+
 import { getCurrentSessionUserMessages, requestSessionNameWithTimeout, type SessionNameRequester } from "./session-name.ts";
 
 const RENAME_COMMAND = "rename";
+
+function targetLabel(target: string): string {
+  return {
+    workspace: "workspace",
+    tab: "tab",
+    window: "window",
+    pane: "pane",
+    session: "session",
+    terminal: "terminal",
+  }[target] ?? target;
+}
+
+function skipReason(reason: string, setting: string): string {
+  return {
+    unsupported: "unsupported by the current backend",
+    disabled: `backend setting is disabled: ${setting}`,
+    shared: "the target is shared with other sessions and was not granted for renaming",
+    unverified: "exclusive target ownership could not be verified",
+    "missing-id": "missing an explicit target ID; current focus is not a substitute",
+  }[reason] ?? reason;
+}
 const CONFIG_COMMAND_ALIASES = ["config:naming", "naming-config", "pi-naming-config"] as const;
 const CONFIG_RESET_COMMAND = "reset";
 const CONFIG_OPTION = {
@@ -59,7 +78,7 @@ function report(pi: ExtensionAPI, ctx: ExtensionContext, notice: { message: stri
       ),
     },
   };
-  notifyWithSource({ ctx: noticeContext, source: NOTICE_SOURCE, level, message });
+  noticeContext.ui.notify(message, level);
 }
 
 export interface NamingConfigStore {
@@ -74,28 +93,28 @@ export function registerNamingConfigCommand(
   store: NamingConfigStore = { load: loadNamingConfig, save: saveNamingConfig, path: namingConfigPath },
 ): void {
   const command = {
-    description: i18n.t("configCommandDescription"),
+    description: "Configure Spark naming",
     getArgumentCompletions: () => [{ value: CONFIG_RESET_COMMAND, label: CONFIG_RESET_COMMAND }],
     handler: async (args: string, ctx: ExtensionCommandContext): Promise<void> => {
       const argument = args.trim();
       if (argument && argument !== CONFIG_RESET_COMMAND) {
-        report(pi, ctx, { message: i18n.t("configCommandUsage"), level: "warning" });
+        report(pi, ctx, { message: "Usage: /config:naming (open the settings menu) or /config:naming reset (restore defaults)", level: "warning" });
         return;
       }
       if (argument === CONFIG_RESET_COMMAND) {
         try {
           const path = store.save(parseConfig({}), ctx) ?? store.path(ctx);
           report(pi, ctx, {
-            message: i18n.t("configCommandSaved", { path }),
+            message: `Naming configuration saved to ${path}. Run /reload to apply it.`,
             level: "info",
           });
         } catch (error) {
-          report(pi, ctx, { message: i18n.t("configCommandInvalid", { error: errorMessage(error) }), level: "error" });
+          report(pi, ctx, { message: `Invalid naming configuration: ${errorMessage(error)}`, level: "error" });
         }
         return;
       }
       if (!ctx.hasUI) {
-        report(pi, ctx, { message: i18n.t("configCommandInteractiveOnly"), level: "warning" });
+        report(pi, ctx, { message: "Naming configuration requires the TUI; run this command in an interactive Pi session.", level: "warning" });
         return;
       }
 
@@ -103,12 +122,12 @@ export function registerNamingConfigCommand(
       try {
         const loaded = store.load(ctx);
         if (loaded === false) {
-          report(pi, ctx, { message: i18n.t("namingDisabled"), level: "info" });
+          report(pi, ctx, { message: "Naming is disabled for this session. Configure naming in spark.json or use /config:naming reset, then /reload.", level: "info" });
           return;
         }
         config = loaded;
       } catch (error) {
-        report(pi, ctx, { message: i18n.t("configCommandInvalid", { error: errorMessage(error) }), level: "error" });
+        report(pi, ctx, { message: `Invalid naming configuration: ${errorMessage(error)}`, level: "error" });
         return;
       }
 
@@ -117,25 +136,25 @@ export function registerNamingConfigCommand(
         try {
           const path = store.save(next, ctx) ?? store.path(ctx);
           config = next;
-          report(pi, ctx, { message: i18n.t("configCommandSaved", { path }), level: "info" });
+          report(pi, ctx, { message: `Naming configuration saved to ${path}. Run /reload to apply it.`, level: "info" });
           return true;
         } catch (error) {
-          report(pi, ctx, { message: i18n.t("configCommandInvalid", { error: errorMessage(error) }), level: "error" });
+          report(pi, ctx, { message: `Invalid naming configuration: ${errorMessage(error)}`, level: "error" });
           return false;
         }
       };
       /** Formats a boolean setting for the localized menu label. */
-      const toggle = (value: boolean): string => value ? i18n.t("configOn") : i18n.t("configOff");
+      const toggle = (value: boolean): string => value ? "on" : "off";
       /** Opens a choice list for common values and falls back to text only for custom values. */
       const chooseSettingValue = async (
         title: string,
         current: string,
         options: readonly string[],
       ): Promise<string | undefined> => {
-        const customChoice = i18n.t("configCustom");
-        const cancelChoice = i18n.t("configCancel");
+        const customChoice = "Custom…";
+        const cancelChoice = "Cancel";
         const choices = [
-          ...options.map((value) => i18n.t("configPresetValue", { value })),
+          ...options.map((value) => `Common value: ${value}`),
           customChoice,
           cancelChoice,
         ];
@@ -147,23 +166,23 @@ export function registerNamingConfigCommand(
       };
 
       while (true) {
-        const doneChoice = i18n.t("configDone");
+        const doneChoice = "Done";
         const choices = [
-          i18n.t("configAutomaticNaming", { value: toggle(config.automaticNaming) }),
-          i18n.t("configManualNaming", { value: toggle(config.manualNaming) }),
-          i18n.t("configSessionTarget", { value: toggle(config.targets.session) }),
-          i18n.t("configWorkspaceTarget", { value: toggle(config.targets.workspace) }),
-          i18n.t("configTabTarget", { value: toggle(config.targets.tab) }),
-          i18n.t("configMaxLength", { value: config.title.maxLength }),
-          i18n.t("configPreferredLength", { value: config.title.preferredLength }),
-          i18n.t("configLanguage", { value: config.title.language }),
-          i18n.t("configInstructions", { value: config.title.instructions || i18n.t("configEmpty") }),
-          i18n.t("configTimeout", { value: config.title.timeoutMs }),
-          i18n.t("configMaxTokens", { value: config.title.maxTokens }),
-          i18n.t("configEffort", { value: config.title.effort }),
+          `Automatic naming: ${toggle(config.automaticNaming)}`,
+          `Manual /rename: ${toggle(config.manualNaming)}`,
+          `Name session: ${toggle(config.targets.session)}`,
+          `Name workspace: ${toggle(config.targets.workspace)}`,
+          `Name tab: ${toggle(config.targets.tab)}`,
+          `Maximum title length: ${config.title.maxLength}`,
+          `Preferred title length: ${config.title.preferredLength}`,
+          `Title language: ${config.title.language}`,
+          `Title instructions: ${config.title.instructions || "not set"}`,
+          `Request timeout: ${config.title.timeoutMs} ms`,
+          `Output budget: ${config.title.maxTokens} tokens`,
+          `Thinking effort: ${config.title.effort}`,
           doneChoice,
         ];
-        const selected = await ctx.ui.select(i18n.t("configMenuTitle"), choices);
+        const selected = await ctx.ui.select("Naming settings", choices);
         if (selected === undefined || selected === doneChoice) return;
         const selectedIndex = choices.indexOf(selected);
         let next: NamingConfig | undefined;
@@ -178,31 +197,31 @@ export function registerNamingConfigCommand(
         } else if (selectedIndex === CONFIG_OPTION.tabTarget) {
           next = parseConfig({ ...config, targets: { ...config.targets, tab: !config.targets.tab } });
         } else {
-          let inputTitle = i18n.t("configTimeoutInput");
+          let inputTitle = "Request timeout (positive milliseconds)";
           let inputValue = String(config.title.timeoutMs);
           let options: readonly string[] = TIMEOUT_PRESETS;
           if (selectedIndex === CONFIG_OPTION.maxLength) {
-            inputTitle = i18n.t("configMaxLengthInput");
+            inputTitle = "Maximum title length (positive integer)";
             inputValue = String(config.title.maxLength);
             options = MAX_LENGTH_PRESETS;
           } else if (selectedIndex === CONFIG_OPTION.preferredLength) {
-            inputTitle = i18n.t("configPreferredLengthInput");
+            inputTitle = "Preferred title length (positive integer)";
             inputValue = String(config.title.preferredLength);
             options = PREFERRED_LENGTH_PRESETS;
           } else if (selectedIndex === CONFIG_OPTION.language) {
-            inputTitle = i18n.t("configLanguageInput");
+            inputTitle = "Title language";
             inputValue = config.title.language;
             options = LANGUAGE_PRESETS;
           } else if (selectedIndex === CONFIG_OPTION.instructions) {
-            inputTitle = i18n.t("configInstructionsInput");
+            inputTitle = "Title instructions (can be empty)";
             inputValue = config.title.instructions;
             options = [];
           } else if (selectedIndex === CONFIG_OPTION.maxTokens) {
-            inputTitle = i18n.t("configMaxTokensInput");
+            inputTitle = "Output budget (positive integer, shared by thinking and title)";
             inputValue = String(config.title.maxTokens);
             options = MAX_TOKENS_PRESETS;
           } else if (selectedIndex === CONFIG_OPTION.effort) {
-            inputTitle = i18n.t("configEffortInput");
+            inputTitle = "Thinking effort";
             inputValue = config.title.effort;
             options = TITLE_EFFORT_LEVELS;
           }
@@ -220,7 +239,7 @@ export function registerNamingConfigCommand(
             // 自定义输入可能不是受支持的档位；明确报错并重开菜单，不静默丢弃也不落到其它字段。
             if (!isTitleEffort(input)) {
               report(pi, ctx, {
-                message: i18n.t("configEffortInvalid", { value: input, options: TITLE_EFFORT_LEVELS.join(", ") }),
+                message: `Invalid thinking effort: ${input}; allowed: ${TITLE_EFFORT_LEVELS.join(", ")}`,
                 level: "error",
               });
               continue;
@@ -229,7 +248,7 @@ export function registerNamingConfigCommand(
           } else title.timeoutMs = Number(input.trim());
           try { next = parseConfig({ ...config, title }); }
           catch (error) {
-            report(pi, ctx, { message: i18n.t("configCommandInvalid", { error: errorMessage(error) }), level: "error" });
+            report(pi, ctx, { message: `Invalid naming configuration: ${errorMessage(error)}`, level: "error" });
           }
         }
         if (next) save(next);
@@ -271,7 +290,7 @@ export function registerNaming(
       const message = errorMessage(error);
       if (message !== lastConfigError) {
         lastConfigError = message;
-        report(pi, ctx, { message: i18n.t("namingConfigFailed", { error: message }), level: "warning" });
+        report(pi, ctx, { message: `Naming is disabled because configuration failed. Fix the naming section in spark.json or the legacy naming file and /reload: ${message}`, level: "warning" });
       }
       return false;
     }
@@ -339,7 +358,7 @@ export function registerNaming(
       try {
         label = await requestSessionNameWithTimeout({ userMessages, ctx, requestName, title: config.title });
       } catch (error) {
-        if (canApply()) report(pi, ctx, { message: i18n.t("namingFailed", { error: errorMessage(error) }), level: "error" });
+        if (canApply()) report(pi, ctx, { message: `Naming failed: ${errorMessage(error)}`, level: "error" });
         return;
       }
     }
@@ -347,11 +366,11 @@ export function registerNaming(
 
     const renamed: string[] = [];
     if (config.targets.session) {
-      try { pi.setSessionName(label); renamed.push(i18n.t("piSessionTarget")); }
-      catch (error) { report(pi, ctx, { message: i18n.t("namingFailed", { error: errorMessage(error) }), level: "error" }); }
+      try { pi.setSessionName(label); renamed.push("Pi session"); }
+      catch (error) { report(pi, ctx, { message: `Naming failed: ${errorMessage(error)}`, level: "error" }); }
     }
     if (resolutionError !== undefined) {
-      report(pi, ctx, { message: i18n.t("terminalNamingFailed", { error: errorMessage(resolutionError) }), level: "warning" });
+      report(pi, ctx, { message: `Terminal naming failed: ${errorMessage(resolutionError)}`, level: "warning" });
     }
     for (const target of targets) {
       let result = target;
@@ -360,23 +379,20 @@ export function registerNaming(
         catch (error) { result = { status: "failed", operation: target.reference.operation, error: errorMessage(error) }; }
       }
       if (result.status === "renamed") {
-        renamed.push(i18n.t(`${result.reference.target}Target`));
+        renamed.push(targetLabel(result.reference.target));
       } else if (result.status === "skipped") {
-        report(pi, ctx, { message: i18n.t("terminalNamingSkipped", {
-          target: i18n.t(`${result.operation}Target`),
-          reason: i18n.t(`skip.${result.reason}`, { setting: result.setting ?? "" }),
-        }), level: "warning" });
+        report(pi, ctx, { message: `Did not rename ${targetLabel(result.operation)}: ${skipReason(result.reason, result.setting ?? "")}`, level: "warning" });
       } else if (result.status === "failed") {
-        report(pi, ctx, { message: i18n.t("terminalNamingFailed", { error: result.error }), level: "warning" });
+        report(pi, ctx, { message: `Terminal naming failed: ${result.error}`, level: "warning" });
       }
     }
     if (renamed.length > 0) {
-      report(pi, ctx, { message: i18n.t("namingDone", { label, targets: [...new Set(renamed)].join(", ") }), level: "info" });
+      report(pi, ctx, { message: `Named ${[...new Set(renamed)].join(", ")}: ${label}`, level: "info" });
     }
   }
 
   pi.registerCommand(RENAME_COMMAND, {
-    description: i18n.t("renameDescription"),
+    description: "Name the session and allowed terminal targets; omit the name to summarize all user messages on the current branch",
     getArgumentCompletions: () => null,
     handler: async (args, ctx) => {
       const state = sessionState(ctx);
@@ -384,7 +400,7 @@ export function registerNaming(
       state.attempted = true;
       const config = readConfig(ctx);
       if (!config || !config.manualNaming || !Object.values(config.targets).some(Boolean)) {
-        report(pi, ctx, { message: i18n.t("namingDisabled"), level: "info" });
+        report(pi, ctx, { message: "Naming is disabled for this session. Configure naming in spark.json or use /config:naming reset, then /reload.", level: "info" });
         return;
       }
       await rename(args, ctx, false, config);
@@ -403,12 +419,12 @@ export function registerNaming(
     const inputRequest = request;
     void naming.catch((error: unknown) => {
       if (generation !== inputGeneration || request !== inputRequest) return;
-      report(pi, ctx, { message: i18n.t("namingFailed", { error: errorMessage(error) }), level: "error" });
+      report(pi, ctx, { message: `Naming failed: ${errorMessage(error)}`, level: "error" });
     });
   });
 }
 
-/** Spark owns the runtime, catalog and notice renderer; no configuration I/O at registration. */
+/** Spark owns the runtime and catalog; no configuration I/O at registration. */
 export function registerNamingFeature(pi: ExtensionAPI): void {
   registerNamingConfigCommand(pi);
   registerNaming(pi, loadNamingConfig);

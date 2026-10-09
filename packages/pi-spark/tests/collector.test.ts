@@ -2,11 +2,7 @@ import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import test from "node:test";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
-import {
-  collectSessionResources,
-  collectToolResources,
-  ResourceIndex,
-} from "../src/features/session-resources/collector.ts";
+import { collectSessionResources, collectToolResources, ResourceIndex } from "../src/features/session-resources/collector.ts";
 
 const cwd = resolve("/workspace/project");
 

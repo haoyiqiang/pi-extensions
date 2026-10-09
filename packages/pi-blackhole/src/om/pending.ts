@@ -13,15 +13,7 @@
  * under ~/.pi/agent/pi-blackhole/. This eliminates race conditions from
  * concurrent pi sessions writing to a shared file.
  */
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  renameSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 // ── Types ───────────────────────────────────────────────────────────────────

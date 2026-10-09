@@ -10,18 +10,11 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { test, type TestContext } from "node:test";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
-import {
-  createEditToolDefinition, createWriteToolDefinition,
-  type BashOperations, type EditToolDetails, type ExtensionAPI, type ExtensionContext, type ToolDefinition,
-} from "@earendil-works/pi-coding-agent";
+import { createEditToolDefinition, createWriteToolDefinition, type BashOperations, type EditToolDetails, type ExtensionAPI, type ExtensionContext, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Value } from "typebox/value";
 import { createActionFusionExtension, type ActionFusionOptions } from "../src/action-fusion.ts";
 import { resolveToolPath, withFusedFileQueue } from "../src/file-queue.ts";
-import {
-  assertUnchangedBeforeCommand, executeMutationThenRun, resultText,
-  THEN_RUN_FAILED, THEN_RUN_RUNNING, THEN_RUN_SKIPPED, THEN_RUN_SUCCEEDED,
-  type ActionFusionDetails,
-} from "../src/then-run.ts";
+import { assertUnchangedBeforeCommand, executeMutationThenRun, resultText, THEN_RUN_FAILED, THEN_RUN_RUNNING, THEN_RUN_SKIPPED, THEN_RUN_SUCCEEDED, type ActionFusionDetails } from "../src/then-run.ts";
 
 const bounded = { timeout: 5_000 };
 

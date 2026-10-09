@@ -4,13 +4,8 @@ import { autoCompactThreshold } from "./model-budget.js";
 import type { Runtime } from "./runtime.js";
 import { debugLog } from "./debug-log.js";
 import { RETRYABLE_ERROR_RE } from "./retryable-error.js";
-import {
-  compactInlineAtTurnBoundary,
-  InlineCompactionUnavailableError,
-  isCompactionEligible,
-  type InlineCompaction,
-} from "./inline-compaction.js";
-import { i18n, notifyBlackhole } from "../i18n.js";
+import { compactInlineAtTurnBoundary, InlineCompactionUnavailableError, isCompactionEligible, type InlineCompaction } from "./inline-compaction.js";
+import { notifyBlackhole } from "../notify.js";
 
 /** User-facing tail for the adapter-unavailable warning. The settled
  * (agent_end) fallback is viable for persisted sessions, but doomed for
@@ -18,8 +13,8 @@ import { i18n, notifyBlackhole } from "../i18n.js";
  * (issue #92), so the message must not promise a fallback that cannot run. */
 function adapterFallbackNote(sessionManager: { isPersisted?: () => boolean } | undefined): string {
   return sessionManager?.isPersisted?.() === false
-    ? i18n.t("adapterFallbackNonPersisted")
-    : i18n.t("adapterFallbackSettled");
+    ? "; non-persisted sessions will not be compacted"
+    : "; using settled compaction fallback";
 }
 
 function getErrorMessage(error: unknown): string {
@@ -59,7 +54,7 @@ export function recordStaleCtxSkip(
   if (warned.has(sessionId)) return;
   if (warned.size >= STALE_SKIP_WARN_MAX_SESSIONS) warned.clear();
   warned.add(sessionId);
-  const message = i18n.t("staleCompactionSkipped");
+  const message = "Observational memory: auto-compaction skipped — the extension ctx went stale before the deferred compaction ran (in-memory sessions disposed right after agent_end lose this race); see /blackhole-memory status";
   notifySafely(hasUI, ui, message, "warning");
   if (!hasUI) console.warn(message);
 }
@@ -121,7 +116,7 @@ export function recordMidRunFailure(runtime: RetryRuntime): number {
   return delay;
 }
 
-const retryInSeconds = (delayMs: number) => i18n.t("retryInSeconds", { seconds: Math.ceil(delayMs / 1000) });
+const retryInSeconds = (delayMs: number) => `; retrying in ${Math.ceil(delayMs / 1000)}s`;
 
 export function registerCompactionTrigger(
   pi: ExtensionAPI,
@@ -160,7 +155,7 @@ export function registerCompactionTrigger(
       notifySafely(
         ctx?.hasUI ?? false,
         ctx?.ui,
-        i18n.t("midRunInlineUnavailable", { reason: runtime.inlineCompactionAdapterStatus.reason ?? i18n.t("configErrorUnknown"), fallback: adapterFallbackNote(ctx?.sessionManager) }),
+        `Observational memory: mid-run inline compaction unavailable: ${runtime.inlineCompactionAdapterStatus.reason ?? "unknown error"}${adapterFallbackNote(ctx?.sessionManager)}`,
         "warning",
       );
     }
@@ -284,7 +279,7 @@ async function handleTurnEnd(
   runtime.tryEmitInfo(
     hasUI,
     ui,
-    i18n.t("midRunThresholdReached", { tokens: tokens.toLocaleString(), mode: inlineMode ? i18n.t("compactingInline") : i18n.t("compactingAndPausing") }),
+    `Observational memory: compaction threshold reached mid-run (~${tokens.toLocaleString()} tokens); compacting${inlineMode ? " inline" : " and pausing"}`,
   );
 
   runtime.compactInFlight = true;
@@ -297,7 +292,7 @@ async function handleTurnEnd(
       runtime.tryEmitInfo(
         hasUI,
         ui,
-        i18n.t("midRunInlineComplete"),
+        "Observational memory: transparent mid-run compaction complete",
       );
     } catch (error) {
       if (isStaleExtensionContextError(error)) throw error;
@@ -317,7 +312,7 @@ async function handleTurnEnd(
           notifySafely(
             hasUI,
             ui,
-            i18n.t("midRunInlineUnavailable", { reason: message, fallback: adapterFallbackNote(ctx.sessionManager) }),
+            `Observational memory: mid-run inline compaction unavailable: ${message}${adapterFallbackNote(ctx.sessionManager)}`,
             "warning",
           );
         }
@@ -333,7 +328,7 @@ async function handleTurnEnd(
         notifySafely(
           hasUI,
           ui,
-          i18n.t("midRunInlineFailed", { message, retry: retryInSeconds(delay) }),
+          `Observational memory: transparent mid-run compaction failed: ${message}${retryInSeconds(delay)}`,
           "error",
         );
       }
@@ -357,7 +352,7 @@ async function handleTurnEnd(
       runtime.tryEmitInfo(
         hasUI,
         ui,
-        i18n.t("midRunPausedComplete"),
+        "Observational memory: mid-run compaction complete; agent paused",
       );
     },
     onError: (error: { message: string }) => {
@@ -373,7 +368,7 @@ async function handleTurnEnd(
         notifySafely(
           hasUI,
           ui,
-          i18n.t("midRunFailed", { message, retry: retryInSeconds(delay) }),
+          `Observational memory: mid-run compaction failed: ${message}${retryInSeconds(delay)}`,
           "error",
         );
       }
@@ -496,7 +491,7 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
   runtime.tryEmitInfo(
     hasUI,
     ui,
-    i18n.t("autoCompactionThresholdReached", { tokens: tokens.toLocaleString() }),
+    `Observational memory: compaction threshold reached (~${tokens.toLocaleString()} tokens); triggering compaction`,
   );
 
   runtime.compactInFlight = true;
@@ -559,7 +554,7 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
           runtime.tryEmitInfo(
             hasUI,
             ui,
-            i18n.t("compactionSessionChanged"),
+            "Observational memory: compaction cancelled — session changed before compaction",
           );
           return;
         }
@@ -610,7 +605,7 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
         runtime.tryEmitInfo(
           hasUI,
           ui,
-          i18n.t("compactionAlreadyRan"),
+          "Observational memory: compaction skipped — another compaction already ran before deferred compaction",
         );
         return;
       }
@@ -634,7 +629,7 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
         onComplete: (result: any) => {
           runtime.compactInFlight = false;
           dbg("compaction_trigger.onComplete", { result: !!result });
-          runtime.tryEmitInfo(hasUI, ui, i18n.t("autoCompactionComplete"));
+          runtime.tryEmitInfo(hasUI, ui, "Observational memory: compaction complete");
         },
         onError: (error: { message: string }) => {
           runtime.compactInFlight = false;
@@ -645,7 +640,7 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
             // We already notified the user with the real reason before returning { cancel: true }.
             return;
           }
-          notifySafely(hasUI, ui, i18n.t("autoCompactionFailed", { message: error.message }), "error");
+          notifySafely(hasUI, ui, `Observational memory: ${error.message}`, "error");
         },
       });
     } catch (error) {
@@ -661,7 +656,7 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
         return;
       }
       dbg("compaction_trigger.microtask.error", { message: msg });
-      notifySafely(hasUI, ui, i18n.t("autoCompactionThrew", { message: msg }), "error");
+      notifySafely(hasUI, ui, `Observational memory: compact threw: ${msg}`, "error");
     }
   })();
 }

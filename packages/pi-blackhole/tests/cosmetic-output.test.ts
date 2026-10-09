@@ -8,17 +8,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { initTheme, sessionEntryToContextMessages } from "@earendil-works/pi-coding-agent";
-import {
-  PRE_COMPACTION_MAX_BYTES,
-  PRE_COMPACTION_OUTPUT_TYPE,
-  assistantText,
-  buildPreCompactionOutputData,
-  hasPreCompactionOutput,
-  isPreCompactionOutputData,
-  registerPreCompactionOutput,
-  selectOmittedAssistantText,
-  truncateToBytes,
-} from "../src/hooks/cosmetic-output.js";
+import { PRE_COMPACTION_MAX_BYTES, PRE_COMPACTION_OUTPUT_TYPE, assistantText, buildPreCompactionOutputData, hasPreCompactionOutput, isPreCompactionOutputData, registerPreCompactionOutput, selectOmittedAssistantText, truncateToBytes } from "../src/hooks/cosmetic-output.js";
 import { DEFAULTS } from "../src/core/unified-config.js";
 import { estimateEntryTokens } from "../src/om/tokens.js";
 import { serializeBranchEntries } from "../src/om/serialize.js";

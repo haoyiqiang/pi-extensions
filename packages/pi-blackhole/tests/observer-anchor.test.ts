@@ -12,13 +12,7 @@ import { describe, test, expect, vi, beforeEach } from "vitest";
 
 import { Runtime } from "../src/om/runtime.js";
 import { anyStageDue, runObserverStage, type ConsolidationCtx } from "../src/om/consolidation.js";
-import {
-  compactionEntry,
-  observation,
-  observationsRecordedEntry,
-  rawMessage,
-  type TestEntry,
-} from "./fixtures/session.js";
+import { compactionEntry, observation, observationsRecordedEntry, rawMessage, type TestEntry } from "./fixtures/session.js";
 
 interface ObserverStageInput {
   chunk: string;

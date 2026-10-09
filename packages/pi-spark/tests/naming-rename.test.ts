@@ -558,7 +558,7 @@ test("all config aliases forward ctx to the store and use its returned path", as
   assert.equal(h.notices.filter((notice) => notice.includes("project/.pi/spark.json")).length, 3);
 });
 
-test("non-UI reports retain Spark source and Pi message semantics without triggering a turn", async () => {
+test("non-UI reports send the Pi message without triggering a turn", async () => {
   const h = harness();
   Object.assign(h.ctx, { hasUI: false, mode: "json" });
   const messages: unknown[] = [];
@@ -568,7 +568,7 @@ test("non-UI reports retain Spark source and Pi message semantics without trigge
   assert.equal(messages.length, 1);
   const sent = messages[0] as { message: { customType: string; content: string; display: boolean }; options: { triggerTurn: boolean } };
   assert.equal(sent.message.customType, "pi-spark");
-  assert.match(sent.message.content, /^\[spark\] /);
+  assert.match(sent.message.content, /Non-UI/);
   assert.equal(sent.message.display, true);
   assert.deepEqual(sent.options, { triggerTurn: false });
 });

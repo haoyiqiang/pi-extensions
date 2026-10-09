@@ -1,12 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import {
-	buildSessionContext,
-	type ContextEvent,
-	SessionManager,
-	type ToolInfo,
-} from "@earendil-works/pi-coding-agent";
+import { buildSessionContext, type ContextEvent, SessionManager, type ToolInfo } from "@earendil-works/pi-coding-agent";
 
 import { buildUsageSnapshot, InitialCaptureState, measureInjectedMessages } from "../src/capture.ts";
 import { buildSnapshot } from "../src/model.ts";

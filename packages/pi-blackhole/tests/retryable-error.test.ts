@@ -1,13 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  getDiscardedCount,
-  isCooldownWorthyError,
-  isDeterministicError,
-  isRetryableError,
-  withDiscardedCount,
-  WorkerStreamError,
-} from "../src/om/retryable-error.js";
+import { getDiscardedCount, isCooldownWorthyError, isDeterministicError, isRetryableError, withDiscardedCount, WorkerStreamError } from "../src/om/retryable-error.js";
 
 describe("getDiscardedCount", () => {
   it("reads the count only from a WorkerStreamError", () => {

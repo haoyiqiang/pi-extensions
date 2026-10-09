@@ -1,9 +1,7 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { notifyWithSource } from "pi-utils";
+
 import { loadConfig } from "../../config/index.ts";
-import { NOTICE_SOURCE } from "../../i18n.ts";
 import { isResourcesEnabled } from "./config.ts";
-import { i18n } from "./i18n.ts";
 import { ensureSessionResourceRuntime } from "./runtime.ts";
 import { projectResourcesOverrides, saveResourcesConfig } from "./store.ts";
 
@@ -18,30 +16,17 @@ function persist(ctx: ExtensionCommandContext, enabled: boolean): void {
   try {
     saveResourcesConfig(enabled);
     ensureSessionResourceRuntime().enabled = isResourcesEnabled(loadConfig(ctx).resources);
-    const override = projectResourcesOverrides(ctx.cwd) ? ` ${i18n.t("resourcesProjectOverride")}` : "";
-    notifyWithSource({
-      ctx,
-      source: NOTICE_SOURCE,
-      level: "info",
-      message: `${i18n.t(enabled ? "enabled" : "disabled")}${override}`,
-    });
+    const override = projectResourcesOverrides(ctx.cwd) ? ` ${"The project spark.json also sets resources and overrides this global configuration."}` : "";
+    ctx.ui.notify(`${enabled ? "# session resource picker enabled" : "# session resource picker disabled"}${override}`, "info");
   } catch (error) {
-    notifyWithSource({
-      ctx,
-      source: NOTICE_SOURCE,
-      level: "error",
-      message: i18n.t("configSaveFailed", {
-        path: "spark.json",
-        error: error instanceof Error ? error.message : String(error),
-      }),
-    });
+    ctx.ui.notify(`Failed to save session resource configuration: ${"spark.json"} (${error instanceof Error ? error.message : String(error)}).`, "error");
   }
 }
 
 /** Registers the retired session-resources commands against spark.json. */
 export function registerSessionResourcesCommand(pi: ExtensionAPI): void {
   const command = {
-    description: i18n.t("commandDescription"),
+    description: "Manage the # session resource picker",
     getArgumentCompletions: (prefix: string) => {
       const matches = ACTIONS.filter((action) => action.startsWith(prefix));
       return matches.length > 0 ? matches.map((action) => ({ value: action, label: action })) : null;
@@ -49,16 +34,11 @@ export function registerSessionResourcesCommand(pi: ExtensionAPI): void {
     handler: async (args: string, ctx: ExtensionCommandContext): Promise<void> => {
       const action = args.trim().toLowerCase();
       if (!action) {
-        notifyWithSource({
-          ctx,
-          source: NOTICE_SOURCE,
-          level: "info",
-          message: i18n.t(enabledFromConfig(ctx) ? "referenceHint" : "referenceDisabledHint"),
-        });
+        ctx.ui.notify(enabledFromConfig(ctx) ? "Type # in the editor and continue typing to filter session resources; Left/Right or Tab/Shift+Tab switch types, Up/Down selects, and Enter inserts the reference" : "The # session resource picker is disabled; use /config:session-resources enable to enable it", "info");
         return;
       }
       if (!ACTIONS.includes(action as (typeof ACTIONS)[number])) {
-        notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("commandUsage") });
+        ctx.ui.notify("Usage: /config:session-resources [enable|disable]", "warning");
         return;
       }
       persist(ctx, action === "enable" || action === "show");

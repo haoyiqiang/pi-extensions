@@ -7,12 +7,7 @@
  * These tests pin down each cut of that surgery with real pipeline output.
  */
 import { describe, expect, it } from "vitest";
-import {
-  compile,
-  compileSegment,
-  stripOMContent,
-  stripRecallNotes,
-} from "../src/core/summarize.js";
+import { compile, compileSegment, stripOMContent, stripRecallNotes } from "../src/core/summarize.js";
 import { buildAppendOnlyDetails } from "../src/core/compaction-chain.js";
 import { isPiVccCompactionDetailsV2 } from "../src/details.js";
 

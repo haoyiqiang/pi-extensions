@@ -20,12 +20,7 @@
  * row keyed by `field.key`) so renderers stay stateless.
  */
 
-import {
-  matchesKey,
-  truncateToWidth,
-  type Component,
-  type SelectItem,
-} from "@earendil-works/pi-tui";
+import { matchesKey, truncateToWidth, type Component, type SelectItem } from "@earendil-works/pi-tui";
 import { SelectList } from "@earendil-works/pi-tui";
 import { getSelectListTheme } from "@earendil-works/pi-coding-agent";
 import { handleInlineEditInput, renderInlineEditValue, type InlineEditState } from "../inline-edit";

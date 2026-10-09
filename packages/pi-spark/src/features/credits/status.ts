@@ -1,6 +1,5 @@
 import prettyMilliseconds from "pretty-ms";
 
-import { i18n } from "../../i18n";
 import { formatLink } from "../../utils/format";
 
 import type { Theme } from "@earendil-works/pi-coding-agent";
@@ -26,7 +25,7 @@ export function renderError(theme: Theme, label: string, message: string): strin
 
 function renderWindows(theme: Theme, credits: Extract<Credits, { type: "windows" }>): string {
   const unlimited = credits.unlimited || credits.lanes.every((lane) => lane.percent === undefined);
-  if (unlimited) return theme.fg("success", i18n.t("creditsUnlimited"));
+  if (unlimited) return theme.fg("success", "unlimited");
 
   return credits.lanes.map((lane) => renderLane(theme, lane)).join(" ");
 }

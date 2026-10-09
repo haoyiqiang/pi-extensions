@@ -167,7 +167,8 @@ for (const dir of packageDirs) {
   }
 
   // The root Git package is an explicit full-suite distribution profile. Each
-  // package contributes owned ./ entries, including dependency entry shims.
+  // package contributes its owned ./ extension entries. pi-utils is a library and
+  // must not be loaded as an extension.
   const ownedExtensionEntries = [];
   for (const extensionEntry of pkgJson.pi?.extensions ?? []) {
     if (typeof extensionEntry !== "string" || extensionEntry.length === 0) {
@@ -237,14 +238,8 @@ for (const dir of packageDirs) {
   if (importsPiUtils && !pkgJson.dependencies?.["pi-utils"]) {
     error(`${label}: runtime imports pi-utils, but it is not declared in dependencies`);
   }
-  if (
-    importsPiUtils &&
-    Array.isArray(pkgJson.pi?.extensions) &&
-    !ownedExtensionEntries.some((path) =>
-      /export\s*\{\s*default\s*\}\s*from\s*["']pi-utils["']/.test(readFileSync(path, "utf8")),
-    )
-  ) {
-    error(`${label}: runtime imports pi-utils, but its shared extension entry is not loaded`);
+  if (pkgJson.name !== "pi-utils" && (pkgJson.pi?.extensions ?? []).some((entry) => String(entry).includes("i18n-entry"))) {
+    error(`${label}: pi-utils is a library; do not load it through an i18n-entry shim`);
   }
 
   // 5. files field should include READMEs
@@ -257,33 +252,8 @@ for (const dir of packageDirs) {
     }
   }
 
-  // 6. i18n catalog consistency. Repository packages use one flat string map
-  // per locale; the public compatibility loader still supports legacy callers.
-  const localesDir = join(pkgRoot, "locales");
-  if (existsSync(localesDir)) {
-    const catalogFiles = readdirSync(localesDir).filter((file) => file.endsWith(".json")).sort();
-    const expectedFiles = ["en-US.json", "zh-CN.json"];
-    if (JSON.stringify(catalogFiles) !== JSON.stringify(expectedFiles)) {
-      error(`${label}: locales must contain exactly en-US.json and zh-CN.json`);
-    }
-    const catalogs = new Map();
-    for (const catalogFile of catalogFiles) {
-      const catalog = JSON.parse(readFileSync(join(localesDir, catalogFile), "utf8"));
-      if (Object.values(catalog).some((value) => typeof value !== "string")) {
-        error(`${label}: locales/${catalogFile} must be a flat string map`);
-        continue;
-      }
-      catalogs.set(catalogFile.replace(/\.json$/, ""), catalog);
-    }
-    const english = catalogs.get("en-US");
-    const chinese = catalogs.get("zh-CN");
-    if (english && chinese) {
-      const englishKeys = Object.keys(english).sort();
-      const chineseKeys = Object.keys(chinese).sort();
-      if (JSON.stringify(englishKeys) !== JSON.stringify(chineseKeys)) {
-        error(`${label}: locales/en-US.json and locales/zh-CN.json must contain the same keys`);
-      }
-    }
+  if (existsSync(join(pkgRoot, "locales"))) {
+    error(`${label}: user-facing text is English in code; do not add a locales catalog`);
   }
 }
 

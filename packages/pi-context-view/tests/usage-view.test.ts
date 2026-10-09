@@ -5,14 +5,7 @@ import { test } from "node:test";
 import { Theme, type ThemeColor } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
 
-import {
-	AUTO_COMPACT_BUFFER_CATEGORY_ID,
-	type CategoryColors,
-	DEFAULT_CATEGORY_COLORS,
-	DEFAULT_MAP_SIZE,
-	FREE_SPACE_CATEGORY_ID,
-	type MapSize,
-} from "../src/config.ts";
+import { AUTO_COMPACT_BUFFER_CATEGORY_ID, type CategoryColors, DEFAULT_CATEGORY_COLORS, DEFAULT_MAP_SIZE, FREE_SPACE_CATEGORY_ID, type MapSize } from "../src/config.ts";
 import type { ContextUsageSnapshot } from "../src/model.ts";
 import { formatPercent, formatTokens, UsageView, type UsageViewInput } from "../src/ui/usage-view.ts";
 

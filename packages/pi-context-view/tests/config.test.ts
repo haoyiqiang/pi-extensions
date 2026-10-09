@@ -1,26 +1,10 @@
 import assert from "node:assert/strict";
-import {
-	mkdtempSync,
-	readFileSync,
-	readdirSync,
-	rmSync,
-	unlinkSync,
-	utimesSync,
-	writeFileSync,
-} from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test, type TestContext } from "node:test";
 
-import {
-	AUTO_COMPACT_BUFFER_CATEGORY_ID,
-	ConfigStore,
-	createDefaultConfigFile,
-	DEFAULT_CONFIG,
-	FREE_SPACE_CATEGORY_ID,
-	loadConfigFile,
-	resolveCategoryColor,
-} from "../src/config.ts";
+import { AUTO_COMPACT_BUFFER_CATEGORY_ID, ConfigStore, createDefaultConfigFile, DEFAULT_CONFIG, FREE_SPACE_CATEGORY_ID, loadConfigFile, resolveCategoryColor } from "../src/config.ts";
 
 /** Create one isolated override path and remove its directory after the test. */
 function createConfigPath(context: TestContext): string {

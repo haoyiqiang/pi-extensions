@@ -1,11 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { registerEditor } from "../src/features/editor/index.ts";
-import {
-  getElapsedLabel,
-  setElapsedLabel,
-  setElapsedLabelListener,
-} from "../src/features/metrics/elapsed-label.ts";
+import { getElapsedLabel, setElapsedLabel, setElapsedLabelListener } from "../src/features/metrics/elapsed-label.ts";
 
 test("elapsed labels and redraw hooks are isolated by session owner", () => {
   const parent = {};

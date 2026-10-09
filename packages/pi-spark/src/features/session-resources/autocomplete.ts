@@ -1,7 +1,6 @@
 import { pathToFileURL } from "node:url";
 import { fuzzyFilter, getCapabilities, visibleWidth } from "@earendil-works/pi-tui";
 import type { ResourceAction, ResourceKind, SessionResource } from "./collector.ts";
-import { i18n } from "./i18n.ts";
 
 export const RESOURCE_AUTOCOMPLETE_LIMIT = 12;
 const ANSI_RESET = "\x1b[0m";
@@ -38,12 +37,12 @@ const RESOURCE_KIND_LABELS: Record<ResourceKind, string> = {
   web: "URL",
 };
 const ACTION_LABELS: Record<ResourceAction, string> = {
-  read: "actionRead",
-  changed: "actionChanged",
-  inspected: "actionInspected",
-  opened: "actionOpened",
-  created: "actionCreated",
-  referenced: "actionReferenced",
+  read: "read",
+  changed: "write",
+  inspected: "inspect",
+  opened: "open",
+  created: "created",
+  referenced: "ref",
 };
 
 export interface ResourceSuggestion {
@@ -107,7 +106,7 @@ function resourceReference(resource: SessionResource): string {
 
 /** Builds searchable text without exposing ANSI sequences to fuzzy matching. */
 function resourceSearchText(resource: SessionResource): string {
-  const actionLabels = resource.actions.map((action) => i18n.t(ACTION_LABELS[action]));
+  const actionLabels = resource.actions.map((action) => ACTION_LABELS[action]);
   return [
     resource.label,
     resource.target,
@@ -121,7 +120,7 @@ function resourceSearchText(resource: SessionResource): string {
 
 /** Formats one resource as a picker row without repeating the active tab type. */
 export function resourceItem(resource: SessionResource): ResourceSuggestion {
-  const actions = resource.actions.map((action) => i18n.t(ACTION_LABELS[action])).join(" · ");
+  const actions = resource.actions.map((action) => ACTION_LABELS[action]).join(" · ");
   const usage = resource.seenCount > 1 ? ` · ×${resource.seenCount}` : "";
   const label = resource.label;
   return {

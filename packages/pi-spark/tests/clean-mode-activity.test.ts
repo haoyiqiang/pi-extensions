@@ -1,30 +1,7 @@
 // @ts-nocheck
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-	BRANCH_CONTINUATION_PADDING,
-	TREE_INDENT,
-	activityClassLabel,
-	activityCountersNote,
-	activityGlyph,
-	appendActivityCountersNote,
-	buildActivityLines,
-	buildRunStatusLines,
-	classifyToolActivity,
-	clampActivityText,
-	createActivitySnapshot,
-	dominantActivityClass,
-	extractOutputTail,
-	extractThoughtHead,
-	formatActivityCountersNote,
-	renderActivityRows,
-	toolActivityDetail,
-	toolActivityLabel,
-	withoutActionRows,
-	type ActivityRenderInput,
-	type ActivityRow,
-} from "../src/features/clean-mode/activity.ts";
-import { i18n } from "../src/features/clean-mode/i18n.ts";
+import { BRANCH_CONTINUATION_PADDING, TREE_INDENT, activityClassLabel, activityCountersNote, activityGlyph, appendActivityCountersNote, buildActivityLines, buildRunStatusLines, classifyToolActivity, clampActivityText, createActivitySnapshot, dominantActivityClass, extractOutputTail, extractThoughtHead, formatActivityCountersNote, renderActivityRows, toolActivityDetail, toolActivityLabel, withoutActionRows, type ActivityRenderInput, type ActivityRow } from "../src/features/clean-mode/activity.ts";
 import { visibleWidth } from "@earendil-works/pi-tui";
 
 /** 透明的取色能力，便于断言明文。 */
@@ -45,7 +22,7 @@ function runningSnapshot(): ReturnType<typeof createActivitySnapshot> {
 	return {
 		active: true,
 		startedAtMs: 1_000_000,
-		running: [{ toolCallId: "c1", label: i18n.t("activityCommand"), detail: "npm test" }],
+		running: [{ toolCallId: "c1", label: "Run Command", detail: "npm test" }],
 		counters: { read: 4, search: 3, command: 1, other: 0 },
 	};
 }
@@ -107,11 +84,11 @@ test("长文本按宽度截断并加省略号", () => {
 });
 
 test("工具名映射到语义标签", () => {
-	assert.equal(toolActivityLabel("read"), i18n.t("activityRead"));
-	assert.equal(toolActivityLabel("grep"), i18n.t("activitySearch"));
-	assert.equal(toolActivityLabel("bash"), i18n.t("activityCommand"));
-	assert.equal(toolActivityLabel("mcp__x/edit"), i18n.t("activityEdit"));
-	assert.equal(toolActivityLabel("weird_tool"), i18n.t("activityTool"));
+	assert.equal(toolActivityLabel("read"), "Read File");
+	assert.equal(toolActivityLabel("grep"), "Search");
+	assert.equal(toolActivityLabel("bash"), "Run Command");
+	assert.equal(toolActivityLabel("mcp__x/edit"), "Edit File");
+	assert.equal(toolActivityLabel("weird_tool"), "Tool");
 });
 
 test("工具分类决定计数桶", () => {
@@ -122,10 +99,10 @@ test("工具分类决定计数桶", () => {
 });
 
 test("分类桶映射到动作标签", () => {
-	assert.equal(activityClassLabel("read"), i18n.t("activityRead"));
-	assert.equal(activityClassLabel("search"), i18n.t("activitySearch"));
-	assert.equal(activityClassLabel("command"), i18n.t("activityCommand"));
-	assert.equal(activityClassLabel("other"), i18n.t("activityTool"));
+	assert.equal(activityClassLabel("read"), "Read File");
+	assert.equal(activityClassLabel("search"), "Search");
+	assert.equal(activityClassLabel("command"), "Run Command");
+	assert.equal(activityClassLabel("other"), "Tool");
 });
 
 test("主导分类要严格过半，最多但不够半数就不给主词", () => {
@@ -203,11 +180,11 @@ test("活动块末尾带本轮分类计数尾注，不重复顶部文案与耗�
 
 	assert.ok(joined.includes("npm test"), `应显示正在跑的工具：${joined}`);
 	assert.ok(
-		joined.includes(i18n.t("activityCounterRead", { count: "4" })),
+		joined.includes(`read ${"4"}`),
 		`分类计数应作为尾注出现在活动块里：${joined}`,
 	);
 	assert.ok(
-		!joined.includes(i18n.t("activityWorking")),
+		!joined.includes("Working"),
 		`「处理中」只在轮首，活动块不应重复：${joined}`,
 	);
 	assert.ok(!joined.includes("42s"), `耗时只在轮首，活动块不应重复：${joined}`);
@@ -280,7 +257,7 @@ test("分类计数拼成一行尾注，0 的桶按需省略", () => {
 	const counted = formatActivityCountersNote({ read: 4, search: 3, command: 1, other: 9 });
 	assert.equal(
 		counted,
-		`${i18n.t("activityCounterRead", { count: "4" })} · ${i18n.t("activityCounterSearch", { count: "3" })} · ${i18n.t("activityCounterCommand", { count: "1" })}`,
+		`${`read ${"4"}`} · ${`search ${"3"}`} · ${`command ${"1"}`}`,
 		`顺序是读取 → 搜索 → 命令，且不带前导分隔符：${counted}`,
 	);
 	assert.equal(
@@ -290,7 +267,7 @@ test("分类计数拼成一行尾注，0 的桶按需省略", () => {
 	);
 	assert.equal(
 		formatActivityCountersNote({ read: 0, search: 2, command: 0, other: 0 }),
-		i18n.t("activityCounterSearch", { count: "2" }),
+		`search ${"2"}`,
 		"只有一个桶时只留那一个桶",
 	);
 });
@@ -302,13 +279,13 @@ test("轮首状态行只报运行级时间：状态与耗时，不带计数与�
 	assert.equal(lines.length, 1, `轮首只应有一行：${lines.join("\n")}`);
 	const line = lines[0] ?? "";
 	assert.ok(!line.includes("[clean]"), `轮首不应带来源前缀：${line}`);
-	assert.ok(line.includes(i18n.t("activityWorking")), `应说明正在处理：${line}`);
+	assert.ok(line.includes("Working"), `应说明正在处理：${line}`);
 	assert.ok(line.includes("42s"), `应带耗时：${line}`);
 	assert.ok(
-		!line.includes(i18n.t("activityCounterRead", { count: "4" })),
+		!line.includes(`read ${"4"}`),
 		`轮首不应带分类计数：${line}`,
 	);
-	assert.ok(!line.includes(i18n.t("activityThinking")), `轮首不应带思考细节：${line}`);
+	assert.ok(!line.includes("Thinking"), `轮首不应带思考细节：${line}`);
 	assert.ok(!line.includes("npm test"), `轮首不应带正在跑的工具：${line}`);
 });
 
@@ -321,7 +298,7 @@ test("轮首状态行在未运行或行数预算为零时为空", () => {
 test("思考行用当前动画帧，不出现改变填充比例的图形", () => {
 	const snapshot = { ...runningSnapshot(), thought: "正在追踪 token 失效路径" };
 	const lines = blockLines({ snapshot, animated: true, frame: 2 });
-	const thoughtLine = lines.find((line) => line.includes(i18n.t("activityThinking")));
+	const thoughtLine = lines.find((line) => line.includes("Thinking"));
 
 	assert.ok(thoughtLine, `应当输出思考行：${lines.join("\n")}`);
 	assert.ok(
@@ -359,16 +336,16 @@ test("行数预算收紧时从尾部截断，先保住第一行", () => {
 
 test("并行执行时轮首换成并行文案，活动块里不重复", () => {
 	const snapshot = runningSnapshot();
-	snapshot.running.push({ toolCallId: "c2", label: i18n.t("activityRead"), detail: "b.ts" });
+	snapshot.running.push({ toolCallId: "c2", label: "Read File", detail: "b.ts" });
 	const lines = blockLines({ snapshot });
 	const joined = lines.join("\n");
 
 	assert.ok(
-		!joined.includes(i18n.t("activityParallel")),
+		!joined.includes("Parallel"),
 		`并行文案只在轮首，活动块里不应重复：${joined}`,
 	);
 	assert.ok(
-		buildRunStatusLines(renderInput({ snapshot }))[0]?.includes(i18n.t("activityParallel")),
+		buildRunStatusLines(renderInput({ snapshot }))[0]?.includes("Parallel"),
 		"轮首应换成并行文案",
 	);
 	assert.ok(joined.includes("npm test"), `应列出第一个动作：${joined}`);
@@ -378,7 +355,7 @@ test("并行执行时轮首换成并行文案，活动块里不重复", () => {
 test("块里哪几行是动作名：并行列出行号，截断时丢掉越界的", () => {
 	const snapshot = runningSnapshot();
 	snapshot.running[0].outputTail = "12 passing";
-	snapshot.running.push({ toolCallId: "c2", label: i18n.t("activityRead"), detail: "b.ts" });
+	snapshot.running.push({ toolCallId: "c2", label: "Read File", detail: "b.ts" });
 	snapshot.thought = "权衡方案";
 
 	const block = buildActivityLines(renderInput({ snapshot }));
@@ -400,7 +377,7 @@ test("多行时分支符按「后面还有没有子项」收口，尾巴用竖�
 	const snapshot = runningSnapshot();
 	snapshot.thought = "权衡方案";
 	snapshot.running[0].outputTail = "12 passing";
-	snapshot.running.push({ toolCallId: "c2", label: i18n.t("activityRead"), detail: "b.ts" });
+	snapshot.running.push({ toolCallId: "c2", label: "Read File", detail: "b.ts" });
 
 	const lines = blockLines({ snapshot });
 
@@ -425,7 +402,7 @@ test("去掉动作名后只剩思考与输出尾巴", () => {
 	assert.deepEqual(
 		detail,
 		[
-			`${TREE_INDENT}└─ ${activityGlyph("thinking", 0, false)} ${i18n.t("activityThinking")}  权衡方案`,
+			`${TREE_INDENT}└─ ${activityGlyph("thinking", 0, false)} ${"Thinking"}  权衡方案`,
 			`${TAIL_PREFIX}↳ 12 passing`,
 		],
 		`动作名去掉后只留思考与尾巴，思考收口成 └─：${detail.join("\n")}`,

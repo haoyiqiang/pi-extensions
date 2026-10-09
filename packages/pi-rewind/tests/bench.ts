@@ -11,15 +11,7 @@
 import { mkdtemp, rm, writeFile, mkdir } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
-import {
-  git,
-  createCheckpoint,
-  restoreCheckpoint,
-  loadAllCheckpoints,
-  diffCheckpoints,
-  pruneCheckpoints,
-  deleteCheckpoint,
-} from "../src/core.js";
+import { git, createCheckpoint, restoreCheckpoint, loadAllCheckpoints, diffCheckpoints, pruneCheckpoints, deleteCheckpoint } from "../src/core.js";
 import type { CreateCheckpointOpts, CheckpointData } from "../src/core.js";
 
 // ============================================================================

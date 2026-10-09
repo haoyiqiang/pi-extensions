@@ -1,14 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { getExtensionsDir } from "../../src/pi-base/config.js";
-import {
-  isAlacritty,
-  isGhostty,
-  isIterm,
-  isKitty,
-  isTmux,
-  isWindowsTerminal,
-  isWSL,
-} from "../../src/pi-base/env.js";
+import { isAlacritty, isGhostty, isIterm, isKitty, isTmux, isWindowsTerminal, isWSL } from "../../src/pi-base/env.js";
 import { getPiAgentDir } from "../../src/pi-base/paths.js";
 
 describe("pi-base paths and env", () => {

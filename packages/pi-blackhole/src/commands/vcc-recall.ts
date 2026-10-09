@@ -16,14 +16,8 @@ import { searchEntriesDetailed, getTouchedFiles } from "../core/search-entries.j
 import { formatRecallOutput, formatTouchedOutput } from "../core/format-recall.js";
 import { getActiveLineageEntryIds } from "../core/lineage.js";
 import { parseRecallScope } from "../core/recall-scope.js";
-import {
-  findObservationsForEntryIds,
-  findReflectionsForEntryIds,
-  formatRelatedObservations,
-} from "../om/reverse-recall.js";
+import { findObservationsForEntryIds, findReflectionsForEntryIds, formatRelatedObservations } from "../om/reverse-recall.js";
 import type { Entry } from "../om/ledger/recall.js";
-import { i18n, NOTICE_SOURCE } from "../i18n.js";
-import { notifyWithSource } from "pi-utils";
 
 const PAGE_SIZE = 5;
 const DEFAULT_RECENT = 25;
@@ -50,11 +44,11 @@ async function augmentWithObservations(
 
 export const registerVccRecallCommand = (pi: ExtensionAPI) => {
   pi.registerCommand("blackhole-recall", {
-    description: i18n.t("recallCommandDescription"),
+    description: "Search session history. Defaults to active lineage. Usage: /blackhole-recall <query> [page:N] [scope:all] [mode:file|touched]",
     handler: async (args: string, ctx) => {
       const sessionFile = ctx.sessionManager.getSessionFile();
       if (!sessionFile) {
-        notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "error", message: i18n.t("noSessionFile") });
+        ctx.ui.notify("No session file available.", "error");
         return;
       }
 
@@ -82,7 +76,7 @@ export const registerVccRecallCommand = (pi: ExtensionAPI) => {
         const { rendered } = loadAllMessages(sessionFile, false, lineageEntryIds);
         const recent = rendered.slice(-DEFAULT_RECENT);
         const base =
-          (parsed.scope === "all" ? `${i18n.t("recallScopeAll")}\n\n` : "") +
+          (parsed.scope === "all" ? `${"Scope: all"}\n\n` : "") +
           formatRecallOutput(recent);
         const output = await augmentWithObservations(base, recent, ctx);
         pi.sendMessage(
@@ -101,7 +95,7 @@ export const registerVccRecallCommand = (pi: ExtensionAPI) => {
         const { rendered } = loadAllMessages(sessionFile, false, lineageEntryIds);
         const recent = rendered.slice(-DEFAULT_RECENT);
         const base =
-          (parsed.scope === "all" ? `${i18n.t("recallScopeAll")}\n\n` : "") +
+          (parsed.scope === "all" ? `${"Scope: all"}\n\n` : "") +
           formatRecallOutput(recent);
         const output = await augmentWithObservations(base, recent, ctx);
         pi.sendMessage(
@@ -121,14 +115,14 @@ export const registerVccRecallCommand = (pi: ExtensionAPI) => {
       const start = (page - 1) * PAGE_SIZE;
       const pageResults = allResults.slice(start, start + PAGE_SIZE);
       const totalPages = Math.ceil(allResults.length / PAGE_SIZE);
-      const scopeSuffix = parsed.scope === "all" ? i18n.t("recallScopeAllSuffix") : "";
+      const scopeSuffix = parsed.scope === "all" ? " (scope: all)" : "";
       // Say both the visible and real total: the hard cap can discard genuine
       // matches, so the capped count alone would understate the real total.
       // Neutral wording ("showing", not "showing top"): regex-path hits are
       // boolean/chronological with no relevance score, so "top" would falsely
       // imply a ranking that only the BM25 path has.
       const capNote = truncated
-        ? i18n.t("recallCapNote", { shown: allResults.length, total: totalBeforeCap })
+        ? ` — showing ${allResults.length} of ${totalBeforeCap} matches, refine your query for more precise results`
         : "";
       // A page beyond the reachable range isn't "no matches" — matches exist,
       // the page just isn't reachable. Say so explicitly instead of falling
@@ -136,19 +130,12 @@ export const registerVccRecallCommand = (pi: ExtensionAPI) => {
       if (allResults.length > 0 && page > totalPages) {
         const scopeArg = parsed.scope === "all" ? " scope:all" : "";
         const guidance = truncated
-          ? i18n.t("recallPageGuidanceTruncated", { query, scope: scopeArg, totalPages })
-          : i18n.t("recallPageGuidance", { query, scope: scopeArg, totalPages });
+          ? `Use /blackhole-recall ${query}${scopeArg} page:N with N between 1 and ${totalPages}.`
+          : `Use /blackhole-recall ${query}${scopeArg} page:N with N between 1 and ${totalPages}, or refine your query.`;
         pi.sendMessage(
           {
             customType: "blackhole-recall",
-            content: i18n.t("recallPageOutOfRange", {
-              page,
-              totalPages,
-              count: allResults.length,
-              scope: scopeSuffix,
-              cap: capNote,
-              guidance,
-            }),
+            content: `Page ${page} is outside the available range 1-${totalPages} (${allResults.length} matches${scopeSuffix}${capNote}). ${guidance}`,
             display: true,
           },
           { triggerTurn: true },
@@ -157,18 +144,8 @@ export const registerVccRecallCommand = (pi: ExtensionAPI) => {
       }
       const header =
         totalPages > 1
-          ? i18n.t("recallPagedHeader", {
-              page,
-              totalPages,
-              total: totalBeforeCap,
-              cap: capNote,
-              scope: scopeSuffix,
-            })
-          : i18n.t("recallMatchesHeader", {
-              total: totalBeforeCap,
-              cap: capNote,
-              scope: scopeSuffix,
-            });
+          ? `Page ${page}/${totalPages} (${totalBeforeCap} total matches${capNote}${scopeSuffix})`
+          : `${totalBeforeCap} matches${capNote}${scopeSuffix}`;
       const footer =
         page < totalPages
           ? `\n--- /blackhole-recall ${query}${parsed.scope === "all" ? " scope:all" : ""} page:${page + 1} ---`

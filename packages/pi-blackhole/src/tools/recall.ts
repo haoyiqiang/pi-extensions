@@ -13,25 +13,13 @@ import { searchEntriesDetailed, getFileIndicators, getTouchedFiles } from "../co
 import type { RenderedEntry } from "../core/render-entries";
 import type { SearchHit } from "../core/search-entries";
 import { formatRecallEntry, formatTouchedOutput } from "../core/format-recall";
-import {
-  capRecallBlocks,
-  capDrillDownText,
-  expandAllocation,
-  DEFAULT_RECALL_RESPONSE_MAX_CHARS,
-} from "../core/recall-budget";
+import { capRecallBlocks, capDrillDownText, expandAllocation, DEFAULT_RECALL_RESPONSE_MAX_CHARS } from "../core/recall-budget";
 import { getActiveLineageEntryIds } from "../core/lineage";
 import { normalizeRecallScope, normalizeRecallMode } from "../core/recall-scope";
 import { parseDrillDown, expandEntryFileDetailed } from "../core/drill-down.js";
 import { recallMemorySources, type Entry } from "../om/ledger/recall.js";
 import { renderRecallSourceEntries } from "../om/serialize.js";
-import {
-  findObservationsForEntryIds,
-  findReflectionsForEntryIds,
-  formatRelatedObservations,
-  buildIndexMap,
-  formatEntryIndexAnnotation,
-  clipBody,
-} from "../om/reverse-recall.js";
+import { findObservationsForEntryIds, findReflectionsForEntryIds, formatRelatedObservations, buildIndexMap, formatEntryIndexAnnotation, clipBody } from "../om/reverse-recall.js";
 
 // ── Pi-vcc recall logic ──────────────────────────────────────────────────
 

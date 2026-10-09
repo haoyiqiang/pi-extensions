@@ -4,7 +4,6 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import type { ExtensionAPI, ExtensionContext, ExtensionCommandContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { withTempAgentDir } from "pi-utils";
-import { createTranslator, loadCatalog } from "pi-utils";
 import actionFusion, { loadActionFusionConfig } from "../index.ts";
 
 function harness() {
@@ -88,12 +87,3 @@ test("configuration command rejects unsupported actions without writing", async 
   });
 });
 
-test("all authored messages have both locales and use the shared translator", () => {
-  const catalog = loadCatalog(new URL("../src/catalog.json", import.meta.url));
-  const translator = createTranslator(catalog);
-  for (const [key, translations] of Object.entries(catalog)) {
-    assert.ok(translations["en-US"].length > 0, key);
-    assert.ok(translations["zh-CN"].length > 0, key);
-    assert.equal(typeof translator.t(key), "string");
-  }
-});

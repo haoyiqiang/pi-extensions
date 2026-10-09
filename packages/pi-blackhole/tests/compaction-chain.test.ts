@@ -1,13 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { convertToLlm } from "@earendil-works/pi-coding-agent";
-import {
-  buildAppendOnlyDetails,
-  collectActiveSegments,
-  coverageForMessages,
-  decideChainRebase,
-  type ChainProjection,
-  projectAppendOnlyContext,
-} from "../src/core/compaction-chain.js";
+import { buildAppendOnlyDetails, collectActiveSegments, coverageForMessages, decideChainRebase, type ChainProjection, projectAppendOnlyContext } from "../src/core/compaction-chain.js";
 import { isPiVccCompactionDetailsV2 } from "../src/details.js";
 
 const compactionEntry = (id: string, summary: string, details: unknown, timestamp: number) => ({

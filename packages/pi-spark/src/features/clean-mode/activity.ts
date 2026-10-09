@@ -27,7 +27,6 @@
 
 import { formatDuration } from "./duration.js";
 import { GUTTER_GAP, RUN_GUTTER } from "./header-style.js";
-import { i18n } from "./i18n.js";
 
 /**
  * 思考动画帧：半填充圆按顺时针转，四帧一循环。
@@ -195,18 +194,18 @@ export function toolActivityLabel(toolName: string): string {
 	switch (bareToolName(toolName)) {
 		case "read":
 		case "ls":
-			return i18n.t("activityRead");
+			return "Read File";
 		case "grep":
 		case "find":
-			return i18n.t("activitySearch");
+			return "Search";
 		case "edit":
 		case "write":
-			return i18n.t("activityEdit");
+			return "Edit File";
 		case "bash":
 		case "powershell":
-			return i18n.t("activityCommand");
+			return "Run Command";
 		default:
-			return i18n.t("activityTool");
+			return "Tool";
 	}
 }
 
@@ -227,12 +226,12 @@ export function classifyToolActivity(toolName: string): keyof ActivityCounters {
 	}
 }
 
-/** 分类桶对应的 i18n key。 */
+/** 分类桶对应的英文标签。 */
 const ACTIVITY_CLASS_LABELS = {
-	read: "activityRead",
-	search: "activitySearch",
-	command: "activityCommand",
-	other: "activityTool",
+	read: "Read File",
+	search: "Search",
+	command: "Run Command",
+	other: "Tool",
 } as const;
 
 /** 能当组头主词的分类；顺序决定平手时先取谁。 */
@@ -243,7 +242,7 @@ export type DominantActivityClass = (typeof DOMINANT_ACTIVITY_CLASSES)[number];
 
 /** 取分类桶对应的动作标签（如 `运行命令`）。 */
 export function activityClassLabel(bucket: keyof ActivityCounters): string {
-	return i18n.t(ACTIVITY_CLASS_LABELS[bucket]);
+	return ACTIVITY_CLASS_LABELS[bucket];
 }
 
 /**
@@ -294,10 +293,7 @@ export function activityCompositionLabel(
 		// 数量多的在前；`sort` 是稳定排序，数量相同时保持上面的固定顺序。
 		.sort((left, right) => (counts[right] ?? 0) - (counts[left] ?? 0))
 		.map((bucket) =>
-			i18n.t("activityCompositionPart", {
-				label: activityClassLabel(bucket),
-				count: String(counts[bucket] ?? 0),
-			}),
+			`${activityClassLabel(bucket)} ${String(counts[bucket] ?? 0)}`,
 		);
 
 	return parts.length === 0 ? undefined : parts.join(SEGMENT_SEPARATOR);
@@ -400,12 +396,12 @@ export function extractThoughtHead(message: unknown): string | undefined {
  * 文案键写在这里而不是拆成几段 if：新增或去掉一个桶只改这张表，拼接逻辑不必跟着动。
  */
 const COUNTER_BUCKETS = [
-	{ bucket: "read", messageKey: "activityCounterRead" },
-	{ bucket: "search", messageKey: "activityCounterSearch" },
-	{ bucket: "command", messageKey: "activityCounterCommand" },
+	{ bucket: "read", label: "read" },
+	{ bucket: "search", label: "search" },
+	{ bucket: "command", label: "command" },
 ] as const satisfies ReadonlyArray<{
 	bucket: keyof ActivityCounters;
-	messageKey: Parameters<typeof i18n.t>[0];
+	label: string;
 }>;
 
 /**
@@ -416,7 +412,7 @@ const COUNTER_BUCKETS = [
  */
 export function formatActivityCountersNote(counters: ActivityCounters): string {
 	return COUNTER_BUCKETS.filter(({ bucket }) => counters[bucket] > 0)
-		.map(({ bucket, messageKey }) => i18n.t(messageKey, { count: String(counters[bucket]) }))
+		.map(({ bucket, label }) => `${label} ${counters[bucket]}`)
 		.join(SEGMENT_SEPARATOR);
 }
 
@@ -497,7 +493,7 @@ function lastNonEmptyLineIndex(lines: string[]): number | undefined {
  */
 function buildRunStatusLine(input: ActivityRenderInput): string {
 	const { snapshot, nowMs, paint } = input;
-	const label = snapshot.running.length > 1 ? i18n.t("activityParallel") : i18n.t("activityWorking");
+	const label = snapshot.running.length > 1 ? "Parallel" : "Working";
 
 	const parts = [paint.bold(paint.fg(COLOR_HEADING, label))];
 	if (snapshot.startedAtMs !== undefined) {
@@ -558,7 +554,7 @@ function buildThoughtRows(input: ActivityRenderInput): ActivityRow[] {
 	return [
 		{
 			kind: "item",
-			text: `${paint.fg(COLOR_GLYPH, `${glyph} `)}${paint.bold(paint.fg(COLOR_HEADING, i18n.t("activityThinking")))}${paint.fg(COLOR_DETAIL, `${THOUGHT_GAP}${snapshot.thought}`)}`,
+			text: `${paint.fg(COLOR_GLYPH, `${glyph} `)}${paint.bold(paint.fg(COLOR_HEADING, "Thinking"))}${paint.fg(COLOR_DETAIL, `${THOUGHT_GAP}${snapshot.thought}`)}`,
 		},
 	];
 }

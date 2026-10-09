@@ -9,7 +9,6 @@ import type { AgentToolResult, AgentToolUpdateCallback } from "@earendil-works/p
 import { createBashToolDefinition, type BashToolDetails, type BashToolOptions, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { withFusedFileQueue } from "./file-queue.ts";
-import { i18n } from "./i18n.ts";
 
 export const THEN_RUN_RUNNING = "[then_run:running]";
 export const THEN_RUN_SUCCEEDED = "[then_run:succeeded]";
@@ -33,8 +32,8 @@ export type FusedDetails<T> = T | (ActionFusionDetails & (T extends object ? T :
 
 export function createThenRunSchema(description: string) {
   return Type.Optional(Type.Object({
-    command: Type.String({ minLength: 1, description: i18n.t("command") }),
-    timeout: Type.Optional(Type.Number({ description: i18n.t("timeout") })),
+    command: Type.String({ minLength: 1, description: "Bash command to run after a successful file mutation" }),
+    timeout: Type.Optional(Type.Number({ description: "Timeout in seconds; omitted means no default timeout" })),
   }, { description }));
 }
 
@@ -47,7 +46,7 @@ export function resultText(result: AgentToolResult<unknown>): string {
 }
 
 function throwIfAborted(signal?: AbortSignal): void {
-  if (signal?.aborted) throw new Error(i18n.t("aborted"));
+  if (signal?.aborted) throw new Error("Operation aborted.");
 }
 
 async function fileSha256(path: string): Promise<string> {
@@ -65,10 +64,10 @@ export async function assertUnchangedBeforeCommand(
     const mutationHash = await fileSha256(path);
     await yieldForInterference();
     throwIfAborted(signal);
-    if (mutationHash !== await fileSha256(path)) throw new Error(i18n.t("targetChanged"));
+    if (mutationHash !== await fileSha256(path)) throw new Error("Target content changed before the follow-up command.");
     throwIfAborted(signal);
   } catch (error) {
-    throw new Error(`${THEN_RUN_SKIPPED} ${errorText(error)} ${i18n.t("commandSkipped")}`);
+    throw new Error(`${THEN_RUN_SKIPPED} ${errorText(error)} ${"The command was not run."}`);
   }
 }
 
@@ -104,7 +103,7 @@ export async function executeMutationThenRun<T>({
 }): Promise<AgentToolResult<FusedDetails<T>>> {
   // Validate before mutation, including direct programmatic calls outside schema validation.
   if (thenRun && (typeof thenRun.command !== "string" || !thenRun.command.trim())) {
-    throw new Error(i18n.t("invalidCommand"));
+    throw new Error("then_run.command must be a non-empty string.");
   }
   return withFusedFileQueue(absolutePath, async () => {
     let mutationResult: AgentToolResult<T>;
@@ -112,7 +111,7 @@ export async function executeMutationThenRun<T>({
       throwIfAborted(signal);
       mutationResult = await mutate();
     } catch (error) {
-      if (thenRun) throw new Error(`${errorText(error)}\n\n${THEN_RUN_SKIPPED} ${i18n.t("mutationSkipped")}`);
+      if (thenRun) throw new Error(`${errorText(error)}\n\n${THEN_RUN_SKIPPED} ${"The file mutation did not complete successfully; the command was not run."}`);
       throw error;
     }
     if (!thenRun) return mutationResult;

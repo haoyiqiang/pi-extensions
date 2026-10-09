@@ -8,23 +8,10 @@
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { Runtime } from "../om/runtime.js";
-import {
-  PI_VCC_COMPACT_INSTRUCTION,
-  notifyMigrationReminder,
-  formatCompactionStats,
-} from "../hooks/before-compact";
+import { PI_VCC_COMPACT_INSTRUCTION, notifyMigrationReminder, formatCompactionStats } from "../hooks/before-compact";
 import { readPendingState, clearPendingState, hasPendingData } from "../om/pending.js";
-import {
-  getCompactionIneligibility,
-  type CompactionIneligibility,
-} from "../om/inline-compaction.js";
-import {
-  OM_OBSERVATIONS_DROPPED,
-  OM_OBSERVATIONS_RECORDED,
-  OM_REFLECTIONS_RECORDED,
-} from "../om/ledger/index.js";
-import { i18n, NOTICE_SOURCE } from "../i18n.js";
-import { notifyWithSource } from "pi-utils";
+import { getCompactionIneligibility, type CompactionIneligibility } from "../om/inline-compaction.js";
+import { OM_OBSERVATIONS_DROPPED, OM_OBSERVATIONS_RECORDED, OM_REFLECTIONS_RECORDED } from "../om/ledger/index.js";
 
 /**
  * One message per host refusal, shared by the pre-check and the onError
@@ -34,8 +21,8 @@ import { notifyWithSource } from "pi-utils";
  */
 const manualRefusalMessage = (reason: CompactionIneligibility): string =>
   reason === "already_compacted"
-    ? i18n.t("manualAlreadyCompacted")
-    : i18n.t("manualNothingToCompact");
+    ? "blackhole: already compacted — nothing new to compact since the last summary"
+    : "blackhole: nothing to compact yet — Pi's keep-recent budget still covers this branch";
 
 export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
   const prefixMatch = (value: string, prefix: string): boolean => {
@@ -43,23 +30,23 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
   };
 
   pi.registerCommand("blackhole", {
-    description: i18n.t("blackholeCommandDescription"),
+    description: "Manual compact with structural summary. Subcommands: [settings] config overlay, [changelog] display changelog, [cleanup] remove orphaned files, [om-off]/[om-on] disable/enable observational memory.",
     getArgumentCompletions: (prefix: string) => {
       const subcommands = [
         {
           value: "settings",
-          label: i18n.t("blackholeSubSettings"),
+          label: "Open configuration overlay [settings]",
         },
         {
           value: "changelog",
-          label: i18n.t("blackholeSubChangelog"),
+          label: "Display changelog [changelog]",
         },
         {
           value: "cleanup",
-          label: i18n.t("blackholeSubCleanup"),
+          label: "Remove orphaned pending files [cleanup]",
         },
-        { value: "om-off", label: i18n.t("blackholeSubOmOff") },
-        { value: "om-on", label: i18n.t("blackholeSubOmOn") },
+        { value: "om-off", label: "Disable observational memory [om-off]" },
+        { value: "om-on", label: "Enable observational memory [om-on]" },
       ];
       if (!prefix) return subcommands;
       // "configure" is an accepted alias for "settings" (routed by the
@@ -75,7 +62,7 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
       // but a command can be the first thing that runs in a session — load the
       // config before the first read so a configured `compaction: "manual"`
       // session does not fall back to DEFAULTS.
-      runtime.ensureConfig(ctx.cwd ?? process.cwd(), (msg) => notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: msg }));
+      runtime.ensureConfig(ctx.cwd ?? process.cwd(), (msg) => ctx.ui.notify(msg, "warning"));
       const sessionId = ctx.sessionManager.getSessionId();
 
       // Handle subcommands
@@ -109,9 +96,9 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
             GLOBAL_CONFIG_DIR,
           );
           runtime.config = config.loadWithWarnings(ctx.cwd, GLOBAL_CONFIG_DIR).config;
-          notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: i18n.t("omDisabled") });
+          ctx.ui.notify("Observational memory disabled. Use /blackhole om-on to re-enable.", "info");
         } catch {
-          notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("configSaveFailed") });
+          ctx.ui.notify("Failed to save config — the config file may be read-only (e.g., managed by Nix). Runtime state updated for this session only.", "warning");
         }
         return;
       }
@@ -125,9 +112,9 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
             GLOBAL_CONFIG_DIR,
           );
           runtime.config = config.loadWithWarnings(ctx.cwd, GLOBAL_CONFIG_DIR).config;
-          notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: i18n.t("omEnabled") });
+          ctx.ui.notify("Observational memory enabled.", "info");
         } catch {
-          notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("configSaveFailed") });
+          ctx.ui.notify("Failed to save config — the config file may be read-only (e.g., managed by Nix). Runtime state updated for this session only.", "warning");
         }
         return;
       } // Warn if input starts with a known subcommand but isn't an exact match.
@@ -138,7 +125,7 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
           trimmed.toLowerCase().startsWith(name.toLowerCase()) && trimmed.length > name.length,
       );
       if (nearMiss) {
-        notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("subcommandNoArgs", { name: nearMiss }) });
+        ctx.ui.notify(`/blackhole ${nearMiss} accepts no arguments. Did you mean "/blackhole ${nearMiss}"?`, "warning");
         return;
       }
 
@@ -161,7 +148,7 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
         ctx.model,
       );
       if (ineligibility) {
-        notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: manualRefusalMessage(ineligibility) });
+        ctx.ui.notify(manualRefusalMessage(ineligibility), "info");
         return;
       }
 
@@ -200,7 +187,7 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
           pi.appendEntry(OM_OBSERVATIONS_DROPPED, batch.data);
         }
         clearPendingState(sessionId);
-        notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: i18n.t("pendingFlushed") });
+        ctx.ui.notify("Observational memory: pending entries flushed", "info");
       }
 
       ctx.compact({
@@ -208,11 +195,11 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
         onComplete: () => {
           const stats = runtime.compactionStats;
           if (stats) {
-            notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: formatCompactionStats(stats) });
+            ctx.ui.notify(formatCompactionStats(stats), "info");
           } else {
-            notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: i18n.t("compacted") });
+            ctx.ui.notify("Compacted with blackhole", "info");
           }
-          notifyMigrationReminder(sessionId, (msg, level) => notifyWithSource({ ctx, source: NOTICE_SOURCE, level, message: msg }));
+          notifyMigrationReminder(sessionId, (msg, level) => ctx.ui.notify(msg, level));
 
           // Fire follow-up prompt after compaction completes
           if (followUpPrompt) {
@@ -227,15 +214,15 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
           // can disagree — Pi resolves per-model keepRecentTokens overrides) is
           // still a refusal, not a failure.
           if (message.startsWith("Nothing to compact")) {
-            notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: manualRefusalMessage("too_small") });
+            ctx.ui.notify(manualRefusalMessage("too_small"), "info");
           } else if (message === "Already compacted") {
-            notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: manualRefusalMessage("already_compacted") });
+            ctx.ui.notify(manualRefusalMessage("already_compacted"), "info");
           } else if (message === "Compaction cancelled") {
             // Our own-cut guard already named the specific reason before
             // returning { cancel: true }, and Pi renders "Compaction cancelled"
             // itself for manual aborts. A second toast adds nothing.
           } else {
-            notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "error", message: i18n.t("compactionFailed", { message }) });
+            ctx.ui.notify(`Compaction failed: ${message}`, "error");
           }
         },
       });

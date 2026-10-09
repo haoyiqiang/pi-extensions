@@ -5,34 +5,11 @@
 import type { ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-agent";
 import { Key, matchesKey, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 
-import { i18n } from "../i18n.ts";
 import type { InitialSnapshot, InjectionItem } from "../model.ts";
 import { normalizeInlineText, normalizePreviewText } from "../text.ts";
-import {
-	buildInjectionRows,
-	collectItemsById,
-	type InjectionRow,
-	ListNavigator,
-	PreviewScroller,
-} from "./injections-model.ts";
+import { buildInjectionRows, collectItemsById, type InjectionRow, ListNavigator, PreviewScroller } from "./injections-model.ts";
 import { expandJsonSpan } from "./json-preview.ts";
-import {
-	BODY_INDENT,
-	calculateViewport,
-	DEFAULT_TERMINAL_ROWS,
-	descriptionBlockRows,
-	fitLine,
-	fitToTerminalHeight,
-	hintRow,
-	isPageBackKey,
-	isPageForwardKey,
-	isStepBackKey,
-	isStepForwardKey,
-	normalizeTerminalRows,
-	spreadLine,
-	STEP_KEY_HINT,
-	wrapDescriptionLines,
-} from "./layout.ts";
+import { BODY_INDENT, calculateViewport, DEFAULT_TERMINAL_ROWS, descriptionBlockRows, fitLine, fitToTerminalHeight, hintRow, isPageBackKey, isPageForwardKey, isStepBackKey, isStepForwardKey, normalizeTerminalRows, spreadLine, STEP_KEY_HINT, wrapDescriptionLines } from "./layout.ts";
 import { type ContextMarker, droppedMarker, markerLegendLines, movedMarker } from "./markers.ts";
 import { previewBodyLines, previewLegendLines } from "./section-preview.ts";
 import { DEFAULT_WHEEL_SCROLL_LINES, parseWheelDirection, readWheelScrollLines } from "./wheel.ts";
@@ -191,9 +168,9 @@ export class InjectionsView {
 		lines.push(
 			this.fit(
 				hintRow(this.theme, [
-					[STEP_KEY_HINT, i18n.t("hintNavigate")],
-					["Enter", i18n.t("hintPreview")],
-					["Esc", i18n.t("hintClose")],
+					[STEP_KEY_HINT, "Navigate"],
+					["Enter", "Preview"],
+					["Esc", "Close"],
 				]),
 				width,
 			),
@@ -281,7 +258,7 @@ export class InjectionsView {
 		const source = normalizeInlineText(item.source.label);
 		const meta = theme.fg(
 			"muted",
-			`${source} · ${i18n.t("tokensCount", { count: item.tokens.toLocaleString("en-US") })}`,
+			`${source} · ${`${item.tokens.toLocaleString("en-US")} tokens`}`,
 		);
 		const marker = item.moved === true ? movedMarker(theme) : "";
 		const fitsMarker = visibleWidth(title) + visibleWidth(meta) + visibleWidth(marker) + 2 <= width;
@@ -299,9 +276,9 @@ export class InjectionsView {
 		lines.push(
 			this.fit(
 				hintRow(this.theme, [
-					[STEP_KEY_HINT, i18n.t("hintScroll")],
-					["PgUp/PgDn", i18n.t("hintPage")],
-					["Esc", i18n.t("hintBack")],
+					[STEP_KEY_HINT, "Scroll"],
+					["PgUp/PgDn", "Page"],
+					["Esc", "Back"],
 				]),
 				width,
 			),
@@ -351,10 +328,10 @@ export class InjectionsView {
 	/** Keep title/label together when possible; give the narrow label its own breathing room. */
 	private headerLines(width: number): string[] {
 		const theme = this.theme;
-		const title = theme.fg("accent", theme.bold(i18n.t("injectionsTitle")));
+		const title = theme.fg("accent", theme.bold("Context Injections"));
 		const separator = theme.fg("dim", " · ");
 		// Runtime remains unimplemented, so only the Initial label is shown.
-		const tabs = theme.fg("mdHeading", theme.bold(i18n.t("tabInitial")));
+		const tabs = theme.fg("mdHeading", theme.bold("[INITIAL]"));
 		const combined = `${title}${separator}${tabs}`;
 		if (visibleWidth(combined) <= width) return [this.fit(combined, width)];
 		return [this.fit(title, width), "", this.fit(tabs, width)];
@@ -499,11 +476,11 @@ export class InjectionsView {
 	 * indicator when needed, and one legend bullet per marker the rows show.
 	 */
 	private descriptionLines(width: number): string[] {
-		const lines = wrapDescriptionLines(this.theme, i18n.t("injectionsDescription"), "dim", width);
+		const lines = wrapDescriptionLines(this.theme, "Injections into the model context for the first turn, with token estimates.", "dim", width);
 		if (this.input.degradedReason !== undefined) {
 			lines.push(...wrapDescriptionLines(
 				this.theme,
-				i18n.t("degradedFallback"),
+				"[Degraded: pi-native fallback used]",
 				"warning",
 				width,
 			));

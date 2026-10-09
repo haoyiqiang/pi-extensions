@@ -1,18 +1,8 @@
 import type { ExtensionContext, AgentToolUpdateCallback } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { i18n } from "../i18n.ts";
 import { getAuth } from "./auth.ts";
 import { readSseEvents } from "./sse.ts";
-import {
-    applyTextCitations,
-    deriveSources,
-    mergeSearchResultMetadata,
-    normalizeCitedSources,
-    pushLlmSearchEvent,
-    pushUniqueSearchResult,
-    sanitizeSearchResults,
-    titleFromUrl,
-} from "./results.ts";
+import { applyTextCitations, deriveSources, mergeSearchResultMetadata, normalizeCitedSources, pushLlmSearchEvent, pushUniqueSearchResult, sanitizeSearchResults, titleFromUrl } from "./results.ts";
 import type { LlmSearchCallDetail, SearchResultDetail, StreamResult } from "./types.ts";
 
 function resolveAnthropicMessagesUrl(baseUrl: string): string {
@@ -29,7 +19,7 @@ export async function callAnthropicStream(
 ): Promise<StreamResult> {
     const auth = await getAuth(ctx, model);
     if (auth.ok === false) {
-        throw new Error(auth.error || i18n.t("llm.authFailed"));
+        throw new Error(auth.error || "Failed to get API key and authentication headers.");
     }
 
     const isOAuth = !!auth.apiKey && auth.apiKey.includes("sk-ant-oat");
@@ -61,7 +51,7 @@ export async function callAnthropicStream(
         max_tokens: maxTokens,
         // Anthropic rejects oauth-2025-04-20 requests that omit the Claude Code
         // system prompt, reporting it as an opaque 429 rate_limit_error.
-        ...(isOAuth ? { system: [{ type: "text", text: i18n.t("llm.claudeCodeSystem") }] } : {}),
+        ...(isOAuth ? { system: [{ type: "text", text: "You are Claude Code, Anthropic's official CLI for Claude." }] } : {}),
         messages: [{ role: "user", content: prompt }],
         tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 10 }],
         stream: true,
@@ -76,11 +66,7 @@ export async function callAnthropicStream(
     });
 
     if (!response.ok) {
-        throw new Error(i18n.t("llm.apiError", {
-            provider: "Anthropic",
-            status: response.status,
-            message: await response.text(),
-        }));
+        throw new Error(`${"Anthropic"} API error (${response.status}): ${await response.text()}`);
     }
 
     let accumulatedText = "";
@@ -120,7 +106,7 @@ export async function callAnthropicStream(
                     raw: block,
                 });
                 onUpdate?.({
-                    content: [{ type: "text", text: accumulatedText || i18n.t("llm.searchingProvider", { provider: "Anthropic" }) }],
+                    content: [{ type: "text", text: accumulatedText || `Searching the web with ${"Anthropic"}...` }],
                     details: { streaming: true, searching: true }
                 });
             } else if (block?.type === "web_search_tool_result") {
@@ -167,7 +153,7 @@ export async function callAnthropicStream(
         }
     });
 
-    const cited = applyTextCitations(accumulatedText || i18n.t("llm.noAnswer"), citations);
+    const cited = applyTextCitations(accumulatedText || "No answer was returned.", citations);
     const citationDetails = citations.map((citation) => ({
         title: citation.title || titleFromUrl(citation.url),
         url: citation.url,

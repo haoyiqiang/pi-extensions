@@ -1,6 +1,4 @@
-import { createTranslator, loadCatalog } from "pi-utils";
 
-export const processingI18n = createTranslator(loadCatalog(new URL("./processing-catalog.json", import.meta.url)));
 
 export interface EvidenceConfig {
   enabled: boolean;
@@ -28,7 +26,13 @@ export function processingConfig(config: ProcessingConfig = {}): { evidence: Evi
 export function parseProcessingConfig(file: Record<string, unknown> | undefined): ProcessingConfig {
   const result: ProcessingConfig = {};
   const fail = (field: string, reason: string): never => {
-    throw new Error(processingI18n.t("invalidConfig", { field, reason: processingI18n.t(reason) }));
+    const reasons: Record<string, string> = {
+      configObject: "expected an object with supported fields",
+      configBoolean: "expected a boolean",
+      configBytes: "expected a positive safe integer within the documented byte limit",
+      configCommands: "expected at most 32 nonempty literal command prefixes, each at most 256 characters",
+    };
+    throw new Error(`Invalid Distill ${field}: ${reasons[reason] ?? reason}. Processing is disabled until the configuration is repaired.`);
   };
   for (const section of ["evidence", "archive"] as const) {
     if (!file || !(section in file)) continue;
@@ -80,7 +84,7 @@ export function sourceReference(artifact: { path: string; sha256: string; bytes:
     `source_bytes=${artifact.bytes}`,
     `source_lines=${artifact.lines}`,
     `source_kind=${artifact.kind}`,
-    processingI18n.t("readback"),
+    "Read source_artifact with native read (offset/limit; outputRequest=RAW when applicable). Tail N lines: offset=max(1, source_lines-N+1).",
   ].join("\n");
 }
 
@@ -88,7 +92,7 @@ export function processingReceipt(mode: "summary" | "evidence", text: string, so
   return [
     `[distill:${mode}]`,
     `tool_status=${isError ? "error" : "success"}`,
-    processingI18n.t(mode === "evidence" ? "evidenceNotice" : "summaryNotice"),
+    mode === "evidence" ? "Exact quotes verified against the source; coverage and evidence labels are not guaranteed. Tool status is not a test verdict." : "Model summary; individual claims are not locally verified. Read the source for exact context.",
     text,
     sourceReference(source),
   ].join("\n\n");

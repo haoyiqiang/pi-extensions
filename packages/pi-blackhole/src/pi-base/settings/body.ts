@@ -17,14 +17,7 @@
  */
 
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
-import {
-  matchesKey,
-  truncateToWidth,
-  visibleWidth,
-  type Component,
-  type TUI,
-  fuzzyMatch,
-} from "@earendil-works/pi-tui";
+import { matchesKey, truncateToWidth, visibleWidth, type Component, type TUI, fuzzyMatch } from "@earendil-works/pi-tui";
 import { validateFieldValue } from "./validate-field.ts";
 import type {
   Field,
@@ -36,39 +29,13 @@ import type {
   VisibilityContext,
 } from "./types";
 import { RENDERERS } from "./fields/index";
-import {
-  divider,
-  formatHintLine,
-  frame,
-  frameContentWidth,
-  pad,
-  responsiveInnerRows,
-  wrapLine,
-  type FrameOptions,
-  DEFAULT_PADDING_X,
-} from "./frame";
+import { divider, formatHintLine, frame, frameContentWidth, pad, responsiveInnerRows, wrapLine, type FrameOptions, DEFAULT_PADDING_X } from "./frame";
 import { deleteWordBackward, type InlineEditState } from "./inline-edit";
 import { notifyError, extractInitialValue } from "./helpers.ts";
-import {
-  totalVisibleItems,
-  updateVisibleIndices,
-  visibleRowIndices,
-  clampSelection,
-  focusedIndex,
-  focusedRow,
-} from "./navigation.ts";
+import { totalVisibleItems, updateVisibleIndices, visibleRowIndices, clampSelection, focusedIndex, focusedRow } from "./navigation.ts";
 import { buildVisibilityContext, isDirty, commitValue, allValues } from "./values.ts";
-import {
-  renderTabBar,
-  renderSearchBar,
-  renderFooter,
-  renderRow,
-  renderBody,
-  renderFieldDesc,
-  estimateDescriptionRows,
-} from "./render.ts";
+import { renderTabBar, renderSearchBar, renderFooter, renderRow, renderBody, renderFieldDesc, estimateDescriptionRows } from "./render.ts";
 import { createConfirm } from "./confirm.ts";
-import { i18n } from "../../i18n.js";
 
 const PREFERRED_INNER_ROWS = 45;
 
@@ -227,9 +194,9 @@ export function createSettingsModalBody<F extends Field>(
   function mountDirtyConfirm(): void {
     state.confirm = createConfirm(
       {
-        message: [i18n.t("unsavedChanges")],
-        confirmLabel: i18n.t("confirmDiscard"),
-        cancelLabel: i18n.t("confirmCancel"),
+        message: ["You have unsaved changes."],
+        confirmLabel: "Discard",
+        cancelLabel: "Cancel",
         danger: true,
       },
       (confirmed) => {
@@ -708,8 +675,8 @@ export function createSettingsModalBody<F extends Field>(
       if (state.confirm) {
         const lines = state.confirm.render(frameContentWidth(width));
         const title = state.options.title
-          ? `${state.options.title} — ${i18n.t("confirmDiscardChanges")}`
-          : i18n.t("confirmDiscardChanges");
+          ? `${state.options.title} — ${"Discard changes?"}`
+          : "Discard changes?";
         const opts: FrameOptions = {
           title,
           fixedInnerRows: inner,
@@ -742,7 +709,7 @@ export function createSettingsModalBody<F extends Field>(
       );
 
       const dirtyDot =
-        state.isBuffered && isDirty(state) ? ` ${state.args.theme.fg("accent", i18n.t("unsavedMarker"))}` : "";
+        state.isBuffered && isDirty(state) ? ` ${state.args.theme.fg("accent", "● Unsaved")}` : "";
       const title = state.options.title ? `${state.options.title}${dirtyDot}` : state.options.title;
 
       const frameLines = frame(bodyLines, width, state.args.theme, {

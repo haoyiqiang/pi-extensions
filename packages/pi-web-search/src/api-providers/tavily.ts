@@ -1,4 +1,3 @@
-import { i18n } from "../i18n.ts";
 import { emptyFetch, extractionFailed, missingCredential, providerApiError } from "./provider-errors.ts";
 import type { FetchResponse, FullProvider, SearchResponse, SearchResult } from "./types.ts";
 
@@ -101,7 +100,7 @@ export class TavilyProvider implements FullProvider {
 			throw extractionFailed(
 				this.label,
 				failed.url ?? url,
-				failed.error ?? i18n.t("provider.error.unknown"),
+				failed.error ?? "unknown error",
 			);
 		}
 

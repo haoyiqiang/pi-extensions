@@ -5,25 +5,9 @@ import type {
   TuiMouseEvent,
   TuiMouseEventResult,
 } from "@earendil-works/pi-tui";
-import {
-  decodeKittyPrintable,
-  isKeyRelease,
-  Key,
-  matchesKey,
-  truncateToWidth,
-  visibleWidth,
-} from "@earendil-works/pi-tui";
+import { decodeKittyPrintable, isKeyRelease, Key, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { ResourceKind, SessionResource } from "./collector.ts";
-import { i18n } from "./i18n.ts";
-import {
-  KIND_COLORS,
-  RESOURCE_ACCENT,
-  kindColored,
-  linkUri,
-  resourceItem,
-  resourceMatches,
-  type ResourceSuggestion,
-} from "./autocomplete.ts";
+import { KIND_COLORS, RESOURCE_ACCENT, kindColored, linkUri, resourceItem, resourceMatches, type ResourceSuggestion } from "./autocomplete.ts";
 
 export const RESOURCE_PICKER_VISIBLE_LIMIT = 6;
 
@@ -234,7 +218,7 @@ function framedLine(content: string, innerWidth: number, accentKind: ResourceKin
 /** Renders the picker title inside a rounded accent border. */
 function renderTopBorder(width: number, accentKind: ResourceKind): string {
   const innerWidth = Math.max(0, width - PANEL_BORDER_WIDTH);
-  const title = `─ ${i18n.t("pickerTitle")} `;
+  const title = `─ ${"Session resources"} `;
   const titleWidth = Math.min(visibleWidth(title), innerWidth);
   const fittedTitle = truncateToWidth(title, titleWidth, "");
   const border = `╭${fittedTitle}${"─".repeat(Math.max(0, innerWidth - visibleWidth(fittedTitle)))}╮`;
@@ -337,11 +321,11 @@ function hintRowLayout(options: {
   innerWidth: number;
 }): HintRowLayout {
   const { mouseEnabled, counter, innerWidth } = options;
-  const layout: HintRowLayout = { hint: i18n.t(mouseEnabled ? "pickerHintMouse" : "pickerHint") };
+  const layout: HintRowLayout = { hint: mouseEnabled ? "←/→ type · ↑/↓ select · click open" : "Left/Right or Tab/Shift+Tab type · Up/Down select · Enter insert · Esc close" };
   if (counter) layout.counter = counter;
   if (!mouseEnabled) return layout;
 
-  const label = i18n.t("pickerClose");
+  const label = "✕ close";
   const start = PANEL_CONTENT_START_COLUMN + 1
     + visibleWidth(layout.hint) + visibleWidth(HINT_ITEM_SEPARATOR);
   const width = visibleWidth(label);
@@ -409,7 +393,7 @@ export interface RenderResourceButtonOptions {
 
 /** Plain button label text, shared by its layout math and its rendering. */
 function resourceButtonLabelText(): string {
-  return ` ${i18n.t("viewResources")} `;
+  return ` ${"View resources"} `;
 }
 
 /** Lays out the count chips once so rendering and mouse hit testing cannot drift apart. */
@@ -497,7 +481,7 @@ export function renderResourcePicker(options: RenderResourcePickerOptions): stri
   if (items.length === 0) {
     lines.push(
       framedLine(
-        theme.fg(THEME_COLOR.muted, `  ${i18n.t("pickerNoMatches")}`),
+        theme.fg(THEME_COLOR.muted, `  ${"No matching resources in this type"}`),
         innerWidth,
         activeKind,
       ),

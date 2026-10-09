@@ -11,10 +11,7 @@ import { describe, it, expect, vi } from "vitest";
 import { buildGlobalIndexById, isCountedMessageEntry } from "../src/core/global-indices.js";
 import { normalize } from "../src/core/normalize.js";
 import { compile } from "../src/core/summarize.js";
-import {
-  registerBeforeCompactHook,
-  PI_VCC_COMPACT_INSTRUCTION,
-} from "../src/hooks/before-compact.js";
+import { registerBeforeCompactHook, PI_VCC_COMPACT_INSTRUCTION } from "../src/hooks/before-compact.js";
 import { userMsg, assistantWithToolCall, toolResult } from "./vcc-fixtures.js";
 
 // ── global-indices unit ─────────────────────────────────────────────────

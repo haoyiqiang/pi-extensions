@@ -17,15 +17,7 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { matchesKey, decodeKittyPrintable } from "@earendil-works/pi-tui";
 import { visibleWidth } from "../om/key-matcher.js";
-import {
-  analyzeOrphaned,
-  deletePendingFiles,
-  deleteOrphanedBatch,
-  describeFile,
-  type PendingFile,
-} from "../om/cleanup.js";
-import { i18n, NOTICE_SOURCE } from "../i18n.js";
-import { notifyWithSource } from "pi-utils";
+import { analyzeOrphaned, deletePendingFiles, deleteOrphanedBatch, describeFile, type PendingFile } from "../om/cleanup.js";
 
 // ── TUI Picker Component ────────────────────────────────────────────────────
 
@@ -121,15 +113,12 @@ function createCleanupPicker(
 
       // ── Confirm-delete-all ──
       if (confirmDeleteAll) {
-        const title = i18n.t("cleanupDeleteConfirm", {
-          count: orphaned.length,
-          plural: orphaned.length === 1 ? "" : "s",
-        });
-        lines.push(buildTopBorder(w, bdr, dim, i18n.t("cleanupTitle")));
+        const title = `Delete ${orphaned.length} orphaned file${orphaned.length === 1 ? "" : "s"}?`;
+        lines.push(buildTopBorder(w, bdr, dim, "Cleanup Pending Files"));
         lines.push(bdr(`┃${" ".repeat(innerW)}┃`));
         lines.push(bdr(`┃ ${err(title)}${" ".repeat(Math.max(0, cw - visibleWidth(title)))} ┃`));
         lines.push(bdr(`┃${" ".repeat(innerW)}┃`));
-        const hint = i18n.t("cleanupConfirmHint");
+        const hint = "Enter confirm · Esc cancel";
         lines.push(bdr(`┃ ${dim(hint)}${" ".repeat(Math.max(0, cw - visibleWidth(hint)))} ┃`));
         lines.push(bdr(`┗${"━".repeat(innerW)}┛`));
         return lines;
@@ -138,15 +127,12 @@ function createCleanupPicker(
       // ── List ──
       clampScroll();
 
-      const sizeLabel = i18n.t("cleanupFileCount", {
-        count: orphaned.length,
-        plural: orphaned.length === 1 ? "" : "s",
-      });
-      lines.push(buildTopBorder(w, bdr, dim, i18n.t("cleanupListTitle"), sizeLabel));
+      const sizeLabel = `${orphaned.length} file${orphaned.length === 1 ? "" : "s"}`;
+      lines.push(buildTopBorder(w, bdr, dim, "Orphaned Pending Files", sizeLabel));
       lines.push(bdr(`┃${" ".repeat(innerW)}┃`));
 
       if (orphaned.length === 0) {
-        const empty = i18n.t("cleanupEmpty");
+        const empty = "No orphaned pending files found";
         lines.push(
           bdr(`┃ ${dim(empty)}${" ".repeat(Math.max(0, cw - visibleWidth(empty)))} ┃`),
         );
@@ -172,14 +158,14 @@ function createCleanupPicker(
       if (orphaned.length > 0) {
         const totalBytes = orphaned.reduce((s, pf) => s + pf.sizeBytes, 0);
         const kb = totalBytes > 0 ? (totalBytes / 1024).toFixed(1) : "0.0";
-        const totalStr = i18n.t("cleanupTotal", { size: kb });
-        const hint = i18n.t("cleanupListHint");
+        const totalStr = `Total: ${kb} KB`;
+        const hint = "↑↓ navigate  Enter delete  D delete all  Esc cancel";
         lines.push(
           bdr(`┃ ${dim(totalStr)}${" ".repeat(Math.max(0, cw - visibleWidth(totalStr)))} ┃`),
         );
         lines.push(bdr(`┃ ${dim(hint)}${" ".repeat(Math.max(0, cw - visibleWidth(hint)))} ┃`));
       } else {
-        const hint = i18n.t("cleanupCloseHint");
+        const hint = "Esc close";
         lines.push(bdr(`┃ ${dim(hint)}${" ".repeat(Math.max(0, cw - visibleWidth(hint)))} ┃`));
       }
       lines.push(bdr(`┗${"━".repeat(innerW)}┛`));
@@ -277,7 +263,7 @@ export async function handleCleanup(ctx: ExtensionContext): Promise<void> {
   const { orphaned } = analyzeOrphaned();
 
   if (orphaned.length === 0) {
-    notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: i18n.t("cleanupNone") });
+    ctx.ui.notify("pi-blackhole: No orphaned pending files found.", "info");
     return;
   }
 
@@ -286,13 +272,13 @@ export async function handleCleanup(ctx: ExtensionContext): Promise<void> {
     // Non-TUI: list only
     const totalSize = orphaned.reduce((s, pf) => s + pf.sizeBytes, 0);
     const lines = [
-      i18n.t("cleanupListHeader", { count: orphaned.length, size: (totalSize / 1024).toFixed(1) }),
+      `Orphaned pending files: ${orphaned.length} (${(totalSize / 1024).toFixed(1)} KB)`,
       "",
       ...orphaned.map((pf) => `  ${describeFile(pf)}`),
       "",
-      i18n.t("cleanupListFooter"),
+      "Use /blackhole cleanup in TUI mode to delete these files.",
     ];
-    notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: lines.join("\n") });
+    ctx.ui.notify(lines.join("\n"), "warning");
     return;
   }
 
@@ -309,17 +295,17 @@ export async function handleCleanup(ctx: ExtensionContext): Promise<void> {
     const deleted = deleteOrphanedBatch(items);
     const intended = items.length;
     if (deleted === intended) {
-      notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: i18n.t("cleanupDeleted", { count: intended, plural: intended === 1 ? "" : "s" }) });
+      ctx.ui.notify(`pi-blackhole: Deleted ${intended} orphaned pending file${intended === 1 ? "" : "s"}.`, "info");
     } else {
-      notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("cleanupDeletedPartial", { deleted, intended, failed: intended - deleted, plural: intended === 1 ? "" : "s" }) });
+      ctx.ui.notify(`pi-blackhole: Deleted ${deleted}/${intended} orphaned pending file${intended === 1 ? "" : "s"} (${intended - deleted} failed).`, "warning");
     }
   } else if (items.length > 0 && items.length < orphaned.length) {
     // Some were deleted inline, some remain
     const remainingSize = items.reduce((s, pf) => s + pf.sizeBytes, 0);
-    notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: i18n.t("cleanupPartial", { deleted: orphaned.length - items.length, remaining: items.length, size: (remainingSize / 1024).toFixed(1) }) });
+    ctx.ui.notify(`pi-blackhole: ${orphaned.length - items.length} deleted, ${items.length} remain (${(remainingSize / 1024).toFixed(1)} KB).`, "info");
   } else if (items.length === 0 && orphaned.length > 0) {
     // All were deleted inline
-    notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: i18n.t("cleanupAllRemoved", { count: orphaned.length, plural: orphaned.length === 1 ? "" : "s" }) });
+    ctx.ui.notify(`pi-blackhole: All ${orphaned.length} orphaned pending file${orphaned.length === 1 ? "" : "s"} removed.`, "info");
   }
   // If nothing was deleted (user just pressed Esc), stay silent
 }

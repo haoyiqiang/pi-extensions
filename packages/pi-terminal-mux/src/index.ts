@@ -83,11 +83,7 @@ export {
 export type { OrcaEnvelope, OrcaTerminalState, OrcaCloseDecision } from "./orca.ts";
 
 // ── 便捷函数 ──
-import {
-  AGENT_MUXY_PANE_ID,
-  getMuxBackend,
-  type MuxBackend,
-} from "./mux.ts";
+import { AGENT_MUXY_PANE_ID, getMuxBackend, type MuxBackend } from "./mux.ts";
 import { AGENT_HERDR_PANE_ID } from "./herdr.ts";
 import { AGENT_OTTY_PANE_ID } from "./otty.ts";
 import { AGENT_ORCA_TERMINAL_HANDLE } from "./orca.ts";

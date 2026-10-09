@@ -13,13 +13,7 @@ import type { Component, TUI } from "@earendil-works/pi-tui";
 import { matchesKey } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import {
-  frame,
-  frameContentWidth,
-  responsiveInnerRows,
-  wrapLine,
-} from "../pi-base/settings/frame.ts";
-import { i18n } from "../i18n.js";
+import { frame, frameContentWidth, responsiveInnerRows, wrapLine } from "../pi-base/settings/frame.ts";
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -320,14 +314,14 @@ export function createChangelogViewer(args: ChangelogViewerArgs): Component {
 
   const version = getPackageVersion(packageRoot);
   const title = version
-    ? i18n.t("changelogTitle", { version })
-    : i18n.t("changelogTitleNoVersion");
+    ? `pi-blackhole v${version} — Changelog`
+    : "pi-blackhole — Changelog";
 
   const raw = readChangelogText(packageRoot);
   let allLines: string[];
 
   if (!raw) {
-    allLines = [i18n.t("changelogNotFound"), i18n.t("changelogExpectedPath")];
+    allLines = ["Changelog not found.", "Expected CHANGELOG.md at package root."];
   } else {
     const entries = parseChangelogEntries(raw, maxEntries);
     if (entries.length === 0) {
@@ -375,13 +369,13 @@ export function createChangelogViewer(args: ChangelogViewerArgs): Component {
     while (slice.length < visible) slice.push("");
 
     const body: string[] = [];
-    if (scroll > 0) body.push(theme.fg("dim", i18n.t("changelogEarlier", { count: scroll })));
+    if (scroll > 0) body.push(theme.fg("dim", `  ↑ ${scroll} earlier`));
     body.push(...slice);
     if (scroll + visible < wrapped.length) {
-      body.push(theme.fg("dim", i18n.t("changelogMore", { count: wrapped.length - scroll - visible })));
+      body.push(theme.fg("dim", `  ↓ ${wrapped.length - scroll - visible} more`));
     }
 
-    const hints = i18n.t("changelogHint");
+    const hints = "↑↓ scroll · PgUp/PgDn · Esc close";
     const footer = theme.fg("dim", hints);
     // Reserve one footer line inside frame: append after body before framing?
     // Simpler: include footer as last body line dim
@@ -458,13 +452,13 @@ function createLazyChangelogViewer(params: {
     while (slice.length < visible) slice.push("");
 
     const body: string[] = [];
-    if (scroll > 0) body.push(theme.fg("dim", i18n.t("changelogEarlier", { count: scroll })));
+    if (scroll > 0) body.push(theme.fg("dim", `  ↑ ${scroll} earlier`));
     body.push(...slice);
     if (scroll + visible < wrapped.length) {
-      body.push(theme.fg("dim", i18n.t("changelogMore", { count: wrapped.length - scroll - visible })));
+      body.push(theme.fg("dim", `  ↓ ${wrapped.length - scroll - visible} more`));
     }
     body.push("");
-    body.push(theme.fg("dim", `  ${i18n.t("changelogHint")}`));
+    body.push(theme.fg("dim", `  ${"↑↓ scroll · PgUp/PgDn · Esc close"}`));
     return frame(body, width, theme, { title, fixedInnerRows: inner });
   };
 

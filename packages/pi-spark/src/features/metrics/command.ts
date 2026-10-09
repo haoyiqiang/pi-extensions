@@ -1,7 +1,6 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { notifyWithSource } from "pi-utils";
+
 import { loadConfig } from "../../config/index.ts";
-import { i18n, NOTICE_SOURCE } from "../../i18n.ts";
 import { DEFAULT_METRICS_DISPLAY, type MetricsDisplay } from "./config.ts";
 import { projectMetricsOverrides, saveMetricsConfig, type StoredMetricsConfig } from "./store.ts";
 
@@ -20,24 +19,12 @@ function persist(ctx: ExtensionCommandContext, value: StoredMetricsConfig): bool
   try {
     const path = saveMetricsConfig(value);
     const override = projectMetricsOverrides(ctx.cwd)
-      ? ` ${i18n.t("metricsProjectOverride")}`
+      ? ` ${"The project spark.json also sets metrics and overrides this global configuration."}`
       : "";
-    notifyWithSource({
-      ctx,
-      source: NOTICE_SOURCE,
-      level: "info",
-      message: `${i18n.t("metricsConfigSaved", { path })}${override}`,
-    });
+    ctx.ui.notify(`${`Metrics configuration saved to ${path}. It applies on the next run.`}${override}`, "info");
     return true;
   } catch (error) {
-    notifyWithSource({
-      ctx,
-      source: NOTICE_SOURCE,
-      level: "error",
-      message: i18n.t("metricsConfigInvalid", {
-        error: error instanceof Error ? error.message : String(error),
-      }),
-    });
+    ctx.ui.notify(`Invalid metrics configuration: ${error instanceof Error ? error.message : String(error)}`, "error");
     return false;
   }
 }
@@ -53,12 +40,10 @@ function patchFor(value: string, current: StoredMetricsConfig): StoredMetricsCon
 async function prompt(ctx: ExtensionCommandContext, current: StoredMetricsConfig): Promise<StoredMetricsConfig | null> {
   const enabled = current !== false;
   const display = current === false ? DEFAULT_METRICS_DISPLAY : current.display;
-  const enabledChoice = i18n.t("metricsConfigEnabled", { value: i18n.t(enabled ? "metricsConfigOn" : "metricsConfigOff") });
-  const displayChoice = i18n.t("metricsConfigDisplay", {
-    value: i18n.t(display === "on-stop" ? "metricsConfigDisplayOnStop" : "metricsConfigDisplayLive"),
-  });
-  const doneChoice = i18n.t("metricsConfigDone");
-  const selected = await ctx.ui.select(i18n.t("metricsConfigMenuTitle"), [enabledChoice, displayChoice, doneChoice]);
+  const enabledChoice = `Metrics enabled: ${enabled ? "on" : "off"}`;
+  const displayChoice = `Display: ${display === "on-stop" ? "one summary line when stopped" : "one line per turn"}`;
+  const doneChoice = "Done";
+  const selected = await ctx.ui.select("Metrics settings", [enabledChoice, displayChoice, doneChoice]);
   if (selected === undefined || selected === doneChoice) return null;
   if (selected === enabledChoice) return enabled ? false : { display };
   return { display: DISPLAY_FLIP[display] };
@@ -67,21 +52,21 @@ async function prompt(ctx: ExtensionCommandContext, current: StoredMetricsConfig
 /** Registers the retired pi-metrics command names against spark.json. */
 export function registerMetricsCommand(pi: ExtensionAPI): void {
   const command = {
-    description: i18n.t("metricsConfigCommandDescription"),
+    description: "Configure session metrics display",
     getArgumentCompletions: () => ["reset", "enable", "disable", "live", "on-stop"].map((value) => ({ value, label: value })),
     handler: async (args: string, ctx: ExtensionCommandContext): Promise<void> => {
       const value = args.trim();
       if (value) {
         const patch = patchFor(value, currentStored(ctx));
         if (patch === undefined) {
-          notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("metricsConfigUsage") });
+          ctx.ui.notify("Usage: /config:metrics (open settings), enable, disable, live, on-stop, or reset", "warning");
           return;
         }
         persist(ctx, patch);
         return;
       }
       if (!ctx.hasUI) {
-        notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("metricsConfigInteractiveOnly") });
+        ctx.ui.notify("Metrics configuration requires the TUI; run this command in an interactive Pi session.", "warning");
         return;
       }
       let current = currentStored(ctx);

@@ -15,17 +15,7 @@ import type {
 import { Type } from "typebox";
 import { convertToLlm } from "@earendil-works/pi-coding-agent";
 
-import {
-  compactInlineAtTurnBoundary,
-  getCapturedCompactionSettings,
-  getCompactionIneligibility,
-  getPrepareCompactionStatus,
-  InlineCompactionUnavailableError,
-  installHostInlineCompactionAdapter,
-  installInlineCompactionAdapter,
-  isCompactionEligible,
-  parseHostFramePaths,
-} from "../src/om/inline-compaction.js";
+import { compactInlineAtTurnBoundary, getCapturedCompactionSettings, getCompactionIneligibility, getPrepareCompactionStatus, InlineCompactionUnavailableError, installHostInlineCompactionAdapter, installInlineCompactionAdapter, isCompactionEligible, parseHostFramePaths } from "../src/om/inline-compaction.js";
 import { createPiAgentSessionHarness } from "./fixtures/pi-agent-session.js";
 import { installedPackageRoot } from "./fixtures/installed-package.js";
 import { createExtensionApiDouble } from "./fixtures/pi-extension-api.js";

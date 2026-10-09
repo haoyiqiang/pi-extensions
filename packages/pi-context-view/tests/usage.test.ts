@@ -3,11 +3,7 @@ import { test } from "node:test";
 
 import type { ContextEvent } from "@earendil-works/pi-coding-agent";
 
-import {
-	AUTO_COMPACT_BUFFER_CATEGORY_ID,
-	DEFAULT_CATEGORY_COLORS,
-	FREE_SPACE_CATEGORY_ID,
-} from "../src/config.ts";
+import { AUTO_COMPACT_BUFFER_CATEGORY_ID, DEFAULT_CATEGORY_COLORS, FREE_SPACE_CATEGORY_ID } from "../src/config.ts";
 import type { InitialSnapshot, InjectionItem, UsageCategory } from "../src/model.ts";
 import { collectPreviewEntries, computeUsage, toReportedUsage } from "../src/usage.ts";
 

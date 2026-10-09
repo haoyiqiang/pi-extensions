@@ -8,12 +8,7 @@
 
 import { describe, expect, it, afterEach } from "vitest";
 import { parseSessionEntries } from "@earendil-works/pi-coding-agent";
-import {
-  getSessionConfig,
-  setSessionConfig,
-  clearSessionConfig,
-  clearAllSessionConfigs,
-} from "../../src/pi-base/config.ts";
+import { getSessionConfig, setSessionConfig, clearSessionConfig, clearAllSessionConfigs } from "../../src/pi-base/config.ts";
 import { getAncestorChain } from "../../src/pi-base/session.ts";
 
 // ─────────────────────────────────────────────────────────────────────

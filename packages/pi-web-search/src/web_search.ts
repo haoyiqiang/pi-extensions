@@ -3,7 +3,6 @@ import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { Type, type Static } from "typebox";
 import { runApiSearch } from "./api_search.ts";
 import { loadWebSearchConfig, resolveApiProviderName } from "./config.ts";
-import { i18n } from "./i18n.ts";
 import { runLlmSearch, UnsupportedLlmSearchError } from "./llm_search.ts";
 import type {
   FallbackReason,
@@ -27,16 +26,16 @@ const ApiProviderSchema = Type.Union([
 ]);
 
 export const WebSearchSchema = Type.Object({
-  query: Type.String({ description: i18n.t("webSearch.query") }),
+  query: Type.String({ description: "The search query or question to answer" }),
   mode: Type.Optional(Type.Union([
     Type.Literal("auto"),
     Type.Literal("llm"),
     Type.Literal("api"),
-  ], { description: i18n.t("webSearch.mode") })),
-  provider: Type.Optional(Type.Union(ApiProviderSchema.anyOf, { description: i18n.t("webSearch.provider") })),
-  max_results: Type.Optional(Type.Number({ minimum: 1, maximum: 10, description: i18n.t("webSearch.maxResults") })),
+  ], { description: "Search mode: auto, llm, or api" })),
+  provider: Type.Optional(Type.Union(ApiProviderSchema.anyOf, { description: "API search provider; used as the fallback provider in auto mode" })),
+  max_results: Type.Optional(Type.Number({ minimum: 1, maximum: 10, description: "Number of API search results, from 1 to 10" })),
   urls: Type.Optional(Type.Array(Type.String(), {
-    description: i18n.t("webSearch.urls"),
+    description: "Additional URLs to analyze with model search, up to 20",
     maxItems: 20,
   })),
 });
@@ -72,7 +71,7 @@ function errorResult(
 ): AgentToolResult<WebSearchErrorDetails> {
   const message = messageOf(error);
   return {
-    content: [{ type: "text", text: i18n.t("webSearch.error", { message }) }],
+    content: [{ type: "text", text: `Search failed: ${message}` }],
     details: {
       query,
       modeRequested,
@@ -106,7 +105,7 @@ export async function webSearch(
 
   if (modeRequested === "api") {
     if (urls.length > 0) {
-      return errorResult(params.query, modeRequested, "api", "invalid-request", new Error(i18n.t("webSearch.urlsRequireLlm")));
+      return errorResult(params.query, modeRequested, "api", "invalid-request", new Error("API search does not support urls. Use llm mode, url_context, or web_fetch."));
     }
     try {
       return await runApiSearch(params, signal, onUpdate, config, modeRequested);
@@ -146,11 +145,7 @@ export async function webSearch(
       return await runApiSearch(params, signal, onUpdate, config, modeRequested, fallback);
     } catch (apiError) {
       const apiKind = classifySearchFailure(apiError, signal);
-      const combinedError = new Error(i18n.t("webSearch.fallbackFailed", {
-        llm: messageOf(llmError),
-        provider: fallbackProvider ?? params.provider ?? "api",
-        api: messageOf(apiError),
-      }));
+      const combinedError = new Error(`LLM search failed: ${messageOf(llmError)}; API fallback (${fallbackProvider ?? params.provider ?? "api"}) failed: ${messageOf(apiError)}`);
       return errorResult(params.query, modeRequested, "fallback", apiKind, combinedError, [
         { mode: "llm", kind: llmKind, message: messageOf(llmError) },
         { mode: "api", backend: fallbackProvider ?? params.provider, kind: apiKind, message: messageOf(apiError) },

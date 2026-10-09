@@ -8,10 +8,8 @@
     ".": "./index.ts"
   },
   "files": [
-    "i18n-entry.ts",
     "index.ts",
     "src",
-    "locales",
     "themes",
     "assets",
     "docs",
@@ -29,7 +27,6 @@
   },
   "pi": {
     "extensions": [
-      "./i18n-entry.ts",
       "./index.ts"
     ],
     "themes": [

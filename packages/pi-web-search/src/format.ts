@@ -2,7 +2,6 @@ import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
 import { truncateHead, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES } from "@earendil-works/pi-coding-agent";
 import { applyCitations } from "./providers/google.ts";
 import type { SearchResultDetail, Source, StreamResult } from "./providers/types.ts";
-import { i18n } from "./i18n.ts";
 
 const ADDITIONAL_RESULTS_LIMIT = 8;
 
@@ -14,7 +13,7 @@ export interface FailedUrl {
 export function formatResult(text: string, details: any): AgentToolResult<any> {
     const { content, truncated } = truncateHead(text, { maxLines: DEFAULT_MAX_LINES, maxBytes: DEFAULT_MAX_BYTES });
     return {
-        content: [{ type: "text", text: content + (truncated ? `\n\n[${i18n.t("output.truncated")}]` : "") }],
+        content: [{ type: "text", text: content + (truncated ? `\n\n[${"Output truncated"}]` : "") }],
         details
     };
 }
@@ -77,13 +76,13 @@ export function collectAdditionalSearchResults(
 
 function appendUrlStatusSection(summary: string, retrieved: string[], failed: FailedUrl[]): string {
     if (failed.length === 0) return summary;
-    let result = summary + `\n\n## ${i18n.t("output.urlStatus")}\n✅ ${i18n.t("output.retrieved")}: ${retrieved.length}\n❌ ${i18n.t("output.failed")}: ${failed.length}`;
+    let result = summary + `\n\n## ${"URL Status"}\n✅ ${"Retrieved"}: ${retrieved.length}\n❌ ${"Failed"}: ${failed.length}`;
     failed.forEach((f) => { result += `\n- ${f.url}: ${f.status}`; });
     return result;
 }
 
 function appendSourcesSection(summary: string, sources: Source[]): string {
-    const heading = i18n.t("output.sources");
+    const heading = "Sources";
     if (sources.length === 0 || summary.includes(`## ${heading}`) || summary.includes("## Sources")) return summary;
     return summary + `\n\n## ${heading}\n${sources.map((s, i) => `${i + 1}. [${s.title}](${s.url})`).join("\n")}`;
 }
@@ -98,7 +97,7 @@ function appendAdditionalResultsSection(
     const visible = limit !== undefined ? results.slice(0, limit) : results;
 
     const lines = visible.map((r, i) => {
-        const label = r.title || r.url || i18n.t("output.resultLabel", { index: i + 1 });
+        const label = r.title || r.url || `Result ${i + 1}`;
         const url = r.url ? ` - ${r.url}` : "";
         const meta = includeMeta
             ? [r.source, r.type, r.status, r.query ? `query=${r.query}` : undefined].filter(Boolean).join(", ")
@@ -106,9 +105,9 @@ function appendAdditionalResultsSection(
         return `${i + 1}. ${label}${url}${meta ? ` (${meta})` : ""}`;
     });
 
-    let result = summary + `\n\n## ${i18n.t("output.additionalResults")}\n${lines.join("\n")}`;
+    let result = summary + `\n\n## ${"Additional Search Results"}\n${lines.join("\n")}`;
     if (results.length > visible.length) {
-        result += `\n${i18n.t("output.moreResults", { count: results.length - visible.length })}`;
+        result += `\n${`There are ${results.length - visible.length} more results in tool details.`}`;
     }
     return result;
 }
@@ -168,7 +167,7 @@ export function formatUrlContextResult(result: StreamResult, options: { modelId:
     let summary = text;
     summary = appendUrlStatusSection(summary, retrieved, failed);
     if (!hasUrlContextMetadata) {
-        summary += `\n\n## ${i18n.t("output.urlVerification")}\n⚠️ ${i18n.t("urlContext.unverified", { provider: result.providerKind || "unknown" })}`;
+        summary += `\n\n## ${"URL Context Verification"}\n⚠️ ${`Provider ${result.providerKind || "unknown"} returned no verified URL Context metadata. Treat the answer as ungrounded unless tool details contain sources or retrieved URLs.`}`;
     }
     summary = appendSourcesSection(summary, sources);
     summary = appendAdditionalResultsSection(summary, additionalResults, {

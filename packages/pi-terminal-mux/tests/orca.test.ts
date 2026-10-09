@@ -1,19 +1,6 @@
 import { test, describe, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import {
-  getMuxBackend,
-  muxSetupHint,
-  getAgentPaneId,
-  backendAgentPaneEnvVar,
-  parseOrcaJson,
-  extractOrcaCreateHandle,
-  extractOrcaSplitHandle,
-  extractOrcaReadTail,
-  orcaSplitDirection,
-  parseOrcaTerminalTabInfo,
-  decideOrcaCloseStep,
-  AGENT_ORCA_TERMINAL_HANDLE,
-} from "../src/index.ts";
+import { getMuxBackend, muxSetupHint, getAgentPaneId, backendAgentPaneEnvVar, parseOrcaJson, extractOrcaCreateHandle, extractOrcaSplitHandle, extractOrcaReadTail, orcaSplitDirection, parseOrcaTerminalTabInfo, decideOrcaCloseStep, AGENT_ORCA_TERMINAL_HANDLE } from "../src/index.ts";
 
 /** 保存并清理会干扰 orca 探测的环境变量 */
 const ORCA_ENV_KEYS = [
@@ -270,14 +257,9 @@ describe("orca 后端偏好", () => {
   });
 });
 
-describe("orca setupHint i18n", () => {
-  test("中文提示", () => {
+describe("orca setupHint", () => {
+  test("提示保持英文", () => {
     process.env.PI_EXTENSIONS_LOCALE = "zh-CN";
-    process.env.PI_TERMINAL_MUX = "orca";
-    assert.match(muxSetupHint(), /请在 Orca 中运行 pi/);
-  });
-  test("英文提示", () => {
-    process.env.PI_EXTENSIONS_LOCALE = "en-US";
     process.env.PI_TERMINAL_MUX = "orca";
     assert.match(muxSetupHint(), /Run pi inside Orca/);
   });

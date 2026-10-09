@@ -21,8 +21,7 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { notifyWithSource } from "pi-utils";
-import { i18n, NOTICE_SOURCE } from "../../i18n.ts";
+
 import { setElapsedLabel } from "./elapsed-label.ts";
 import { formatDone, formatTick } from "./format-utils.ts";
 import type { MetricsDisplay } from "./config.ts";
@@ -176,7 +175,7 @@ export default function (pi: ExtensionAPI, options: TurnElapsedOptions = {}) {
       // spinner 显示全程总耗时（从用户发出消息起），跨轮不归零
       const elapsed = tracker.runElapsed();
       if (elapsed <= 0) return;
-      const label = i18n.t("elapsedWorking", { value: formatTick(elapsed) });
+      const label = `⏱ ${formatTick(elapsed)}`;
       setElapsedLabel(ctx.sessionManager, label);
       ctx.ui.setWorkingMessage(label);
     };
@@ -210,12 +209,7 @@ export default function (pi: ExtensionAPI, options: TurnElapsedOptions = {}) {
     if (display === false || !ctx.hasUI) return;
 
     if (settlement !== undefined && shouldReportTotalRun(settlement)) {
-      notifyWithSource({
-        ctx,
-        source: NOTICE_SOURCE,
-        level: "info",
-        message: i18n.t("elapsedTotal", { value: formatDone(settlement.elapsedMs) }),
-      });
+      ctx.ui.notify(`⏱ ${formatDone(settlement.elapsedMs)}`, "info");
     }
   });
 

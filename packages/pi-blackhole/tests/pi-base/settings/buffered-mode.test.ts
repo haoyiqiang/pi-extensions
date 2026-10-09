@@ -156,7 +156,7 @@ describe("createSettingsModalBody — buffered mode", () => {
     // Modal stays open
     expect(close).not.toHaveBeenCalled();
     // Error was surfaced via the same ctx
-    expect(ctx.ui.notify).toHaveBeenCalledWith("[blackhole] disk full", "error");
+    expect(ctx.ui.notify).toHaveBeenCalledWith("disk full", "error");
   });
 
   // Slice 5: Ctrl+S shortcut
@@ -295,7 +295,7 @@ describe("createSettingsModalBody — buffered mode", () => {
     // Value rolled back, not dirty
     expect(body.render(80).join("\n")).not.toContain("●");
     // Error surfaced
-    expect(ctx.ui.notify).toHaveBeenCalledWith("[blackhole] onChange rejected", "error");
+    expect(ctx.ui.notify).toHaveBeenCalledWith("onChange rejected", "error");
   });
 
   // ── Ctrl+C mid-edit ──

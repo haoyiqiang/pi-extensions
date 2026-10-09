@@ -9,25 +9,7 @@
 import { mkdtemp, rm, writeFile, mkdir, readFile, stat } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
-import {
-  git,
-  isGitRepo,
-  getRepoRoot,
-  createCheckpoint,
-  restoreCheckpoint,
-  loadCheckpointFromRef,
-  listCheckpointRefs,
-  loadAllCheckpoints,
-  deleteCheckpoint,
-  pruneCheckpoints,
-  findClosestCheckpoint,
-  shouldIgnoreForSnapshot,
-  sanitizeForRef,
-  isSafeId,
-  MUTATING_TOOLS,
-  type CreateCheckpointOpts,
-  type CheckpointData,
-} from "../src/core.js";
+import { git, isGitRepo, getRepoRoot, createCheckpoint, restoreCheckpoint, loadCheckpointFromRef, listCheckpointRefs, loadAllCheckpoints, deleteCheckpoint, pruneCheckpoints, findClosestCheckpoint, shouldIgnoreForSnapshot, sanitizeForRef, isSafeId, MUTATING_TOOLS, type CreateCheckpointOpts, type CheckpointData } from "../src/core.js";
 
 // ============================================================================
 // Test harness

@@ -1,5 +1,4 @@
 import * as z from "zod";
-import { i18n } from "./i18n.ts";
 
 const MAX_TIMER_MS = 2_147_483_647;
 
@@ -37,7 +36,7 @@ export interface NamingConfig {
 }
 
 function invalid(field: string): never {
-  throw new Error(i18n.t("namingConfigInvalidField", { field }));
+  throw new Error(`Invalid configuration field: ${field}. Check the field name, type and allowed range.`);
 }
 
 function object(value: unknown, field: string): Record<string, unknown> {

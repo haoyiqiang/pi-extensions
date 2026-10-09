@@ -3,12 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import {
-  GitHubInterceptor,
-  parseGitHubUrl,
-  resolveGitHubCloneDir,
-  resolveGitHubOptions,
-} from "../src/api-providers/interceptors/index.ts";
+import { GitHubInterceptor, parseGitHubUrl, resolveGitHubCloneDir, resolveGitHubOptions } from "../src/api-providers/interceptors/index.ts";
 
 test("GitHub interceptor remains opt-in and preserves original option defaults", () => {
   assert.equal(resolveGitHubOptions(undefined, undefined).enabled, false);

@@ -1,11 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { readBooleanEnv, readPositiveIntEnv } from "../../src/pi-base/config.js";
-import {
-  shellQuote,
-  splitShellBoundary,
-  stripQuotes,
-  tokenizeCommand,
-} from "../../src/pi-base/shell.js";
+import { shellQuote, splitShellBoundary, stripQuotes, tokenizeCommand } from "../../src/pi-base/shell.js";
 
 describe("pi-base utilities", () => {
   describe("types", () => {

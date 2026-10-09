@@ -3,15 +3,7 @@ import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { withTempDir } from "../index.ts";
-import {
-  extensionConfigPath,
-  readJsonObject,
-  readJsonObjectResult,
-  resolveAgentDir,
-  tryWriteJsonAtomic,
-  updateJsonObjectAtomic,
-  writeJsonAtomic,
-} from "../index.ts";
+import { extensionConfigPath, readJsonObject, readJsonObjectResult, resolveAgentDir, tryWriteJsonAtomic, updateJsonObjectAtomic, writeJsonAtomic } from "../index.ts";
 
 test("agent directory resolution supports defaults and tilde overrides", () => {
   assert.equal(resolveAgentDir({}, "/home/test"), "/home/test/.pi/agent");

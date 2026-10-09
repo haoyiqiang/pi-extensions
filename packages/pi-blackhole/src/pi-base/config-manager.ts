@@ -13,27 +13,11 @@ import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { applyEnvOverrides, type EnvParser } from "./core/config-env.js";
 export type { EnvParser } from "./core/config-env.js";
-import {
-  loadConfig,
-  writeConfig,
-  readConfig,
-  deleteConfig,
-  getExtensionsDir,
-  deepEqual,
-  checkConfigFile,
-  deepMerge,
-  getSessionConfig,
-  setSessionConfig,
-  clearSessionConfig,
-  PENDING_SENTINEL,
-  getRawSessionConfig,
-} from "./config.js";
+import { loadConfig, writeConfig, readConfig, deleteConfig, getExtensionsDir, deepEqual, checkConfigFile, deepMerge, getSessionConfig, setSessionConfig, clearSessionConfig, PENDING_SENTINEL, getRawSessionConfig } from "./config.js";
 import { openConfigFlow, type ExtraSelectorEntry } from "./settings/config-flow.js";
 import { validateFieldValue } from "./settings/validate-field.ts";
 import type { Field } from "./settings/types.ts";
 import type { ExtensionContext, FileEntry } from "@earendil-works/pi-coding-agent";
-import { i18n, NOTICE_SOURCE } from "../i18n.js";
-import { notifyWithSource } from "pi-utils";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -694,10 +678,10 @@ export class ConfigManager<T extends object> {
       const globalExists = existsSync(globalPath);
       sources.push({
         scope: "global",
-        label: i18n.t("scopeGlobal"),
+        label: "Global",
         path: globalPath,
         exists: globalExists,
-        note: globalExists ? globalPath : i18n.t("scopeNoteNonexistent"),
+        note: globalExists ? globalPath : "(nonexistent — will be created on save)",
       });
     }
 
@@ -706,10 +690,10 @@ export class ConfigManager<T extends object> {
       const projectExists = existsSync(projectPath);
       sources.push({
         scope: "project",
-        label: i18n.t("scopeProject"),
+        label: "Project Local",
         path: projectPath,
         exists: projectExists,
-        note: projectExists ? projectPath : i18n.t("scopeNoteNonexistent"),
+        note: projectExists ? projectPath : "(nonexistent — will be created on save)",
       });
     }
 
@@ -719,14 +703,14 @@ export class ConfigManager<T extends object> {
       const pending = this._sessionPersist === "pending";
       sources.push({
         scope: "session",
-        label: i18n.t("scopeSession"),
+        label: "Session",
         exists: false,
         path: sessionFile,
         note: pending
           ? sessionFile
-            ? i18n.t("scopeNotePending")
-            : i18n.t("scopeNotePending")
-          : i18n.t("scopeNoteSessionOverrides", { entryType }),
+            ? "in-memory until session file exists — will persist automatically"
+            : "in-memory until session file exists — will persist automatically"
+          : `in-memory per-leaf overrides (persisted to session JSONL as ${entryType})`,
       });
     }
 
@@ -1080,13 +1064,13 @@ export class ConfigManager<T extends object> {
 
     const globalStatus = checkConfigFile(filename, configDir);
     if (globalStatus.exists && !globalStatus.valid) {
-      notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("configFileInvalid", { filename, error: globalStatus.error ?? i18n.t("configErrorUnknown") }) });
+      ctx.ui.notify(`Config file "${filename}" is ${globalStatus.error ?? "unknown error"}. Using defaults.`, "warning");
     }
 
     const projectDir = join(cwd, ".pi");
     const projectStatus = checkConfigFile(filename, projectDir);
     if (projectStatus.exists && !projectStatus.valid) {
-      notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("projectConfigFileInvalid", { filename, error: projectStatus.error ?? i18n.t("configErrorUnknown") }) });
+      ctx.ui.notify(`Project config file ".pi/${filename}" is ${projectStatus.error ?? "unknown error"}. Using defaults.`, "warning");
     }
   }
 }

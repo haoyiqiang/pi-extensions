@@ -8,8 +8,6 @@ import { readLegacyMetricsConfig } from "./legacy-metrics";
 import { readLegacyNamingConfig } from "./legacy-naming";
 import { readLegacySessionResourcesConfig } from "./legacy-resources";
 import { featureSchemas } from "./schema";
-import { i18n, NOTICE_SOURCE } from "../i18n";
-import { notifyWithSource } from "pi-utils";
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { SparkConfig } from "./schema";
@@ -50,7 +48,7 @@ export function loadConfig(ctx: ExtensionContext): SparkConfig {
   }
   if (namingErrors.length > 0) {
     raw.naming = false;
-    errors.push(i18n.t("naming.namingConfigFailed", { error: namingErrors.join("; ") }));
+    errors.push(`Naming is disabled because configuration failed. Fix the naming section in spark.json or the legacy naming file and /reload: ${namingErrors.join("; ")}`);
   }
   if (raw.cleanMode === undefined) {
     const legacy = readLegacyCleanModeConfig();
@@ -92,11 +90,11 @@ export function loadConfig(ctx: ExtensionContext): SparkConfig {
 
     config[field] = field === "naming" ? false : {};
     const error = result.error.issues.map((issue) => `${[field, ...issue.path].join(".")}: ${issue.message}`).join("; ");
-    errors.push(field === "naming" ? i18n.t("naming.namingConfigFailed", { error }) : error);
+    errors.push(field === "naming" ? `Naming is disabled because configuration failed. Fix the naming section in spark.json or the legacy naming file and /reload: ${error}` : error);
   }
 
   if (errors.length > 0) {
-    notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "error", message: i18n.t("invalidConfig", { errors: errors.join("; ") }) });
+    ctx.ui.notify(`Invalid pi-spark config: ${errors.join("; ")}`, "error");
   }
 
   cache.set(ctx.cwd, config as SparkConfig);

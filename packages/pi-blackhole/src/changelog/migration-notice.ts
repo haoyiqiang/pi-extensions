@@ -18,7 +18,7 @@
  */
 
 import { getPackageVersion } from "./changelog.js";
-import { i18n, notifyBlackhole } from "../i18n.js";
+import { notifyBlackhole } from "../notify.js";
 
 /** The only version this notice fires on. */
 export const MIGRATION_NOTICE_VERSION = "0.5.2";
@@ -115,7 +115,7 @@ export function maybeNotifyThresholdMigration(
   if (notify === undefined && typeof ctx.ui?.notify !== "function") return false;
   notifiedThisProcess = true;
   try {
-    const message = i18n.t("thresholdMigrationNotice");
+    const message = "pi-blackhole: auto-compaction can now derive its threshold from your model's context window (preset curve — no fixed threshold needed). If you pinned a threshold or turned compaction off, reconsider: /blackhole settings → Compaction. Details: /blackhole changelog.";
     if (notify) notify(message, "info");
     else notifyBlackhole({ hasUI: ctx.hasUI, ui: { notify: ctx.ui!.notify! } }, "info", message);
   } catch {

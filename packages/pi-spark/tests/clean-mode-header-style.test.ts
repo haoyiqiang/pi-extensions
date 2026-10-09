@@ -2,14 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import {
-	createHeaderStyler,
-	GUTTER_GAP,
-	GUTTER_PREFIX_WIDTH,
-	renderGutterPrefix,
-	RUN_GUTTER,
-	type ThemePainter,
-} from "../src/features/clean-mode/header-style.ts";
+import { createHeaderStyler, GUTTER_GAP, GUTTER_PREFIX_WIDTH, renderGutterPrefix, RUN_GUTTER, type ThemePainter } from "../src/features/clean-mode/header-style.ts";
 
 /** 伪造的前景色码前缀，用来断言「确实套了这一层色」。 */
 const FG_PREFIX = "\x1b[38;5;99m";

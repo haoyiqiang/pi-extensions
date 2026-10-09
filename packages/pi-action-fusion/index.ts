@@ -1,9 +1,8 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { updateJsonObjectAtomic } from "pi-utils";
-import { notifyWithSource } from "pi-utils";
+
 import { createActionFusionExtension } from "./src/action-fusion.ts";
 import { loadActionFusionConfig } from "./src/config.ts";
-import { i18n, NOTICE_SOURCE } from "./src/i18n.ts";
 
 export { createActionFusionExtension, type ActionFusionOptions } from "./src/action-fusion.ts";
 export { loadActionFusionConfig, type ActionFusionConfig } from "./src/config.ts";
@@ -20,35 +19,35 @@ export default function actionFusion(pi: ExtensionAPI): void {
     if (initialized) return;
     initialized = true;
     const loaded = loadActionFusionConfig();
-    if (loaded.warning) notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: loaded.warning });
+    if (loaded.warning) ctx.ui.notify(loaded.warning, "warning");
     loadedEnabled = loaded.config.enabled;
     if (loadedEnabled) createActionFusionExtension()(pi);
   });
   pi.registerCommand("config:action-fusion", {
-    description: i18n.t("configDescription"),
+    description: "Configure Action Fusion: status, enable, or disable; reload after changes",
     async handler(args, ctx) {
       const action = args.trim() || "status";
       const loaded = loadActionFusionConfig();
       if (action === "status") {
-        notifyWithSource({ ctx, source: NOTICE_SOURCE, level: loaded.warning ? "warning" : "info", message:
-          loaded.warning ?? i18n.t("configStatus", { loaded: String(loadedEnabled), enabled: String(loaded.config.enabled), path: loaded.path }),
-        });
+        ctx.ui.notify(loaded.warning ?? `Action Fusion: loaded=${String(loadedEnabled)}; configured=${String(loaded.config.enabled)}.
+${loaded.path}`, loaded.warning ? "warning" : "info");
         return;
       }
       if (action !== "enable" && action !== "disable") {
-        notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: i18n.t("configUsage") });
+        ctx.ui.notify("Usage: /config:action-fusion [status|enable|disable]", "warning");
         return;
       }
       if (loaded.warning) {
-        notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "warning", message: loaded.warning });
+        ctx.ui.notify(loaded.warning, "warning");
         return;
       }
       try {
         const enabled = action === "enable";
         updateJsonObjectAtomic(loaded.path, (current) => ({ ...current, enabled }));
-        notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "info", message: i18n.t("configSaved", { enabled: String(enabled), path: loaded.path }) });
+        ctx.ui.notify(`Action Fusion configured=${String(enabled)}. Run /reload to apply.
+${loaded.path}`, "info");
       } catch (error) {
-        notifyWithSource({ ctx, source: NOTICE_SOURCE, level: "error", message: i18n.t("configSaveFailed", { error: String(error) }) });
+        ctx.ui.notify(`Could not save Action Fusion configuration: ${String(error)}`, "error");
       }
     },
   });

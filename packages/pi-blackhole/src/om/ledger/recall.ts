@@ -4,14 +4,7 @@
  * Upstream: https://github.com/elpapi42/pi-observational-memory (src/session-ledger/recall.ts)
  * Unmodified.
  */
-import {
-  isObservationsDroppedEntry,
-  isObservationsRecordedEntry,
-  isReflectionsRecordedEntry,
-  type Entry,
-  type Observation,
-  type Reflection,
-} from "./types.js";
+import { isObservationsDroppedEntry, isObservationsRecordedEntry, isReflectionsRecordedEntry, type Entry, type Observation, type Reflection } from "./types.js";
 
 const SOURCE_TYPES = new Set(["message", "custom_message", "branch_summary"]);
 

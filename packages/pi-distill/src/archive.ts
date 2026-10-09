@@ -5,18 +5,7 @@
  */
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import {
-  chmod,
-  link,
-  lstat,
-  mkdir,
-  open,
-  readdir,
-  realpath,
-  rmdir,
-  unlink,
-  type FileHandle,
-} from "node:fs/promises";
+import { chmod, link, lstat, mkdir, open, readdir, realpath, rmdir, unlink, type FileHandle } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 export type SourceKind = "tool-output" | "full-log" | "preview";

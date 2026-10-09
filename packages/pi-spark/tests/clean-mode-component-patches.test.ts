@@ -9,32 +9,13 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-	AssistantMessageComponent,
-	ToolExecutionComponent,
-	initTheme,
-} from "@earendil-works/pi-coding-agent";
+import { AssistantMessageComponent, ToolExecutionComponent, initTheme } from "@earendil-works/pi-coding-agent";
 import type { TuiMouseEvent } from "@earendil-works/pi-tui";
-import { visibleWidth } from "@earendil-works/pi-tui";import {
-	beginActionGroupStep,
-	createActionGroupState,
-	findActionGroupMembership,
-	getActionGroupSize,
-	isActionGroupExpanded,
-	registerActionToolCall,
-	toggleActionGroup,
-	type ActionGroupState,
-} from "../src/features/clean-mode/action-groups.ts";
-import {
-	BRANCH_LAST,
-	BRANCH_MIDDLE,
-	TREE_INDENT,
-	type ActivityCounters,
-} from "../src/features/clean-mode/activity.ts";
+import { visibleWidth } from "@earendil-works/pi-tui";import { beginActionGroupStep, createActionGroupState, findActionGroupMembership, getActionGroupSize, isActionGroupExpanded, registerActionToolCall, toggleActionGroup, type ActionGroupState } from "../src/features/clean-mode/action-groups.ts";
+import { BRANCH_LAST, BRANCH_MIDDLE, TREE_INDENT, type ActivityCounters } from "../src/features/clean-mode/activity.ts";
 import { installComponentPatches } from "../src/features/clean-mode/component-patches.ts";
 import { formatDuration } from "../src/features/clean-mode/duration.ts";
 import { createHeaderStyler, type ThemePainter } from "../src/features/clean-mode/header-style.ts";
-import { i18n } from "../src/features/clean-mode/i18n.ts";
 import { DEFAULT_CLEAN_MODE_CONFIG, type CleanModeConfig, type CleanModeState } from "../src/features/clean-mode/types.ts";
 
 /** 渲染宽度。 */
@@ -91,11 +72,11 @@ function ansiTheme(): ThemePainter {
 /** 折叠头里应当出现的耗时文案。 */
 const HEADER_FRAGMENT = formatDuration(RUN_DURATION_MS);
 /** 运行级折叠头的完整标签（含耗时），用来量它的起始列。 */
-const RUN_HEADER_LABEL = i18n.t("runHeader", { duration: formatDuration(RUN_DURATION_MS) });
+const RUN_HEADER_LABEL = `Took ${formatDuration(RUN_DURATION_MS)}`;
 /** 步数文案；箭头紧跟在它右边。 */
-const RUN_HEADER_STEPS = i18n.t("runHeaderSteps", { count: String(RUN_STEPS) });
+const RUN_HEADER_STEPS = `· ${String(RUN_STEPS)} steps`;
 /** 三条成员的组头文案；由 i18n 推导，避免与实现里的文案漂移。 */
-const GROUP_HEADER_FRAGMENT = i18n.t("actionGroupHeader", { count: "3" });
+const GROUP_HEADER_FRAGMENT = `Explored · ${"3"} steps`;
 /** 单条动作的组头摘要；组内只有一条时直接用它当组头文案。 */
 const SINGLE_ACTION_SUMMARY = "运行命令 ls -la";
 /** 活动块里的动作行；块里全是普通行，只带树形前缀。 */
@@ -108,7 +89,7 @@ const ACTIVITY_TAIL_ROW = "      │ ↳ 12 passing";
  * 它和成员命令行用同一段缩进（`  ├─ ` / `  └─ `），所以活动块看起来是列表的末项，
  * 而不是挂在某条命令正文底下的子项。
  */
-const THOUGHT_ROW = `  ${BRANCH_LAST} ◐ ${i18n.t("activityThinking")}  想点事`;
+const THOUGHT_ROW = `  ${BRANCH_LAST} ◐ ${"Thinking"}  想点事`;
 /** 展开的组里一条成员命令的摘要文案。 */
 const MEMBER_SUMMARIES = ["读取 a.ts", "运行命令 npm test", "搜索 handleMouse"];
 /** 树形行的正文列号：`  ├─ ` 之后。 */
@@ -118,7 +99,7 @@ const HEADER_BLOCK_HEIGHT = 2;
 /** 组头块首行（空行）的行号：它留白不画竖条，但与组头同属一个点击块。 */
 const GROUP_SPACER_ROW = 0;
 /** 超出渲染宽度的活动行：用来验证超宽行被截到终端宽度。 */
-const OVERLONG_ACTIVITY_ROW = `  ${BRANCH_LAST} ◐ ${i18n.t("activityThinking")}  ${"长".repeat(WIDTH)}`;
+const OVERLONG_ACTIVITY_ROW = `  ${BRANCH_LAST} ◐ ${"Thinking"}  ${"长".repeat(WIDTH)}`;
 /** 超长的命令摘要：摘要行必须自己截断，不能把箭头挤出屏幕。 */
 const OVERLONG_SUMMARY = `运行命令 ${"x".repeat(WIDTH * 2)}`;
 /**
@@ -444,7 +425,7 @@ test("组头只报动作与步数，后面不接任何计数后缀", () => {
 		);
 		assert.ok(groupHeader, "前置条件：应渲染出组头行");
 		assert.ok(
-			!groupHeader.includes(i18n.t("activityCounterRead", { count: "4" })),
+			!groupHeader.includes(`read ${"4"}`),
 			`分类计数已挪到活动块尾注，组头不该再报一次：${groupHeader}`,
 		);
 		assert.equal(
@@ -867,12 +848,12 @@ test("多条成员的组收起时只渲染一条组头", () => {
 test("组内有过半分类时组头用它命名", () => {
 	withPatches(EXPANDED_STATE, { ...DEFAULT_CLEAN_MODE_CONFIG }, (harness) => {
 		const ids = seedActionGroup(harness.actionGroups, 3);
-		harness.groupActivityLabel = i18n.t("activityCommand");
+		harness.groupActivityLabel = "Run Command";
 
 		const rendered = linesOf(toolComponent(ids[0])).join("\n");
 		assert.ok(
 			rendered.includes(
-				i18n.t("actionGroupSteps", { label: i18n.t("activityCommand"), count: "3" }),
+				`Run Command · 3 steps`,
 			),
 			`组头应带主导分类：${rendered}`,
 		);
@@ -1259,16 +1240,16 @@ test("组内没有过半分类时组头写构成，而不是通用词", () => {
 		harness.groupActivityCounts = { command: 2, read: 1 };
 
 		const header = linesOf(toolComponent(ids[0])).find((line) =>
-			line.includes(i18n.t("activityCommand")),
+			line.includes("Run Command"),
 		);
 		assert.ok(header, `组头应写出构成里的分类：${JSON.stringify(stripAnsi(header ?? ""))}`);
 		assert.ok(
-			header.includes(`${i18n.t("activityCommand")} 2`),
+			header.includes(`${"Run Command"} 2`),
 			`构成里应带上条数：${JSON.stringify(stripAnsi(header))}`,
 		);
-		assert.ok(header.includes(`${i18n.t("activityRead")} 1`), "计数为 1 的分类也要写出来");
+		assert.ok(header.includes(`${"Read File"} 1`), "计数为 1 的分类也要写出来");
 		assert.ok(
-			header.indexOf(i18n.t("activityCommand")) < header.indexOf(i18n.t("activityRead")),
+			header.indexOf("Run Command") < header.indexOf("Read File"),
 			"条数多的分类排在前面",
 		);
 		assert.ok(
@@ -1299,7 +1280,7 @@ test("构成文案过长时截断，箭头仍留在行内且不超宽", () => {
 		const NARROW_WIDTH = 30;
 		const header = toolComponent(ids[0])
 			.render(NARROW_WIDTH)
-			.find((line) => line.includes(i18n.t("activityCommand")));
+			.find((line) => line.includes("Run Command"));
 		assert.ok(header, "前置条件：应渲染出组头行");
 		assert.equal(visibleWidth(header), NARROW_WIDTH, "截断后仍要正好占一行宽度");
 		assert.ok(

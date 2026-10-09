@@ -4,7 +4,6 @@ import { type RenameOperation, type RenameTarget } from "./surface.ts";
 import { getCreatedHerdrTabId } from "./backends/herdr.ts";
 import { AGENT_OTTY_PANE_ID, getTabIdForPane } from "./backends/otty.ts";
 import { renameOrcaTerminal } from "./backends/orca.ts";
-import { i18n } from "./i18n.ts";
 
 export const TERMINAL_RENAME_CONTEXT_ENV = "PI_TERMINAL_RENAME_CONTEXT";
 const CONTEXT_VERSION = 1;
@@ -75,17 +74,17 @@ export function readSurfaceRenameContext(env: NodeJS.ProcessEnv = process.env): 
     return undefined;
   }
   let value: unknown;
-  try { value = JSON.parse(raw); } catch { throw new Error(i18n.t("rename.invalidContext")); }
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(i18n.t("rename.invalidContext"));
+  try { value = JSON.parse(raw); } catch { throw new Error("Invalid terminal rename ownership context; terminal names were not changed."); }
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid terminal rename ownership context; terminal names were not changed.");
   const context = value as Record<string, unknown>;
   const validBackend = context.backend === null || BACKENDS.some((backend) => backend === context.backend);
   if (context.version !== CONTEXT_VERSION || !validBackend || typeof context.surface !== "string" ||
       Object.keys(context).some((key) => !["version", "backend", "surface", "ownedTarget"].includes(key))) {
-    throw new Error(i18n.t("rename.invalidContext"));
+    throw new Error("Invalid terminal rename ownership context; terminal names were not changed.");
   }
   if (context.ownedTarget !== null) {
     if (!context.ownedTarget || typeof context.ownedTarget !== "object" || Array.isArray(context.ownedTarget)) {
-      throw new Error(i18n.t("rename.invalidContext"));
+      throw new Error("Invalid terminal rename ownership context; terminal names were not changed.");
     }
     const owned = context.ownedTarget as Record<string, unknown>;
     const targetByBackend: Partial<Record<MuxBackend, readonly string[]>> = {
@@ -95,7 +94,7 @@ export function readSurfaceRenameContext(env: NodeJS.ProcessEnv = process.env): 
         Object.keys(owned).some((key) => !["target", "id"].includes(key)) ||
         !targetByBackend[context.backend as MuxBackend]?.includes(owned.target as string) ||
         (!(context.backend === "herdr" && owned.target === "tab") && owned.id !== context.surface)) {
-      throw new Error(i18n.t("rename.invalidContext"));
+      throw new Error("Invalid terminal rename ownership context; terminal names were not changed.");
     }
   }
   return context as unknown as SurfaceRenameContext;
@@ -207,7 +206,7 @@ export function renameTerminalTarget(
   const { backend, operation, target, id } = reference;
   const { run, renameOrca } = dependencies;
   try {
-    if (!id.trim()) throw new Error(i18n.t("rename.missingId"));
+    if (!id.trim()) throw new Error("Cannot determine the terminal rename target ID.");
     switch (backend) {
       case "cmux":
         run("cmux", operation === "tab" ? [...RENAME_COMMANDS.cmuxTab, id, title]
@@ -220,7 +219,7 @@ export function renameTerminalTarget(
       case "herdr": run("herdr", [target, RENAME_COMMANDS.herdr, id, title]); break;
       case "otty": run("otty", [...RENAME_COMMANDS.otty, id, title]); break;
       case "orca":
-        if (!renameOrca(id, title)) throw new Error(i18n.t("error.renameIncomplete", { backend }));
+        if (!renameOrca(id, title)) throw new Error(`${backend} did not complete terminal renaming.`);
         break;
     }
     return { status: "renamed", reference };

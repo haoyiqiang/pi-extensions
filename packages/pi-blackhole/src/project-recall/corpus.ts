@@ -15,24 +15,10 @@
  *     whole-file scanning sees the full history; only the actively-written
  *     session file is excluded (race safety, D7).
  */
-import {
-  existsSync,
-  openSync,
-  readFileSync,
-  readSync,
-  closeSync,
-  readdirSync,
-  statSync,
-} from "node:fs";
+import { existsSync, openSync, readFileSync, readSync, closeSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import {
-  OM_OBSERVATIONS_RECORDED,
-  OM_REFLECTIONS_RECORDED,
-  OM_OBSERVATIONS_DROPPED,
-  RELEVANCE_VALUES,
-  type Relevance,
-} from "../om/ledger/types.js";
+import { OM_OBSERVATIONS_RECORDED, OM_REFLECTIONS_RECORDED, OM_OBSERVATIONS_DROPPED, RELEVANCE_VALUES, type Relevance } from "../om/ledger/types.js";
 
 const LEGACY_OM_OBSERVATION = "om.observation";
 const PENDING_DIR = "pi-blackhole";
