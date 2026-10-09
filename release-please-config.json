@@ -15,6 +15,7 @@
     "packages/pi-blackhole": {},
     "packages/pi-context-view": {},
     "packages/pi-rewind": {},
-    "packages/pi-spark": {}
+    "packages/pi-spark": {},
+    "packages/pi-subagent": {}
   }
 }

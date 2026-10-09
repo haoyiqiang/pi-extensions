@@ -16,6 +16,7 @@ pi-extensions/
 │   ├── pi-blackhole/            # Deterministic compaction, observational memory, and recall
 │   ├── pi-context-view/         # Context usage and injection inspection
 │   ├── pi-rewind/               # Git-backed checkpoints and rewind
+│   ├── pi-subagent/             # Persistent subagents in a terminal panel
 │   └── pi-spark/                # Compact TUI, clean transcript, credits, presets, recap, metrics, resources, naming
 ├── scripts/                     # Repository checks and workspace helpers
 ├── .github/workflows/           # CI and release automation
@@ -43,6 +44,7 @@ The layer model, allowed workspace dependency edges, UI ownership, and root dist
 - `pi-blackhole` owns deterministic compaction, observational-memory workers, and raw-session recall. Do not combine its automatic compaction ownership with another automatic context owner.
 - `pi-context-view` passively inspects context composition and hidden injections; it must not add persistent model-context instructions or messages.
 - `pi-rewind` owns Git-backed worktree checkpoints and coordinated file/session restore. It is not a substitute for context compaction.
+- `pi-subagent` owns persistent subagent runs. It opens panels through `pi-terminal-mux` and does not register `/subagent`.
 
 Keep packages composable and independently installable. Avoid coupling one extension to another extension's private implementation details or display state.
 

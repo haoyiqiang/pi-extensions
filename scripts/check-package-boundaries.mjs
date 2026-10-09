@@ -17,6 +17,7 @@ const PACKAGE_LAYERS = new Map([
   ["pi-models-discovery", "capability"],
   ["pi-rewind", "capability"],
   ["pi-context-view", "capability"],
+  ["pi-subagent", "capability"],
 ]);
 
 const ALLOWED_WORKSPACE_EDGES = new Set([
@@ -30,6 +31,7 @@ const ALLOWED_WORKSPACE_EDGES = new Set([
   "pi-models-discovery -> pi-utils",
   "pi-rewind -> pi-utils",
   "pi-context-view -> pi-utils",
+  "pi-subagent -> pi-terminal-mux",
 ]);
 
 const errors = [];

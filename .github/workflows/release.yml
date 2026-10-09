@@ -186,6 +186,7 @@ jobs:
       matrix:
         include:
           - dir: packages/pi-spark
+          - dir: packages/pi-subagent
     steps:
       - uses: actions/checkout@v4
 

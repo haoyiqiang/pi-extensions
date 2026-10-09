@@ -21,7 +21,8 @@
       "packages/pi-distill/index.ts",
       "packages/pi-models-discovery/index.ts",
       "packages/pi-rewind/index.ts",
-      "packages/pi-web-search/index.ts"
+      "packages/pi-web-search/index.ts",
+      "packages/pi-subagent/index.ts"
     ],
     "themes": [
       "packages/pi-spark/themes"

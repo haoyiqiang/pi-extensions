@@ -22,6 +22,7 @@ Published packages are independently installable from npm. Each package owns its
 | [`pi-models-discovery`](./packages/pi-models-discovery) | Discovers models from `{baseUrl}/models` for providers marked with `discoverModels` in models.json, with a persistent startup cache and a manual refresh command. | [English](./packages/pi-models-discovery/README.md) · [中文](./packages/pi-models-discovery/README.zh-CN.md) |
 | [`pi-utils`](./packages/pi-utils) | Library for portable JSON config I/O and deterministic test fixtures. Not a Pi extension. | [English](./packages/pi-utils/README.md) · [中文](./packages/pi-utils/README.zh-CN.md) |
 | [`@maplezzk/pi-web-search`](./packages/pi-web-search) | Combines LLM built-in web search, independent Search APIs, Gemini/Vertex URL Context, bounded web fetching, and opt-in GitHub repository extraction. | [English](./packages/pi-web-search/README.md) · [中文](./packages/pi-web-search/README.zh-CN.md) |
+| [`pi-subagent`](./packages/pi-subagent) | Runs persistent subagents in a terminal panel through `pi-terminal-mux`. No `/subagent` command. | [English](./packages/pi-subagent/README.md) · [中文](./packages/pi-subagent/README.zh-CN.md) |
 
 Shared libraries are published for feature-package dependencies. [`pi-utils`](./packages/pi-utils) is a library, not a Pi extension. It owns portable JSON config I/O and deterministic test fixtures. [`pi-terminal-mux`](./packages/pi-terminal-mux) provides terminal surface operations.
 
@@ -29,7 +30,7 @@ Shared libraries are published for feature-package dependencies. [`pi-utils`](./
 
 > `pi-session-tools` has been retired and removed from this repository. Existing sessions with its historical `session-squash` entries remain readable by compatibility code in packages that explicitly support them.
 
-> `pi-interactive-subagents`, `pi-subagents`, and `pi-workflow` are retired and removed from this repository. Stop old work and remove separately installed old entries before reloading; the old subagent tools, `/plan`/`/iterate`/`/subagent` aliases, and `/wf` commands are not retained.
+> `pi-interactive-subagents`, `pi-subagents`, and `pi-workflow` are retired and removed from this repository. Stop old work and remove separately installed old entries before reloading; the old subagent tools, `/plan`/`/iterate`/`/subagent` aliases, and `/wf` commands are not retained. [`pi-subagent`](./packages/pi-subagent) is a separate panel-based runner and does not restore those commands.
 
 Extension management slash commands use the `/config:<feature>[-action]` convention.
 
@@ -72,7 +73,7 @@ npm run check
 
 The check command runs workspace type checks, tests, and the portability/i18n gates.
 
-The retired subagent/workflow products are not workspaces, root-profile entries, or release candidates. Their external archive is not a repository dependency.
+The retired interactive-subagent and workflow products are not workspaces, root-profile entries, or release candidates. Their external archive is not a repository dependency. `pi-subagent` is the current panel-based package.
 
 The repository pins `https://registry.npmjs.org/` in `.npmrc` so lockfile tarball URLs stay portable. Installing through a mirror registry rewrites those URLs and makes `npm ci` fail on npm 12+ with `EALLOWREMOTE`; `node scripts/check-lockfile-registry.mjs` (part of `npm run check`) blocks that before merge.
 
