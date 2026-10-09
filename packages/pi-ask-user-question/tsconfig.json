@@ -11,5 +11,5 @@
     "types": ["node"]
   },
   "include": ["index.ts", "ask-user-question.ts", "config.ts", "events.ts", "reconcile.ts", "rpc-fallback.ts", "state/**/*.ts", "tool/**/*.ts", "view/**/*.ts"],
-  "exclude": ["**/*.test.ts", "test-fixtures.ts", "test-setup.ts", "vitest.config.ts"]
+  "exclude": ["**/*.test.ts", "tests/**", "vitest.config.ts"]
 }

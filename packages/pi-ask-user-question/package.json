@@ -22,11 +22,9 @@
     "README.zh-CN.md",
     "LICENSE",
     "UPSTREAM.md",
-    "test-setup.ts",
     "vitest.config.ts",
     "!**/*.test.ts",
-    "!test-fixtures.ts",
-    "!test-setup.ts",
+    "!tests/**",
     "!vitest.config.ts"
   ],
   "scripts": {

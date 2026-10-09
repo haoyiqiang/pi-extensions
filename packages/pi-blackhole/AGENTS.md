@@ -15,8 +15,8 @@ npm run check --workspace pi-blackhole
 - Pi loads `index.ts` directly. Do not require a generated `dist/` directory for consumers.
 
 ## Testing quirks
-- **`tests/` is NOT in tsconfig.json** apart from `tests/fixtures/pi-extension-api.typecheck.ts`, which holds the compile-only extension-API contract. Adding other test files would surface ~150 pre-existing type errors tracked as a separate cleanup.
-- `src/pi-base/**/*.test.ts` is excluded from tsconfig by design.
+- **`tests/` is NOT in tsconfig.json** apart from `tests/fixtures/pi-extension-api.typecheck.ts`, which holds the compile-only extension-API contract. Adding other test files to tsconfig would surface pre-existing type errors tracked as a separate cleanup.
+- Source-adjacent tests live under `tests/` (for example, `tests/pi-base/**`) so `src/` stays runtime-only.
 - Tests are pure unit tests with fake agent loops — no LLM/network. `tests/vcc-support/real-sessions.ts` optionally samples `~/.pi/agent/sessions`, but nothing requires real data.
 - `tests/fixtures/installed-package.ts` resolves an installed package's root by walking up from the test file. Use it instead of a `process.cwd()`-relative `node_modules` path, which only exists in a standalone checkout.
 - Loading the module graph in a test's first `await import()` is disk-bound, so `testTimeout` is raised well above vitest's default. Keep new tests free of compiler or other heavyweight child processes; static contracts belong in `npm run typecheck`.

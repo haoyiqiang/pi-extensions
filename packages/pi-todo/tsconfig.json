@@ -19,5 +19,5 @@
     "tool/**/*.ts",
     "view/**/*.ts"
   ],
-  "exclude": ["**/*.test.ts", "test/**", "tests/**"]
+  "exclude": ["**/*.test.ts", "tests/**"]
 }

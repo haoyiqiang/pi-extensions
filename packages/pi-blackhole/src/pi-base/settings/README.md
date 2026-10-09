@@ -512,5 +512,5 @@ from the old `(values, scope)` signature should update their callbacks.
 ## Reference
 
 - Source: `packages/pi-base/src/settings/`
-- Tests: `packages/pi-base/src/settings/buffered-mode.test.ts`
+- Tests: `packages/pi-blackhole/tests/pi-base/settings/buffered-mode.test.ts`
 - Spec: `docs/config-rework/01-architecture.md`
