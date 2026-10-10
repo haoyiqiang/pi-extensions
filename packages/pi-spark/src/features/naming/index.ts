@@ -122,7 +122,7 @@ export function registerNamingConfigCommand(
       try {
         const loaded = store.load(ctx);
         if (loaded === false) {
-          report(pi, ctx, { message: "Naming is disabled for this session. Configure naming in spark.json or use /config:naming reset, then /reload.", level: "info" });
+          report(pi, ctx, { message: "Naming is disabled for this session. Configure naming in extensions/pi-spark/config.json or use /config:naming reset, then /reload.", level: "info" });
           return;
         }
         config = loaded;
@@ -290,7 +290,7 @@ export function registerNaming(
       const message = errorMessage(error);
       if (message !== lastConfigError) {
         lastConfigError = message;
-        report(pi, ctx, { message: `Naming is disabled because configuration failed. Fix the naming section in spark.json or the legacy naming file and /reload: ${message}`, level: "warning" });
+        report(pi, ctx, { message: `Naming is disabled because configuration failed. Fix the naming section in extensions/pi-spark/config.json or the legacy naming file and /reload: ${message}`, level: "warning" });
       }
       return false;
     }
@@ -400,7 +400,7 @@ export function registerNaming(
       state.attempted = true;
       const config = readConfig(ctx);
       if (!config || !config.manualNaming || !Object.values(config.targets).some(Boolean)) {
-        report(pi, ctx, { message: "Naming is disabled for this session. Configure naming in spark.json or use /config:naming reset, then /reload.", level: "info" });
+        report(pi, ctx, { message: "Naming is disabled for this session. Configure naming in extensions/pi-spark/config.json or use /config:naming reset, then /reload.", level: "info" });
         return;
       }
       await rename(args, ctx, false, config);

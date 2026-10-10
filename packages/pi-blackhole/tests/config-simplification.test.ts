@@ -32,7 +32,7 @@ function writeConfig(data: unknown, filename = "pi-blackhole/pi-blackhole-config
 }
 
 function configPath(): string {
-  return join(testDir, "pi-blackhole", "pi-blackhole-config.json");
+  return join(testDir, "extensions", "pi-blackhole", "config.json");
 }
 
 // ── Setup ───────────────────────────────────────────────────────────────────
@@ -361,7 +361,7 @@ describe("saveUnifiedConfig — atomic write", () => {
     async () => {
       const { saveUnifiedConfig } = await import("../src/core/unified-config.js");
       // Make the config dir read-only so write fails
-      const dir = join(testDir, "pi-blackhole");
+      const dir = join(testDir, "extensions", "pi-blackhole");
       mkdirSync(dir, { recursive: true });
       // Set permissions to read+execute only (no write)
       try {
@@ -411,9 +411,9 @@ describe("scaffoldConfig — NixOS safety", () => {
   it("does not crash on read-only filesystem during scaffold", async () => {
     const { scaffoldConfig } = await import("../src/core/unified-config.js");
     // Create directory with read-only permissions
-    mkdirSync(join(testDir, "pi-blackhole"), { recursive: true });
+    mkdirSync(join(testDir, "extensions", "pi-blackhole"), { recursive: true });
     try {
-      chmodSync(join(testDir, "pi-blackhole"), 0o555);
+      chmodSync(join(testDir, "extensions", "pi-blackhole"), 0o555);
     } catch {
       /* skip on Windows */
     }
@@ -422,7 +422,7 @@ describe("scaffoldConfig — NixOS safety", () => {
 
     // Restore permissions so afterEach cleanup works
     try {
-      chmodSync(join(testDir, "pi-blackhole"), 0o755);
+      chmodSync(join(testDir, "extensions", "pi-blackhole"), 0o755);
     } catch {
       /* skip on Windows */
     }

@@ -50,7 +50,7 @@ test("integrated resources feature collects tools and persists its compatibility
 
     await commands.get("config:session-resources").handler("disable", ctx as unknown as ExtensionCommandContext);
     assert.equal(runtime.enabled, false);
-    assert.equal(JSON.parse(readFileSync(join(dir, "spark.json"), "utf8")).resources, false);
+    assert.equal(JSON.parse(readFileSync(join(dir, "extensions", "pi-spark", "config.json"), "utf8")).resources, false);
 
     events.get("session_shutdown")?.({}, ctx);
     assert.equal(runtime.list().length, 0);

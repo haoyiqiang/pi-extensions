@@ -22,9 +22,9 @@ import { CACHE_RETENTION_VALUES, DEFAULTS, normalizeCacheRetention, normalizeThr
 import { effectivePresets } from "../om/model-budget.js";
 import { openChangelogView } from "../changelog/changelog.js";
 
-const CONFIG_FILENAME = "pi-blackhole-config.json";
+const CONFIG_FILENAME = "config.json";
 
-export const GLOBAL_CONFIG_DIR = join(getPiAgentDir(), "pi-blackhole");
+export const GLOBAL_CONFIG_DIR = join(getPiAgentDir(), "extensions", "pi-blackhole");
 
 // ── ConfigManager instance ───────────────────────────────────────────────────
 
@@ -33,6 +33,7 @@ export const config = new ConfigManager<UnifiedConfig>({
   label: "pi-blackhole",
   filename: CONFIG_FILENAME,
   configDir: GLOBAL_CONFIG_DIR,
+  projectDir: (cwd) => join(cwd, ".pi", "extensions", "pi-blackhole"),
   defaults: DEFAULTS,
   scopes: { global: true, project: true, session: true },
   sessionConfig: { entryType: "session-config-pi-blackhole" },

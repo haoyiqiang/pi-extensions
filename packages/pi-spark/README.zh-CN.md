@@ -108,7 +108,7 @@ pi remove npm:pi-naming
 
 ## 配置
 
-配置读取顺序：`~/.pi/agent/spark.json`（全局）与当前项目的 `.pi/spark.json`（项目覆盖同名字段）。agent 目录遵守 `PI_CODING_AGENT_DIR`。命名默认值示例见 [config.example.json](./config.example.json)。
+配置读取顺序：`<agent-dir>/extensions/pi-spark/config.json`（全局）与当前项目的 `.pi/extensions/pi-spark/config.json`（项目覆盖同名字段）。新文件不存在时，才只读旧的 `spark.json`。agent 目录遵守 `PI_CODING_AGENT_DIR`。命名默认值示例见 [config.example.json](./config.example.json)。
 
 ```json
 {

@@ -54,7 +54,8 @@
     "subagent"
   ],
   "dependencies": {
-    "pi-terminal-mux": "^0.6.5"
+    "pi-terminal-mux": "^0.6.5",
+    "pi-utils": "^0.1.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.87.1"

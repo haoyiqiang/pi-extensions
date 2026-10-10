@@ -73,7 +73,7 @@ export class PresetManager {
 
   async cycle(ctx: ExtensionContext, direction: "forward" | "backward"): Promise<void> {
     if (this.keys.length === 0) {
-      ctx.ui.notify("No presets defined in spark.json", "warning");
+      ctx.ui.notify("No presets defined in extensions/pi-spark/config.json", "warning");
       return;
     }
 

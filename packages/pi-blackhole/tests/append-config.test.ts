@@ -5,9 +5,9 @@ import { tmpdir } from "node:os";
 
 const testDir = join(tmpdir(), `pi-blackhole-append-config-${Date.now()}`);
 const writeConfig = (data: unknown) => {
-  const dir = join(testDir, "pi-blackhole");
+  const dir = join(testDir, "extensions", "pi-blackhole");
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "pi-blackhole-config.json"), JSON.stringify(data, null, 2));
+  writeFileSync(join(dir, "config.json"), JSON.stringify(data, null, 2));
 };
 
 beforeEach(() => {
@@ -65,11 +65,11 @@ describe("reflection output configuration", () => {
         compactAfterTokens: 168000,
         custom: "keep",
       });
-      const path = join(testDir, "pi-blackhole", "pi-blackhole-config.json");
+      const path = join(testDir, "extensions", "pi-blackhole", "config.json");
       const before = readFileSync(path, "utf8");
       const expected = value === 12000 || value === 0 ? value : 8000;
       expect(loadUnifiedConfig(testDir).reflectionsPoolMaxTokens).toBe(expected);
-      expect(config.load(testDir, join(testDir, "pi-blackhole")).reflectionsPoolMaxTokens).toBe(
+      expect(config.load(testDir, join(testDir, "extensions", "pi-blackhole")).reflectionsPoolMaxTokens).toBe(
         expected,
       );
       expect(loadUnifiedConfig(testDir).compactAfterTokens).toBe(168000);
@@ -82,14 +82,14 @@ describe("reflection output configuration", () => {
       await import("../src/core/unified-config.js");
     const { config } = await import("../src/pi-base/blackhole-settings.js");
     writeConfig({ reflectionsPoolMaxTokens: 9000, compactAfterTokens: 168000 });
-    mkdirSync(join(testDir, ".pi"), { recursive: true });
+    mkdirSync(join(testDir, ".pi/extensions/pi-blackhole"), { recursive: true });
     writeFileSync(
-      join(testDir, ".pi/pi-blackhole-config.json"),
+      join(testDir, ".pi/extensions/pi-blackhole/config.json"),
       JSON.stringify({ reflectionsPoolMaxTokens: 11000, custom: "keep" }),
     );
     const readBoth = () => [
       loadUnifiedConfig(testDir),
-      config.load(testDir, join(testDir, "pi-blackhole")),
+      config.load(testDir, join(testDir, "extensions", "pi-blackhole")),
     ];
     for (const cfg of readBoth()) expect(cfg.reflectionsPoolMaxTokens).toBe(11000);
     process.env.PI_BLACKHOLE_REFLECTIONS_POOL_MAX_TOKENS = "13000";
@@ -105,7 +105,7 @@ describe("reflection output configuration", () => {
       true,
     );
     expect(
-      JSON.parse(readFileSync(join(testDir, ".pi/pi-blackhole-config.json"), "utf8")),
+      JSON.parse(readFileSync(join(testDir, ".pi/extensions/pi-blackhole/config.json"), "utf8")),
     ).toMatchObject({ reflectionsPoolMaxTokens: 14000, custom: "keep" });
     for (const cfg of readBoth())
       expect(cfg).toMatchObject({

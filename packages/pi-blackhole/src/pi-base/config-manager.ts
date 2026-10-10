@@ -70,6 +70,8 @@ export interface ConfigManagerOptions<T extends object = object> {
    * per-call `configDir` argument is passed (which takes precedence).
    */
   configDir?: string;
+  /** Project config directory. Defaults to `<cwd>/.pi`. */
+  projectDir?: (cwd: string) => string;
 }
 
 export interface ConfigLoadWarning {
@@ -136,6 +138,10 @@ export class ConfigManager<T extends object> {
       );
     }
     this._filename = opts.filename ?? `${opts.id}-config.json`;
+  }
+
+  private projectConfigDir(cwd: string): string {
+    return this.opts.projectDir?.(cwd) ?? join(cwd, ".pi");
   }
 
   /** Resolved scope availability (opts.scopes with defaults applied). */
@@ -427,6 +433,7 @@ export class ConfigManager<T extends object> {
     const loaded = loadConfig(this._filename, this.opts.defaults, {
       cwd,
       configDir: configDir ?? this._defaultConfigDir,
+      projectDir: cwd ? this.projectConfigDir(cwd) : undefined,
       merge: "deep",
     });
 
@@ -539,7 +546,7 @@ export class ConfigManager<T extends object> {
 
     // Layer 2: project
     if (cwd) {
-      const projectDir = join(cwd, ".pi");
+      const projectDir = this.projectConfigDir(cwd);
       const projectData = readConfig<Record<string, unknown>>(this._filename, projectDir) ?? {};
       result = deepMerge(result, projectData) as Record<string, unknown>;
     }
@@ -591,7 +598,7 @@ export class ConfigManager<T extends object> {
     const globalLayer = (readConfig<Record<string, unknown>>(this._filename, dir) ??
       {}) as Partial<T>;
     const projectLayer = cwd
-      ? ((readConfig<Record<string, unknown>>(this._filename, join(cwd, ".pi")) ??
+      ? ((readConfig<Record<string, unknown>>(this._filename, this.projectConfigDir(cwd)) ??
           {}) as Partial<T>)
       : ({} as Partial<T>);
 
@@ -686,7 +693,7 @@ export class ConfigManager<T extends object> {
     }
 
     if (scopes.project !== false && cwd) {
-      const projectPath = join(cwd, ".pi", this._filename);
+      const projectPath = join(this.projectConfigDir(cwd), this._filename);
       const projectExists = existsSync(projectPath);
       sources.push({
         scope: "project",
@@ -819,7 +826,7 @@ export class ConfigManager<T extends object> {
 
     const dir =
       scope === "project" && cwd
-        ? join(cwd, ".pi")
+        ? this.projectConfigDir(cwd)
         : (configDir ?? this._defaultConfigDir ?? getExtensionsDir());
     const targetPath = join(dir, this._filename);
     const created = !existsSync(targetPath);
@@ -1010,7 +1017,7 @@ export class ConfigManager<T extends object> {
     }
     const dir =
       scope === "project" && cwd
-        ? join(cwd, ".pi")
+        ? this.projectConfigDir(cwd)
         : (configDir ?? this._defaultConfigDir ?? getExtensionsDir());
     const knownKeys = new Set(Object.keys(this.opts.defaults));
     const existing = readConfig<Record<string, unknown>>(this._filename, dir);
@@ -1050,7 +1057,7 @@ export class ConfigManager<T extends object> {
     }
     const dir =
       scope === "project" && cwd
-        ? join(cwd, ".pi")
+        ? this.projectConfigDir(cwd)
         : (configDir ?? this._defaultConfigDir ?? getExtensionsDir());
     deleteConfig(this._filename, dir);
   }
@@ -1067,10 +1074,10 @@ export class ConfigManager<T extends object> {
       ctx.ui.notify(`Config file "${filename}" is ${globalStatus.error ?? "unknown error"}. Using defaults.`, "warning");
     }
 
-    const projectDir = join(cwd, ".pi");
+    const projectDir = this.projectConfigDir(cwd);
     const projectStatus = checkConfigFile(filename, projectDir);
     if (projectStatus.exists && !projectStatus.valid) {
-      ctx.ui.notify(`Project config file ".pi/${filename}" is ${projectStatus.error ?? "unknown error"}. Using defaults.`, "warning");
+      ctx.ui.notify(`Project config file "${join(projectDir, filename)}" is ${projectStatus.error ?? "unknown error"}. Using defaults.`, "warning");
     }
   }
 }

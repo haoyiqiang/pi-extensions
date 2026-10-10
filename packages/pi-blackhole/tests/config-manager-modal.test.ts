@@ -97,7 +97,7 @@ describe("openSettings configDir forwarding (canonical config-flow)", () => {
     const { mkdirSync, writeFileSync } = await import("node:fs");
     mkdirSync(GLOBAL_CONFIG_DIR, { recursive: true });
     writeFileSync(
-      join(GLOBAL_CONFIG_DIR, "pi-blackhole-config.json"),
+      join(GLOBAL_CONFIG_DIR, "config.json"),
       JSON.stringify({ retainedToolOutputMaxTokens: 0 }),
     );
 
@@ -155,7 +155,7 @@ describe("window-derived threshold fields in the settings modal (issue #60)", ()
     config.save(cfg as never, "global", undefined, cfgDir);
 
     const written = JSON.parse(
-      readFileSync(join(cfgDir, "pi-blackhole-config.json"), "utf8"),
+      readFileSync(join(cfgDir, "config.json"), "utf8"),
     ) as Record<string, unknown>;
     expect(written.compactAfterRatio).toBe(0.65);
     expect(written.compactReserveTokens).toBe(32_768);
@@ -164,7 +164,7 @@ describe("window-derived threshold fields in the settings modal (issue #60)", ()
     const cfg2 = { ...DEFAULTS } as Record<string, unknown>;
     config.save(cfg2 as never, "global", undefined, cfgDir);
     const written2 = JSON.parse(
-      readFileSync(join(cfgDir, "pi-blackhole-config.json"), "utf8"),
+      readFileSync(join(cfgDir, "config.json"), "utf8"),
     ) as Record<string, unknown>;
     expect("compactAfterRatio" in written2).toBe(false);
     expect("compactReserveTokens" in written2).toBe(false);
@@ -183,7 +183,7 @@ describe("workerAttemptTimeoutMs persistence (0e1b110)", () => {
     config.save({ ...DEFAULTS, workerAttemptTimeoutMs: 15_000 }, "global", undefined, cfgDir);
 
     const written = JSON.parse(
-      readFileSync(join(cfgDir, "pi-blackhole-config.json"), "utf8"),
+      readFileSync(join(cfgDir, "config.json"), "utf8"),
     ) as Record<string, unknown>;
     expect(written.workerAttemptTimeoutMs).toBe(15_000);
   });
@@ -196,14 +196,14 @@ describe("workerAttemptTimeoutMs persistence (0e1b110)", () => {
     const cfgDir = join(testDir, "pi-blackhole-wat-replace");
     mkdirSync(cfgDir, { recursive: true });
     writeFileSync(
-      join(cfgDir, "pi-blackhole-config.json"),
+      join(cfgDir, "config.json"),
       JSON.stringify({ workerAttemptTimeoutMs: 60_000 }),
     );
 
     config.save({ ...DEFAULTS, workerAttemptTimeoutMs: 15_000 }, "global", undefined, cfgDir);
 
     const written = JSON.parse(
-      readFileSync(join(cfgDir, "pi-blackhole-config.json"), "utf8"),
+      readFileSync(join(cfgDir, "config.json"), "utf8"),
     ) as Record<string, unknown>;
     expect(written.workerAttemptTimeoutMs).toBe(15_000);
   });
@@ -258,7 +258,7 @@ describe("preset-curve select + hand-edited preset definitions (window curve)", 
     const cfgDir = join(testDir, "pi-blackhole-preset-save");
     const mkdir = await import("node:fs");
     mkdir.mkdirSync(cfgDir, { recursive: true });
-    const file = join(cfgDir, "pi-blackhole-config.json");
+    const file = join(cfgDir, "config.json");
 
     // User hand-added a preset definition to the file; the modal loads it.
     const defs = { "early-1m": [{ window: 131_072, ratio: 0.6 }] };
@@ -287,7 +287,7 @@ describe("preset-curve select + hand-edited preset definitions (window curve)", 
     const cfgDir = join(testDir, "pi-blackhole-preset-preserve");
     const mkdir = await import("node:fs");
     mkdir.mkdirSync(cfgDir, { recursive: true });
-    const file = join(cfgDir, "pi-blackhole-config.json");
+    const file = join(cfgDir, "config.json");
 
     const v1 = { "early-1m": [{ window: 131_072, ratio: 0.6 }] };
     writeFileSync(file, JSON.stringify({ compactAfterPresets: v1 }, null, 2));
@@ -415,7 +415,7 @@ describe("modal save preserves hand-edited configs (models, unknown keys, preset
 
     const cfgDir = join(testDir, "handedited-roundtrip");
     mkdirSync(cfgDir, { recursive: true });
-    const file = join(cfgDir, "pi-blackhole-config.json");
+    const file = join(cfgDir, "config.json");
     const model = { provider: "openrouter", id: "x/y", contextWindow: 32_768 };
     writeFileSync(
       file,
@@ -486,7 +486,7 @@ describe("modal save for cacheRetention", () => {
       r: Record<string, unknown>,
     ) => Record<string, unknown>;
     config.save(validate({ ...layer, ...edits }) as never, "global", undefined, dir);
-    return JSON.parse(readFileSync(join(dir, "pi-blackhole-config.json"), "utf8")) as Record<
+    return JSON.parse(readFileSync(join(dir, "config.json"), "utf8")) as Record<
       string,
       unknown
     >;
@@ -508,7 +508,7 @@ describe("modal save for cacheRetention", () => {
     const { writeFileSync } = await import("node:fs");
     mkdirSync(dir, { recursive: true });
     writeFileSync(
-      join(dir, "pi-blackhole-config.json"),
+      join(dir, "config.json"),
       JSON.stringify({ cacheRetention: "long", customHandKey: { foo: 1 } }, null, 2),
     );
 

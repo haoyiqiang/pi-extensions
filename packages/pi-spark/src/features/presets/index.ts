@@ -19,7 +19,7 @@ export function registerPresets(pi: ExtensionAPI): void {
     const presetFlag = event.reason === "startup" ? pi.getFlag("preset") : undefined;
 
     if (!config || Object.keys(config).length === 0) {
-      if (presetFlag) ctx.ui.notify("No presets defined in spark.json", "warning");
+      if (presetFlag) ctx.ui.notify("No presets defined in extensions/pi-spark/config.json", "warning");
       return;
     }
 

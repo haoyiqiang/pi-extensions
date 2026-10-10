@@ -16,10 +16,10 @@ function persist(ctx: ExtensionCommandContext, enabled: boolean): void {
   try {
     saveResourcesConfig(enabled);
     ensureSessionResourceRuntime().enabled = isResourcesEnabled(loadConfig(ctx).resources);
-    const override = projectResourcesOverrides(ctx.cwd) ? ` ${"The project spark.json also sets resources and overrides this global configuration."}` : "";
+    const override = projectResourcesOverrides(ctx.cwd) ? ` ${"The project extensions/pi-spark/config.json also sets resources and overrides this global configuration."}` : "";
     ctx.ui.notify(`${enabled ? "# session resource picker enabled" : "# session resource picker disabled"}${override}`, "info");
   } catch (error) {
-    ctx.ui.notify(`Failed to save session resource configuration: ${"spark.json"} (${error instanceof Error ? error.message : String(error)}).`, "error");
+    ctx.ui.notify(`Failed to save session resource configuration: ${"extensions/pi-spark/config.json"} (${error instanceof Error ? error.message : String(error)}).`, "error");
   }
 }
 

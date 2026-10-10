@@ -7,7 +7,7 @@ import type { PresetManager } from "./manager";
 
 export async function showPresetSelector(ctx: ExtensionContext, presetManager: PresetManager): Promise<string | undefined> {
   if (presetManager.keys.length === 0) {
-    ctx.ui.notify("No presets defined in spark.json", "warning");
+    ctx.ui.notify("No presets defined in extensions/pi-spark/config.json", "warning");
     return undefined;
   }
 

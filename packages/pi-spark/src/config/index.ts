@@ -1,5 +1,3 @@
-import { join } from "node:path";
-import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { defu } from "defu";
 import { readJsonObjectResult } from "pi-utils";
 
@@ -8,11 +6,16 @@ import { readLegacyMetricsConfig } from "./legacy-metrics";
 import { readLegacyNamingConfig } from "./legacy-naming";
 import { readLegacySessionResourcesConfig } from "./legacy-resources";
 import { featureSchemas } from "./schema";
+import {
+  legacyProjectSparkConfigPath,
+  legacySparkConfigPath,
+  projectSparkConfigPath,
+  readableSparkConfigPath,
+  sparkConfigPath,
+} from "./store";
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { SparkConfig } from "./schema";
-
-const CONFIG_FILE = "spark.json";
 
 const cache = new Map<string, SparkConfig>();
 
@@ -28,7 +31,8 @@ export function loadConfig(ctx: ExtensionContext): SparkConfig {
 
   // Deep-merge the global file under the project file, so project settings win at scalar
   // leaves while deep objects (e.g., `recap.model`) combine across both.
-  const [globalPath, projectPath] = getConfigPaths(ctx.cwd, CONFIG_FILE);
+  const globalPath = readableSparkConfigPath(sparkConfigPath(), legacySparkConfigPath());
+  const projectPath = readableSparkConfigPath(projectSparkConfigPath(ctx.cwd), legacyProjectSparkConfigPath(ctx.cwd));
   const global = readJsonObjectResult(globalPath);
   const project = readJsonObjectResult(projectPath);
   const globalRaw = global.status === "loaded" ? global.value : {};
@@ -48,7 +52,7 @@ export function loadConfig(ctx: ExtensionContext): SparkConfig {
   }
   if (namingErrors.length > 0) {
     raw.naming = false;
-    errors.push(`Naming is disabled because configuration failed. Fix the naming section in spark.json or the legacy naming file and /reload: ${namingErrors.join("; ")}`);
+    errors.push(`Naming is disabled because configuration failed. Fix the naming section in extensions/pi-spark/config.json or the legacy naming file and /reload: ${namingErrors.join("; ")}`);
   }
   if (raw.cleanMode === undefined) {
     const legacy = readLegacyCleanModeConfig();
@@ -90,7 +94,7 @@ export function loadConfig(ctx: ExtensionContext): SparkConfig {
 
     config[field] = field === "naming" ? false : {};
     const error = result.error.issues.map((issue) => `${[field, ...issue.path].join(".")}: ${issue.message}`).join("; ");
-    errors.push(field === "naming" ? `Naming is disabled because configuration failed. Fix the naming section in spark.json or the legacy naming file and /reload: ${error}` : error);
+    errors.push(field === "naming" ? `Naming is disabled because configuration failed. Fix the naming section in extensions/pi-spark/config.json or the legacy naming file and /reload: ${error}` : error);
   }
 
   if (errors.length > 0) {
@@ -99,10 +103,6 @@ export function loadConfig(ctx: ExtensionContext): SparkConfig {
 
   cache.set(ctx.cwd, config as SparkConfig);
   return config as SparkConfig;
-}
-
-function getConfigPaths(cwd: string, fileName: string): [globalPath: string, projectPath: string] {
-  return [join(getAgentDir(), fileName), join(cwd, CONFIG_DIR_NAME, fileName)];
 }
 
 /** Merge only known nested naming sections; never coerce invalid scalars or concatenate arrays. */

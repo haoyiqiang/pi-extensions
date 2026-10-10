@@ -11,10 +11,12 @@ import {
 	getRunsDir,
 	inboxDir,
 	launchRun,
+	legacyRunsDir,
 	listRuns,
 	readLatestAssistant,
 	readMetadata,
 	removeRunDir,
+	runDirForHandle as resolveRunDir,
 	runDisplayName,
 	isValidRunName,
 	surfaceAlive,
@@ -59,7 +61,7 @@ function normalizeRunName(value: string): string {
 
 function runDirForHandle(handle: string): string {
 	if (!/^[a-z0-9]+$/.test(handle)) fail(`Invalid subagent handle: ${handle}`);
-	return join(getRunsDir(), handle);
+	return resolveRunDir(handle);
 }
 
 function getRun(handle: string): RunMetadata {
@@ -72,7 +74,7 @@ function generateHandle(): string {
 	mkdirSync(getRunsDir(), { recursive: true, mode: 0o700 });
 	for (let attempt = 0; attempt < 100; attempt++) {
 		const handle = randomBytes(3).toString("hex");
-		if (!existsSync(runDirForHandle(handle))) return handle;
+		if (!existsSync(join(getRunsDir(), handle)) && !existsSync(join(legacyRunsDir(), handle))) return handle;
 	}
 	fail("Could not allocate a unique subagent handle");
 }

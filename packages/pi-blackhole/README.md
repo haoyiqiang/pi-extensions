@@ -34,7 +34,7 @@ pi uninstall npm / git:https://github.com/sting8k/pi-vcc
 pi uninstall npm / git:https://github.com/elpapi42/pi-observational-memory
 ```
 
-Then `/reload` or restart Pi. The config file at `~/.pi/agent/pi-blackhole/pi-blackhole-config.json` is created with sensible defaults — no setup required for the default behavior. Config merges global → project → env → session (session is ephemeral). See **[`docs/CONFIG.md`](docs/CONFIG.md)** for tuning or run `/blackhole settings` to open the interactive overlay.
+Then `/reload` or restart Pi. The config file at `<agent-dir>/extensions/pi-blackhole/config.json` is created with sensible defaults — no setup required for the default behavior. Config merges global → project → env → session (session is ephemeral). See **[`docs/CONFIG.md`](docs/CONFIG.md)** for tuning or run `/blackhole settings` to open the interactive overlay.
 
 > **Want a guided setup?** Pass [`llms.txt`](llms.txt) to your agent — it will walk you through the interview, including picking cheap fallback models for your providers.
 
@@ -166,7 +166,7 @@ Defaults target ~128k context models and work out of the box — no tuning requi
 
 Fallbacks (optional): each worker tries `stageModel → stageFallbacks → base model → session model` (skipping cooled-down models). By default the workers **do not** fall back to your session model — this avoids surprise cost and cache busting. Enable it with `sessionFallback: true` (default) or set `model` as a shared fallback. See [`docs/CONFIG.md` → Model Configuration](docs/CONFIG.md#model-configuration).
 
-Config file: **`~/.pi/agent/pi-blackhole/pi-blackhole-config.json`**
+Config file: **`<agent-dir>/extensions/pi-blackhole/config.json`**. A retired `pi-blackhole/pi-blackhole-config.json` is read only when the new file is absent.
 
 Full reference — every key, default, and env override — lives in:
 

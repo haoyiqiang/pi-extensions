@@ -469,9 +469,11 @@ export function checkConfigFile(filename: string, configDir?: string): ConfigFil
 export interface LoadConfigOptions {
   /**
    * Working directory for project-local overrides.
-   * When set, reads from `<cwd>/.pi/<filename>` in addition to global.
+   * When set, reads from `<cwd>/.pi/<filename>` unless `projectDir` is set.
    */
   cwd?: string;
+  /** Explicit project config directory. Defaults to `<cwd>/.pi`. */
+  projectDir?: string;
 
   /**
    * Merge strategy for combining defaults ← global ← project.
@@ -518,7 +520,7 @@ export function loadConfig<T extends object>(
 
   // Layer 2: project-local
   if (opts.cwd) {
-    const projectDir = join(opts.cwd, ".pi");
+    const projectDir = opts.projectDir ?? join(opts.cwd, ".pi");
     config = mergeFn(config, readConfig<Partial<T>>(filename, projectDir) ?? ({} as Partial<T>));
   }
 

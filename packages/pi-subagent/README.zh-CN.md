@@ -83,4 +83,4 @@ subagent list
 - `--no-prompt-templates`：关闭 prompt templates
 - `--no-context-files`：忽略仓库指令文件
 
-不允许嵌套子代理。子会话不加载 subagent skill。子代理在 `/reload` 后继续存在。父会话退出或被替换时，正在运行的子代理会被挂起：分栏关闭，但记录和元数据保留。恢复该父会话时会用完整历史重新打开分栏。只有 `subagent stop` 会永久删除一次运行。
+运行记录放在 `<agent-dir>/extensions/pi-subagent/runs`。`<agent-dir>/subagents` 里的旧记录仍然可以读取。不允许嵌套子代理。子会话不加载 subagent skill。子代理在 `/reload` 后继续存在。父会话退出或被替换时，正在运行的子代理会被挂起：分栏关闭，但记录和元数据保留。恢复该父会话时会用完整历史重新打开分栏。只有 `subagent stop` 会永久删除一次运行。

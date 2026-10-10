@@ -12,6 +12,7 @@ import {
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { extensionConfigPath } from "pi-utils";
 import {
 	closeSurface,
 	createSurface,
@@ -84,7 +85,17 @@ export function getAgentDir(): string {
 }
 
 export function getRunsDir(): string {
+	return join(dirname(extensionConfigPath("pi-subagent", "config.json", getAgentDir())), "runs");
+}
+
+export function legacyRunsDir(): string {
 	return join(getAgentDir(), "subagents");
+}
+
+export function runDirForHandle(handle: string): string {
+	const next = join(getRunsDir(), handle);
+	if (existsSync(next) || !existsSync(join(legacyRunsDir(), handle))) return next;
+	return join(legacyRunsDir(), handle);
 }
 
 export function metadataPath(runDir: string): string {
@@ -262,17 +273,18 @@ export function effectiveRunState(metadata: RunMetadata): RunState {
 }
 
 export function listRuns(parentSessionId?: string): RunMetadata[] {
-	const root = getRunsDir();
-	if (!existsSync(root)) return [];
-	const runs: RunMetadata[] = [];
-	for (const entry of readdirSync(root, { withFileTypes: true })) {
-		if (!entry.isDirectory()) continue;
-		const metadata = readMetadata(join(root, entry.name));
-		if (!metadata) continue;
-		if (parentSessionId && metadata.parentSessionId !== parentSessionId) continue;
-		runs.push(metadata);
+	const runs = new Map<string, RunMetadata>();
+	for (const root of [legacyRunsDir(), getRunsDir()]) {
+		if (!existsSync(root)) continue;
+		for (const entry of readdirSync(root, { withFileTypes: true })) {
+			if (!entry.isDirectory()) continue;
+			const metadata = readMetadata(join(root, entry.name));
+			if (!metadata) continue;
+			if (parentSessionId && metadata.parentSessionId !== parentSessionId) continue;
+			runs.set(metadata.handle, metadata);
+		}
 	}
-	return runs.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+	return [...runs.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
 function isSessionEntry(value: unknown): value is SessionEntry {

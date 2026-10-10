@@ -135,7 +135,7 @@ pi-spark generates a short recap of the current session after it goes idle, or o
 
 ## Configuration
 
-pi-spark reads config from `~/.pi/agent/spark.json` and from the current project's `.pi/spark.json`. Project config overrides matching global fields. The agent directory respects `PI_CODING_AGENT_DIR`. See [config.example.json](./config.example.json) for naming defaults.
+pi-spark reads config from `<agent-dir>/extensions/pi-spark/config.json` and from the current project's `.pi/extensions/pi-spark/config.json`. Project config overrides matching global fields. A retired `spark.json` in the agent directory or `.pi/` is read only when the new file is absent. The agent directory respects `PI_CODING_AGENT_DIR`. See [config.example.json](./config.example.json) for naming defaults.
 
 For example:
 

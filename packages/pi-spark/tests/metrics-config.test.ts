@@ -48,7 +48,7 @@ test("metrics false disables telemetry and saving preserves other spark settings
 
     clearConfigCache();
     saveMetricsConfig({ display: "live" }, dir);
-    const saved = JSON.parse(readFileSync(join(dir, "spark.json"), "utf8"));
+    const saved = JSON.parse(readFileSync(join(dir, "extensions", "pi-spark", "config.json"), "utf8"));
     assert.equal(saved.footer, false);
     assert.deepEqual(saved.metrics, { display: "live" });
   });

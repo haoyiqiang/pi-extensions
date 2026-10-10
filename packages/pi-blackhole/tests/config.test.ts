@@ -306,7 +306,7 @@ describe("cacheRetention", () => {
   async function modalCacheRetention(data: Record<string, unknown>): Promise<unknown> {
     const { config } = await import("../src/pi-base/blackhole-settings.js");
     mkdirSync(mgrDir, { recursive: true });
-    writeFileSync(join(mgrDir, "pi-blackhole-config.json"), JSON.stringify(data, null, 2));
+    writeFileSync(join(mgrDir, "config.json"), JSON.stringify(data, null, 2));
     const loaded = config.loadWithWarnings(undefined, mgrDir).config as {
       cacheRetention?: unknown;
     };
@@ -998,7 +998,7 @@ describe("loader parity: file bytes → same effective threshold on both loaders
     const { autoCompactThreshold } = await import("../src/om/model-budget.js");
     writeConfig(data);
     mkdirSync(mgrDir, { recursive: true });
-    writeFileSync(join(mgrDir, "pi-blackhole-config.json"), JSON.stringify(data, null, 2));
+    writeFileSync(join(mgrDir, "config.json"), JSON.stringify(data, null, 2));
     // undefined model → 128k fallback window on both paths.
     return {
       viaFileLoader: autoCompactThreshold(loadUnifiedConfig(testDir), undefined),

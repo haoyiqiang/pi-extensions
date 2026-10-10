@@ -19,7 +19,7 @@ function persist(ctx: ExtensionCommandContext, value: StoredMetricsConfig): bool
   try {
     const path = saveMetricsConfig(value);
     const override = projectMetricsOverrides(ctx.cwd)
-      ? ` ${"The project spark.json also sets metrics and overrides this global configuration."}`
+      ? ` ${"The project extensions/pi-spark/config.json also sets metrics and overrides this global configuration."}`
       : "";
     ctx.ui.notify(`${`Metrics configuration saved to ${path}. It applies on the next run.`}${override}`, "info");
     return true;

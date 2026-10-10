@@ -16,7 +16,7 @@ test("feature patches preserve sibling spark settings and leave no temporary fil
       metrics: { display: "live" },
       resources: false,
     });
-    assert.deepEqual(readdirSync(dir), ["spark.json"]);
+    assert.deepEqual(readdirSync(join(dir, "extensions", "pi-spark")), ["config.json"]);
   });
 });
 
@@ -24,7 +24,7 @@ test("project override detection is namespaced by feature", async () => {
   await withTempDir("pi-spark-config-store-", (dir) => {
     const cwd = join(dir, "project");
     const path = projectSparkConfigPath(cwd);
-    mkdirSync(join(cwd, ".pi"), { recursive: true });
+    mkdirSync(join(path, ".."), { recursive: true });
     writeFileSync(path, JSON.stringify({ metrics: false }), { encoding: "utf8", flag: "wx" });
 
     assert.equal(projectOverridesFeature(cwd, "metrics"), true);
@@ -35,6 +35,7 @@ test("project override detection is namespaced by feature", async () => {
 test("malformed and non-object files fail instead of erasing configuration", async () => {
   await withTempDir("pi-spark-config-store-", (dir) => {
     const path = sparkConfigPath(dir);
+    mkdirSync(join(path, ".."), { recursive: true });
     writeFileSync(path, "[]", "utf8");
     assert.throws(() => patchGlobalFeature("resources", false, dir), /configuration must be a JSON object/);
   });

@@ -583,6 +583,8 @@ test("production registration selects Spark naming per context and sends config 
       mkdirSync(disabled, { recursive: true });
       const globalPath = join(agentDir, "spark.json");
       const projectPath = join(enabled, ".pi", "spark.json");
+      const globalCanonical = join(agentDir, "extensions", "pi-spark", "config.json");
+      const projectCanonical = join(enabled, ".pi", "extensions", "pi-spark", "config.json");
       const global = { naming: false, footer: false };
       writeFileSync(globalPath, JSON.stringify(global));
       writeFileSync(projectPath, JSON.stringify({ naming: { targets: { workspace: false, tab: false } }, metrics: false }));
@@ -600,13 +602,15 @@ test("production registration selects Spark naming per context and sends config 
       await h.commands.get("rename")!.handler("Project title", h.ctx);
       assert.equal(h.name(), "Project title");
       await h.commands.get("naming-config")!.handler("reset", h.ctx);
-      assert.deepEqual(JSON.parse(readFileSync(projectPath, "utf8")), { naming: parseConfig({}), metrics: false });
+      assert.deepEqual(JSON.parse(readFileSync(projectCanonical, "utf8")), { naming: parseConfig({}), metrics: false });
+      assert.deepEqual(JSON.parse(readFileSync(projectPath, "utf8")), { naming: { targets: { workspace: false, tab: false } }, metrics: false });
       assert.deepEqual(JSON.parse(readFileSync(globalPath, "utf8")), global);
       Object.assign(h.ctx, { cwd: disabled });
       h.switchSession("global-session");
       h.events.get("session_start")!({}, h.ctx);
       await h.commands.get("pi-naming-config")!.handler("reset", h.ctx);
-      assert.deepEqual(JSON.parse(readFileSync(globalPath, "utf8")), { naming: parseConfig({}), footer: false });
+      assert.deepEqual(JSON.parse(readFileSync(globalCanonical, "utf8")), { naming: parseConfig({}), footer: false });
+      assert.deepEqual(JSON.parse(readFileSync(globalPath, "utf8")), global);
     } finally {
       clearConfigCache();
     }

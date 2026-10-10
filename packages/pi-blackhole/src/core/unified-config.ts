@@ -2,11 +2,12 @@
  * Unified configuration loader — merges pi-vcc + OM settings into one file.
  *
  * Created by pi-vcc-om.
- * Reads ~/.pi/agent/pi-blackhole/pi-blackhole-config.json with legacy fallback support.
+ * Reads <agent-dir>/extensions/pi-blackhole/config.json with legacy fallback support.
  * Model configs support cooldownHours and fallbackModel arrays.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { extensionConfigPath } from "pi-utils";
 import { applyEnvOverrides, CACHE_RETENTION_VALUES, DECLARATIVE_ENV_OVERRIDES, MAX_TIMER_DELAY_MS, normalizeCacheRetention } from "./config-env.js";
 
 export { CACHE_RETENTION_VALUES, normalizeCacheRetention };
@@ -33,8 +34,10 @@ export function getAgentDir(): string {
 
 // ── Config path ──────────────────────────────────────────────────────────────
 
-const CONFIG_DIR = "pi-blackhole";
-const CONFIG_FILE = "pi-blackhole-config.json";
+const PACKAGE_NAME = "pi-blackhole";
+const CONFIG_FILE = "config.json";
+const LEGACY_DIR = "pi-blackhole";
+const LEGACY_FILE = "pi-blackhole-config.json";
 
 /** Test-only: override for config directory. Set via __setTestConfigDir(). */
 let __testConfigDir: string | undefined;
@@ -44,11 +47,29 @@ export function __setTestConfigDir(dir: string | undefined): void {
   __testConfigDir = dir;
 }
 
+function configRoot(): string {
+  return __testConfigDir ?? getAgentDir();
+}
+
 export function configPath(): string {
-  if (__testConfigDir) {
-    return join(__testConfigDir, CONFIG_DIR, CONFIG_FILE);
-  }
-  return join(getAgentDir(), CONFIG_DIR, CONFIG_FILE);
+  return extensionConfigPath(PACKAGE_NAME, CONFIG_FILE, configRoot());
+}
+
+export function projectConfigPath(cwd: string): string {
+  return extensionConfigPath(PACKAGE_NAME, CONFIG_FILE, join(cwd, ".pi"));
+}
+
+function legacyConfigPath(): string {
+  return join(configRoot(), LEGACY_DIR, LEGACY_FILE);
+}
+
+function legacyProjectConfigPath(cwd: string): string {
+  return join(cwd, ".pi", LEGACY_FILE);
+}
+
+function readExistingConfig(primary: string, legacy: string): { data: Record<string, unknown> | null; error: string | null } {
+  if (existsSync(primary) || !existsSync(legacy)) return readJson(primary);
+  return readJson(legacy);
 }
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -744,14 +765,14 @@ function readJson(path: string): {
 type WarnFn = (message: string) => void;
 
 /**
- * Load unified configuration from ~/.pi/agent/pi-blackhole/pi-blackhole-config.json.
+ * Load unified configuration from <agent-dir>/extensions/pi-blackhole/config.json.
  * Falls back to legacy sources if the unified file doesn't exist.
  */
 export function loadUnifiedConfig(cwd: string, onWarn?: WarnFn): UnifiedConfig {
   const path = configPath();
   let raw: Record<string, unknown> | null;
   let primaryError: string | null = null;
-  const result = readJson(path);
+  const result = readExistingConfig(path, legacyConfigPath());
   raw = result.data;
   primaryError = result.error;
   if (primaryError && onWarn) onWarn(primaryError);
@@ -784,9 +805,9 @@ export function loadUnifiedConfig(cwd: string, onWarn?: WarnFn): UnifiedConfig {
     raw = merged;
   }
 
-  // Project-local override: <cwd>/.pi/pi-blackhole-config.json
-  const projectConfigPath = join(cwd, ".pi", CONFIG_FILE);
-  const projectResult = readJson(projectConfigPath);
+  // Project-local override: <cwd>/.pi/extensions/pi-blackhole/config.json
+  const projectPath = projectConfigPath(cwd);
+  const projectResult = readExistingConfig(projectPath, legacyProjectConfigPath(cwd));
   const projectRaw = projectResult.data;
   if (projectResult.error && onWarn) onWarn(projectResult.error);
   if (projectRaw && isRecord(projectRaw)) {
@@ -884,7 +905,7 @@ export function saveUnifiedConfig(settings: Partial<UnifiedConfig>): boolean {
     const path = configPath();
     const dir = dirname(path);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    const existingResult = readJson(path);
+    const existingResult = readExistingConfig(path, legacyConfigPath());
     const existing = existingResult.data ?? {};
     if (existingResult.error) {
       console.warn("blackhole: overwriting corrupt config file at " + path);
@@ -900,8 +921,8 @@ export function saveUnifiedConfig(settings: Partial<UnifiedConfig>): boolean {
 /**
  * Write settings back to disk for a specific scope.
  *
- * - global: writes to `<agentDir>/pi-blackhole/pi-blackhole-config.json`
- * - project: writes to `<cwd>/.pi/pi-blackhole-config.json`
+ * - global: writes to `<agentDir>/extensions/pi-blackhole/config.json`
+ * - project: writes to `<cwd>/.pi/extensions/pi-blackhole/config.json`
  *
  * Preserves unknown keys in the target file.
  */
@@ -911,10 +932,11 @@ export function saveUnifiedConfigScoped(
   cwd: string,
 ): boolean {
   try {
-    const dir = scope === "project" ? join(cwd, ".pi") : join(getAgentDir(), "pi-blackhole");
-    const path = join(dir, CONFIG_FILE);
+    const path = scope === "project" ? projectConfigPath(cwd) : configPath();
+    const legacy = scope === "project" ? legacyProjectConfigPath(cwd) : legacyConfigPath();
+    const dir = dirname(path);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    const existingResult = readJson(path);
+    const existingResult = readExistingConfig(path, legacy);
     const existing = existingResult.data ?? {};
     if (existingResult.error) {
       console.warn("blackhole: overwriting corrupt config file at " + path);
@@ -928,7 +950,7 @@ export function saveUnifiedConfigScoped(
 }
 
 /**
- * Ensure ~/.pi/agent/pi-blackhole/pi-blackhole-config.json exists with defaults.
+ * Ensure <agent-dir>/extensions/pi-blackhole/config.json exists with defaults.
  *
  * Only creates the file if it doesn't exist. Missing keys are filled at read
  * time by loadUnifiedConfig() via { ...DEFAULTS, ...parsed } merge, so there
@@ -941,7 +963,7 @@ export function scaffoldConfig(): void {
     const dir = dirname(path);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
-    if (!existsSync(path)) {
+    if (!existsSync(path) && !existsSync(legacyConfigPath())) {
       writeFileSync(path, `${JSON.stringify(DEFAULTS, null, 2)}\n`);
     }
   } catch (e) {

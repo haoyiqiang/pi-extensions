@@ -32,6 +32,7 @@ const ALLOWED_WORKSPACE_EDGES = new Set([
   "pi-rewind -> pi-utils",
   "pi-context-view -> pi-utils",
   "pi-subagent -> pi-terminal-mux",
+  "pi-subagent -> pi-utils",
 ]);
 
 const errors = [];

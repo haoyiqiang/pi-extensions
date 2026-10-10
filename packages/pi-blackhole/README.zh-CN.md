@@ -77,8 +77,10 @@ Blackhole 不自动压缩，Pi 处理原生压缩。显式 `/blackhole` 仍可�
 默认配置文件：
 
 ```text
-~/.pi/agent/pi-blackhole/pi-blackhole-config.json
+<agent-dir>/extensions/pi-blackhole/config.json
 ```
+
+项目覆盖写在 `<cwd>/.pi/extensions/pi-blackhole/config.json`。新文件不存在时，才读取旧的 `pi-blackhole/pi-blackhole-config.json`。
 
 配置按全局、项目、环境变量和 session 层合并。推荐先运行：
 

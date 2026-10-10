@@ -49,7 +49,7 @@ test("saving resources preserves other spark settings", () => {
   withAgentDir((dir) => {
     writeFileSync(join(dir, "spark.json"), JSON.stringify({ footer: false, resources: {} }));
     saveResourcesConfig(false, dir);
-    const saved = JSON.parse(readFileSync(join(dir, "spark.json"), "utf8"));
+    const saved = JSON.parse(readFileSync(join(dir, "extensions", "pi-spark", "config.json"), "utf8"));
     assert.equal(saved.footer, false);
     assert.equal(saved.resources, false);
   });

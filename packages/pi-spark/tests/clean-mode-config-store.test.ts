@@ -44,6 +44,7 @@ test("legacy partial config is used only when spark.json omits cleanMode", () =>
     assert.equal(legacy.hideThinking, DEFAULT_CLEAN_MODE_CONFIG.hideThinking);
 
     clearConfigCache();
+    mkdirSync(join(configPath(), ".."), { recursive: true });
     writeFileSync(configPath(), JSON.stringify({ cleanMode: { enabled: true } }));
     assert.equal(loadConfig(ctx).config.enabled, true);
   });
@@ -57,6 +58,7 @@ test("field type mismatches fall back independently", () => {
 
 test("saving cleanMode preserves other spark settings", () => {
   withAgentDir((_agentDir, ctx) => {
+    mkdirSync(join(configPath(), ".."), { recursive: true });
     writeFileSync(configPath(), JSON.stringify({ footer: false }));
     const config = { ...DEFAULT_CLEAN_MODE_CONFIG, autoExpandWhileRunning: false };
     const result = saveConfig(config);
