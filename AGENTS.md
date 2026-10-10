@@ -66,6 +66,20 @@ User-visible notices call `ctx.ui.notify(message, level)` directly. Do not add a
 
 Keep developer comments and implementation notes concise. Keep the English and Chinese README files separate so each language has a complete, readable entrypoint.
 
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked in GitHub Issues using the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Triage uses the five canonical label names without overrides. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Domain documentation uses a single-context layout. See `docs/agents/domain.md`.
+
 ## Development
 
 Requirements: Node.js 22 or newer and a compatible Pi extension runtime for manual smoke tests.
