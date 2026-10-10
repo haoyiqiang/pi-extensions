@@ -2,11 +2,8 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync,
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { TUI } from "@earendil-works/pi-tui";
-import { renderSubagentWidget, type SubagentWidgetRun } from "./widget.ts";
 import {
 	closeRunSurface,
-	effectiveRunState,
 	getAgentDir,
 	inboxDir,
 	launchRun,
@@ -60,48 +57,6 @@ export default function subagentExtension(pi: ExtensionAPI) {
 	}
 
 	if (!runDir) {
-		let widgetTimer: ReturnType<typeof setInterval> | undefined;
-		let widgetContext: ExtensionContext | undefined;
-		let widgetTui: TUI | undefined;
-		let widgetMounted = false;
-
-		const widgetRuns = (): SubagentWidgetRun[] => {
-			if (!widgetContext) return [];
-			return listRuns(widgetContext.sessionManager.getSessionId())
-				.map((run) => ({
-					name: run.name ?? run.handle,
-					startTime: Date.parse(run.createdAt),
-					state: effectiveRunState(run),
-				}))
-				.filter((run) => run.state !== "exited");
-		};
-
-		const refreshWidget = (): void => {
-			if (!widgetContext) return;
-			if (widgetRuns().length === 0) {
-				if (widgetMounted) widgetContext.ui.setWidget("subagents", undefined);
-				widgetMounted = false;
-				widgetTui = undefined;
-				return;
-			}
-			if (!widgetMounted) {
-				widgetContext.ui.setWidget(
-					"subagents",
-					(tui, _theme) => {
-						widgetTui = tui;
-						return {
-							render: (width) => renderSubagentWidget(widgetRuns(), width),
-							invalidate() {},
-						};
-					},
-					{ placement: "aboveEditor" },
-				);
-				widgetMounted = true;
-				return;
-			}
-			widgetTui?.requestRender();
-		};
-
 		pi.on("session_start", (_event, ctx) => {
 			const linked = ensureSubagentBin();
 			if (ctx.hasUI && linked === "failed") {
@@ -126,21 +81,9 @@ export default function subagentExtension(pi: ExtensionAPI) {
 					if (ctx.hasUI) ctx.ui.notify(`Could not resume subagent ${runDisplayName(run)}: ${message}`, "error");
 				}
 			}
-
-			if (!ctx.hasUI) return;
-			widgetContext = ctx;
-			refreshWidget();
-			widgetTimer = setInterval(refreshWidget, 1000);
-			widgetTimer.unref();
 		});
 
 		pi.on("session_shutdown", async (event, ctx) => {
-			if (widgetTimer) clearInterval(widgetTimer);
-			widgetTimer = undefined;
-			widgetContext = undefined;
-			widgetTui = undefined;
-			widgetMounted = false;
-			ctx.ui.setWidget("subagents", undefined);
 			if (event.reason === "reload") return;
 			// Suspend running children: close the panel but keep transcript and metadata so resuming this
 			// session relaunches them. Children that already exited on their own are discarded.

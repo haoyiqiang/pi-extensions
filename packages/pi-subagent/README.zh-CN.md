@@ -32,7 +32,7 @@ pi -e npm:pi-subagent
 subagent spawn --name review --prompt "Review the current diff independently"
 ```
 
-名称显示在父会话界面。后续管理命令使用生成的 handle。spawn 会打印分栏 id。
+名称显示在分栏标题和 CLI 输出中。后续管理命令使用生成的 handle。spawn 会打印分栏 id。
 
 需要时可以覆盖模型：
 
@@ -70,8 +70,6 @@ subagent wait a1b2c3
 subagent stop a1b2c3
 subagent list
 ```
-
-子代理以交互式子代理的圆角框列在输入框上方：左边是已运行时间，右边直接显示子代理自己的状态（`starting`、`busy`、`idle` 或 `error`）。`idle` 表示本轮已完成，子会话仍可接收后续消息。已退出的子代理不显示，没有剩余子代理时框会隐藏。
 
 ## 隔离
 

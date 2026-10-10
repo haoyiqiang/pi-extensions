@@ -32,7 +32,7 @@ Spawn with a descriptive name using the parent session's provider, model, and th
 subagent spawn --name review --prompt "Review the current diff independently"
 ```
 
-Names appear in the parent UI. Generated handles remain the stable identifiers used by management commands. Spawn prints the panel id.
+Names appear in panel titles and CLI output. Generated handles remain the stable identifiers used by management commands. Spawn prints the panel id.
 
 Override the model configuration when needed:
 
@@ -70,8 +70,6 @@ subagent wait a1b2c3
 subagent stop a1b2c3
 subagent list
 ```
-
-Active runs are listed above the editor in the interactive-subagent box: elapsed time on the left, the subagent's own state (`starting`, `busy`, `idle`, or `error`) on the right. `idle` means the turn has finished but the child remains available for follow-ups. Exited runs are hidden; the box hides when none remain.
 
 ## Isolation
 

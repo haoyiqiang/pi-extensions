@@ -14,7 +14,6 @@
     "index.ts",
     "shared.ts",
     "subagent.ts",
-    "widget.ts",
     "skills",
     "README.md",
     "README.zh-CN.md",
@@ -59,12 +58,10 @@
     "pi-utils": "^0.1.0"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": ">=0.87.1",
-    "@earendil-works/pi-tui": ">=0.87.1"
+    "@earendil-works/pi-coding-agent": ">=0.87.1"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.87.1",
-    "@earendil-works/pi-tui": "0.87.1",
     "@types/node": "24.12.4",
     "typescript": "5.9.3"
   }
