@@ -5,9 +5,6 @@
   "packages/pi-action-fusion": "0.1.0",
   "packages/pi-terminal-mux": "0.6.5",
   "packages/pi-models-discovery": "1.4.0",
-  "packages/pi-blackhole": "0.5.10",
-  "packages/pi-context-view": "0.6.0",
-  "packages/pi-rewind": "0.5.0",
   "packages/pi-spark": "0.28.0",
   "packages/pi-subagent": "0.1.0"
 }

@@ -103,9 +103,6 @@ jobs:
           - dir: packages/pi-distill
           - dir: packages/pi-action-fusion
           - dir: packages/pi-models-discovery
-          - dir: packages/pi-blackhole
-          - dir: packages/pi-context-view
-          - dir: packages/pi-rewind
     steps:
       - uses: actions/checkout@v4
 

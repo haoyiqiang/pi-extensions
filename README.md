@@ -13,9 +13,6 @@ Published packages are independently installable from npm. Each package owns its
 
 | Package | Description | Documentation |
 | --- | --- | --- |
-| [`pi-blackhole`](./packages/pi-blackhole) | Provides deterministic compaction, session-aware observational memory, and raw-history recall. | [English](./packages/pi-blackhole/README.md) · [中文](./packages/pi-blackhole/README.zh-CN.md) |
-| [`pi-context-view`](./packages/pi-context-view) | Visualizes context usage and inspects system prompt, tool, skill, and extension injections. | [English](./packages/pi-context-view/README.md) · [中文](./packages/pi-context-view/README.zh-CN.md) |
-| [`pi-rewind`](./packages/pi-rewind) | Creates Git-backed checkpoints and restores files, conversation state, or both. | [English](./packages/pi-rewind/README.md) · [中文](./packages/pi-rewind/README.zh-CN.md) |
 | [`pi-spark`](./packages/pi-spark) | Owns the compact editor/footer TUI, clean transcript folding, provider credits, model presets, idle recaps, metrics, session/terminal naming, and the `#` resource picker. | [English](./packages/pi-spark/README.md) · [中文](./packages/pi-spark/README.zh-CN.md) |
 | [`pi-distill`](./packages/pi-distill) | Archives sources before summarizing enabled tool results, with opt-in locally verified diagnostic evidence. | [English](./packages/pi-distill/README.md) · [中文](./packages/pi-distill/README.zh-CN.md) |
 | [`pi-action-fusion`](./packages/pi-action-fusion) | Opt-in single-file edit/write plus a follow-up command in one tool call; adapted from SoL-Pi, disabled by default. New package, pending first npm release; available in the Git/local suite. | [English](./packages/pi-action-fusion/README.md) · [中文](./packages/pi-action-fusion/README.zh-CN.md) |
@@ -44,8 +41,7 @@ pi install git:github.com/maplezzk/pi-extensions
 
 The repository root is also an explicit full-suite Pi profile. Its manifest allowlists every extension and includes the `pi-spark` themes; library-only packages such as `pi-terminal-mux` are never loaded as extensions. Adding a workspace package does not automatically add it to this profile.
 
-The full profile intentionally enables invasive features together: `pi-spark` replaces the editor/footer and folds transcript activity, `pi-blackhole` owns automatic compaction, `pi-distill` transforms tool results, and `pi-rewind` manages Git-backed checkpoints. Prefer single-package npm installs for published capabilities when you do not want the complete composition.
-
+The full profile intentionally enables invasive features together: `pi-spark` replaces the editor/footer and folds transcript activity, and `pi-distill` transforms tool results. Prefer single-package npm installs for published capabilities when you do not want the complete composition.
 `pi-action-fusion` is also loaded by the profile but stays disabled until explicitly enabled with `/config:action-fusion enable` followed by `/reload`. It does not replace `pi-distill` or add another compaction owner.
 
 Reload Pi after installation:

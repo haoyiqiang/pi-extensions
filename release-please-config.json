@@ -12,9 +12,6 @@
     "packages/pi-action-fusion": {},
     "packages/pi-terminal-mux": {},
     "packages/pi-models-discovery": {},
-    "packages/pi-blackhole": {},
-    "packages/pi-context-view": {},
-    "packages/pi-rewind": {},
     "packages/pi-spark": {},
     "packages/pi-subagent": {}
   }

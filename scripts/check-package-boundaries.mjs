@@ -10,13 +10,10 @@ const PACKAGE_LAYERS = new Map([
   ["pi-utils", "foundation"],
   ["pi-terminal-mux", "foundation"],
   ["pi-spark", "product"],
-  ["pi-blackhole", "product"],
   ["pi-distill", "capability"],
   ["pi-action-fusion", "capability"],
   ["@maplezzk/pi-web-search", "capability"],
   ["pi-models-discovery", "capability"],
-  ["pi-rewind", "capability"],
-  ["pi-context-view", "capability"],
   ["pi-subagent", "capability"],
 ]);
 
@@ -24,13 +21,10 @@ const ALLOWED_WORKSPACE_EDGES = new Set([
   "pi-terminal-mux -> pi-utils",
   "pi-spark -> pi-utils",
   "pi-spark -> pi-terminal-mux",
-  "pi-blackhole -> pi-utils",
   "pi-distill -> pi-utils",
   "pi-action-fusion -> pi-utils",
   "@maplezzk/pi-web-search -> pi-utils",
   "pi-models-discovery -> pi-utils",
-  "pi-rewind -> pi-utils",
-  "pi-context-view -> pi-utils",
   "pi-subagent -> pi-terminal-mux",
   "pi-subagent -> pi-utils",
 ]);
