@@ -8,8 +8,13 @@
 * absorb the pi-session-resources `#` picker into the spark editor; configure it with `resources` in `spark.json` or `/config:session-resources`
 * absorb pi-clean-mode transcript folding, activity rows, action groups, commands, and shortcuts; configure it with `cleanMode` in `spark.json` or `/config:clean-mode`
 
+### Bug Fixes
+
+* emit metrics only through Pi's native `ctx.ui.notify`, without notice entries or custom renderers, and report elapsed time when no TPS sample is available
+
 ### Breaking changes
 
+* stop persisting per-turn `tps` session entries; metrics remain available through native notifications and the `tps:telemetry` event
 * remove automatic session title generation; use `pi-naming` for session and terminal names
 * remove the scrolling `write` preview; `write` display stays with `pi-extensions-tool-display`
 

@@ -8,10 +8,9 @@ import type { ElapsedTracker } from "../src/features/metrics/turn-elapsed.ts";
 /** Pi 事件的处理器签名；测试只需要按名字取出来调用。 */
 type Handler = (event: unknown, ctx: unknown) => unknown;
 
-/** 可驱动的假 Pi：记录注册的处理器、写入的 session entry 和发出去的提示。 */
+/** 可驱动的假 Pi：记录注册的处理器和通过原生 notify 发出去的提示。 */
 function createFakePi() {
   const handlers = new Map<string, Handler[]>();
-  const entries: Array<{ customType: string; data: unknown }> = [];
   const notices: string[] = [];
   const pi = {
     on(event: string, handler: Handler) {
@@ -22,9 +21,6 @@ function createFakePi() {
         return () => {};
       },
       emit() {},
-    },
-    appendEntry(customType: string, data?: unknown) {
-      entries.push({ customType, data });
     },
     registerCommand() {},
   } as unknown as ExtensionAPI;
@@ -37,7 +33,7 @@ function createFakePi() {
       setWorkingMessage() {},
     },
   };
-  return { pi, ctx, handlers, entries, notices };
+  return { pi, ctx, handlers, notices };
 }
 
 /** 触发某个事件的所有处理器。 */
@@ -109,8 +105,8 @@ test("TPS rate rejects unusable costs and zero-token turns", () => {
   assert.equal(computeRateUsdPerM(1.25, 500_000), 2.5);
 });
 
-test("live 模式每轮结束就发一行，并把该轮写进 session entry", () => {
-  const { pi, ctx, handlers, entries, notices } = createFakePi();
+test("live 模式每轮结束就通过原生 notify 发一行", () => {
+  const { pi, ctx, handlers, notices } = createFakePi();
   tpsExtension(pi, { display: "live" });
   completeTurn(handlers, ctx, 0);
 
@@ -118,7 +114,6 @@ test("live 模式每轮结束就发一行，并把该轮写进 session entry", (
   // 两条 assistant 消息都计入：in 200 / out 12。
   assert.match(notices[0], /in 200/);
   assert.match(notices[0], /out 12/);
-  assert.equal(entries.filter((entry) => entry.customType === "tps").length, 1);
 });
 
 test("on-stop 模式每轮都不发提示，只在整段停下后发一行汇总并结算运行时钟", () => {
@@ -141,6 +136,17 @@ test("on-stop 模式每轮都不发提示，只在整段停下后发一行汇总
   assert.equal(wasReset(), true);
 });
 
+test("on-stop 模式没有 TPS 样本时仍通过原生 notify 报告总耗时", () => {
+  const { pi, ctx, handlers, notices } = createFakePi();
+  const { tracker, wasReset } = createFakeTracker(12_000);
+  tpsExtension(pi, { display: "on-stop", tracker });
+
+  emit(handlers, "agent_settled", { type: "agent_settled" }, ctx);
+
+  assert.deepEqual(notices, ["⏱ 12.0s"]);
+  assert.equal(wasReset(), true);
+});
+
 test("on-stop 模式在汇总后清空累加器，下一段运行不会带上上一段的数据", () => {
   const { pi, ctx, handlers, notices } = createFakePi();
   tpsExtension(pi, { display: "on-stop", tracker: createFakeTracker(1_000).tracker });
@@ -158,7 +164,6 @@ test("TPS unsubscribes shared event listeners during extension shutdown", () => 
   const handlers = new Map<string, Handler[]>();
   const energyListeners = new Set<(payload: unknown) => unknown>();
   let unsubscribeCount = 0;
-  let appendedEntries = 0;
   const registeredCommands: string[] = [];
 
   const fakePi = {
@@ -175,9 +180,6 @@ test("TPS unsubscribes shared event listeners during extension shutdown", () => 
       },
       emit() {},
     },
-    appendEntry() {
-      appendedEntries++;
-    },
     registerCommand(name: string) { registeredCommands.push(name); },
   } as unknown as ExtensionAPI;
 
@@ -190,6 +192,4 @@ test("TPS unsubscribes shared event listeners during extension shutdown", () => 
 
   assert.equal(unsubscribeCount, 1);
   assert.equal(energyListeners.size, 0);
-  for (const listener of energyListeners) listener({ turnIndex: 0, costUsd: 1 });
-  assert.equal(appendedEntries, 0);
 });

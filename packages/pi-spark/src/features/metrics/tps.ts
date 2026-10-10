@@ -5,9 +5,9 @@
  * elapsed-time HUD and generation telemetry share one lifecycle.
  *
  * 两种显示时机：
- * - `live`：每轮结束即出一行指标。
- * - `on-stop`（默认）：每轮只记 `tps` session entry 和事件，不动对话区；等整段运行
- *   `agent_settled` 后把各轮合成一行汇总（总耗时、混合 TPS、TTFT、in/out、成本）。
+ * - `live`：每轮结束直接通过 `ctx.ui.notify` 显示一行指标。
+ * - `on-stop`（默认）：运行期间只累加数据，等整段运行 `agent_settled` 后直接通过
+ *   `ctx.ui.notify` 显示一行汇总（总耗时、混合 TPS、TTFT、in/out、成本）。
  */
 
 import { performance } from "node:perf_hooks";
@@ -18,7 +18,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 
 import type { MetricsDisplay } from "./config.ts";
-import { computeRateUsdPerM, formatDuration, formatNumber } from "./format-utils.ts";
+import { computeRateUsdPerM, formatDone, formatDuration, formatNumber } from "./format-utils.ts";
 import { composeRunSummary, createRunAccumulator, type RunAccumulator } from "./run-summary.ts";
 import type { ElapsedTracker } from "./turn-elapsed.ts";
 
@@ -36,12 +36,6 @@ interface TurnEndEvent {
 interface MessageEvent {
   type: string;
   message: unknown;
-}
-
-interface SessionTreeEvent {
-  type: "session_tree";
-  newLeafId: string | null;
-  oldLeafId: string | null;
 }
 
 interface ToolExecutionStartEvent {
@@ -272,28 +266,6 @@ function composeDisplayString(telemetry: TurnTelemetry): string {
   return parts.join(" · ");
 }
 
-function restoreTPSNotification(
-  ctx: ExtensionContext,
-  schedule: (callback: () => void) => void,
-): void {
-  if (!ctx.hasUI) return;
-  const entries = ctx.sessionManager.getBranch() as SessionEntryLike[];
-  for (let i = entries.length - 1; i >= 0; i--) {
-    const entry = entries[i];
-    if (entry.type !== "custom" || entry.customType !== "tps") continue;
-    const data = entry.data as Record<string, unknown> | null | undefined;
-    if (!data) continue;
-    if (typeof data.model === "object" && data.model !== null) {
-      schedule(() => ctx.ui.notify(composeDisplayString(data as unknown as TurnTelemetry), "info"));
-      return;
-    }
-    if (typeof data.message === "string") {
-      schedule(() => ctx.ui.notify(data.message as string, "info"));
-      return;
-    }
-  }
-}
-
 /** `on-stop` 模式下与汇总相关的运行状态。 */
 interface SummaryState {
   /** 本段运行的增量累加器；只保留聚合量，不囤各轮原始记录。 */
@@ -312,7 +284,7 @@ export type MetricsDisplaySource = MetricsDisplay | ((ctx: ExtensionContext) => 
 
 /** tps 模块的可注入依赖：显示时机，以及 on-stop 模式下共用的运行时钟。 */
 export interface TpsOptions {
-  /** 显示时机；函数返回 false 时本轮不记录。默认 on-stop。 */
+  /** 显示时机；函数返回 false 时本轮不采集或显示。默认 on-stop。 */
   display?: MetricsDisplaySource;
   /** 共享的运行时钟；只在 `on-stop` 模式下用于汇总行的总耗时。 */
   tracker?: ElapsedTracker;
@@ -341,7 +313,6 @@ export default function tpsExtension(pi: ExtensionAPI, options: TpsOptions = {})
   /** 最近一次已经发出的汇总；账单迟到时用它重算并重发。 */
   let lastSummary: SummaryState | null = null;
   const tpsCaps = new Map<string, number>();
-  const restoreTimers = new Set<ReturnType<typeof setTimeout>>();
   let unsubscribeNeuralwatt: (() => void) | undefined;
 
   const clearState = () => {
@@ -351,8 +322,6 @@ export default function tpsExtension(pi: ExtensionAPI, options: TpsOptions = {})
     runAccumulator = createRunAccumulator();
     lastRunTurn = null;
     lastSummary = null;
-    for (const timer of restoreTimers) clearTimeout(timer);
-    restoreTimers.clear();
   };
 
   /**
@@ -367,16 +336,8 @@ export default function tpsExtension(pi: ExtensionAPI, options: TpsOptions = {})
     if (!summary.accumulator.replaceBilledCost(summary.effectiveCostUsd, costUsd)) return;
     summary.effectiveCostUsd = costUsd;
     const aggregate = summary.accumulator.summarize();
-    if (aggregate === null || !summary.ctx.hasUI) return;
+    if (aggregate === null) return;
     summary.ctx.ui.notify(composeRunSummary(aggregate, summary.elapsedMs), "info");
-  };
-
-  const scheduleRestore = (callback: () => void) => {
-    const timer = setTimeout(() => {
-      restoreTimers.delete(timer);
-      callback();
-    }, 0);
-    restoreTimers.add(timer);
   };
 
   unsubscribeNeuralwatt = pi.events?.on(NEURALWATT_ENERGY_EVENT, (payload: unknown) => {
@@ -400,13 +361,12 @@ export default function tpsExtension(pi: ExtensionAPI, options: TpsOptions = {})
     if (correctedRate === null || correctedRate === committed.telemetry.rateUsdPerMTokens) return;
     const corrected = { ...committed.telemetry, rateUsdPerMTokens: correctedRate };
     committed.telemetry = corrected;
-    pi.appendEntry("tps", corrected);
     pi.events?.emit("tps:telemetry", corrected);
     if (resolveDisplay(options.display, committed.ctx) === "on-stop") {
       applyLateBilledCost(committed.turnIndex, costUsd);
       return;
     }
-    if (committed.ctx.hasUI) committed.ctx.ui.notify(composeDisplayString(corrected), "info");
+    committed.ctx.ui.notify(composeDisplayString(corrected), "info");
   });
 
   pi.on("session_shutdown", () => {
@@ -415,20 +375,16 @@ export default function tpsExtension(pi: ExtensionAPI, options: TpsOptions = {})
     clearState();
   });
 
-  pi.on("session_start", (_event, ctx) => {
+  pi.on("session_start", () => {
     clearState();
-    if (resolveDisplay(options.display, ctx) === false) return;
-    restoreTPSNotification(ctx, scheduleRestore);
   });
 
-  pi.on("session_tree", (_event: SessionTreeEvent, ctx) => {
+  pi.on("session_tree", () => {
     pendingNeuralwattBilledCost = null;
     lastCommittedTurn = null;
     runAccumulator = createRunAccumulator();
     lastRunTurn = null;
     lastSummary = null;
-    if (resolveDisplay(options.display, ctx) === false) return;
-    restoreTPSNotification(ctx, scheduleRestore);
   });
 
   pi.on("turn_start", (event: TurnStartEvent) => {
@@ -534,7 +490,6 @@ export default function tpsExtension(pi: ExtensionAPI, options: TpsOptions = {})
       billedApplied: billedCost !== null,
       ctx,
     };
-    pi.appendEntry("tps", telemetry);
     pi.events?.emit("tps:telemetry", telemetry);
     if (display === "on-stop") {
       // 先累加：整段停下后只出一行汇总，多轮工具调用不会把对话区刷满。
@@ -543,7 +498,7 @@ export default function tpsExtension(pi: ExtensionAPI, options: TpsOptions = {})
       lastRunTurn = { turnIndex: event.turnIndex, effectiveCostUsd };
       return;
     }
-    if (ctx.hasUI) ctx.ui.notify(composeDisplayString(telemetry), "info");
+    ctx.ui.notify(composeDisplayString(telemetry), "info");
   });
 
   pi.on("agent_settled", (_event, ctx: ExtensionContext) => {
@@ -553,8 +508,14 @@ export default function tpsExtension(pi: ExtensionAPI, options: TpsOptions = {})
     const settlement = options.tracker?.currentRun();
     options.tracker?.resetRun();
     const aggregate = runAccumulator.summarize();
-    if (aggregate === null) return;
     const elapsedMs = settlement && settlement.elapsedMs > 0 ? settlement.elapsedMs : null;
+    if (aggregate === null) {
+      runAccumulator = createRunAccumulator();
+      lastRunTurn = null;
+      lastSummary = null;
+      if (elapsedMs !== null) ctx.ui.notify(`⏱ ${formatDone(elapsedMs)}`, "info");
+      return;
+    }
     lastSummary = {
       accumulator: runAccumulator,
       ctx,
@@ -565,7 +526,6 @@ export default function tpsExtension(pi: ExtensionAPI, options: TpsOptions = {})
     // 本段运行已经结算：换一个空累加器，下一段运行从零开始。
     runAccumulator = createRunAccumulator();
     lastRunTurn = null;
-    if (!ctx.hasUI) return;
     ctx.ui.notify(composeRunSummary(aggregate, elapsedMs), "info");
   });
 

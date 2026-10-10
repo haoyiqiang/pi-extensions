@@ -96,7 +96,7 @@ const PANEL_ITEMS: readonly PanelItemSpec[] = [
 	{
 		id: "hideExtensionEntries",
 		label: "Collapse extension entries",
-		description: "Also collapse custom entries written by extensions (e.g. distill audit rows); info notices collapse too, warnings and errors stay visible",
+		description: "Also collapse custom work entries written by extensions, such as distill audit rows",
 		kind: PANEL_ITEM_KIND.toggle,
 	},
 ];

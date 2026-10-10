@@ -80,11 +80,11 @@ Clean mode collapses an entire agent run into one duration header, leaving the f
 
 ### Metrics
 
-pi-spark records session elapsed time and token-generation telemetry. The editor border shows the total wait, for example `⏱ 47s`, and it keeps counting across turns.
+pi-spark shows session elapsed time and token-generation telemetry through Pi's native notifications. The editor border shows the total wait, for example `⏱ 47s`, and it keeps counting across turns.
 
-- `on-stop` (default): the transcript stays quiet during the run. When the agent settles, one summary line reports elapsed time, blended TPS, TTFT, tokens, stalls, and cost.
-- `live`: one line is emitted at the end of every turn. A multi-turn run also gets a final `⏱ <duration>` line.
-- Every turn is still stored as a `tps` session entry. Remove `npm:@monotykamary/pi-tps` if it is installed, or both extensions will write duplicate entries.
+- `on-stop` (default): the transcript stays quiet during the run. When the agent settles, one native notification reports elapsed time, blended TPS, TTFT, tokens, stalls, and cost. If no TPS sample is available, it still reports elapsed time.
+- `live`: one native notification is emitted at the end of every turn. A multi-turn run also gets a final `⏱ <duration>` notification.
+- Metrics do not register a custom entry renderer or write display entries into the session.
 - Run `/config:metrics`, or `/config:metrics enable|disable|live|on-stop|reset`. An existing `extensions/pi-metrics/config.json` is used only when `spark.json` does not set `metrics`.
 
 ### Session resources
@@ -176,7 +176,7 @@ All fields are optional. Each top-level feature runs with the defaults below unl
 | `credits` | `CreditsConfig` | Shows the active provider's credit balance or rate-limit usage in the status line. |
 | `editor` | `EditorConfig` | Shows a working indicator and the current model on the editor's top border. |
 | `footer` | `FooterConfig` | Shows session info, extension statuses, cost, and context usage. |
-| `metrics` | `MetricsConfig` | Shows elapsed time and records TPS, TTFT, token, and cost telemetry. |
+| `metrics` | `MetricsConfig` | Shows elapsed time and TPS, TTFT, token, and cost telemetry through native notifications. |
 | `naming` | `NamingConfig` | Automatic titles and `/rename` for sessions and owned terminal targets. |
 | `resources` | `{}` | Enables the `#` session resource picker. Set it to `false` to disable the picker. |
 | `presets` | `{ [name]: Preset }` | Defines named model presets, keyed by name. |

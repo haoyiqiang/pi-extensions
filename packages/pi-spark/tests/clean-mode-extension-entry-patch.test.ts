@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { AssistantMessageComponent } from "@earendil-works/pi-coding-agent";
 import { Container } from "@earendil-works/pi-tui";
-import { applyEntryRail, dropLeadingBlankLines, installExtensionEntryPatch, isExtensionEntryHost, NOTICE_ENTRY_TYPE, isExtensionEntryWorkWindow, isExtensionMessageHost, readExtensionEntryCustomType, resolveContainerPrototypes, shouldHideExtensionEntry, shouldRailExtensionEntry } from "../src/features/clean-mode/extension-entry-patch.ts";
+import { applyEntryRail, dropLeadingBlankLines, installExtensionEntryPatch, isExtensionEntryHost, isExtensionEntryWorkWindow, isExtensionMessageHost, readExtensionEntryCustomType, resolveContainerPrototypes, shouldHideExtensionEntry, shouldRailExtensionEntry } from "../src/features/clean-mode/extension-entry-patch.ts";
 import { isMethodPatchInstalled } from "../src/features/clean-mode/prototype-patch.ts";
 import { DEFAULT_CLEAN_MODE_CONFIG, type CleanModeConfig, type CleanModeState } from "../src/features/clean-mode/types.ts";
 
@@ -25,6 +25,8 @@ const RENDER_WIDTH = 80;
 const RAIL_PREFIX = "│ ";
 /** 轨道前缀的可见列宽，用来验证渲染宽度确实让出去了。 */
 const RAIL_WIDTH = 2;
+/** 普通扩展自定义条目类型；不承载通知语义。 */
+const CUSTOM_ENTRY_TYPE = "custom-extension-entry";
 
 /** 带条目特征的组件结构；与 Pi 的 CustomEntryComponent 同形。 */
 interface EntryHostShape {
@@ -42,7 +44,7 @@ class FakeEntryComponent extends Container implements EntryHostShape {
 
 	/**
 	 * @param customType 条目的 customType。
-	 * @param data 条目载荷；通知条目用它带 level。
+	 * @param data 可选条目载荷。
 	 */
 	constructor(customType: string, data?: unknown) {
 		super();
@@ -210,11 +212,11 @@ test("折叠判定：只有工作条目 + 折叠态 + 开关都打开才隐藏",
 	const collapsed = stateWith({ collapsed: true });
 	const config = configWith({});
 	assert.equal(
-		shouldHideExtensionEntry({ state: collapsed, config, customType: "pi-distill-audit", isWorkEntry: true }),
+		shouldHideExtensionEntry({ state: collapsed, config, isWorkEntry: true }),
 		true,
 	);
 	assert.equal(
-		shouldHideExtensionEntry({ state: collapsed, config, customType: "pi-distill-audit", isWorkEntry: false }),
+		shouldHideExtensionEntry({ state: collapsed, config, isWorkEntry: false }),
 		false,
 		"非工作条目保持可见",
 	);
@@ -222,7 +224,6 @@ test("折叠判定：只有工作条目 + 折叠态 + 开关都打开才隐藏",
 		shouldHideExtensionEntry({
 			state: stateWith({ collapsed: false }),
 			config,
-			customType: "pi-distill-audit",
 			isWorkEntry: true,
 		}),
 		false,
@@ -232,7 +233,6 @@ test("折叠判定：只有工作条目 + 折叠态 + 开关都打开才隐藏",
 		shouldHideExtensionEntry({
 			state: collapsed,
 			config: configWith({ hideExtensionEntries: false }),
-			customType: "pi-distill-audit",
 			isWorkEntry: true,
 		}),
 		false,
@@ -241,48 +241,9 @@ test("折叠判定：只有工作条目 + 折叠态 + 开关都打开才隐藏",
 		shouldHideExtensionEntry({
 			state: collapsed,
 			config: configWith({ enabled: false }),
-			customType: "pi-distill-audit",
 			isWorkEntry: true,
 		}),
 		false,
-	);
-	assert.equal(
-		shouldHideExtensionEntry({
-			state: collapsed,
-			config,
-			customType: NOTICE_ENTRY_TYPE,
-			noticeLevel: "info",
-			isWorkEntry: true,
-		}),
-		true,
-		"info 级通知属于过程噪声，跟工作过程一起收起",
-	);
-	assert.equal(
-		shouldHideExtensionEntry({
-			state: collapsed,
-			config,
-			customType: NOTICE_ENTRY_TYPE,
-			noticeLevel: "warning",
-			isWorkEntry: true,
-		}),
-		false,
-		"警告不能被静默吞掉",
-	);
-	assert.equal(
-		shouldHideExtensionEntry({
-			state: collapsed,
-			config,
-			customType: NOTICE_ENTRY_TYPE,
-			noticeLevel: "error",
-			isWorkEntry: true,
-		}),
-		false,
-		"错误同样不能被静默吞掉",
-	);
-	assert.equal(
-		shouldHideExtensionEntry({ state: collapsed, config, customType: NOTICE_ENTRY_TYPE, isWorkEntry: true }),
-		false,
-		"读不出版本（未带 level）的通知按可见处理，宁可多显示一条",
 	);
 });
 
@@ -344,7 +305,7 @@ test("条目归属在首次渲染时固定，运行结束后不会反转", () =>
 
 test("运行结束后才出现的条目保持可见", () => {
 	withPatch({ state: stateWith({ collapsed: true, runSettled: true }), config: configWith({}), restoreWindow: false }, () => {
-		const entry = new FakeEntryComponent("pi-metrics-tps");
+		const entry = new FakeEntryComponent("post-run-entry");
 		assert.equal(entry.render(RENDER_WIDTH).length, SINGLE_LINE, "运行之外的条目不属于工作过程");
 	});
 });
@@ -363,24 +324,6 @@ test("Pi 内部那份 Container 上的条目同样会被收起", () => {
 
 		box.state = stateWith({ collapsed: true, runSettled: false });
 		assert.deepEqual(entry.render(RENDER_WIDTH), [], "收起后不占行");
-	});
-});
-
-test("收起态下 info 级通知跟着收起，警告仍可见", () => {
-	withPatch({ state: stateWith({ collapsed: true, runSettled: false }), config: configWith({}), restoreWindow: false }, () => {
-		// 真实的 metrics 条目就是这个形状：customType 是通知类型，载荷里带 level。
-		const info = new FakeEntryComponent(NOTICE_ENTRY_TYPE, { tag: "metrics", level: "info", message: "TPS" });
-		assert.deepEqual(info.render(RENDER_WIDTH), [], "info 级通知在收起态应不占行");
-
-		const warning = new FakeEntryComponent(NOTICE_ENTRY_TYPE, { tag: "clean-mode", level: "warning", message: "x" });
-		assert.equal(warning.render(RENDER_WIDTH).length, SINGLE_LINE, "警告必须留着");
-	});
-});
-
-test("通知条目无论何时都可见", () => {
-	withPatch({ state: stateWith({ collapsed: true, runSettled: false }), config: configWith({}), restoreWindow: false }, () => {
-		const entry = new FakeEntryComponent(NOTICE_ENTRY_TYPE);
-		assert.equal(entry.render(RENDER_WIDTH).length, SINGLE_LINE);
 	});
 });
 
@@ -459,8 +402,8 @@ test("去掉开头自带的空行：只去开头的，末尾的留着", () => {
 
 test("运行中的条目：开头那行空行不占行，块与相邻记录紧挨着", () => {
 	withPatch({ state: stateWith({ runSettled: false }), config: configWith({}), restoreWindow: false }, () => {
-		const entry = new SpacerPrefixedEntry(NOTICE_ENTRY_TYPE);
-		assert.deepEqual(entry.render(RENDER_WIDTH), [`${RAIL_PREFIX}entry:${NOTICE_ENTRY_TYPE}`]);
+		const entry = new SpacerPrefixedEntry(CUSTOM_ENTRY_TYPE);
+		assert.deepEqual(entry.render(RENDER_WIDTH), [`${RAIL_PREFIX}entry:${CUSTOM_ENTRY_TYPE}`]);
 
 		const message = new FakeMessageComponent(true);
 		assert.deepEqual(
@@ -473,15 +416,15 @@ test("运行中的条目：开头那行空行不占行，块与相邻记录紧�
 
 test("运行之外的条目保留 Pi 自己的空行", () => {
 	withPatch({ state: stateWith({ runSettled: true }), config: configWith({}), restoreWindow: false }, () => {
-		const entry = new SpacerPrefixedEntry(NOTICE_ENTRY_TYPE);
-		assert.deepEqual(entry.render(RENDER_WIDTH), ["", `entry:${NOTICE_ENTRY_TYPE}`]);
+		const entry = new SpacerPrefixedEntry(CUSTOM_ENTRY_TYPE);
+		assert.deepEqual(entry.render(RENDER_WIDTH), ["", `entry:${CUSTOM_ENTRY_TYPE}`]);
 	});
 });
 
 test("运行中的扩展条目带上轨道前缀，并让出前缀占的两列", () => {
 	withPatch({ state: stateWith({ runSettled: false }), config: configWith({}), restoreWindow: false }, () => {
-		const notice = new WidthReportingEntry(NOTICE_ENTRY_TYPE);
-		assert.deepEqual(notice.render(RENDER_WIDTH), [`${RAIL_PREFIX}w=${RENDER_WIDTH - RAIL_WIDTH}`]);
+		const entry = new WidthReportingEntry(CUSTOM_ENTRY_TYPE);
+		assert.deepEqual(entry.render(RENDER_WIDTH), [`${RAIL_PREFIX}w=${RENDER_WIDTH - RAIL_WIDTH}`]);
 
 		const audit = new WidthReportingEntry("pi-distill-audit");
 		assert.deepEqual(
@@ -492,13 +435,13 @@ test("运行中的扩展条目带上轨道前缀，并让出前缀占的两列",
 	});
 });
 
-test("收起态与运行之外的提示条目不加轨道前缀", () => {
+test("收起态隐藏工作条目，运行之外的扩展条目不加轨道前缀", () => {
 	withPatch({ state: stateWith({ collapsed: true, runSettled: false }), config: configWith({}), restoreWindow: false }, () => {
-		const entry = new WidthReportingEntry(NOTICE_ENTRY_TYPE);
-		assert.deepEqual(entry.render(RENDER_WIDTH), [`w=${RENDER_WIDTH}`]);
+		const entry = new WidthReportingEntry(CUSTOM_ENTRY_TYPE);
+		assert.deepEqual(entry.render(RENDER_WIDTH), []);
 	});
 	withPatch({ state: stateWith({ runSettled: true }), config: configWith({}), restoreWindow: false }, () => {
-		const entry = new WidthReportingEntry(NOTICE_ENTRY_TYPE);
+		const entry = new WidthReportingEntry(CUSTOM_ENTRY_TYPE);
 		assert.deepEqual(entry.render(RENDER_WIDTH), [`w=${RENDER_WIDTH}`]);
 	});
 });
@@ -507,7 +450,7 @@ test("拿不到轨道前缀时按原样渲染", () => {
 	withPatch(
 		{ state: stateWith({ runSettled: false }), config: configWith({}), restoreWindow: false, railPrefix: undefined },
 		() => {
-			const entry = new WidthReportingEntry(NOTICE_ENTRY_TYPE);
+			const entry = new WidthReportingEntry(CUSTOM_ENTRY_TYPE);
 			assert.deepEqual(entry.render(RENDER_WIDTH), [`w=${RENDER_WIDTH}`]);
 		},
 	);
@@ -515,29 +458,29 @@ test("拿不到轨道前缀时按原样渲染", () => {
 
 test("宽度放不下前缀时按原样渲染", () => {
 	withPatch({ state: stateWith({ runSettled: false }), config: configWith({}), restoreWindow: false }, () => {
-		const entry = new WidthReportingEntry(NOTICE_ENTRY_TYPE);
+		const entry = new WidthReportingEntry(CUSTOM_ENTRY_TYPE);
 		assert.deepEqual(entry.render(RAIL_WIDTH), [`w=${RAIL_WIDTH}`]);
 	});
 });
 
-test("轨道归属在首次渲染时固定，收起后仍然带着", () => {
+test("轨道归属在首次渲染时固定，运行结束后不会反转", () => {
 	withPatch({ state: stateWith({ runSettled: false }), config: configWith({}), restoreWindow: false }, (box) => {
-		const entry = new FakeEntryComponent(NOTICE_ENTRY_TYPE);
-		assert.deepEqual(entry.render(RENDER_WIDTH), [`${RAIL_PREFIX}entry:${NOTICE_ENTRY_TYPE}`]);
+		const entry = new FakeEntryComponent(CUSTOM_ENTRY_TYPE);
+		assert.deepEqual(entry.render(RENDER_WIDTH), [`${RAIL_PREFIX}entry:${CUSTOM_ENTRY_TYPE}`]);
 
-		box.state = stateWith({ collapsed: true, runSettled: true });
+		box.state = stateWith({ collapsed: false, runSettled: true });
 		assert.deepEqual(
 			entry.render(RENDER_WIDTH),
-			[`${RAIL_PREFIX}entry:${NOTICE_ENTRY_TYPE}`],
-			"已判定归属的提示不会因为运行结束而变样",
+			[`${RAIL_PREFIX}entry:${CUSTOM_ENTRY_TYPE}`],
+			"已判定归属的条目不会因为运行结束而变样",
 		);
 	});
 });
 
 test("Pi 重建条目组件后，轨道归属跟着条目对象走", () => {
 	withPatch({ state: stateWith({ collapsed: true, runSettled: true }), config: configWith({}), restoreWindow: false }, (box) => {
-		// 启动时的提示：先按「不在运行中」记下归属。
-		const first = new WidthReportingEntry(NOTICE_ENTRY_TYPE);
+		// 启动时的条目：先按「不在运行中」记下归属。
+		const first = new WidthReportingEntry(CUSTOM_ENTRY_TYPE);
 		assert.deepEqual(first.render(RENDER_WIDTH), [`w=${RENDER_WIDTH}`]);
 
 		// 运行开始了，而且 Pi 用同一条目对象重建了组件。
@@ -551,12 +494,12 @@ test("Pi 重建条目组件后，轨道归属跟着条目对象走", () => {
 	});
 });
 
-test("重建后归属为真的提示仍然带着轨道前缀", () => {
+test("重建后归属为真的条目仍然带着轨道前缀", () => {
 	withPatch({ state: stateWith({ runSettled: false }), config: configWith({}), restoreWindow: false }, (box) => {
-		const first = new WidthReportingEntry(NOTICE_ENTRY_TYPE);
+		const first = new WidthReportingEntry(CUSTOM_ENTRY_TYPE);
 		assert.deepEqual(first.render(RENDER_WIDTH), [`${RAIL_PREFIX}w=${RENDER_WIDTH - RAIL_WIDTH}`]);
 
-		box.state = stateWith({ collapsed: true, runSettled: true });
+		box.state = stateWith({ collapsed: false, runSettled: true });
 		const rebuilt = rebuildEntry(first);
 		assert.deepEqual(rebuilt.render(RENDER_WIDTH), [`${RAIL_PREFIX}w=${RENDER_WIDTH - RAIL_WIDTH}`]);
 	});

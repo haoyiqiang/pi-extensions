@@ -17,7 +17,7 @@
  *   运行中收到的 steer/followUp 消息不重置起点：整段连续工作计入同一次总耗时。
  * - 总耗时终点用 agent_settled 而不是 agent_end：agent_end 之后还可能发生自动重试、
  *   compaction 和队列续跑，agent_settled 才表示 AI 真正停下（Esc 中断也会在 finally 中触发）。
- * - 非 TUI 模式（rpc / print）下 hasUI 为 false，不启动定时器、不发 notify。
+ * - 非 TUI 模式不启动定时器；结算提示仍统一交给 `ctx.ui.notify`，由 Pi 决定如何呈现。
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -206,7 +206,7 @@ export default function (pi: ExtensionAPI, options: TurnElapsedOptions = {}) {
     // 运行时钟只有一个结算者：live 模式在这里结算，on-stop 模式由 tps 结算（汇总行要同时带上耗时）。
     const settlement = display === "live" ? settleRun() : undefined;
     clearWorking(ctx);
-    if (display === false || !ctx.hasUI) return;
+    if (display === false) return;
 
     if (settlement !== undefined && shouldReportTotalRun(settlement)) {
       ctx.ui.notify(`⏱ ${formatDone(settlement.elapsedMs)}`, "info");

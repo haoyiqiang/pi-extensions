@@ -12,13 +12,10 @@
  * 同一个对象。具体见 resolveContainerPrototypes。
  *
  * 只折「工作条目」，归属在条目第一次渲染时确定：
- * - 一次运行（agent_start → agent_settled）期间 —— 例如 distill 审计行、
- *   tool-supervisor 审计行、pi-spark 的逐轮遥测；
+ * - 一次运行（agent_start → agent_settled）期间 —— 例如 distill 审计行；
  * - 会话恢复窗口（session_start 之后、首次 agent_start 之前）—— 历史轮次留下的
  *   条目，与历史工具行一样属于工作过程。
- * 运行结束后才出现的条目（提示、汇总）保持可见。历史会话里退役的
- * `pi-extensions-notice` 条目仍按级别区分：`info` 跟着工作过程收起，
- * `warning` / `error` 留着，避免把旧警告静默吞掉。
+ * 运行结束后才出现的条目保持可见。
  */
 
 import { Container, visibleWidth } from "@earendil-works/pi-tui";
@@ -34,8 +31,6 @@ const NO_LINES: string[] = [];
  * 整行宽度才不会溢出。数值与 `GUTTER_PREFIX_WIDTH` 一致。
  */
 const ENTRY_RAIL_WIDTH = 2;
-/** 退役的 pi-utils 提示块类型；只为重放历史会话保留。 */
-export const NOTICE_ENTRY_TYPE = "pi-extensions-notice";
 
 /**
  * 条目组件对外可见的最小结构。
@@ -107,24 +102,6 @@ export function readExtensionEntryCustomType(host: ExtensionEntryHost): string |
 }
 
 /**
- * 读通知条目的级别。
- *
- * 历史通知条目写成 `{ tag, color, level, message, ... }`。读不出来
- * （别的包用了同一个 customType、字段改过、老版本）时返回 undefined，调用方按「留着」处理
- * —— 宁可多显示一条，也不能把警告静默吞掉。
- */
-export function readExtensionEntryNoticeLevel(host: ExtensionEntryHost): string | undefined {
-	const payload = host.entry as { data?: unknown } | undefined;
-	const data = payload?.data;
-	if (typeof data !== "object" || data === null) {
-		return undefined;
-	}
-
-	const level = (data as { level?: unknown }).level;
-	return typeof level === "string" ? level : undefined;
-}
-
-/**
  * 判定条目第一次渲染时是否落在「工作窗口」内。
  *
  * 运行中本身就是工作过程；会话恢复窗口内的条目属于历史轮次的工作过程，同样按
@@ -155,7 +132,7 @@ export function readRailOwnershipKey(host: (ExtensionEntryHost | ExtensionMessag
 /**
  * 判定一条扩展条目在当前位置是否该接上运行时轨道。
  *
- * 运行期间扩展写入的条目（通知提示、工作流结果面板、审计卡片）都铺满整宽，
+ * 运行期间扩展写入的条目（工作流结果面板、审计卡片）都铺满整宽，
  * 它们会把左侧轨道从中间切断；接上 `│ ` 前缀，竖条才不会断。
  *
  * 两种情况不加：总开关关闭（根本没有轨道可接）；收起态（组头本身不显示，加一条
@@ -199,26 +176,18 @@ export function dropLeadingBlankLines(lines: readonly string[]): string[] {
 export interface ExtensionEntryHideInput {
 	state: CleanModeState;
 	config: CleanModeConfig;
-	/** entry 的 customType；无法读出时为 undefined。 */
-	customType?: string;
-	/** 通知条目的级别（`info` / `warning` / `error`）；非通知或读不出来时为 undefined。 */
-	noticeLevel?: string;
 	/** 该条目是否在工作窗口内首次渲染，由补丁层标记后传入。 */
 	isWorkEntry: boolean;
 }
-
-/** 收起时会一起藏掉的通知级别：只有 info。 */
-const HIDDEN_NOTICE_LEVEL = "info";
 
 /**
  * 判定一条扩展条目在当前位置该不该隐藏。
  *
  * 任一前置条件不成立就放行原始渲染：总开关关闭、条目折叠开关关闭、当前不是折叠态、
- * 条目不属于工作过程。通知条目不是全部豁免：`info` 级通知（遥测、回执）和普通工作条目
- * 一样收起，`warning` / `error` 留着 —— 扩展出错时只有它俩能说话，收起来等于把警告藏了。
+ * 条目不属于工作过程。
  */
 export function shouldHideExtensionEntry(input: ExtensionEntryHideInput): boolean {
-	const { state, config, customType, noticeLevel, isWorkEntry } = input;
+	const { state, config, isWorkEntry } = input;
 	if (!config.enabled || !config.hideExtensionEntries || !state.collapsed) {
 		return false;
 	}
@@ -226,7 +195,7 @@ export function shouldHideExtensionEntry(input: ExtensionEntryHideInput): boolea
 		return false;
 	}
 
-	return customType !== NOTICE_ENTRY_TYPE || noticeLevel === HIDDEN_NOTICE_LEVEL;
+	return true;
 }
 
 /** Container.render 的补丁签名；容器接口只保证返回行数组。 */
@@ -368,8 +337,6 @@ export function installExtensionEntryPatch(deps: ExtensionEntryPatchDeps): () =>
 					shouldHideExtensionEntry({
 						state,
 						config,
-						customType: readExtensionEntryCustomType(entryHost),
-						noticeLevel: readExtensionEntryNoticeLevel(entryHost),
 						isWorkEntry,
 					})
 				) {

@@ -55,11 +55,11 @@ pi install git:github.com/maplezzk/pi-extensions
 
 ### 指标
 
-记录会话耗时和 token 生成遥测。editor 边框显示例如 `⏱ 47s` 的总等待时间，跨轮不归零。
+通过 Pi 原生通知显示会话耗时和 token 生成遥测。editor 边框显示例如 `⏱ 47s` 的总等待时间，跨轮不归零。
 
-- `on-stop`（默认）：运行期间对话区保持安静，agent 停下后出一行汇总，包含耗时、混合 TPS、TTFT、token、stall 和成本。
-- `live`：每轮结束出一行；多轮运行停下后再补一条 `⏱ <耗时>`。
-- 每一轮仍写入 `tps` session entry。如果还安装了 `npm:@monotykamary/pi-tps`，请移除它，否则两边都会写重复记录。
+- `on-stop`（默认）：运行期间对话区保持安静，agent 停下后通过原生通知显示一行汇总，包含耗时、混合 TPS、TTFT、token、stall 和成本；没有 TPS 样本时仍会显示总耗时。
+- `live`：每轮结束通过原生通知显示一行；多轮运行停下后再补一条 `⏱ <耗时>` 通知。
+- metrics 不注册自定义 entry renderer，也不向 session 写入用于展示的 entry。
 - 用 `/config:metrics`，或 `/config:metrics enable|disable|live|on-stop|reset` 配置。只有 `spark.json` 没有 `metrics` 字段时，才会读取旧的 `extensions/pi-metrics/config.json`。
 
 ### 会话资源
@@ -129,7 +129,7 @@ pi remove npm:pi-naming
 | `credits` | `CreditsConfig` | 状态栏的余额或速率限制用量。`providers` 可逐个 provider 开关。 |
 | `editor` | `EditorConfig` | 顶部边框的 working 指示与模型名。`spinner` 可选 `dots`、`lights`、`tildes`（默认）、`pulse`。 |
 | `footer` | `FooterConfig` | 会话信息、扩展状态、花费与上下文用量。`statusPosition` 可选 `inline`（默认）或 `below`。`style` 可选 `default`（默认）或 `p10k`。 |
-| `metrics` | `MetricsConfig` | 耗时和 TPS/TTFT/token/成本遥测。`display` 为 `on-stop`（默认）或 `live`；设为 `false` 可关闭。 |
+| `metrics` | `MetricsConfig` | 通过原生通知显示耗时和 TPS/TTFT/token/成本遥测。`display` 为 `on-stop`（默认）或 `live`；设为 `false` 可关闭。 |
 | `naming` | `NamingConfig` | 会话和授权终端目标的自动标题及 `/rename`；设为 `false` 关闭。 |
 | `resources` | `{}` | `#` 会话资源选择器。设为 `false` 可关闭。 |
 | `presets` | `{ [name]: Preset }` | 具名预设，每个预设必须给出 `provider`、`model`、`thinkingLevel`。 |
