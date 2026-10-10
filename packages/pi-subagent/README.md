@@ -71,6 +71,8 @@ subagent stop a1b2c3
 subagent list
 ```
 
+Users can press Escape in the child panel, then enter a correction to continue. `wait` keeps waiting when the latest assistant reply has `stopReason: "aborted"`, and returns the next normal reply after the child becomes idle. Execution errors, child exit, and timeout still return failure; `wait` does not close the panel. The default 1800-second deadline includes time spent waiting for user input. Retry cancellations that Pi reports as errors remain errors.
+
 ## Isolation
 
 Optional spawn flags:

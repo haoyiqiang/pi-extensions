@@ -71,6 +71,8 @@ subagent stop a1b2c3
 subagent list
 ```
 
+用户可以在子面板按 Esc 打断，再直接输入校正指令继续。当最新 assistant 回复的 `stopReason` 为 `aborted` 时，`wait` 保持等待，在子代理空闲后返回下一份正常回复。执行错误、子代理退出和超时仍返回失败；`wait` 不会关闭面板。默认 1800 秒的期限包含等待用户输入的时间。Pi 以错误报告的重试取消仍按错误处理。
+
 ## 隔离
 
 可选 spawn 参数：
