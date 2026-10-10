@@ -10,5 +10,5 @@
     "verbatimModuleSyntax": true,
     "types": ["node"]
   },
-  "include": ["index.ts", "shared.ts", "subagent.ts"]
+  "include": ["index.ts", "shared.ts", "subagent.ts", "widget.ts"]
 }

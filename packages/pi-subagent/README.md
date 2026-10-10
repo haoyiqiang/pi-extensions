@@ -71,7 +71,7 @@ subagent stop a1b2c3
 subagent list
 ```
 
-The status widget shows active names (or handles for unnamed runs) and their current state.
+Active runs are listed above the editor in the interactive-subagent box: elapsed time on the left, the subagent's own state (`starting`, `busy`, `idle`, or `error`) on the right. `idle` means the turn has finished but the child remains available for follow-ups. Exited runs are hidden; the box hides when none remain.
 
 ## Isolation
 
