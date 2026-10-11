@@ -20,14 +20,16 @@ export function formatResult(text: string, details: any): AgentToolResult<any> {
 
 /**
  * Resolve the answer text and sources the same way for every provider: apply
- * Gemini grounding citations (a no-op when there is no grounding metadata) and
- * prefer the provider's own source list when it is non-empty.
+ * Gemini grounding citations (a no-op when there is no grounding metadata).
+ * Grounding markers and their source list must use the same chunk-index mapping.
  */
 export function resolveCitedText(result: StreamResult): { text: string; sources: Source[] } {
     const cited = applyCitations(result.text, result.groundingMetadata);
     return {
         text: cited.text,
-        sources: result.sources?.length ? result.sources : cited.sources,
+        sources: result.groundingMetadata?.groundingChunks
+            ? cited.sources
+            : result.sources?.length ? result.sources : cited.sources,
     };
 }
 
@@ -119,6 +121,10 @@ function buildResultDetails(
     failed: FailedUrl[],
     modelId: string,
 ): Record<string, any> {
+    const validResults = (result.searchResults || []).filter((item) =>
+        item.type !== "web_search_tool_result_error"
+        && item.source !== "anthropic.web_search_tool_result_error"
+    );
     return {
         sources,
         providerKind: result.providerKind,
@@ -131,8 +137,8 @@ function buildResultDetails(
         retrieved,
         failed: failed.length > 0 ? failed : undefined,
         model: modelId,
-        grounded: sources.length > 0 || (result.searchResults?.length || 0) > 0,
-        resultCount: result.searchResults?.length || sources.length,
+        grounded: sources.length > 0 || validResults.length > 0,
+        resultCount: validResults.length || sources.length,
     };
 }
 

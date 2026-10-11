@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import registerExtension, { createModelScopedToolManager } from "../src/index.ts";
 import { urlContext } from "../src/url_context.ts";
-import { webSearch } from "../src/web_search.ts";
+import { classifySearchFailure, webSearch } from "../src/web_search.ts";
 
 const googleModel = {
   id: "gemini-test",
@@ -320,4 +320,105 @@ test("URL context rejects multiple YouTube videos before making a request", asyn
       assert.equal(calls, 0);
     });
   });
+});
+
+test("failure classification distinguishes daily quota from throttling and never hides auth/request errors", () => {
+  assert.equal(classifySearchFailure(new Error("Google API error (429): daily quota exceeded")), "quota");
+  assert.equal(classifySearchFailure(new Error("Google API error (429): quota RequestsPerMinute exceeded")), "rate-limit");
+  assert.equal(classifySearchFailure(new Error("Google API error (429): too many requests")), "rate-limit");
+  assert.equal(classifySearchFailure(new Error("Google API error (403): quota access is unsupported")), "auth");
+  assert.equal(classifySearchFailure(new Error("Google API error (400): unsupported request")), "invalid-request");
+  for (const id of ["401-api-key-missing", "abort-unsupported", "quota-network-timeout"]) {
+    assert.equal(classifySearchFailure(new Error(`Invalid request: configured model ${id} was not found.`)), "invalid-request");
+  }
+  const controller = new AbortController();
+  controller.abort();
+  assert.equal(classifySearchFailure(new Error("quota exceeded"), controller.signal), "aborted");
+  assert.equal(classifySearchFailure(new Error("Invalid request: missing model"), controller.signal), "aborted");
+});
+
+test("daily Google quota exhaustion can use the quota-only API fallback", async () => {
+  await withConfig({ fallbackOn: ["quota"], api: { provider: "brave", apiKeys: { brave: "test-key" } } }, async () => {
+    let calls = 0;
+    await withFetch(async (input) => {
+      calls += 1;
+      if (String(input).includes("generativelanguage.googleapis.com")) {
+        return new Response("daily quota exceeded", { status: 429 });
+      }
+      assert.match(String(input), /api\.search\.brave\.com/);
+      return new Response(JSON.stringify({ web: { results: [] } }));
+    }, async () => {
+      const result = await webSearch("id", { query: "test" }, new AbortController().signal, undefined, context());
+      assert.equal(result.details.modeUsed, "api");
+      assert.equal(result.details.fallback.reason, "quota");
+      assert.equal(calls, 2);
+    });
+  });
+});
+
+test("malformed and empty LLM responses trigger configured invalid-response fallback", async () => {
+  for (const body of ["", "data: {invalid-json}\n\n", "<html>gateway error</html>"]) {
+    await withConfig({ fallbackOn: ["invalid-response"], api: { provider: "brave", apiKeys: { brave: "test-key" } } }, async () => {
+      let calls = 0;
+      await withFetch(async (input) => {
+        calls += 1;
+        if (String(input).includes("generativelanguage.googleapis.com")) {
+          return new Response(body, { headers: { "content-type": "text/event-stream" } });
+        }
+        return new Response(JSON.stringify({ web: { results: [] } }));
+      }, async () => {
+        const result = await webSearch("id", { query: "test" }, new AbortController().signal, undefined, context());
+        assert.equal(result.details.modeUsed, "api");
+        assert.equal(result.details.fallback.reason, "invalid-response");
+        assert.equal(calls, 2);
+      });
+    });
+  }
+});
+
+test("Anthropic native search errors can fall back instead of claiming grounded success", async () => {
+  await withConfig({ fallbackOn: ["rate-limit"], api: { provider: "brave", apiKeys: { brave: "test-key" } } }, async () => {
+    await withFetch(async (input) => {
+      if (String(input).includes("api.anthropic.com")) {
+        return sse({ type: "content_block_start", content_block: {
+          type: "web_search_tool_result", tool_use_id: "use1",
+          content: { type: "web_search_tool_result_error", error_code: "too_many_requests" },
+        } });
+      }
+      return new Response(JSON.stringify({ web: { results: [] } }));
+    }, async () => {
+      const result = await webSearch("id", { query: "test" }, new AbortController().signal, undefined, context(anthropicModel));
+      assert.equal(result.details.modeUsed, "api");
+      assert.equal(result.details.fallback.reason, "rate-limit");
+      assert.equal(result.details.resultCount, 0);
+      assert.deepEqual(result.details.sources, []);
+    });
+  });
+});
+
+test("a missing explicitly configured model never silently switches to API search", async () => {
+  await withConfig({ llm: { provider: "google", model: "missing-model" } }, async () => {
+    let calls = 0;
+    await withFetch(async () => { calls += 1; throw new Error("unexpected request"); }, async () => {
+      const result = await webSearch("id", { query: "test" }, new AbortController().signal, undefined, context());
+      assert.equal(result.details.error.kind, "invalid-request");
+      assert.match(result.details.error.message, /missing-model/);
+      assert.equal(calls, 0);
+    });
+  });
+});
+
+test("native Google Vertex models enable URL Context only for explicit Express transport", async () => {
+  const vertexModel = { ...googleModel, provider: "google-vertex", api: "google-vertex" };
+  for (const transport of ["auto", "vertex-express"]) {
+    await withConfig({ llm: { provider: "google-vertex", model: "gemini-test", transport } }, async () => {
+      let active = ["web_search", "url_context", "web_fetch"];
+      const manager = createModelScopedToolManager({
+        getActiveTools: () => [...active],
+        setActiveTools: (tools: string[]) => { active = tools; },
+      } as any);
+      manager.sync(anthropicModel as any, context(vertexModel));
+      assert.equal(active.includes("url_context"), transport === "vertex-express");
+    });
+  }
 });

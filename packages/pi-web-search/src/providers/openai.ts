@@ -2,7 +2,7 @@ import type { ExtensionContext, AgentToolUpdateCallback } from "@earendil-works/
 import { clampThinkingLevel, type Api, type Model, type ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { TextDecoder } from "util";
 import { getProviderKind } from "./config.ts";
-import { getAuth, type ResolvedAuth } from "./auth.ts";
+import { getAuth, resolveAzureResponsesUrl, resolveAzureDeploymentName, type ResolvedAuth } from "./auth.ts";
 import { readSseEvents } from "./sse.ts";
 import { applyIndexCitations, deriveSources, mergeSearchResultMetadata, normalizeCitedSources, preserveInlineCitations, pushLlmSearchEvent, pushUniqueSearchResult, pushUniqueString, sanitizeSearchResults, titleFromUrl } from "./results.ts";
 import type { LlmSearchCallDetail, SearchResultDetail, StreamResult } from "./types.ts";
@@ -101,27 +101,35 @@ export async function callOpenAIStream(
         throw new Error(auth.error || "Failed to get API key and authentication headers.");
     }
 
+    const headerOverrides = new Map([
+        ...Object.entries(model.headers || {}), ...Object.entries(auth.headers || {}),
+    ].map(([name, value]) => [name.toLowerCase(), value] as const));
     const headers = new Headers();
-    for (const [name, value] of Object.entries(model.headers || {})) headers.set(name, value);
-    for (const [name, value] of Object.entries(auth.headers || {})) headers.set(name, value);
-    if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-    if (!headers.has("Accept")) headers.set("Accept", "text/event-stream");
-    if (auth.apiKey && !headers.has("Authorization")) headers.set("Authorization", `Bearer ${auth.apiKey}`);
+    for (const [name, value] of headerOverrides) {
+        if (value !== null) headers.set(name, value);
+    }
+    const setDefaultHeader = (name: string, value: string) => {
+        if (!headers.has(name) && headerOverrides.get(name.toLowerCase()) !== null) headers.set(name, value);
+    };
+    setDefaultHeader("Content-Type", "application/json");
+    setDefaultHeader("Accept", "text/event-stream");
+    if (auth.apiKey) setDefaultHeader("Authorization", `Bearer ${auth.apiKey}`);
 
     const isCodex = isOpenAICodexModel(model);
+    const isAzure = model.api === "azure-openai-responses";
     if (isCodex) {
         const authorization = headers.get("Authorization");
         const hasBearerAuth = typeof authorization === "string" && /^Bearer\s+\S+/i.test(authorization);
         if (!auth.apiKey && !hasBearerAuth) {
             throw new Error("No OAuth credential is configured for the openai-codex model.");
         }
-        if (!headers.has("chatgpt-account-id")) {
+        if (!headers.has("chatgpt-account-id") && headerOverrides.get("chatgpt-account-id") !== null) {
             if (!auth.apiKey) {
                 throw new Error("No ChatGPT account ID is configured for the openai-codex model.");
             }
             headers.set("chatgpt-account-id", extractOpenAICodexAccountId(auth.apiKey));
         }
-        if (!headers.has("originator")) headers.set("originator", "codex_cli_rs");
+        setDefaultHeader("originator", "codex_cli_rs");
     }
     const requestHeaders = Object.fromEntries(headers.entries());
 
@@ -129,7 +137,7 @@ export async function callOpenAIStream(
     const searchProvider: "xai" | "openai" = isXai ? "xai" : "openai";
     const providerSourceName = isXai ? "xai" : "openai";
     const requestBody: any = {
-        model: model.id,
+        model: isAzure ? resolveAzureDeploymentName(model, auth) : model.id,
         input: isCodex
             ? [{ role: "user", content: [{ type: "input_text", text: prompt }] }]
             : isXai
@@ -160,7 +168,7 @@ export async function callOpenAIStream(
 
     const requestModel = auth.baseUrl ? { ...model, baseUrl: auth.baseUrl } : model;
     const baseUrl = resolveGitHubCopilotBaseUrl(requestModel, auth);
-    const response = await fetch(resolveOpenAIResponsesUrl(requestModel, baseUrl), {
+    const response = await fetch(isAzure ? resolveAzureResponsesUrl(model, auth) : resolveOpenAIResponsesUrl(requestModel, baseUrl), {
         method: "POST",
         headers: requestHeaders,
         body: JSON.stringify(requestBody),
@@ -237,21 +245,26 @@ export async function callOpenAIStream(
     };
 
     const collectFromResponse = (response: any) => {
+        let responseText = "";
         for (const item of response?.output || []) {
             collectWebSearchCall(item);
             if (item?.type !== "message") continue;
             for (const content of item.content || []) {
                 if (content?.type !== "output_text") continue;
+                if (typeof content.text === "string") responseText += content.text;
                 for (const annotation of content.annotations || []) collectAnnotation(annotation);
             }
         }
+        // Responses-compatible servers can send only the completed snapshot.
+        // Do not append it again when output_text deltas have already arrived.
+        if (!accumulatedText && responseText) accumulatedText = responseText;
     };
 
     await readSseEvents(response, signal, ({ data: event }) => {
         if (event.type === "error" || event.type === "response.failed") {
             const message = event.message || event.error?.message || event.response?.error?.message;
             throw new Error(message || JSON.stringify(event.error || event.response?.error || event));
-        } else if (event.type === "response.output_text.delta") {
+        } else if (event.type === "response.output_text.delta" && typeof event.delta === "string") {
             accumulatedText += event.delta || "";
             onUpdate?.({
                 content: [{ type: "text", text: accumulatedText }],
@@ -298,6 +311,9 @@ export async function callOpenAIStream(
     const sanitizedCitations = sanitizeSearchResults(citationDetails);
     mergeSearchResultMetadata(sanitizedSearchResults, sanitizedCitations);
     const derivedSources = deriveSources(sanitizedSearchResults, sanitizedCitations);
+    if (!accumulatedText.trim() && sanitizedSearchResults.length === 0 && sanitizedCitations.length === 0) {
+        throw new Error(`Invalid response: ${isXai ? "xAI" : "OpenAI"} returned no answer or web search results.`);
+    }
 
     return {
         text: cited.text,

@@ -15,8 +15,9 @@ export interface LlmSearchConfig {
 
 export interface ApiSearchConfig {
   provider?: ApiSearchProviderName;
-  apiKeys?: Partial<Record<ApiSearchProviderName, string>>;
-  baseUrls?: Partial<Record<ApiSearchProviderName, string>>;
+  // null explicitly clears a value inherited from the legacy rpiv config.
+  apiKeys?: Partial<Record<ApiSearchProviderName, string | null>>;
+  baseUrls?: Partial<Record<ApiSearchProviderName, string | null>>;
 }
 
 export interface GitHubInterceptorConfig {
@@ -136,11 +137,12 @@ function parseLlmConfig(value: unknown, label: string): LlmSearchConfig {
   if (transport && !LLM_TRANSPORTS.has(transport)) {
     throw new Error("llm.transport must be auto, google-developer, or vertex-express.");
   }
-  return {
-    provider: optionalString(llm.provider, `${label}.provider`),
-    model: optionalString(llm.model, `${label}.model`),
-    transport,
-  };
+  const provider = optionalString(llm.provider, `${label}.provider`);
+  const model = optionalString(llm.model, `${label}.model`);
+  if (Boolean(provider) !== Boolean(model)) {
+    throw new Error(`${label}.provider and ${label}.model must be configured together.`);
+  }
+  return { provider, model, transport };
 }
 
 function parseConfig(raw: unknown): WebSearchConfig {
@@ -165,16 +167,20 @@ function parseConfig(raw: unknown): WebSearchConfig {
     config.fallbackOn = [...new Set(values)];
   }
 
-  // `native` and top-level provider/model are read-only compatibility aliases.
+  // `native` and top-level provider/model/modelId are read-only compatibility aliases.
   // Every loaded and saved config exposes the modern `llm` shape.
   if (root.llm !== undefined) {
     config.llm = parseLlmConfig(root.llm, "llm");
   } else if (root.native !== undefined) {
     config.llm = parseLlmConfig(root.native, "native");
   } else {
-    const provider = optionalString(root.provider, "provider");
-    const model = optionalString(root.model, "model");
-    if (provider || model) config.llm = { provider, model, transport: "auto" };
+    if (root.provider !== undefined || root.model !== undefined || root.modelId !== undefined) {
+      config.llm = parseLlmConfig({
+        provider: root.provider,
+        model: root.model ?? root.modelId,
+        transport: "auto",
+      }, "llm");
+    }
   }
 
   if (root.api !== undefined) {
@@ -200,16 +206,19 @@ function parseConfig(raw: unknown): WebSearchConfig {
   return config;
 }
 
-function parseStringMap(value: unknown, label: string): Record<string, string> | undefined {
+function parseStringMap(value: unknown, label: string): Record<string, string | null> | undefined {
   if (value === undefined) return undefined;
   const object = expectObject(value, label);
-  const output: Record<string, string> = {};
+  const output: Record<string, string | null> = {};
   for (const [key, entry] of Object.entries(object)) {
-    if (typeof entry !== "string") {
-      throw new Error(`${`${label}.${key}`} must be a string.`);
+    if (entry === null) {
+      output[key] = null;
+    } else if (typeof entry === "string") {
+      const trimmed = entry.trim();
+      if (trimmed) output[key] = trimmed;
+    } else {
+      throw new Error(`${`${label}.${key}`} must be a string or null.`);
     }
-    const trimmed = entry.trim();
-    if (trimmed) output[key] = trimmed;
   }
   return output;
 }
@@ -253,7 +262,7 @@ function loadLegacyRpivConfig(): LegacyRpivConfig | undefined {
     if (!existsSync(path)) continue;
     try {
       const parsed = JSON.parse(readFileSync(path, "utf8"));
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
       const root = parsed as Record<string, unknown>;
       const provider = typeof root.provider === "string" && API_PROVIDERS.has(root.provider as ApiSearchProviderName)
         ? root.provider as ApiSearchProviderName
@@ -275,7 +284,7 @@ function loadLegacyRpivConfig(): LegacyRpivConfig | undefined {
         : undefined;
       const github = parseLegacyGitHubInterceptor(legacyInterceptors?.github);
       const interceptors = github === undefined ? undefined : { github };
-      if (!api && !interceptors) return undefined;
+      if (!api && !interceptors) continue;
       return { api, interceptors };
     } catch {
       // The original rpiv loader was fail-soft. Skip a stale malformed file so
@@ -337,13 +346,12 @@ export function loadWebSearchConfig(): LoadedWebSearchConfig {
 }
 
 function compactStringMap(
-  value: Partial<Record<ApiSearchProviderName, string>> | undefined,
-): Partial<Record<ApiSearchProviderName, string>> | undefined {
+  value: Partial<Record<ApiSearchProviderName, string | null>> | undefined,
+): Partial<Record<ApiSearchProviderName, string | null>> | undefined {
   if (!value) return undefined;
-  const entries = Object.entries(value).filter((entry): entry is [ApiSearchProviderName, string] => (
+  const entries = Object.entries(value).filter((entry): entry is [ApiSearchProviderName, string | null] => (
     API_PROVIDERS.has(entry[0] as ApiSearchProviderName)
-    && typeof entry[1] === "string"
-    && entry[1].trim().length > 0
+    && (entry[1] === null || (typeof entry[1] === "string" && entry[1].trim().length > 0))
   ));
   return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }

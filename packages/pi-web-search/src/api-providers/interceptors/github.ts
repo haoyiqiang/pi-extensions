@@ -179,7 +179,7 @@ export function parseGitHubUrl(url: string): GitHubUrlInfo | null {
 	if (segments.length < 4) return null;
 
 	const ref = segments[3];
-	if (!isSafeCloneSegment(ref)) return null;
+	if (!isSafeCloneRef(ref)) return null;
 	const refIsFullSha = /^[0-9a-f]{40}$/.test(ref);
 	const pathParts = segments.slice(4);
 	const path = pathParts.length > 0 ? pathParts.join("/") : "";
@@ -257,6 +257,10 @@ function isSafeCloneSegment(value: string | undefined): value is string {
 	);
 }
 
+function isSafeCloneRef(value: string | undefined): value is string {
+	return Boolean(value && value.split("/").every(isSafeCloneSegment));
+}
+
 function isPathWithin(rootPath: string, candidatePath: string): boolean {
 	if (candidatePath === rootPath) return true;
 	const prefix = rootPath.endsWith(pathSep) ? rootPath : rootPath + pathSep;
@@ -264,7 +268,7 @@ function isPathWithin(rootPath: string, candidatePath: string): boolean {
 }
 
 export function resolveGitHubCloneDir(clonePath: string, owner: string, repo: string, ref?: string): string {
-	if (!isSafeCloneSegment(owner) || !isSafeCloneSegment(repo) || (ref !== undefined && !isSafeCloneSegment(ref))) {
+	if (!isSafeCloneSegment(owner) || !isSafeCloneSegment(repo) || (ref !== undefined && !isSafeCloneRef(ref))) {
 		throw new Error("Refusing to use a path outside the GitHub clone root.");
 	}
 
@@ -272,7 +276,8 @@ export function resolveGitHubCloneDir(clonePath: string, owner: string, repo: st
 	mkdirSync(rootPath, { recursive: true, mode: 0o700 });
 	const realRoot = realpathSync(rootPath);
 	const ownerPath = resolvePath(rootPath, owner);
-	const dirName = ref ? `${repo}@${ref}` : repo;
+	// A ref may contain slashes; encode it as one cache directory segment.
+	const dirName = ref ? `${repo}@${encodeURIComponent(ref)}` : repo;
 	const candidate = resolvePath(ownerPath, dirName);
 	if (!isPathWithin(rootPath, ownerPath) || !isPathWithin(rootPath, candidate)) {
 		throw new Error("Refusing to use a path outside the GitHub clone root.");
@@ -412,7 +417,7 @@ export class GitHubInterceptor implements UrlInterceptor {
 		return new Promise((resolve) => {
 			execFile(
 				"gh",
-				["api", `repos/${owner}/${repo}/git/trees/${ref}?recursive=1`, "--jq", ".tree[].path"],
+				["api", `repos/${owner}/${repo}/git/trees/${encodeURIComponent(ref)}?recursive=1`, "--jq", ".tree[].path"],
 				{ timeout: 15000, maxBuffer: 5 * 1024 * 1024 },
 				(err, stdout) => {
 					if (err) {
@@ -437,7 +442,7 @@ export class GitHubInterceptor implements UrlInterceptor {
 		return new Promise((resolve) => {
 			execFile(
 				"gh",
-				["api", `repos/${owner}/${repo}/readme?ref=${ref}`, "--jq", ".content"],
+				["api", `repos/${owner}/${repo}/readme?ref=${encodeURIComponent(ref)}`, "--jq", ".content"],
 				{ timeout: 10000 },
 				(err, stdout) => {
 					if (err) {
@@ -459,10 +464,11 @@ export class GitHubInterceptor implements UrlInterceptor {
 
 	private async fetchFileViaApi(owner: string, repo: string, path: string, ref: string): Promise<string | null> {
 		if (!(await this.checkGhAvailable())) return null;
+		const encodedPath = path.split("/").map(encodeURIComponent).join("/");
 		return new Promise((resolve) => {
 			execFile(
 				"gh",
-				["api", `repos/${owner}/${repo}/contents/${path}?ref=${ref}`, "--jq", ".content"],
+				["api", `repos/${owner}/${repo}/contents/${encodedPath}?ref=${encodeURIComponent(ref)}`, "--jq", ".content"],
 				{ timeout: 10000, maxBuffer: 2 * 1024 * 1024 },
 				(err, stdout) => {
 					if (err) {
@@ -565,9 +571,9 @@ export class GitHubInterceptor implements UrlInterceptor {
 		owner: string,
 		repo: string,
 		ref: string | undefined,
+		localPath: string,
 		signal?: AbortSignal,
 	): Promise<string | null> {
-		const localPath = resolveGitHubCloneDir(this.options.clonePath, owner, repo, ref);
 		try {
 			rmSync(localPath, { recursive: true, force: true });
 		} catch {
@@ -649,8 +655,8 @@ export class GitHubInterceptor implements UrlInterceptor {
 		const cachedAfterCheck = this.cloneCache.get(key);
 		if (cachedAfterCheck) return this.awaitCachedClone(cachedAfterCheck, url, owner, repo, info, signal);
 
-		const clonePromise = this.cloneRepo(owner, repo, info.ref, signal);
 		const localPath = resolveGitHubCloneDir(this.options.clonePath, owner, repo, info.ref);
+		const clonePromise = this.cloneRepo(owner, repo, info.ref, localPath, signal);
 		this.cloneCache.set(key, { localPath, clonePromise });
 
 		const result = await clonePromise;
@@ -804,8 +810,8 @@ function buildDirListing(rootPath: string, subPath: string): string {
 function readReadme(localPath: string): string | null {
 	const candidates = ["README.md", "readme.md", "README", "README.txt", "README.rst"];
 	for (const name of candidates) {
-		const readmePath = join(localPath, name);
-		if (existsSync(readmePath)) {
+		const readmePath = resolveWithinRepo(localPath, name);
+		if (readmePath && existsSync(readmePath)) {
 			try {
 				const content = readFileSync(readmePath, "utf-8");
 				return content.length > 8192 ? `${content.slice(0, 8192)}\n\n${"[README truncated at 8K chars]"}` : content;

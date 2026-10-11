@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Fixed legacy `modelId` selection and rejected incomplete or missing configured model overrides instead of silently switching backends.
+- Made API key/base URL clears persist across legacy-config merging without modifying legacy files.
+- Restored failed tool execution status and error rendering while preserving provider/direct-HTTP fetch dispatch.
+- Confined GitHub README reads to the clone root, removed unhandled clone-path promise rejections, and supported encoded slash refs and special-character API paths safely.
+- Rejected empty/malformed LLM streams, surfaced native Anthropic search errors, collected streamed search queries, and corrected quota fallback classification.
+- Aligned Gemini source numbering with grounding citations and preserved cancellation during grounding redirect resolution.
+- Restored OpenCode session headers, Copilot Anthropic Bearer auth, Azure endpoint/key/deployment handling, and explicit API-key Vertex Express support for native Vertex models.
+- Added deterministic regression tests for the repaired paths.
+
 ## 1.6.0
 
 - Introduced the publishable package as `@maplezzk/pi-web-search` while preserving the `pi-web-search` feature and config names.

@@ -7,7 +7,7 @@ import { callOpenAIStream } from "./providers/openai.ts";
 import { callAnthropicStream } from "./providers/anthropic.ts";
 import type { StreamResult } from "./providers/types.ts";
 
-export { getProviderKind, getConfig, isGoogleDeveloperModel } from "./providers/config.ts";
+export { getProviderKind, getConfig, isGoogleDeveloperModel, isGoogleUrlContextModel } from "./providers/config.ts";
 export { applyCitations } from "./providers/google.ts";
 export type { Source, SearchResultDetail, LlmSearchCallDetail, StreamResult } from "./providers/types.ts";
 

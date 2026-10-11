@@ -3,7 +3,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
 import { loadWebSearchConfig, resolveConfiguredLlm } from "./config.ts";
 import { openWebSearchConfigPanel } from "./config-panel.ts";
-import { getProviderKind, isGoogleDeveloperModel } from "./api.ts";
+import { getProviderKind, isGoogleUrlContextModel } from "./api.ts";
 import { urlContext, UrlContextSchema } from "./url_context.ts";
 import { webFetch, WebFetchSchema } from "./web_fetch.ts";
 import { webSearch, WebSearchSchema } from "./web_search.ts";
@@ -24,7 +24,7 @@ function supportsUrlContext(
       : currentModel;
     if (!model) return false;
     const transport = configured?.transport ?? "auto";
-    return isGoogleDeveloperModel(model) && getProviderKind(model, transport) === "google";
+    return isGoogleUrlContextModel(model, transport) && getProviderKind(model, transport) === "google";
   } catch {
     return false;
   }
@@ -67,12 +67,25 @@ export function createModelScopedToolManager(pi: Pick<ExtensionAPI, "getActiveTo
   return { sync };
 }
 
-function renderResult(result: AgentToolResult<any>, expanded: boolean, theme: any) {
+// Pi marks a tool invocation as failed only when execute() throws. Keep the
+// internal result envelopes for routing/tests, but surface errors at this boundary.
+function throwOnToolFailure<T extends AgentToolResult<any>>(result: T): T {
+  if ((result.details as { error?: unknown } | undefined)?.error) {
+    const message = result.content
+      .filter((part) => part.type === "text")
+      .map((part) => part.text)
+      .join("\n");
+    throw new Error(message || "Web tool failed.");
+  }
+  return result;
+}
+
+function renderResult(result: AgentToolResult<any>, expanded: boolean, theme: any, executionError = false) {
   const output = result.content
     .filter((part) => part.type === "text")
     .map((part: any) => part.text)
     .join("\n");
-  const isError = Boolean(result.details?.error);
+  const isError = executionError || Boolean(result.details?.error);
   if (!expanded && !isError) return new Text("", 0, 0);
   return new Text(theme.fg(isError ? "error" : "toolOutput", output), 0, 0);
 }
@@ -83,14 +96,14 @@ export default function registerPiWebSearch(pi: ExtensionAPI) {
     label: "Web Search",
     description: "Search the web with an LLM provider's built-in web search or a configured Search API. Auto mode prefers LLM search and falls back to API search as configured.",
     parameters: WebSearchSchema,
-    execute: (id, params, signal = new AbortController().signal, onUpdate, ctx) =>
-      webSearch(id, params, signal, onUpdate, ctx, pi.getThinkingLevel()),
+    execute: async (id, params, signal = new AbortController().signal, onUpdate, ctx) =>
+      throwOnToolFailure(await webSearch(id, params, signal, onUpdate, ctx, pi.getThinkingLevel())),
     renderCall(args, theme) {
       const suffix = args.mode ? theme.fg("muted", ` [${args.mode}]`) : "";
       return new Text(`${theme.fg("toolTitle", theme.bold(WEB_SEARCH_TOOL))} ${theme.fg("accent", args.query || "…")}${suffix}`, 0, 0);
     },
-    renderResult(result, { expanded }, theme) {
-      return renderResult(result, expanded, theme);
+    renderResult(result, { expanded }, theme, context) {
+      return renderResult(result, expanded, theme, context.isError);
     },
   });
 
@@ -99,7 +112,8 @@ export default function registerPiWebSearch(pi: ExtensionAPI) {
     label: "URL Context",
     description: "Analyze up to 20 public URLs with built-in URL Context from Google Gemini Developer API or Vertex Express; public YouTube URLs are handled as video input.",
     parameters: UrlContextSchema,
-    execute: urlContext,
+    execute: async (id, params, signal = new AbortController().signal, onUpdate, ctx) =>
+      throwOnToolFailure(await urlContext(id, params, signal, onUpdate, ctx)),
   });
 
   pi.registerTool({
@@ -107,7 +121,8 @@ export default function registerPiWebSearch(pi: ExtensionAPI) {
     label: "Web Fetch",
     description: "Read one HTTP(S) URL and return its content through a hosted fetch provider or built-in HTML-to-text extraction.",
     parameters: WebFetchSchema,
-    execute: webFetch,
+    execute: async (id, params, signal = new AbortController().signal, onUpdate, ctx) =>
+      throwOnToolFailure(await webFetch(id, params, signal, onUpdate, ctx)),
   });
 
   const manager = createModelScopedToolManager(pi);

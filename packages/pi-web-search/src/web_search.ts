@@ -49,13 +49,21 @@ export function classifySearchFailure(error: unknown, signal?: AbortSignal): Sea
   if (signal?.aborted) return "aborted";
   if (error instanceof UnsupportedLlmSearchError) return "unsupported";
   const message = messageOf(error).toLowerCase();
+  // Explicit validation errors can contain arbitrary model IDs (including
+  // "401", "api-key", "abort" or "unsupported"); do not classify those IDs.
+  if (message.startsWith("invalid request:")) return "invalid-request";
   if (message.includes("abort")) return "aborted";
-  if (message.includes("unsupported") || message.includes("does not support") || message.includes("not support native")) return "unsupported";
-  if (message.includes("429") || message.includes("rate limit") || message.includes("too many requests")) return "rate-limit";
-  if (message.includes("402") || message.includes("quota") || message.includes("credit") || message.includes("billing")) return "quota";
-  if (message.includes("timed out") || message.includes("timeout")) return "timeout";
-  if (message.includes("401") || message.includes("403") || message.includes("api key") || message.includes("authentication") || message.includes("unauthorized")) return "auth";
+  if (message.includes("401") || message.includes("403") || message.includes("api key") || message.includes("api_key") || message.includes("authentication") || message.includes("unauthorized")) return "auth";
   if (message.includes("invalid request") || message.includes("bad request") || message.includes("400")) return "invalid-request";
+  if (message.includes("unsupported") || message.includes("does not support") || message.includes("not support native")) return "unsupported";
+  // Google uses 429 for both transient throttling and exhausted daily quota.
+  // Per-minute/token-per-minute quotas remain throttling, not exhausted credit.
+  const quota = message.includes("402") || message.includes("quota") || message.includes("credit") || message.includes("billing");
+  const shortTermQuota = /per[ _-]?minute|per[ _-]?second|\/(?:min|s)\b/.test(message);
+  if (quota && !shortTermQuota) return "quota";
+  if (message.includes("429") || message.includes("rate limit") || message.includes("too many requests")) return "rate-limit";
+  if (quota) return "quota";
+  if (message.includes("timed out") || message.includes("timeout")) return "timeout";
   if (message.includes("fetch failed") || message.includes("network") || message.includes("enotfound") || message.includes("econnreset") || message.includes("econnrefused")) return "network";
   if (message.includes("invalid response") || message.includes("malformed") || message.includes("empty response")) return "invalid-response";
   return "unknown";

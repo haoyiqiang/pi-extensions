@@ -93,13 +93,14 @@ export function isGoogleDeveloperModel(model: Model<Api>): boolean {
     return model.provider === "google-generative-ai" || model.api === "google-generative-ai";
 }
 
+/** Vertex/ADC is not a raw transport; Vertex models are supported only when Express is explicit. */
+export function isGoogleUrlContextModel(model: Model<Api>, transport: LlmTransport = "auto"): boolean {
+    return isGoogleDeveloperModel(model)
+        || (transport === "vertex-express" && model.api === "google-vertex");
+}
+
 export function getProviderKind(model: Model<Api>, transport: LlmTransport = "auto"): ProviderKind {
-    if (
-        isGoogleDeveloperModel(model)
-        && (transport === "vertex-express" || transport === "google-developer")
-    ) {
-        return "google";
-    }
+    if (isGoogleUrlContextModel(model, transport)) return "google";
     if (model.provider === "antigravity" || model.api === "antigravity") return "google";
     if (GOOGLE_PROVIDERS[model.provider] || GOOGLE_PROVIDERS[model.api]) return "google";
     if (model.provider === "xai" && model.api === "openai-responses") return "xai";
@@ -113,7 +114,7 @@ export function getProviderKind(model: Model<Api>, transport: LlmTransport = "au
 }
 
 export function getConfig(model: Model<Api>, transport: LlmTransport = "auto"): ProviderConfig {
-    if (isGoogleDeveloperModel(model) && transport === "vertex-express") {
+    if (isGoogleUrlContextModel(model, transport) && transport === "vertex-express") {
         return VERTEX_EXPRESS_CONFIG;
     }
     if (isGoogleDeveloperModel(model) && transport === "google-developer") {

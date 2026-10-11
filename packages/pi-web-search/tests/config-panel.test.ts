@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
 import { openWebSearchConfigPanel } from "../src/config-panel.ts";
+import { loadWebSearchConfig, saveWebSearchConfig } from "../src/config.ts";
 
 async function withPanelEnvironment(run: (path: string) => Promise<void>) {
   const previousConfig = process.env.PI_WEB_SEARCH_CONFIG;
@@ -109,5 +110,41 @@ test("configuration panel selects an API provider and stores its credential", as
     const config = JSON.parse(await readFile(path, "utf8"));
     assert.equal(config.api.provider, "tavily");
     assert.equal(config.api.apiKeys.tavily, "tavily-panel-key");
+  });
+});
+
+test("clearing a legacy API key in the panel remains cleared after reload and another save", async () => {
+  await withPanelEnvironment(async (path) => {
+    const legacy = join(process.env.XDG_CONFIG_HOME!, "rpiv-web-tools", "config.json");
+    await mkdir(dirname(legacy), { recursive: true });
+    await writeFile(legacy, JSON.stringify({ provider: "tavily", apiKeys: { tavily: "legacy-key" } }));
+    let calls = 0;
+    const { ctx } = panelContext(async (_title, choices) => {
+      if (++calls === 1) return choices.find((choice) => choice.startsWith("API credential:"));
+      return choices.at(-1);
+    }, async () => "-");
+    await openWebSearchConfigPanel(ctx);
+    assert.equal(loadWebSearchConfig().config.api?.apiKeys?.tavily, null);
+    assert.equal(saveWebSearchConfig({ ...loadWebSearchConfig().config, mode: "api" }).ok, true);
+    assert.equal(loadWebSearchConfig().config.api?.apiKeys?.tavily, null);
+    const saved = JSON.parse(await readFile(path, "utf8"));
+    assert.equal(saved.api.apiKeys.tavily, null);
+  });
+});
+
+test("clearing a legacy base URL restores the default instead of the legacy URL", async () => {
+  await withPanelEnvironment(async (path) => {
+    const legacy = join(process.env.XDG_CONFIG_HOME!, "rpiv-web-tools", "config.json");
+    await mkdir(dirname(legacy), { recursive: true });
+    await writeFile(legacy, JSON.stringify({ provider: "searxng", baseUrls: { searxng: "http://legacy.invalid:8888" } }));
+    let calls = 0;
+    const { ctx } = panelContext(async (_title, choices) => {
+      if (++calls === 1) return choices.find((choice) => choice.startsWith("API base URL:"));
+      assert.ok(choices.some((choice) => choice === "API base URL: http://localhost:8080"));
+      return choices.at(-1);
+    }, async () => "-");
+    await openWebSearchConfigPanel(ctx);
+    assert.equal(loadWebSearchConfig().config.api?.baseUrls?.searxng, null);
+    assert.equal(JSON.parse(await readFile(path, "utf8")).api.baseUrls.searxng, null);
   });
 });

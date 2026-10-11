@@ -21,7 +21,7 @@ export interface ApiSearchInput {
   max_results?: number;
 }
 
-function nonEmpty(value: string | undefined): string | undefined {
+function nonEmpty(value: string | null | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed || undefined;
 }

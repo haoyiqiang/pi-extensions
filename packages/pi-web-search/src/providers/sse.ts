@@ -10,22 +10,23 @@ export async function readSseEvents(
     signal: AbortSignal | undefined,
     onEvent: (event: SseEvent) => boolean | void | Promise<boolean | void>
 ): Promise<void> {
+    signal?.throwIfAborted();
     if (!response.body) {
-        throw new Error("The response has no body.");
+        throw new Error("Invalid response: the SSE response has no body.");
     }
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
-    let currentEventData = "";
+    let currentEventData: string[] = [];
     let currentEventName = "";
+    let eventCount = 0;
     let stopRequested = false;
     let reachedEof = false;
 
     const flushEvent = async (): Promise<boolean> => {
-        if (!currentEventData) return false;
-        const raw = currentEventData.trim();
-        currentEventData = "";
+        const raw = currentEventData.join("\n").trim();
+        currentEventData = [];
         const eventName = currentEventName;
         currentEventName = "";
         if (!raw || raw === "[DONE]") return false;
@@ -34,54 +35,65 @@ export async function readSseEvents(
         try {
             data = JSON.parse(raw);
         } catch {
-            return false;
+            throw new Error("Invalid response: malformed JSON in an SSE data event.");
         }
-        return await onEvent({ event: eventName, data }) === true;
+        if (!data || typeof data !== "object" || Array.isArray(data)) {
+            throw new Error("Invalid response: an SSE data event must contain a JSON object.");
+        }
+        eventCount++;
+        const stop = await onEvent({ event: eventName, data }) === true;
+        signal?.throwIfAborted();
+        return stop;
     };
 
+    const processLine = async (line: string): Promise<boolean> => {
+        if (!line) return flushEvent();
+        if (line.startsWith("data:")) {
+            currentEventData.push(line.slice(5).replace(/^ /, ""));
+        } else if (line.startsWith("event:")) {
+            currentEventName = line.slice(6).trim();
+        }
+        return false;
+    };
+
+    // Cancel a pending read as well as checking between chunks. Mock streams and
+    // custom transports do not necessarily wire the request signal to their body.
+    const onAbort = () => { void reader.cancel().catch(() => {}); };
+    signal?.addEventListener("abort", onAbort, { once: true });
     try {
         readLoop: while (true) {
-            if (signal?.aborted) {
-                throw new Error("The request was aborted.");
-            }
-
+            signal?.throwIfAborted();
             const { done, value } = await reader.read();
+            signal?.throwIfAborted();
+            buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
+
+            // Keep a trailing CR until the next chunk to distinguish CRLF from
+            // a standalone CR. Both are valid SSE line endings.
+            let lineEnd: number;
+            while ((lineEnd = buffer.search(/[\r\n]/)) >= 0) {
+                if (!done && buffer[lineEnd] === "\r" && lineEnd === buffer.length - 1) break;
+                const line = buffer.slice(0, lineEnd);
+                const separatorLength = buffer[lineEnd] === "\r" && buffer[lineEnd + 1] === "\n" ? 2 : 1;
+                buffer = buffer.slice(lineEnd + separatorLength);
+                if (await processLine(line)) {
+                    stopRequested = true;
+                    break readLoop;
+                }
+            }
             if (done) {
                 reachedEof = true;
                 break;
             }
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split("\n");
-            buffer = lines.pop() || "";
-
-            for (const line of lines) {
-                if (line === "" || line === "\r") {
-                    if (await flushEvent()) {
-                        stopRequested = true;
-                        break readLoop;
-                    }
-                    continue;
-                }
-
-                if (line.startsWith("data:")) {
-                    const data = line.slice(5).trim();
-                    currentEventData = currentEventData ? currentEventData + "\n" + data : data;
-                } else if (line.startsWith("event:")) {
-                    currentEventName = line.slice(6).trim();
-                }
-            }
         }
 
-        if (!stopRequested && buffer.trim()) {
-            const line = buffer.trim();
-            if (line.startsWith("data:")) {
-                const data = line.slice(5).trim();
-                currentEventData = currentEventData ? currentEventData + "\n" + data : data;
-            }
+        if (!stopRequested && buffer) stopRequested = await processLine(buffer);
+        if (!stopRequested) await flushEvent();
+        signal?.throwIfAborted();
+        if (eventCount === 0) {
+            throw new Error("Invalid response: the SSE stream contained no JSON data events.");
         }
-        if (!stopRequested) stopRequested = await flushEvent();
     } finally {
+        signal?.removeEventListener("abort", onAbort);
         if (!reachedEof) {
             try {
                 await reader.cancel();

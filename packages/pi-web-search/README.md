@@ -45,11 +45,13 @@ The default fallback policy is conservative:
 
 Optional reasons are `unsupported`, `quota`, `rate-limit`, `network`, `timeout`, and `invalid-response`. Authentication, invalid-request, cancellation, and unknown errors never fall back. Requests containing `urls` never fall back to API search because that would silently discard URL-analysis semantics.
 
+Empty or malformed LLM streams are `invalid-response`, not successful answers. Native search errors are surfaced rather than counted as grounding. Daily quota exhaustion is distinguished from short-term throttling even when both use HTTP 429.
+
 ### Result contract
 
 Every successful result is a Pi `AgentToolResult`. Inspect `details.modeUsed` as the discriminator.
 
-LLM search returns a generated grounded answer in `content` and details including:
+LLM search returns a generated answer in `content`; inspect `grounded` and `sources` to verify grounding. Details include:
 
 ```ts
 {
@@ -83,7 +85,7 @@ API search returns a bounded title/URL/snippet list and:
 }
 ```
 
-No API provider chain is attempted: an API failure is returned directly.
+No API provider chain is attempted. Failed registered tool calls throw so Pi records an error, rather than a successful result containing an error message.
 
 ## `url_context`
 
@@ -109,7 +111,7 @@ POST https://aiplatform.googleapis.com/v1/
 x-goog-api-key: ...
 ```
 
-Standard Vertex project/location/ADC authentication is not yet implemented.
+Set `llm.transport` to `vertex-express` explicitly. Both Gemini Developer API models and native `google-vertex` models can use this transport with a real Google Cloud API key. Native Vertex models are not automatically redirected to Express. Standard Vertex project/location/ADC authentication is not implemented; ADC credentials are rejected rather than sent as API keys.
 
 Ollama is intentionally not a `url_context` backend. As an API provider it retains the original rpiv-web-tools search and `web_fetch` endpoints.
 
@@ -128,7 +130,9 @@ Dispatch order, matching rpiv-web-tools:
 2. the selected provider's fetch endpoint when available, including local/cloud Ollama;
 3. direct HTTP plus lightweight HTML-to-text extraction for search-only providers.
 
-GitHub extraction is off by default. When enabled, it prefers `gh`, falls back to `git` for cloning, and uses the GitHub API as a bounded fallback. Clones are cached under the configured temporary clone path. Optional external commands are detected at runtime.
+Direct HTTP is used when the provider has no fetch capability, not when its fetch endpoint fails. There is no silent provider-to-HTTP retry.
+
+GitHub extraction is off by default. When enabled, it prefers `gh`, falls back to `git` for cloning, and uses the GitHub API as a bounded fallback. Clones are cached under the configured temporary clone path. Optional external commands are detected at runtime. Encoded slash-containing refs such as `feature%2Fone` are supported without using the ref as a filesystem path. Repository file reads, including README files, skip symlinks that escape the clone root.
 
 Direct HTTP fetches reject non-HTTP protocols, URL credentials, literal private/loopback hosts, DNS resolutions to private addresses, and redirects to private addresses. Image, audio, and video response bodies are rejected.
 
@@ -171,7 +175,9 @@ The default file is `~/.pi/agent/web-search.json`. `PI_CODING_AGENT_DIR` is resp
 }
 ```
 
-Legacy top-level `{ "provider": "...", "model": "..." }` in `web-search.json` is treated as the LLM model override. If present, the old XDG-aware `rpiv-web-tools/config.json` is read as a fallback for `provider`, `apiKeys`, `baseUrls`, the legacy Brave `apiKey`, and `interceptors.github`; the unified config wins on matching fields, and neither legacy file is modified or deleted.
+Legacy top-level `{ "provider": "...", "model": "..." }` or `{ "provider": "...", "modelId": "..." }` in `web-search.json` is treated as the LLM model override. Provider and model must be configured together; incomplete overrides or missing configured models fail instead of silently using the current model or API search. If present, the old XDG-aware `rpiv-web-tools/config.json` is read as a fallback for `provider`, `apiKeys`, `baseUrls`, the legacy Brave `apiKey`, and `interceptors.github`; the unified config wins on matching fields, and neither legacy file is modified or deleted.
+
+Enter `-` in the panel to clear a stored API key or base URL. The unified file stores `null` for that provider's entry so the old value is not reimported on the next load. A cleared base URL uses the provider default. Explicit environment variables still take precedence.
 
 The panel exposes the normal GitHub on/off switch. Advanced compatibility options remain available as `{ "enabled": true, "maxRepoSizeMB": 350, "cloneTimeoutSeconds": 30, "clonePath": "..." }`.
 
@@ -179,7 +185,7 @@ API provider resolution is: per-call `provider` → `PI_WEB_SEARCH_API_PROVIDER`
 
 Common environment variables include `BRAVE_SEARCH_API_KEY`, `TAVILY_API_KEY`, `SERPER_API_KEY`, `EXA_API_KEY`, `YOUCOM_API_KEY`, `JINA_API_KEY`, `FIRECRAWL_API_KEY`, `PERPLEXITY_API_KEY`, `SEARXNG_URL`, and `OLLAMA_HOST`.
 
-Model authentication is resolved through Pi's model registry, including a resolved base URL. Raw search transports do not add provider session headers.
+Model authentication is resolved through Pi's model registry, including provider-scoped environment settings and a resolved base URL. Raw transports preserve OpenCode's per-session routing headers, use Bearer authentication for Copilot Anthropic models, and honor Azure API-key authentication and endpoint/deployment settings (`AZURE_OPENAI_BASE_URL`, `AZURE_OPENAI_RESOURCE_NAME`, `AZURE_OPENAI_API_VERSION`, and `AZURE_OPENAI_DEPLOYMENT_NAME_MAP`). Explicit registry/model endpoints take precedence over ambient endpoint defaults.
 
 ## Development
 

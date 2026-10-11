@@ -34,7 +34,7 @@ async function selectChoice<T extends string>(
   return choices.find((choice) => choice.label === selected)?.id;
 }
 
-function maskSecret(value: string | undefined): string {
+function maskSecret(value: string | null | undefined): string {
   if (!value) return "Not configured";
   if (value.length <= 8) return "••••••••";
   return `${value.slice(0, 4)}…${value.slice(-4)}`;
@@ -147,7 +147,9 @@ async function configureMode(ctx: ExtensionCommandContext, config: WebSearchConf
 async function configureLlmModel(ctx: ExtensionCommandContext, config: WebSearchConfig): Promise<WebSearchConfig> {
   let models: Model<Api>[] = [];
   try {
-    models = ctx.modelRegistry.getAvailable().filter(isSupportedSearchModel);
+    models = ctx.modelRegistry.getAvailable().filter((model) =>
+      isSupportedSearchModel(model, config.llm?.transport ?? "auto"),
+    );
   } catch {
     models = [];
   }
@@ -219,7 +221,7 @@ async function configureApiCredential(ctx: ExtensionCommandContext, config: WebS
   const trimmed = value.trim();
   if (!trimmed) return config;
   const apiKeys = { ...(config.api?.apiKeys ?? {}) };
-  if (trimmed === CLEAR_VALUE) delete apiKeys[provider];
+  if (trimmed === CLEAR_VALUE) apiKeys[provider] = null;
   else apiKeys[provider] = trimmed;
   return { ...config, api: { ...config.api, provider, apiKeys } };
 }
@@ -239,7 +241,7 @@ async function configureApiBaseUrl(ctx: ExtensionCommandContext, config: WebSear
   const trimmed = value.trim();
   if (!trimmed) return config;
   const baseUrls = { ...(config.api?.baseUrls ?? {}) };
-  if (trimmed === CLEAR_VALUE) delete baseUrls[provider];
+  if (trimmed === CLEAR_VALUE) baseUrls[provider] = null;
   else baseUrls[provider] = trimmed;
   return { ...config, api: { ...config.api, provider, baseUrls } };
 }

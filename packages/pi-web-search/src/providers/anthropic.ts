@@ -23,25 +23,32 @@ export async function callAnthropicStream(
     }
 
     const isOAuth = !!auth.apiKey && auth.apiKey.includes("sk-ant-oat");
-    const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-        "Accept": "text/event-stream",
-        "anthropic-version": "2023-06-01",
-        ...(model.headers || {}),
-        ...(auth.headers || {}),
+    const headerOverrides = new Map([
+        ...Object.entries(model.headers || {}), ...Object.entries(auth.headers || {}),
+    ].map(([name, value]) => [name.toLowerCase(), value] as const));
+    const headers = new Headers();
+    for (const [name, value] of headerOverrides) {
+        if (value !== null) headers.set(name, value);
+    }
+    const setDefaultHeader = (name: string, value: string) => {
+        if (!headers.has(name) && headerOverrides.get(name.toLowerCase()) !== null) headers.set(name, value);
     };
+    setDefaultHeader("Content-Type", "application/json");
+    setDefaultHeader("Accept", "text/event-stream");
+    setDefaultHeader("anthropic-version", "2023-06-01");
 
     if (auth.apiKey) {
         if (isOAuth) {
-            if (!headers.Authorization && !headers.authorization) headers.Authorization = `Bearer ${auth.apiKey}`;
-            headers["anthropic-beta"] = headers["anthropic-beta"]
-                ? `${headers["anthropic-beta"]},claude-code-20250219,oauth-2025-04-20`
-                : "claude-code-20250219,oauth-2025-04-20";
+            setDefaultHeader("Authorization", `Bearer ${auth.apiKey}`);
+            const beta = headers.get("anthropic-beta");
+            if (headerOverrides.get("anthropic-beta") !== null) {
+                headers.set("anthropic-beta", [beta, "claude-code-20250219", "oauth-2025-04-20"].filter(Boolean).join(","));
+            }
             // Anthropic rejects OAuth requests from anything older than 2.1.251.
-            headers["user-agent"] = headers["user-agent"] || "claude-cli/2.1.251";
-            headers["x-app"] = headers["x-app"] || "cli";
-        } else if (!headers["x-api-key"] && !headers["X-Api-Key"]) {
-            headers["x-api-key"] = auth.apiKey;
+            setDefaultHeader("user-agent", "claude-cli/2.1.251");
+            setDefaultHeader("x-app", "cli");
+        } else if (!headers.has("Authorization")) {
+            setDefaultHeader("x-api-key", auth.apiKey);
         }
     }
 
@@ -60,7 +67,7 @@ export async function callAnthropicStream(
     const baseUrl = auth.baseUrl ?? model.baseUrl;
     const response = await fetch(resolveAnthropicMessagesUrl(baseUrl), {
         method: "POST",
-        headers,
+        headers: Object.fromEntries(headers.entries()),
         body: JSON.stringify(requestBody),
         signal
     });
@@ -74,6 +81,22 @@ export async function callAnthropicStream(
     const llmSearchEvents: string[] = [];
     const llmSearchCalls: LlmSearchCallDetail[] = [];
     const searchResults: SearchResultDetail[] = [];
+    const toolInputs = new Map<number, { call: LlmSearchCallDetail; json: string }>();
+
+    const finishToolInput = (index: number) => {
+        const input = toolInputs.get(index);
+        if (!input) return;
+        toolInputs.delete(index);
+        if (!input.json) return;
+        let parsed: any;
+        try {
+            parsed = JSON.parse(input.json);
+        } catch {
+            throw new Error("Invalid response: malformed Anthropic web search input JSON.");
+        }
+        if (typeof parsed?.query === "string") input.call.queries = [parsed.query];
+        input.call.raw = { ...input.call.raw, input: parsed };
+    };
 
     const collectSource = (source: any, toolUseId?: string) => {
         if (!source?.url) return;
@@ -92,19 +115,21 @@ export async function callAnthropicStream(
     await readSseEvents(response, signal, ({ data: event }) => {
         if (event.type === "content_block_start") {
             const block = event.content_block;
-            if (block?.type === "text" && block.text) {
+            if (block?.type === "text" && typeof block.text === "string") {
                 accumulatedText += block.text;
                 onUpdate?.({ content: [{ type: "text", text: accumulatedText }], details: { streaming: true } });
             } else if (block?.type === "server_tool_use" && block.name === "web_search") {
                 pushLlmSearchEvent(llmSearchEvents, "anthropic.content_block_start.server_tool_use.web_search");
-                llmSearchCalls.push({
+                const call: LlmSearchCallDetail = {
                     id: block.id,
                     provider: "anthropic",
                     status: "in_progress",
                     actionType: block.name,
                     queries: typeof block.input?.query === "string" ? [block.input.query] : undefined,
                     raw: block,
-                });
+                };
+                llmSearchCalls.push(call);
+                toolInputs.set(event.index ?? 0, { call, json: "" });
                 onUpdate?.({
                     content: [{ type: "text", text: accumulatedText || `Searching the web with ${"Anthropic"}...` }],
                     details: { streaming: true, searching: true }
@@ -112,27 +137,35 @@ export async function callAnthropicStream(
             } else if (block?.type === "web_search_tool_result") {
                 pushLlmSearchEvent(llmSearchEvents, "anthropic.content_block_start.web_search_tool_result");
                 const call = llmSearchCalls.find((item) => item.id === block.tool_use_id);
+                const toolError = Array.isArray(block.content)
+                    ? block.content.find((item: any) => item?.type === "web_search_tool_result_error")
+                    : block.content?.type === "web_search_tool_result_error" ? block.content : undefined;
+                if (toolError) {
+                    if (call) call.status = "failed";
+                    const code = toolError.error_code || "unknown";
+                    const description = code === "too_many_requests" ? "rate limit: too many requests"
+                        : code === "max_uses_exceeded" ? "per-request web search use limit reached"
+                        : code === "invalid_input" ? "invalid request: web search input rejected"
+                        : "web search tool failed";
+                    throw new Error(`Anthropic web search failed (${code}): ${description}.`);
+                }
                 if (call) call.status = "completed";
                 else llmSearchCalls.push({ id: block.tool_use_id, provider: "anthropic", status: "completed", actionType: "web_search", raw: block });
                 if (Array.isArray(block.content)) {
                     for (const result of block.content) collectSource(result, block.tool_use_id);
-                } else if (block.content?.type === "web_search_tool_result_error") {
-                    pushUniqueSearchResult(searchResults, {
-                        status: block.content.error_code,
-                        source: "anthropic.web_search_tool_result_error",
-                        type: block.content.type,
-                        raw: block,
-                    });
                 }
             }
         } else if (event.type === "content_block_delta") {
             const delta = event.delta;
-            if (delta?.type === "text_delta") {
+            if (delta?.type === "text_delta" && typeof delta.text === "string") {
                 accumulatedText += delta.text || "";
                 onUpdate?.({
                     content: [{ type: "text", text: accumulatedText }],
                     details: { streaming: true }
                 });
+            } else if (delta?.type === "input_json_delta") {
+                const input = toolInputs.get(event.index ?? 0);
+                if (input && typeof delta.partial_json === "string") input.json += delta.partial_json;
             } else if (delta?.type === "citations_delta") {
                 const citation = delta.citation;
                 if (citation?.type === "web_search_result_location" && citation.url) {
@@ -148,11 +181,15 @@ export async function callAnthropicStream(
                     pushUniqueSearchResult(searchResults, detail);
                 }
             }
+        } else if (event.type === "content_block_stop") {
+            finishToolInput(event.index ?? 0);
         } else if (event.type === "error") {
             throw new Error(event.error?.message || JSON.stringify(event.error || event));
         }
     });
-
+    // Some compatible endpoints omit block_stop; a complete delta input at EOF
+    // is still useful, and does not require a particular terminal event.
+    for (const index of toolInputs.keys()) finishToolInput(index);
     const cited = applyTextCitations(accumulatedText || "No answer was returned.", citations);
     const citationDetails = citations.map((citation) => ({
         title: citation.title || titleFromUrl(citation.url),
@@ -167,6 +204,9 @@ export async function callAnthropicStream(
     const sanitizedCitations = sanitizeSearchResults(citationDetails);
     mergeSearchResultMetadata(sanitizedSearchResults, sanitizedCitations);
     const derivedSources = deriveSources(sanitizedSearchResults, sanitizedCitations);
+    if (!accumulatedText.trim() && sanitizedSearchResults.length === 0 && sanitizedCitations.length === 0) {
+        throw new Error("Invalid response: Anthropic returned no answer or web search results.");
+    }
 
     return {
         text: cited.text,

@@ -1,6 +1,6 @@
 import type { AgentToolUpdateCallback, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "typebox";
-import { callApiStream, getConfig, isGoogleDeveloperModel } from "./api.ts";
+import { callApiStream, getConfig, isGoogleUrlContextModel } from "./api.ts";
 import { loadWebSearchConfig, resolveConfiguredLlm } from "./config.ts";
 import { formatResult, formatUrlContextResult } from "./format.ts";
 import { describeModel, getUrlContextModel } from "./utils.ts";
@@ -44,12 +44,19 @@ export async function urlContext(
     });
   }
 
-  const model = await getUrlContextModel(ctx, config);
+  let model;
+  try {
+    model = await getUrlContextModel(ctx, config);
+  } catch (error) {
+    return formatResult(`Search failed: ${error instanceof Error ? error.message : String(error)}`, {
+      error: "invalid_request",
+    });
+  }
   const transport = resolveConfiguredLlm(config)?.transport ?? "auto";
   const providerConfig = model ? getConfig(model, transport) : undefined;
   const isVertexExpress = transport === "vertex-express";
 
-  if (!model || !isGoogleDeveloperModel(model) || providerConfig?.kind !== "google") {
+  if (!model || !isGoogleUrlContextModel(model, transport) || providerConfig?.kind !== "google") {
     const current = ctx.model ? describeModel(ctx.model) : "none";
     return formatResult(`url_context requires a Google Gemini Developer API or Vertex Express model. Current model: ${current}.`, {
       error: "unsupported_provider",
