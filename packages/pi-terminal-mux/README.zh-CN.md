@@ -1,8 +1,6 @@
 # pi-terminal-mux
 
-终端多路复用器统一抽象层，供 pi 扩展复用。任何涉及终端交互（分屏、发命令、读屏、关屏、等待退出）的插件都应依赖本包，而不是各自重新实现 backend 探测与命令拼装。
-
-一套统一的 surface API 跨 **muxy、cmux、tmux、zellij、wezterm、herdr、otty、orca** 八个后端，探测不到任何后端时自动降级为 **headless**（后台子进程 + 日志文件）。
+供 Pi 扩展使用的终端 surface API，仅支持 **tmux**、**Orca** 和 **headless** 后台进程。
 
 [English README](./README.md)
 
@@ -12,139 +10,96 @@
 npm install pi-terminal-mux
 ```
 
-## 快速上手
+## 创建时启动命令
 
 ```ts
-import {
-  isMuxAvailable,
-  muxSetupHint,
-  createSurface,
-  createSurfaceSplit,
-  sendCommand,
-  sendLongCommand,
-  sendEscape,
-  readScreen,
-  closeSurface,
-  pollForExit,
-} from "pi-terminal-mux";
+import { createSurface, createSurfaceSplit, readScreen, closeSurface } from "pi-terminal-mux";
 
-if (!isMuxAvailable()) {
-  console.warn(muxSetupHint()); // 中英文安装提示，由 pi-utils 决定语言
-}
+const surface = createSurface("my-agent", {
+  command: "pi --session /tmp/child.jsonl",
+});
 
-// 智能放置：按后端策略分屏 / 堆叠 / 开 tab（headless 时返回 headless surface）
-const surface = createSurface("my-agent");
-
-// 长命令自动落脚本文件，避免终端宽度截断
-// （默认 Bash；Windows 上显式传 interpreter: "powershell" 切到 PowerShell）
-const scriptPath = sendLongCommand(surface, "pi --session abc", {
-  scriptPreamble: "export MY_FLAG=1",
+const sibling = createSurfaceSplit("review", "right", surface, {
+  command: "pi --session /tmp/review.jsonl",
 });
 
 const tail = readScreen(surface, 50);
-sendEscape(surface);
+closeSurface(sibling);
 closeSurface(surface);
 ```
 
-## 后端探测
+`command` 是可选的、非空的 **shell 命令字符串**，包含启动参数。动态值在 POSIX shell 中使用 `shellEscape()` 转义。这条路径不再另外调用 `sendCommand()`，也没有库内固定的 shell-ready 等待：
 
-| 后端 | 探测条件 |
-|------|----------|
-| muxy | `MUXY_SOCKET_PATH` + `muxy` 命令 |
-| cmux | `CMUX_SOCKET_PATH` + `cmux` 命令 |
-| tmux | `TMUX` + `tmux` 命令 |
-| zellij | `ZELLIJ` / `ZELLIJ_SESSION_NAME` + `zellij` 命令 |
-| wezterm | `WEZTERM_UNIX_SOCKET` + `wezterm` 命令 |
-| herdr | `HERDR_ENV=1` + `HERDR_PANE_ID` + `herdr` 命令（`tab` 模式还需要 `HERDR_WORKSPACE_ID`） |
-| otty | `TERM_PROGRAM=otty` + `otty` 命令 |
-| orca | `TERM_PROGRAM=Orca` + `orca` 命令 + Orca runtime 可达 |
+- **tmux**：将命令直接传给 `tmux split-window`，在创建 pane 时启动。
+- **Orca**：传给 `terminal create` / `terminal split` 的 `--command`。Orca 自己启动 shell 并提交命令，不等同于直接按 argv spawn 程序。
+- **Headless**：用 `bash -c` 启动命令，stdout/stderr 写入日志文件。
 
-默认优先级即上表顺序（muxy 优先）。可用环境变量强制指定后端：
+返回 handle 只证明创建/提交成功，不保证应用已就绪或任务成功。仍需使用应用自身的就绪信号、日志或退出协议。创建错误向上抛出；Orca 输入和读屏错误也会抛出，不再伪报成功。
 
-- `PI_TERMINAL_MUX`（推荐）：`muxy | cmux | tmux | zellij | wezterm | herdr | otty | orca`
-- `PI_SUBAGENT_MUX`：同上的向后兼容别名
+不传 options 的既有调用保持原来的行为：
 
-指定的后端运行环境不满足时 `getMuxBackend()` 返回 `null`，不会悄悄降级到其他后端。
+```ts
+import { createSurface, sendLongCommand } from "pi-terminal-mux";
 
-### Herdr surface 模式
-
-Herdr 默认保持向后兼容的广度优先分屏模式。设置 `PI_SUBAGENT_HERDR_MODE=tab` 后，每个 subagent 会创建独立后台 Tab；设置为 `split` 可显式选择原有分屏布局。`createSurfaceSplit()` 始终保留显式 pane 分屏语义。
-
-```bash
-export PI_SUBAGENT_HERDR_MODE=tab
+const surface = createSurface("my-agent");
+const scriptPath = sendLongCommand(surface, "pi --session /tmp/child.jsonl", {
+  scriptPreamble: "export MY_FLAG=1",
+});
 ```
 
-## API 概览
+`sendLongCommand` 先写脚本，再向终端提交 `bash <script>`，仍供旧调用和长命令使用。已经在创建时传入的启动命令不要再发送一次，否则会重复执行。
 
-### 统一 surface API（跨后端语义一致）
+## 后端探测
 
-| 函数 | 说明 |
+| 后端 | 条件 |
 |------|------|
-| `createSurface(name)` | 智能放置新 surface（herdr 默认广度优先分屏，设置 `PI_SUBAGENT_HERDR_MODE=tab` 后每个 surface 创建独立后台 Tab；cmux 首次右分屏后续开 tab、zellij tab 感知平铺/堆叠、muxy/otty/orca 广度优先分屏；orca 缺少 agent handle 时新建 tab），返回 surface 标识 |
-| `createSurfaceSplit(name, direction, fromSurface?, options?)` | 指定方向（left/right/up/down）分屏；`options.activate`（仅 wezterm，默认 false）分屏后聚焦新 pane |
-| `sendCommand(surface, command)` | 发送命令并回车执行 |
-| `sendLongCommand(surface, command, opts?)` | 长命令先写脚本文件再执行；`opts.scriptPreamble` 可注入前置片段；`opts.interpreter`（默认 `"bash"`，Windows 可显式 `"powershell"`）选择脚本运行时；返回脚本路径 |
-| `sendEscape(surface)` | 发送一次 ESC |
-| `readScreen(surface, lines?, options?)` / `readScreenAsync` | 读取屏幕尾部 N 行；`options.source`（仅 herdr）透传 herdr 读屏来源（如 `"recent_unwrapped"`），其他后端忽略 |
-| `closeSurface(surface)` | 关闭 surface |
-| `renameSurface(surface, name)` / `renameAgent(surface, name)` | 重命名已知 surface 或 agent 标签 |
-| `getRenameCapability(operation, backend?, env?)` | 不执行命令，返回实际重命名目标，或明确的 `unsupported` / `disabled` 能力结果 |
-| `renameCurrentTab(title)` / `renameWorkspace(title)` | 执行重命名并返回可判别的 `renamed` / `unsupported` / `disabled` / `failed` 结果 |
-| `pollForExit(surface, signal, opts)` | 等待 surface 内进程退出：优先 `.exit` sidecar 文件，其次屏幕 sentinel（`__SUBAGENT_DONE_<code>__`），headless 走子进程 exit |
-| `getLastSplitSource()` / `clearLastSplitSource()` | 最近一次分屏的来源 pane（用于 UI 展示） |
+| tmux | 存在 `TMUX` 环境变量及 `tmux` 可执行文件 |
+| Orca | `TERM_PROGRAM=Orca`、存在 `orca` 可执行文件，且 runtime 可达 |
+| Headless | 上述终端后端均不可用 |
 
-各后端的实际目标不同：muxy/zellij 的 tab 重命名作用于 pane；tmux 作用于 window/session；WezTerm 的 workspace 重命名作用于 window；cmux 和 Herdr 提供原生 workspace 重命名；Otty、Orca 没有 workspace 重命名。`resolveTerminalRenameTargets` 是明确 ID 路径，忽略旧环境开关；`getRenameCapability`、`renameCurrentTab`、`renameWorkspace` 保持旧开关行为。Headless 会明确返回 `unsupported`，不再静默成功。
+自动探测优先 tmux，其次 Orca。可用 `PI_TERMINAL_MUX=tmux|orca` 强制指定；保留 `PI_SUBAGENT_MUX` 兼容别名。强制指定的后端不可用时不改选另一终端后端；未知或已移除的后端配置明确报错。
 
-### 探测与工具
+## API
 
-`getMuxBackend()`、`isMuxAvailable()`、`isHeadlessMode()`、`muxSetupHint()`、`getAgentPaneId(backend?)`、`backendAgentPaneEnvVar(backend)`、`shellEscape()`、`isFishShell()`、`exitStatusVar()`，以及 zellij 放置规划（`selectZellijPlacement` 等）与 cmux/otty JSON 解析等纯函数，均可直接引用做单元测试。
-
-### 后端原生 API
-
-各后端原生函数也从包入口透出（如 `createHerdrSurface`、`splitHerdrPane`、`readHerdrScreen`、`sendOttyCommand`、`renameOttyTab`、`createOrcaSurface`、`sendOrcaCommand`……），子路径导入亦可：`pi-terminal-mux/mux`、`pi-terminal-mux/herdr`、`pi-terminal-mux/otty`、`pi-terminal-mux/orca`。
-
-## Headless 模式
-
-探测不到任何后端时，`createSurface` 返回 `headless:` 前缀的 surface，`sendLongCommand` 直接 spawn 后台子进程并把输出写入日志文件，`readScreen`/`pollForExit`/`closeSurface` 语义保持不变，调用方无需特判。
-
-## Windows PowerShell 支持
-
-所有平台默认保持 **Bash** 作为脚本运行时，以不变更现有调用方语义。Windows 11 PowerShell/WezTerm/herdr 组合下显式开启：
-
-- **命令提交（wezterm）**：Enter 终止符在 `win32` 用 `\r`、其他平台用 `\n`，PowerShell 输入只会提交一次，不会停在续行提示。
-- **长命令（`sendLongCommand`）**：传 `interpreter: "powershell"` 会生成 `.ps1`，mux 通过 `powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File <path>` 执行、headless 走 `-Command "& <path>"`。显式 `scriptPath` 原样保留；自动路径按解释器选 `.ps1`/`.sh`。未传 interpreter 时保持既有 Bash command、`.sh` 路径与 `$?` 数值哨兵不变。
-- **读屏（`readScreen` / `readScreenAsync`）**：传 `{ source: "recent_unwrapped" }`（仅 herdr）选择 herdr 的软换行合并捕获；不传 options 时 herdr 保持 `recent`，其他后端保持各自读屏语义。
-
-这些都是可选项。既有 Bash 调用方仍使用默认 Bash 运行时。旧 interactive-subagents workspace 已退役。
-
-## 环境变量
-
-| 变量 | 说明 |
+| 函数 | 行为 |
 |------|------|
-| `PI_TERMINAL_MUX` / `PI_SUBAGENT_MUX` | 强制指定后端 |
-| `PI_SUBAGENT_ZELLIJ_MIN_COLUMNS` / `PI_SUBAGENT_ZELLIJ_MIN_ROWS` | zellij 分屏最小可用尺寸（默认 50×10，不满足时改堆叠） |
-| `PI_SUBAGENT_RENAME_TMUX_WINDOW` / `PI_SUBAGENT_RENAME_TMUX_SESSION` | tmux 下旧 `getRenameCapability` / `renameCurrentTab` / `renameWorkspace` 的兼容开关；明确目标解析忽略 |
-| `PI_SUBAGENT_HERDR_MODE` | herdr surface 放置模式：`split`（默认）或 `tab` |
-| `PI_SUBAGENT_RENAME_HERDR_WORKSPACE` | herdr 下旧 `getRenameCapability` / `renameWorkspace` 的兼容开关；明确目标解析忽略 |
-| `PI_EXTENSIONS_LOCALE` | 提示文案语言（`zh-CN` / `en-US` / `auto`），由 pi-utils 提供 |
+| `createSurface(name, options?)` | tmux 向右分屏；Orca 从调用方做 BFS 分屏，没有调用方 handle 时新建 tab；无后端时 headless。`options.command` 在创建时启动任务 |
+| `createSurfaceSplit(name, direction, fromSurface?, options?)` | 指定方向 left/right/up/down 分屏；可传 `options.command`。要求 tmux 或 Orca，headless 没有布局 |
+| `sendCommand(surface, command)` | 向现有终端发送文本并回车 |
+| `sendLongCommand(surface, command, options?)` | 先写脚本再执行；支持 `scriptPath`、`scriptPreamble` 和 `interpreter: "bash" | "powershell"` |
+| `sendEscape(surface)` | 发送 Escape；headless 使用 SIGINT |
+| `readScreen(surface, lines?)` / `readScreenAsync` | 读取终端输出或 headless 日志 |
+| `closeSurface(surface)` | 关闭 pane 或 headless 进程 |
+| `renameSurface(surface, name)` | 修改后端对应的 window/tab 名称 |
+| `getLastSplitSource()` / `clearLastSplitSource()` | 最近一次分屏来源 |
+| `pollForExit(surface, signal, options)` | 等待 `.exit` sidecar、sentinel 或 headless 进程退出 |
 
-## 设计约束
+`CreateSurfaceOptions` 和 `CreateSurfaceSplitOptions` 均提供 `command?: string`。分屏的前三个位置参数保持不变。
 
-- **不绑定具体机器**：全部后端通过运行时探测（环境变量 + 命令存在性）选择，零硬编码本机路径；外部 CLI 缺失时按后端逐个降级，最终落到 headless。
-- **用户文案国际化**：面向用户的提示走 [pi-utils](https://www.npmjs.com/package/pi-utils) catalog，中英文齐全。
-- **agent pane 锚定**：muxy/herdr/otty/orca 的 agent 自身 pane ID 在模块加载时捕获（`AGENT_MUXY_PANE_ID`、`AGENT_ORCA_TERMINAL_HANDLE` 等），不受用户后续焦点切换影响。
+探测工具包括 `getMuxBackend`、`isMuxAvailable`、`isHeadlessMode`、`muxSetupHint`、`getAgentPaneId`、`backendAgentPaneEnvVar`；shell 工具包括 `shellEscape`、`isFishShell`、`exitStatusVar`。
+
+统一 API 同样从 `pi-terminal-mux/mux` 导出；Orca 原生工具从 `pi-terminal-mux/orca` 导出。
+
+## 改名归属
+
+`createSurfaceRenameContext(surface)` 为子进程启动方生成 `PI_TERMINAL_RENAME_CONTEXT` 协议。每次启动和恢复都替换继承值。
+
+子 pane 不能证明独占 tmux window 或 Orca tab，因此子进程不获得共享 window/tab 或 workspace 改名权限。协议损坏时不退回父会话权限。
+
+普通会话使用 `resolveTerminalRenameTargets({ tab, workspace })` 解析明确身份，再通过 `renameTerminalTarget(reference, title)` 对捕获的目标执行，而不是使用 UI 焦点：
+
+- tmux：`tab` 对应 window，`workspace` 对应 session。
+- Orca：`tab` 对应终端 tab，不支持 `workspace`。
+- Headless：不支持终端改名。
+
+旧 `renameCurrentTab` / `renameWorkspace` 返回可判别的成功、不支持、禁用或失败结果。tmux 的旧入口分别要求 `PI_SUBAGENT_RENAME_TMUX_WINDOW=1` / `PI_SUBAGENT_RENAME_TMUX_SESSION=1`；明确 ID 的解析不受这两个开关影响。
+
+## 迁移
+
+`MuxBackend` 仅保留 tmux 和 Orca。其他后端实现、原生导出/子路径、WezTerm 的 `activate` 参数、Herdr 的读屏 source 参数已移除。请更新旧后端环境配置和导入路径。这是支持范围/API 的不兼容精简；既有 tmux/Orca 调用不传启动参数时保持兼容。
+
+代码不硬编码本地可执行文件路径；Orca 调用方 handle 在模块加载时捕获，后续焦点变化不会改变分屏来源。Headless 保留 Bash 默认运行时；需要 PowerShell 时显式使用 `sendLongCommand({ interpreter: "powershell" })`。
 
 ## License
 
 MIT
-
-
-## 按归属改名
-
-`createSurfaceRenameContext(surface)` 描述启动方可授予子进程的终端改名目标。把返回值序列化为 JSON 放入 `PI_TERMINAL_RENAME_CONTEXT`，**每次启动和恢复都替换继承值**。协议属于 terminal-mux，不属于命名或子代理插件。
-
-`resolveTerminalRenameTargets({ tab, workspace })` 返回明确的目标 ID、`surface`/`shared` 范围，或逐目标跳过/失败结果。`renameTerminalTarget(reference, title)` 对捕获的身份执行改名。调用方决定何时改、改哪些目标；库不生成标题，也不修改 Pi session。
-
-受限子进程不能改 workspace。cmux surface、muxy/zellij pane、Herdr pane 或明确新建的 Herdr tab 可以授予。tmux/WezTerm/Otty/Orca 的分屏不能证明独占 window/tab，改名会跳过，不扩大到共享父目标。普通会话必须能确定自身目标 ID；缺失时不退回当前焦点或第一个 tab。明确目标解析直接使用后端能力，独立于旧改名开关。
-
-协议 JSON 损坏或版本未知会报错，不能退回无限制范围。只有旧子代理身份标志、没有归属协议时，终端改名受限，直到启动方提供归属。此协议用于可信本地进程协作，不是安全沙箱。WezTerm/Otty 创建分屏时不会重命名共享 tab。

@@ -1,58 +1,31 @@
 /**
  * surface.ts — 统一 surface API（跨后端一致语义）
  *
- * 持有 Record<MuxBackend, BackendOps> 全键注册表，
- * createSurface / sendCommand / readScreen 等统一 API 通过查表派发到对应后端。
- *
- * 非对称操作（renameCurrentTab / renameWorkspace / sendLongCommand / pollForExit）
- * 按现状直接调用各 backend 公开函数，不进 BackendOps。
+ * tmux / Orca 使用原生创建命令，无终端时支持 headless 后台进程。
+ * 其他 surface 操作通过 BackendOps 派发。
  */
 
-import { execSync, execFileSync, execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-import { getMuxBackend, isMuxAvailable, muxLog, muxSetupHint, AGENT_MUXY_PANE_ID } from "./detection.ts";
-import { isHeadlessSurface, isHeadlessMode, createHeadlessSurface, closeHeadlessSurface, sendHeadlessEscape, readHeadlessScreen, readHeadlessScreenAsync, spawnHeadlessProcess, getHeadlessProcessExit, drainHeadlessProcess } from "./headless.ts";
+import { getMuxBackend, muxLog, muxSetupHint } from "./detection.ts";
+import { isHeadlessSurface, createHeadlessSurface, closeHeadlessSurface, sendHeadlessEscape, readHeadlessScreen, readHeadlessScreenAsync, spawnHeadlessProcess, getHeadlessProcessExit, drainHeadlessProcess } from "./headless.ts";
 import { shellEscape, powershellEscape } from "./shell.ts";
 import type { MuxBackend } from "./detection.ts";
-import type { BackendOps } from "./backends/types.ts";
-
-import { ops as muxyOps } from "./backends/muxy.ts";
-import { ops as cmuxOps } from "./backends/cmux.ts";
+import type { BackendOps, CreateSurfaceOptions } from "./backends/types.ts";
 import { ops as tmuxOps } from "./backends/tmux.ts";
-import { ops as zellijOps } from "./backends/zellij.ts";
-import { ops as weztermOps } from "./backends/wezterm.ts";
-import { ops as herdrOps, AGENT_HERDR_PANE_ID, renameHerdrTab, renameHerdrWorkspace } from "./backends/herdr.ts";
-import { ops as ottyOps, AGENT_OTTY_PANE_ID } from "./backends/otty.ts";
-import { ops as orcaOps, AGENT_ORCA_TERMINAL_HANDLE } from "./backends/orca.ts";
+import { ops as orcaOps, AGENT_ORCA_TERMINAL_HANDLE, renameOrcaTerminal } from "./backends/orca.ts";
 
-// 各后端直接引用的公开函数（非对称操作不进 BackendOps）
-import { renameHerdrPane, renameHerdrAgent, sendHerdrCommand, sendHerdrEscape, readHerdrScreen, closeHerdrSurface } from "./backends/herdr.ts";
-import { sendOttyCommand, sendOttyEscape, readOttyScreen, closeOttySurface, renameOttyTab } from "./backends/otty.ts";
-import { renameOrcaTerminal } from "./backends/orca.ts";
-
-const execFileAsync = promisify(execFile);
-const ORCA_BACKEND: MuxBackend = "orca";
-const HERDR_BACKEND: MuxBackend = "herdr";
+export type { CreateSurfaceOptions } from "./backends/types.ts";
+export type CreateSurfaceSplitOptions = CreateSurfaceOptions;
 const TMUX_WINDOW_RENAME_SETTING = "PI_SUBAGENT_RENAME_TMUX_WINDOW";
 const TMUX_SESSION_RENAME_SETTING = "PI_SUBAGENT_RENAME_TMUX_SESSION";
-const HERDR_WORKSPACE_RENAME_SETTING = "PI_SUBAGENT_RENAME_HERDR_WORKSPACE";
 const ENABLED_SETTING_VALUE = "1";
 
-// ── 全键注册表 ──
-
-/** 全键注册表：TS 编译期强制所有 MuxBackend 值都有对应的 BackendOps */
 const backendOps: Record<MuxBackend, BackendOps> = {
-  muxy: muxyOps,
-  cmux: cmuxOps,
   tmux: tmuxOps,
-  zellij: zellijOps,
-  wezterm: weztermOps,
-  herdr: herdrOps,
-  otty: ottyOps,
   orca: orcaOps,
 };
 
@@ -90,89 +63,36 @@ export function clearLastSplitSource(): void {
  * 创建新 terminal surface（智能放置：分屏/堆叠/新 tab，按后端策略）。
  * 无后端时降级为 headless。
  */
-export function createSurface(name: string): string {
-  if (!isMuxAvailable()) {
-    return createHeadlessSurface(name);
+export function createSurface(name: string, options?: CreateSurfaceOptions): string {
+  validateStartupCommand(options);
+  const backend = getMuxBackend();
+  if (!backend) {
+    lastSplitSource = null;
+    const surface = createHeadlessSurface(name);
+    if (options?.command !== undefined) spawnHeadlessProcess(surface, name, options.command);
+    return surface;
   }
-
-  const backend = getMuxBackend()!;
-
-  if (backend === "cmux") {
-    // cmux 的 create 内部处理子 agent pane 复用，这里设置 lastSplitSource
-    lastSplitSource = process.env.CMUX_SURFACE_ID ?? null;
-  } else if (backend === "muxy") {
-    // muxy 的 split source 由 BFS 状态决定，先设置为当前 AGENT_MUXY_PANE_ID
-    lastSplitSource = AGENT_MUXY_PANE_ID ?? null;
-  } else if (backend === "otty") {
-    lastSplitSource = AGENT_OTTY_PANE_ID ?? null;
-  } else if (backend === ORCA_BACKEND) {
-    lastSplitSource = AGENT_ORCA_TERMINAL_HANDLE ?? null;
-  } else {
-    // tmux / wezterm / zellij / herdr
-    lastSplitSource = process.env.TMUX_PANE ?? null;
-  }
-
-  return backendOps[backend].create(name);
+  lastSplitSource = backend === "tmux" ? process.env.TMUX_PANE ?? null : AGENT_ORCA_TERMINAL_HANDLE;
+  return backendOps[backend].create(name, options);
 }
 
-/**
- * 分屏来源/激活 options 的公开类型。
- * activate 仅 wezterm 支持；其他后端忽略该提示并保持既有焦点行为。
- */
-export interface CreateSurfaceSplitOptions {
-  /** 是否在分屏后激活新创建的 pane（仅 wezterm；默认 false，保持当前焦点） */
-  activate?: boolean;
-}
-
-/**
- * 指定方向分屏创建新 surface。
- *
- * 签名沿用法（外部 API 兼容豁免参数数量约束）：前三个位置参数 name/direction/fromSurface 是现有
- * 公开契约，仓库内调用方（pi-interactive-subagents/test/integration/harness.ts）仍以
- * createSurfaceSplit(name, direction, fromSurface) 三位置参调用，合并为参数对象会破坏这些调用点的
- * 源码兼容；因此新增能力只能作为第 4 个可选尾部参数 options 追加，旧 3 参调用类型与行为保持不变。
- */
+/** Preserve the existing positional arguments; startup options are the optional fourth argument. */
 export function createSurfaceSplit(
   name: string,
   direction: "left" | "right" | "up" | "down",
   fromSurface?: string,
   options?: CreateSurfaceSplitOptions,
 ): string {
+  validateStartupCommand(options);
   const backend = requireMuxBackend();
-
-  if (backend === "muxy") {
-    const dir = direction === "down" || direction === "up" ? "down" : "right";
-    const sourcePane = fromSurface ?? AGENT_MUXY_PANE_ID;
-    if (!sourcePane) {
-      throw new Error(
-        "MUXY_PANE_ID not set and no fromSurface provided; cannot determine source pane for split. " +
-        "Start pi inside Muxy so MUXY_PANE_ID is injected at launch.",
-      );
-    }
-    lastSplitSource = sourcePane;
-  } else if (backend === "cmux") {
-    lastSplitSource = fromSurface ?? process.env.CMUX_SURFACE_ID ?? null;
-  } else if (backend === "herdr") {
-    const sourcePane = fromSurface ?? AGENT_HERDR_PANE_ID;
-    if (!sourcePane) {
-      throw new Error(
-        "HERDR_PANE_ID not set and no fromSurface provided; cannot determine source pane for split. " +
-          "Start pi inside herdr so HERDR_PANE_ID is injected at launch.",
-      );
-    }
-    lastSplitSource = sourcePane;
-  } else if (backend === "otty") {
-    lastSplitSource = fromSurface ?? AGENT_OTTY_PANE_ID ?? null;
-  } else if (backend === "orca") {
-    // orca split 默认从 agent 自己的 terminal 拆，与 splitOrcaTerminal 的回退逻辑一致
-    lastSplitSource = fromSurface ?? AGENT_ORCA_TERMINAL_HANDLE ?? null;
-  } else {
-    // tmux / wezterm / zellij
-    const source = backend === "tmux" ? process.env.TMUX_PANE : fromSurface;
-    lastSplitSource = source ?? null;
-  }
-
+  lastSplitSource = fromSurface ?? (backend === "tmux" ? process.env.TMUX_PANE ?? null : AGENT_ORCA_TERMINAL_HANDLE);
   return backendOps[backend].createSplit(name, direction, fromSurface, options);
+}
+
+function validateStartupCommand(options?: CreateSurfaceOptions): void {
+  if (options?.command !== undefined && !options.command.trim()) {
+    throw new Error("Startup command must not be empty.");
+  }
 }
 
 /**
@@ -314,48 +234,14 @@ export function sendLongCommand(
   return scriptPath;
 }
 
-/**
- * 统一读屏 options。source 仅 herdr 后端消费（转发给 herdr pane read --source），
- * 非 herdr 后端忽略该提示并保持各自既有读屏语义；未提供时 herdr 维持默认 recent。
- */
-export interface ReadScreenOptions {
-  source?: "recent" | "visible" | "recent_unwrapped";
+export function readScreen(surface: string, lines = 50): string {
+  if (isHeadlessSurface(surface)) return readHeadlessScreen(surface, lines);
+  return backendOps[requireMuxBackend()].read(surface, lines);
 }
 
-/**
- * 同步读取 surface 屏幕最后 N 行。
- * options.source 仅对 herdr 后端生效（如 "recent_unwrapped"），其他后端忽略。
- */
-export function readScreen(surface: string, lines = 50, options?: ReadScreenOptions): string {
-  if (isHeadlessSurface(surface)) {
-    return readHeadlessScreen(surface, lines);
-  }
-
-  const backend = requireMuxBackend();
-  if (options?.source && backend === HERDR_BACKEND) {
-    return readHerdrScreen(surface, lines, options.source);
-  }
-  return backendOps[backend].read(surface, lines);
-}
-
-/**
- * 异步读取 surface 屏幕最后 N 行。
- * options.source 仅对 herdr 后端生效（如 "recent_unwrapped"），其他后端忽略。
- */
-export async function readScreenAsync(
-  surface: string,
-  lines = 50,
-  options?: ReadScreenOptions,
-): Promise<string> {
-  if (isHeadlessSurface(surface)) {
-    return readHeadlessScreenAsync(surface, lines);
-  }
-
-  const backend = requireMuxBackend();
-  if (options?.source && backend === HERDR_BACKEND) {
-    return readHerdrScreen(surface, lines, options.source);
-  }
-  return backendOps[backend].readAsync(surface, lines);
+export async function readScreenAsync(surface: string, lines = 50): Promise<string> {
+  if (isHeadlessSurface(surface)) return readHeadlessScreenAsync(surface, lines);
+  return backendOps[requireMuxBackend()].readAsync(surface, lines);
 }
 
 /**
@@ -381,19 +267,8 @@ export function renameSurface(surface: string, name: string): void {
   backendOps[backend].rename(surface, name);
 }
 
-/**
- * 重命名子 agent 显示名称（左侧栏标题，仅 herdr 支持）。
- */
-export function renameAgent(surface: string, name: string): void {
-  if (isHeadlessMode()) return;
-  const backend = getMuxBackend();
-  if (backend === "herdr") {
-    renameHerdrAgent(surface, name);
-  }
-}
-
 export type RenameOperation = "tab" | "workspace";
-export type RenameTarget = "tab" | "window" | "pane" | "workspace" | "session" | "terminal";
+export type RenameTarget = "window" | "session" | "terminal";
 export type RenameBackend = MuxBackend | "headless";
 
 export type RenameCapability =
@@ -407,42 +282,21 @@ export type RenameResult =
   | { status: "disabled"; backend: MuxBackend; operation: RenameOperation; setting: string }
   | { status: "failed"; backend: MuxBackend; operation: RenameOperation; target: RenameTarget; error: string };
 
-/** 返回指定后端的真实重命名语义，不执行终端命令。 */
+/** Report actual rename targets without executing terminal commands. */
 export function getRenameCapability(
   operation: RenameOperation,
   backend: MuxBackend | null = getMuxBackend(),
   env: NodeJS.ProcessEnv = process.env,
 ): RenameCapability {
   if (!backend) return { status: "unsupported", backend: "headless", operation };
-
-  if (operation === "tab") {
-    if (backend === "tmux" && env[TMUX_WINDOW_RENAME_SETTING] !== ENABLED_SETTING_VALUE) {
-      return { status: "disabled", backend, operation, setting: TMUX_WINDOW_RENAME_SETTING };
-    }
-    const target: Record<MuxBackend, RenameTarget> = {
-      muxy: "pane",
-      cmux: "tab",
-      tmux: "window",
-      zellij: "pane",
-      wezterm: "tab",
-      herdr: "tab",
-      otty: "tab",
-      orca: "terminal",
-    };
-    return { status: "supported", backend, operation, target: target[backend] };
+  if (backend === "orca") {
+    return operation === "tab"
+      ? { status: "supported", backend, operation, target: "terminal" }
+      : { status: "unsupported", backend, operation };
   }
-
-  if (backend === "tmux" && env[TMUX_SESSION_RENAME_SETTING] !== ENABLED_SETTING_VALUE) {
-    return { status: "disabled", backend, operation, setting: TMUX_SESSION_RENAME_SETTING };
-  }
-  if (backend === "herdr" && env[HERDR_WORKSPACE_RENAME_SETTING] !== ENABLED_SETTING_VALUE) {
-    return { status: "disabled", backend, operation, setting: HERDR_WORKSPACE_RENAME_SETTING };
-  }
-  if (backend === "cmux") return { status: "supported", backend, operation, target: "workspace" };
-  if (backend === "tmux") return { status: "supported", backend, operation, target: "session" };
-  if (backend === "wezterm") return { status: "supported", backend, operation, target: "window" };
-  if (backend === "herdr") return { status: "supported", backend, operation, target: "workspace" };
-  return { status: "unsupported", backend, operation };
+  const setting = operation === "tab" ? TMUX_WINDOW_RENAME_SETTING : TMUX_SESSION_RENAME_SETTING;
+  if (env[setting] !== ENABLED_SETTING_VALUE) return { status: "disabled", backend, operation, setting };
+  return { status: "supported", backend, operation, target: operation === "tab" ? "window" : "session" };
 }
 
 /** 将终端命令异常封装为可判别的失败结果。 */
@@ -459,99 +313,38 @@ function failedRenameResult(
   };
 }
 
-/** 重命名当前 tab/window/pane，并返回实际目标与执行结果。 */
 export function renameCurrentTab(title: string): RenameResult {
   const capability = getRenameCapability("tab");
   if (capability.status !== "supported") return capability;
-
   try {
-    const backend = capability.backend;
-    if (backend === "cmux") {
-      const surfaceId = process.env.CMUX_SURFACE_ID;
-      if (!surfaceId) throw new Error("CMUX_SURFACE_ID not set");
-      execSync(`cmux rename-tab --surface ${shellEscape(surfaceId)} ${shellEscape(title)}`, {
-        encoding: "utf8",
-      });
-    } else if (backend === "muxy") {
-      const paneId = AGENT_MUXY_PANE_ID;
-      if (!paneId) throw new Error("MUXY_PANE_ID not set");
-      execFileSync("muxy", ["rename-pane", "--pane", paneId, title], { encoding: "utf8" });
-    } else if (backend === "tmux") {
-      const paneId = process.env.TMUX_PANE;
-      if (!paneId) throw new Error("TMUX_PANE not set");
-      const windowId = execFileSync("tmux", ["display-message", "-p", "-t", paneId, "#{window_id}"], {
-        encoding: "utf8",
-      }).trim();
-      execFileSync("tmux", ["rename-window", "-t", windowId, title], { encoding: "utf8" });
-    } else if (backend === "wezterm") {
-      const paneId = process.env.WEZTERM_PANE;
-      const args = ["cli", "set-tab-title"];
-      if (paneId) args.push("--pane-id", paneId);
-      args.push(title);
-      execFileSync("wezterm", args, { encoding: "utf8" });
-    } else if (backend === "herdr") {
-      if (!renameHerdrTab(AGENT_HERDR_PANE_ID ?? "", title)) {
-        throw new Error(`${"Herdr"} did not complete terminal renaming.`);
-      }
-    } else if (backend === "otty") {
-      if (!renameOttyTab(AGENT_OTTY_PANE_ID ?? "", title)) {
-        throw new Error(`${"Otty"} did not complete terminal renaming.`);
-      }
-    } else if (backend === "orca") {
-      if (!AGENT_ORCA_TERMINAL_HANDLE) throw new Error("ORCA_TERMINAL_HANDLE not set");
-      if (!renameOrcaTerminal(AGENT_ORCA_TERMINAL_HANDLE, title)) {
-        throw new Error(`${"Orca"} did not complete terminal renaming.`);
-      }
+    if (capability.backend === "tmux") {
+      const pane = process.env.TMUX_PANE;
+      if (!pane) throw new Error("TMUX_PANE not set");
+      const window = execFileSync("tmux", ["display-message", "-p", "-t", pane, "#{window_id}"], { encoding: "utf8" }).trim();
+      execFileSync("tmux", ["rename-window", "-t", window, title], { encoding: "utf8" });
     } else {
-      const paneId = process.env.ZELLIJ_PANE_ID;
-      const args = ["action", "rename-pane", title];
-      if (paneId) args.push("--pane-id", paneId);
-      execFileSync("zellij", args, { encoding: "utf8" });
+      if (!AGENT_ORCA_TERMINAL_HANDLE) throw new Error("ORCA_TERMINAL_HANDLE not set");
+      if (!renameOrcaTerminal(AGENT_ORCA_TERMINAL_HANDLE, title)) throw new Error("Orca did not complete terminal renaming.");
     }
-    return { status: "renamed", backend, operation: capability.operation, target: capability.target };
+    return { status: "renamed", backend: capability.backend, operation: capability.operation, target: capability.target };
   } catch (error) {
     return failedRenameResult(capability, error);
   }
 }
 
-/** 重命名当前 workspace/session/window，并明确报告不支持或未启用。 */
 export function renameWorkspace(title: string): RenameResult {
   const capability = getRenameCapability("workspace");
   if (capability.status !== "supported") return capability;
-
   try {
-    const backend = capability.backend;
-    if (backend === "cmux") {
-      execSync(`cmux workspace-action --action rename --title ${shellEscape(title)}`, {
-        encoding: "utf8",
-      });
-    } else if (backend === "tmux") {
-      const paneId = process.env.TMUX_PANE;
-      if (!paneId) throw new Error("TMUX_PANE not set");
-      const sessionId = execFileSync(
-        "tmux",
-        ["display-message", "-p", "-t", paneId, "#{session_id}"],
-        { encoding: "utf8" },
-      ).trim();
-      execFileSync("tmux", ["rename-session", "-t", sessionId, title], { encoding: "utf8" });
-    } else if (backend === "wezterm") {
-      const paneId = process.env.WEZTERM_PANE;
-      const args = ["cli", "set-window-title"];
-      if (paneId) args.push("--pane-id", paneId);
-      args.push(title);
-      execFileSync("wezterm", args, { encoding: "utf8" });
-    } else if (backend === "herdr") {
-      if (!renameHerdrWorkspace(title)) {
-        throw new Error(`${"Herdr"} did not complete terminal renaming.`);
-      }
-    }
-    return { status: "renamed", backend, operation: capability.operation, target: capability.target };
+    const pane = process.env.TMUX_PANE;
+    if (!pane) throw new Error("TMUX_PANE not set");
+    const session = execFileSync("tmux", ["display-message", "-p", "-t", pane, "#{session_id}"], { encoding: "utf8" }).trim();
+    execFileSync("tmux", ["rename-session", "-t", session, title], { encoding: "utf8" });
+    return { status: "renamed", backend: capability.backend, operation: capability.operation, target: capability.target };
   } catch (error) {
     return failedRenameResult(capability, error);
   }
 }
-
-export { renameHerdrTab, renameHerdrWorkspace };
 
 // ── pollForExit ──
 

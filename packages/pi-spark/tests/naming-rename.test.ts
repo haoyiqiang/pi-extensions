@@ -44,9 +44,9 @@ function harness(messages: string[] = []) {
     },
   } as unknown as ExtensionCommandContext;
   const terminal: TerminalNamingAdapter = {
-    resolve: (options) => resolveTerminalRenameTargets({ ...options, backend: "cmux", env: {
-      CMUX_SURFACE_ID: "own-tab", CMUX_WORKSPACE_ID: "own-workspace",
-    } }),
+    resolve: (options) => resolveTerminalRenameTargets({ ...options, backend: "tmux", env: {
+      TMUX_PANE: "%own",
+    } }, (_command, args) => args.at(-1) === "#{window_id}" ? "@own" : "$own"),
     rename: (reference, title) => { renamed.push([reference, title]); return { status: "renamed", reference }; },
   };
   return {
@@ -237,7 +237,7 @@ test("没有终端、加载失败或协议损坏仍能改 session，并报告原
   }
 });
 
-for (const backend of ["cmux", "tmux", "herdr"] as const) {
+for (const backend of ["tmux", "orca"] as const) {
   test(`${backend} 组合子代理只修改获授目标，绝不改 workspace`, async () => {
     const h = harness();
     const context = createSurfaceRenameContext("child", backend);
@@ -247,7 +247,7 @@ for (const backend of ["cmux", "tmux", "herdr"] as const) {
     await h.commands.get("rename")!.handler("Child", h.ctx);
     assert.equal(h.name(), "Child");
     assert.ok(h.renamed.every(([target]) => target.operation !== "workspace" && target.id === "child"));
-    assert.equal(h.renamed.length, backend === "cmux" || backend === "herdr" ? 1 : 0);
+    assert.equal(h.renamed.length, 0);
     assert.ok(h.notices.some((message) => /共享|shared/.test(message)));
   });
 }
@@ -499,7 +499,7 @@ test("terminal IDs are captured before generation instead of following later foc
   h.terminal.resolve = () => assert.fail("must reuse captured IDs");
   finish("Captured targets");
   await running;
-  assert.deepEqual(h.renamed.map(([target]) => target.id), ["own-workspace", "own-tab"]);
+  assert.deepEqual(h.renamed.map(([target]) => target.id), ["$own", "@own"]);
 });
 
 test("tree navigation invalidates eligibility until a different session is selected", async () => {

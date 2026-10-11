@@ -8,7 +8,7 @@ Each subagent runs in its own terminal panel, opened through [`pi-terminal-mux`]
 
 - Pi
 - Node.js 22 or newer
-- A supported terminal multiplexer (muxy, cmux, tmux, zellij, wezterm, herdr, otty, or orca). Start Pi inside it. `PI_TERMINAL_MUX` or `PI_SUBAGENT_MUX` can force a backend.
+- tmux or Orca. Start Pi inside it. `PI_TERMINAL_MUX` or `PI_SUBAGENT_MUX` can force a backend.
 
 ## Install
 
@@ -33,6 +33,8 @@ subagent spawn --name review --prompt "Review the current diff independently"
 ```
 
 Names appear in panel titles and CLI output. Generated handles remain the stable identifiers used by management commands. Spawn prints the panel id.
+
+The Pi command is submitted through `pi-terminal-mux`'s `createSurface(name, { command })` API when the panel is created, including on resume. There is no generated `launch.sh`, fixed shell-ready delay, or separate terminal input injection. tmux starts the command through `split-window`; Orca receives `--command` and manages shell startup/submission itself. A returned panel id confirms creation/submission, not that Pi is ready; the control bridge records the child's state.
 
 Override the model configuration when needed:
 

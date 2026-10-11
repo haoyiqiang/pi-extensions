@@ -16,9 +16,9 @@
  *   - read   → result.terminal.tail（字符串数组，最新在尾部）
  *
  * 与其他 backend 的关键差异：
- *   1. Orca 注入 ORCA_TERMINAL_HANDLE（类似 cmux 的 CMUX_SURFACE_ID），
+ *   1. Orca 注入 ORCA_TERMINAL_HANDLE，
  *      模块加载时冻结为 AGENT_ORCA_TERMINAL_HANDLE。
- *   2. create() 与 muxy/herdr/otty 一样从 agent terminal 分屏，并通过
+ *   2. create() 从 agent terminal 分屏，并通过
  *      shared.ts 的 BFS 状态机轮转 right/down；没有 agent handle 时回退为新 tab。
  *   3. Escape 通过发送裸 ESC（`\u001b`，即 `0x1b`）字节实现，TUI 会将其解释为 Escape 键。
  *   4. rename 作用于 tab 标题；split 出来的 pane 与源 pane 共享 tab，
@@ -33,7 +33,7 @@
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { BfsSplitStateManager, createBackendLogger, hasCommand, withFileLock } from "./shared.ts";
-import type { BackendOps } from "./types.ts";
+import type { BackendOps, CreateSurfaceOptions } from "./types.ts";
 
 const ORCA_RUNTIME_CHECK_TIMEOUT_MS = 1_500;
 const ORCA_COMMAND_TIMEOUT_MS = 10_000;
@@ -76,7 +76,7 @@ export function isOrcaRuntimeAvailable(): boolean {
 
 /**
  * 捕获于模块加载时的 agent terminal handle。
- * Orca 注入 ORCA_TERMINAL_HANDLE（类似 cmux 注入 CMUX_SURFACE_ID），
+ * Orca 注入 ORCA_TERMINAL_HANDLE，
  * 冻结到常量，不受用户后续切换 tab 影响。
  */
 export const AGENT_ORCA_TERMINAL_HANDLE: string | null = process.env.ORCA_TERMINAL_HANDLE ?? null;
@@ -166,20 +166,15 @@ function cleanupOrcaStateForSurface(handle: string): void {
 /**
  * 调用 `orca terminal create` 新建 tab，作为没有 agent handle 时的回退。
  */
-function createOrcaTab(name: string): string {
-  try {
-    const raw = orcaExec(["terminal", "create", "--title", name, "--json"]);
-    const handle = extractOrcaCreateHandle(parseOrcaJson(raw));
-    if (!handle) {
-      orcaLog(`[create] no handle in tab response for name=${JSON.stringify(name)}`);
-      return "";
-    }
-    orcaLog(`[create] fallback=tab new=${handle} name=${JSON.stringify(name)}`);
-    return handle;
-  } catch (e) {
-    orcaLog(`[create] fallback tab failed: ${(e as Error).message}`);
-    return "";
-  }
+function createOrcaTab(name: string, options?: CreateSurfaceOptions): string {
+  const args = ["terminal", "create", "--title", name];
+  if (options?.command !== undefined) args.push("--command", options.command);
+  args.push("--json");
+  const raw = orcaExec(args);
+  const handle = extractOrcaCreateHandle(parseOrcaJson(raw));
+  if (!handle) throw new Error(`Unexpected Orca terminal create output: ${raw.trim() || "(empty)"}`);
+  orcaLog(`[create] fallback=tab new=${handle} name=${JSON.stringify(name)}`);
+  return handle;
 }
 
 // ── Orca CLI 调用的薄封装 ──
@@ -238,104 +233,76 @@ function orcaExecSilent(args: string[]): boolean {
 /**
  * 创建一个新的 subagent terminal。
  *
- * 实现：与 muxy/herdr/otty 一致，使用持久化 BFS 状态从 agent terminal 分屏：
+ * 使用持久化 BFS 状态从 agent terminal 分屏：
  *   - 第一次从 agent pane 向右分屏；
  *   - 后续按 BFS 状态机轮转 right/down，均保持 agent 焦点不变（Orca split CLI 默认不抢焦点）。
  *
  * Orca 没有注入 agent handle 时回退为新建 tab，兼容手动调用原生 API 的场景。
- * 失败返回 ""（与其他 backend create 一致，调用方统一处理）。
+ * 启动命令通过原生 --command 提交；创建失败向调用方抛错。
  */
-export function createOrcaSurface(name: string): string {
+export function createOrcaSurface(name: string, options?: CreateSurfaceOptions): string {
   const agentHandle = AGENT_ORCA_TERMINAL_HANDLE;
-  if (!agentHandle) return createOrcaTab(name);
+  if (!agentHandle) return createOrcaTab(name, options);
 
   const markerFile = orcaStateFile();
   const lockPath = `${markerFile}.lock`;
-
   try {
     return withFileLock(lockPath, { timeoutMs: 3_000 }, () => {
       let state = new BfsSplitStateManager(markerFile);
-
-      // 首次 split：从 agent pane 向右分屏。
       if (state.panes().length === 0) {
-        const newHandle = splitOrcaTerminal("right", agentHandle);
-        if (!newHandle) {
-          orcaLog(`[create] first split failed from=${agentHandle}`);
-          return "";
-        }
-        state.add(newHandle);
-        orcaLog(`[create] mode=first dir=right from=${agentHandle} new=${newHandle} name=${JSON.stringify(name)}`);
-        return newHandle;
+        const handle = splitOrcaTerminal("right", agentHandle, options);
+        state.add(handle);
+        return handle;
       }
-
       const next = state.next();
-      if (!next) return "";
-
-      // 正常路径按 BFS 状态机分屏；目标 pane 失效时清空状态并从 agent pane 恢复。
-      let newHandle = splitOrcaTerminal(next.direction, next.source);
-      if (newHandle) {
-        state.advance();
-        state.add(newHandle);
-        orcaLog(
-          `[create] mode=next dir=${next.direction} from=${next.source} new=${newHandle} name=${JSON.stringify(name)}`,
-        );
-        return newHandle;
+      if (!next) throw new Error("Cannot determine the next Orca split source.");
+      // Resolve stale placement before submitting work. Never retry an ambiguous create failure.
+      if (queryOrcaTerminalState(next.source).kind === "absent") {
+        for (const pane of state.panes()) state.remove(pane);
+        state = new BfsSplitStateManager(markerFile);
+        const handle = splitOrcaTerminal("right", agentHandle, options);
+        state.add(handle);
+        return handle;
       }
-
-      orcaLog(`[create] pane ${next.source} unavailable, reset and retry from agent pane`);
-      for (const pane of state.panes()) state.remove(pane);
-      state = new BfsSplitStateManager(markerFile);
-      newHandle = splitOrcaTerminal("right", agentHandle);
-      if (!newHandle) {
-        orcaLog(`[create] reset split failed from=${agentHandle}`);
-        return "";
-      }
-      state.add(newHandle);
-      orcaLog(`[create] mode=recovered dir=right from=${agentHandle} new=${newHandle} name=${JSON.stringify(name)}`);
-      return newHandle;
+      const handle = splitOrcaTerminal(next.direction, next.source, options);
+      state.advance();
+      state.add(handle);
+      return handle;
     });
-  } catch (e) {
-    orcaLog(`[create] failed: ${(e as Error).message}`);
-    return "";
+  } catch (error) {
+    orcaLog(`[create] failed: ${(error as Error).message}`);
+    throw error;
   }
 }
 
 /**
  * 指定方向分屏创建新 pane。
  * fromSurface 缺省时从 agent 自己的 terminal（ORCA_TERMINAL_HANDLE）拆。
- * 失败返回 ""。
+ * 失败抛错；不会再将命令创建失败表示为一个空 handle。
  */
 export function splitOrcaTerminal(
   direction: "left" | "right" | "up" | "down",
   fromSurface?: string,
+  options?: CreateSurfaceOptions,
 ): string {
   const source = fromSurface ?? AGENT_ORCA_TERMINAL_HANDLE;
-  if (!source) {
-    orcaLog(`[split] no source terminal (ORCA_TERMINAL_HANDLE not set)`);
-    return "";
-  }
-  const orcaDir = orcaSplitDirection(direction);
-  try {
-    const raw = orcaExec(["terminal", "split", "--terminal", source, "--direction", orcaDir, "--json"]);
-    const handle = extractOrcaSplitHandle(parseOrcaJson(raw));
-    if (!handle) {
-      orcaLog(`[split] no handle in response (from=${source} dir=${orcaDir})`);
-      return "";
-    }
-    orcaLog(`[split] from=${source} dir=${orcaDir} new=${handle}`);
-    return handle;
-  } catch (e) {
-    orcaLog(`[split] from=${source} dir=${orcaDir} failed: ${(e as Error).message}`);
-    return "";
-  }
+  if (!source) throw new Error("ORCA_TERMINAL_HANDLE not set and no split source provided.");
+  const args = ["terminal", "split", "--terminal", source, "--direction", orcaSplitDirection(direction)];
+  if (options?.command !== undefined) args.push("--command", options.command);
+  args.push("--json");
+  const raw = orcaExec(args);
+  const handle = extractOrcaSplitHandle(parseOrcaJson(raw));
+  if (!handle) throw new Error(`Unexpected Orca terminal split output: ${raw.trim() || "(empty)"}`);
+  orcaLog(`[split] from=${source} new=${handle}`);
+  return handle;
 }
 
 /**
  * 给 terminal 发送命令 + Enter。
- * `orca terminal send --text <cmd> --enter`，失败只记 log（best-effort）。
+ * `orca terminal send --text <cmd> --enter`，失败向调用方抛错。
  */
 export function sendOrcaCommand(handle: string, command: string): void {
-  orcaExecSilent(["terminal", "send", "--terminal", handle, "--text", command, "--enter"]);
+  orcaExec(["terminal", "send", "--terminal", handle, "--text", command, "--enter"]);
 }
 
 /**
@@ -344,22 +311,19 @@ export function sendOrcaCommand(handle: string, command: string): void {
  * 注意不能用 --enter（会把 ESC 和回车拼成一行输入）。
  */
 export function sendOrcaEscape(handle: string): void {
-  orcaExecSilent(["terminal", "send", "--terminal", handle, "--text", "\u001b"]);
+  orcaExec(["terminal", "send", "--terminal", handle, "--text", "\u001b"]);
 }
 
 /**
  * 读取 terminal 屏幕最后 N 行。
  * `orca terminal read --limit <N> --json` → result.terminal.tail，拼成文本返回。
- * 失败返回 ""（与 otty readScreen 一致）。
+ * 读取失败抛错，避免将不存在的 terminal 当作存活的空白屏幕。
  */
 export function readOrcaScreen(handle: string, lines = 50): string {
-  try {
-    const raw = orcaExec(["terminal", "read", "--terminal", handle, "--limit", String(lines), "--json"]);
-    return extractOrcaReadTail(parseOrcaJson(raw)).join("\n");
-  } catch (e) {
-    orcaLog(`[read] terminal=${handle} failed: ${(e as Error).message}`);
-    return "";
-  }
+  const raw = orcaExec(["terminal", "read", "--terminal", handle, "--limit", String(lines), "--json"]);
+  const parsed = parseOrcaJson(raw);
+  if (parsed?.ok !== true) throw new Error(`Unexpected Orca terminal read output: ${raw.trim() || "(empty)"}`);
+  return extractOrcaReadTail(parsed).join("\n");
 }
 
 /**
@@ -495,12 +459,12 @@ export function renameOrcaTerminal(handle: string, name: string): boolean {
 /** BackendOps 适配器：所有方法薄包装 orca 原生函数 */
 export const ops: BackendOps = {
   /** 创建 orca surface（从 agent terminal BFS 分屏；无 handle 时回退新 tab） */
-  create(name: string): string {
-    return createOrcaSurface(name);
+  create(name: string, options?: CreateSurfaceOptions): string {
+    return createOrcaSurface(name, options);
   },
   /** 指定方向分屏；不做 rename（split pane 与源 pane 共享 tab 标题） */
-  createSplit(name: string, direction: "left" | "right" | "up" | "down", fromSurface?: string): string {
-    return splitOrcaTerminal(direction, fromSurface);
+  createSplit(name: string, direction: "left" | "right" | "up" | "down", fromSurface?: string, options?: CreateSurfaceOptions): string {
+    return splitOrcaTerminal(direction, fromSurface, options);
   },
   /** 向 orca terminal 发送命令并执行 */
   send(surface: string, command: string): void {

@@ -110,7 +110,7 @@ export interface BfsNext {
 /**
  * 广度优先分屏状态机，跨进程通过 marker 文件持久化。
  *
- * 分屏策略（与 muxy/herdr/otty 原有逻辑一致）：
+ * Orca 分屏策略：
  *   第 1 轮：调用方在外部执行首次 split-right，然后 add(pane)
  *   第 2 轮：从 p1 向下分
  *   第 3 轮：从 p1、p2 分别向右分

@@ -8,7 +8,7 @@
 
 - Pi
 - Node.js 22 或更高版本
-- 受支持的终端复用器（muxy、cmux、tmux、zellij、wezterm、herdr、otty 或 orca）。请在其中启动 Pi。可用 `PI_TERMINAL_MUX` 或 `PI_SUBAGENT_MUX` 指定后端。
+- tmux 或 Orca。请在其中启动 Pi。可用 `PI_TERMINAL_MUX` 或 `PI_SUBAGENT_MUX` 指定后端。
 
 ## 安装
 
@@ -33,6 +33,8 @@ subagent spawn --name review --prompt "Review the current diff independently"
 ```
 
 名称显示在分栏标题和 CLI 输出中。后续管理命令使用生成的 handle。spawn 会打印分栏 id。
+
+首次启动和恢复运行都通过 `pi-terminal-mux` 的 `createSurface(name, { command })` 在创建面板时提交 Pi 命令。不再生成 `launch.sh`，不再固定等待 shell 就绪，也不再单独向终端注入启动输入。tmux 通过 `split-window` 启动命令；Orca 接收 `--command`，自行管理 shell 启动和命令提交。返回面板 id 只证明创建/提交成功，不保证 Pi 已就绪；子代理状态由控制桥记录。
 
 需要时可以覆盖模型：
 

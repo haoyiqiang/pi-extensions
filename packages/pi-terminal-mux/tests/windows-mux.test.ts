@@ -1,26 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { commandTerminator, weztermActivateArgs } from "../src/backends/wezterm.ts";
 import { powershellEscape } from "../src/shell.ts";
-import { herdrSourceFlag } from "../src/backends/herdr.ts";
 import { resolveSendInterpreter, sendScriptExtension, buildSendScriptContent, buildMuxInvocation } from "../src/surface.ts";
-
-// U-001：Windows WezTerm 命令提交终止符
-describe("commandTerminator (U-001)", () => {
-  test("win32 使用 CR", () => {
-    assert.equal(commandTerminator("win32"), "\r");
-  });
-  test("POSIX 平台使用 LF", () => {
-    assert.equal(commandTerminator("darwin"), "\n");
-    assert.equal(commandTerminator("linux"), "\n");
-  });
-  test("命令正文不被改写（仅追加终止符）", () => {
-    // 验证终止符决策可作为 ops.send 的 payload 追加而不改动正文
-    const raw = "Write-Host hi";
-    assert.equal(raw + commandTerminator("win32"), "Write-Host hi\r");
-    assert.equal(raw + commandTerminator("darwin"), "Write-Host hi\n");
-  });
-});
 
 // U-002：长命令解释器选择
 describe("resolveSendInterpreter (U-002)", () => {
@@ -87,25 +68,5 @@ describe("powershellEscape (U-002)", () => {
   });
   test("单引号路径按 PowerShell 规则双写转义", () => {
     assert.equal(powershellEscape("/tmp/o'k.ps1"), "'/tmp/o''k.ps1'");
-  });
-});
-
-// U-003：herdr 读屏 source 映射
-describe("herdrSourceFlag (U-003)", () => {
-  test("recent_unwrapped 映射为 recent-unwrapped", () => {
-    assert.equal(herdrSourceFlag("recent_unwrapped"), "recent-unwrapped");
-  });
-  test("recent 与 visible 原样保留", () => {
-    assert.equal(herdrSourceFlag("recent"), "recent");
-    assert.equal(herdrSourceFlag("visible"), "visible");
-  });
-});
-
-// U-004：WezTerm 分屏可选激活
-// 默认不激活由 createSplit 的 `if (options?.activate)` 守卫保证（activate 缺省为 false），
-// 这里验证 activate:true 时构造的 CLI 参数正确，且该参数数组仅用于激活。
-describe("weztermActivateArgs (U-004)", () => {
-  test("activate:true 时对新 pane id 发出 activate-pane", () => {
-    assert.deepEqual(weztermActivateArgs("7"), ["cli", "activate-pane", "--pane-id", "7"]);
   });
 });

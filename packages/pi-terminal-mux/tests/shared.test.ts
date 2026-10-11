@@ -37,23 +37,23 @@ describe("createBackendLogger", () => {
   // 验证多次调用是追加而非覆盖
   test("appends multiple messages", () => {
     const logDir = makeTempDir();
-    const logPath = join(logDir, "pi-mux-muxy.log");
-    const log = createBackendLogger("muxy", logPath);
+    const logPath = join(logDir, "pi-mux-orca.log");
+    const log = createBackendLogger("orca", logPath);
 
     log("first");
     log("second");
 
     const lines = readFileSync(logPath, "utf8").trim().split("\n");
     assert.equal(lines.length, 2);
-    assert.match(lines[0], /\[muxy\] first$/);
-    assert.match(lines[1], /\[muxy\] second$/);
+    assert.match(lines[0], /\[orca\] first$/);
+    assert.match(lines[1], /\[orca\] second$/);
   });
 
   // 验证写失败时静默不抛
   test("does not throw when log path is not writable", () => {
     const logDir = makeTempDir();
     const logPath = join(logDir, "no-such-dir", "deep", "log.log");
-    const log = createBackendLogger("herdr", logPath);
+    const log = createBackendLogger("orca", logPath);
 
     log("this goes nowhere");
   });

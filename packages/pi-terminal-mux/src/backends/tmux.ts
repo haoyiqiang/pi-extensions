@@ -8,7 +8,7 @@
 import { execFileSync, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createBackendLogger } from "./shared.ts";
-import type { BackendOps } from "./types.ts";
+import type { BackendOps, CreateSurfaceOptions } from "./types.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -16,15 +16,11 @@ const execFileAsync = promisify(execFile);
 const tmuxLog = createBackendLogger("tmux", "/tmp/pi-mux-tmux.log");
 
 export const ops: BackendOps = {
-  create(_name: string): string {
-    // Tmux 的 createSurface 退化为 createSurfaceSplit "right"
-    // 此方法由 surface.ts 的 createSurface 调度，不会直接传入空参的 create。
-    // 直接调用 split-window 作为 fallback。
-    const fromSurface = process.env.TMUX_PANE;
-    return ops.createSplit(_name, "right", fromSurface);
+  create(name: string, options?: CreateSurfaceOptions): string {
+    return ops.createSplit(name, "right", process.env.TMUX_PANE, options);
   },
 
-  createSplit(name: string, direction: "left" | "right" | "up" | "down", fromSurface?: string): string {
+  createSplit(name: string, direction: "left" | "right" | "up" | "down", fromSurface?: string, options?: CreateSurfaceOptions): string {
     const args = ["split-window", "-d"];
     if (direction === "left" || direction === "right") {
       args.push("-h");
@@ -38,6 +34,7 @@ export const ops: BackendOps = {
       args.push("-t", fromSurface);
     }
     args.push("-P", "-F", "#{pane_id}");
+    if (options?.command !== undefined) args.push("--", options.command);
 
     const pane = execFileSync("tmux", args, { encoding: "utf8" }).trim();
     if (!pane.startsWith("%")) {

@@ -1,8 +1,6 @@
 # pi-terminal-mux
 
-Terminal multiplexer abstraction for pi extensions — one unified surface API across **muxy, cmux, tmux, zellij, wezterm, herdr, otty and orca**, with automatic **headless fallback** (background child process + log file) when no multiplexer is detected.
-
-Any pi extension that needs terminal interaction (splitting panes, sending commands, reading screens, closing panes, waiting for process exit) should depend on this package instead of re-implementing backend detection and command assembly.
+Terminal surface API for Pi extensions, supporting **tmux**, **Orca**, and **headless** background processes.
 
 [中文文档](./README.zh-CN.md)
 
@@ -12,140 +10,96 @@ Any pi extension that needs terminal interaction (splitting panes, sending comma
 npm install pi-terminal-mux
 ```
 
-## Quick start
+## Create and start a command
 
 ```ts
-import {
-  isMuxAvailable,
-  muxSetupHint,
-  createSurface,
-  createSurfaceSplit,
-  sendCommand,
-  sendLongCommand,
-  sendEscape,
-  readScreen,
-  closeSurface,
-  pollForExit,
-} from "pi-terminal-mux";
+import { createSurface, createSurfaceSplit, readScreen, closeSurface } from "pi-terminal-mux";
 
-if (!isMuxAvailable()) {
-  console.warn(muxSetupHint()); // localized setup hint via pi-utils
-}
+const surface = createSurface("my-agent", {
+  command: "pi --session /tmp/child.jsonl",
+});
 
-// Smart placement: split / stack / new tab depending on the backend strategy
-// (returns a headless surface when no multiplexer is available)
-const surface = createSurface("my-agent");
-
-// Long commands are written to a script file first to avoid terminal line wrapping
-// (Bash by default; pass interpreter: "powershell" on Windows for PowerShell)
-const scriptPath = sendLongCommand(surface, "pi --session abc", {
-  scriptPreamble: "export MY_FLAG=1",
+const sibling = createSurfaceSplit("review", "right", surface, {
+  command: "pi --session /tmp/review.jsonl",
 });
 
 const tail = readScreen(surface, 50);
-sendEscape(surface);
+closeSurface(sibling);
 closeSurface(surface);
 ```
 
-## Backend detection
+`command` is an optional, non-empty **shell command string**, including its arguments. Quote dynamic values with `shellEscape()` for POSIX shells. There is no separate `sendCommand()` call or library-side shell-ready sleep on this path:
 
-| Backend | Detection |
-|---------|-----------|
-| muxy | `MUXY_SOCKET_PATH` + `muxy` command |
-| cmux | `CMUX_SOCKET_PATH` + `cmux` command |
-| tmux | `TMUX` + `tmux` command |
-| zellij | `ZELLIJ` / `ZELLIJ_SESSION_NAME` + `zellij` command |
-| wezterm | `WEZTERM_UNIX_SOCKET` + `wezterm` command |
-| herdr | `HERDR_ENV=1` + `HERDR_PANE_ID` + `herdr` command (`tab` mode also requires `HERDR_WORKSPACE_ID`) |
-| otty | `TERM_PROGRAM=otty` + `otty` command |
-| orca | `TERM_PROGRAM=Orca` + `orca` command + reachable Orca runtime |
+- **tmux:** supplies the command to `tmux split-window` while creating the pane.
+- **Orca:** supplies `--command` to `terminal create` or `terminal split`. Orca itself starts a shell and submits the command; this is not a direct argv process spawn.
+- **Headless:** starts the command with `bash -c`, writing stdout/stderr to a log file.
 
-Default priority follows the table order (muxy first). Force a backend with:
+Returning a handle confirms creation/submission, not application readiness or successful completion. Use your application's ready signal, logs, or exit protocol for that. Creation errors propagate to the caller. Orca input/read errors also propagate instead of appearing successful.
 
-- `PI_TERMINAL_MUX` (preferred): `muxy | cmux | tmux | zellij | wezterm | herdr | otty | orca`
-- `PI_SUBAGENT_MUX`: backward-compatible alias
+Existing calls without options keep their previous behavior:
 
-If the forced backend's runtime is unavailable, `getMuxBackend()` returns `null` — it never silently falls back to another backend.
+```ts
+import { createSurface, sendLongCommand } from "pi-terminal-mux";
 
-### Herdr surface mode
-
-Herdr keeps the backward-compatible breadth-first split mode by default. Set `PI_SUBAGENT_HERDR_MODE=tab` to create one background tab per subagent, or `split` to select the original pane layout explicitly. `createSurfaceSplit()` always remains an explicit pane split.
-
-```bash
-export PI_SUBAGENT_HERDR_MODE=tab
+const surface = createSurface("my-agent");
+const scriptPath = sendLongCommand(surface, "pi --session /tmp/child.jsonl", {
+  scriptPreamble: "export MY_FLAG=1",
+});
 ```
 
-## API overview
+`sendLongCommand` writes a script first and then submits `bash <script>` to the terminal. It remains available for existing callers and long commands. Do not also submit the startup command after passing it to `createSurface`, or it will run twice.
 
-### Unified surface API (same semantics across backends)
+## Detection
 
-| Function | Description |
-|----------|-------------|
-| `createSurface(name)` | Smart placement (herdr: breadth-first splits by default, or one background tab per surface with `PI_SUBAGENT_HERDR_MODE=tab`; cmux: first right-split then tabs; zellij: tab-aware tiled/stacked; muxy/otty/orca: breadth-first splits; orca falls back to a new tab without an agent handle), returns a surface handle |
-| `createSurfaceSplit(name, direction, fromSurface?, options?)` | Split in an explicit direction (left/right/up/down). `options.activate` (WezTerm only, default `false`) focuses the new pane after splitting |
-| `sendCommand(surface, command)` | Send a command and press Enter |
-| `sendLongCommand(surface, command, opts?)` | Write long commands to a script file first. `opts.scriptPreamble` injects leading lines; `opts.interpreter` (`"bash"` default, or `"powershell"` on Windows) selects the scripting runtime; returns the script path |
-| `sendEscape(surface)` | Send one ESC keypress |
-| `readScreen(surface, lines?, options?)` / `readScreenAsync` | Read the last N screen lines. `options.source` (herdr-only) forwards a herdr read source such as `"recent_unwrapped"`; other backends ignore it |
-| `closeSurface(surface)` | Close the surface |
-| `renameSurface(surface, name)` / `renameAgent(surface, name)` | Rename a known surface or agent label |
-| `getRenameCapability(operation, backend?, env?)` | Report the actual rename target or an explicit `unsupported` / `disabled` capability without executing a command |
-| `renameCurrentTab(title)` / `renameWorkspace(title)` | Rename and return a discriminated `renamed` / `unsupported` / `disabled` / `failed` result |
-| `pollForExit(surface, signal, opts)` | Wait for the process in a surface to exit: `.exit` sidecar file first, then a screen sentinel (`__SUBAGENT_DONE_<code>__`); headless uses child process exit |
-| `getLastSplitSource()` / `clearLastSplitSource()` | Source pane of the most recent split (for UI display) |
+| Backend | Requirements |
+|---------|--------------|
+| tmux | `TMUX` environment variable and the `tmux` executable |
+| Orca | `TERM_PROGRAM=Orca`, the `orca` executable, and a reachable runtime |
+| Headless | Neither terminal backend is available |
 
-Rename targets differ by backend: muxy/zellij tab rename targets a pane; tmux targets a window/session; WezTerm workspace rename targets the window; cmux and Herdr provide native workspace rename; Otty and Orca have no workspace rename. `resolveTerminalRenameTargets` is the explicit-ID path and ignores legacy opt-in variables; `getRenameCapability`, `renameCurrentTab` and `renameWorkspace` retain their legacy opt-in behavior. Headless reports `unsupported` instead of silently succeeding.
+Automatic detection prefers tmux, then Orca. Force a backend with `PI_TERMINAL_MUX=tmux|orca`; `PI_SUBAGENT_MUX` remains a compatibility alias. An unavailable forced backend does not select another terminal backend. Unknown or removed backend preferences throw an explicit error.
 
-### Detection and utilities
+## API
 
-`getMuxBackend()`, `isMuxAvailable()`, `isHeadlessMode()`, `muxSetupHint()`, `getAgentPaneId(backend?)`, `backendAgentPaneEnvVar(backend)`, `shellEscape()`, `isFishShell()`, `exitStatusVar()`, plus zellij placement planning (`selectZellijPlacement` etc.) and cmux/otty JSON parsing helpers — all pure and unit-testable.
+| Function | Behavior |
+|----------|----------|
+| `createSurface(name, options?)` | tmux right-split; Orca breadth-first splits from the caller, or a new tab without a caller handle; headless fallback. `options.command` starts work during creation |
+| `createSurfaceSplit(name, direction, fromSurface?, options?)` | Explicit split; `direction` is left/right/up/down, `options.command` is optional. Requires tmux or Orca; headless has no pane layout |
+| `sendCommand(surface, command)` | Send input followed by Enter to an existing terminal |
+| `sendLongCommand(surface, command, options?)` | Write a script, then execute it. Supports `scriptPath`, `scriptPreamble`, and `interpreter: "bash" | "powershell"` |
+| `sendEscape(surface)` | Send Escape; headless uses SIGINT |
+| `readScreen(surface, lines?)` / `readScreenAsync` | Read terminal output or headless logs |
+| `closeSurface(surface)` | Close a pane or headless process |
+| `renameSurface(surface, name)` | Rename the backend's corresponding window/tab |
+| `getLastSplitSource()` / `clearLastSplitSource()` | Track the most recent split source |
+| `pollForExit(surface, signal, options)` | Wait for an `.exit` sidecar, sentinel, or headless process exit |
 
-### Backend-native APIs
+Types `CreateSurfaceOptions` and `CreateSurfaceSplitOptions` both expose `command?: string`. The existing first three split arguments are unchanged.
 
-Backend-native functions are also re-exported (e.g. `createHerdrSurface`, `splitHerdrPane`, `readHerdrScreen`, `sendOttyCommand`, `renameOttyTab`, `createOrcaSurface`, `sendOrcaCommand`, ...). Subpath imports are available too: `pi-terminal-mux/mux`, `pi-terminal-mux/herdr`, `pi-terminal-mux/otty`, `pi-terminal-mux/orca`.
+Detection helpers include `getMuxBackend`, `isMuxAvailable`, `isHeadlessMode`, `muxSetupHint`, `getAgentPaneId`, and `backendAgentPaneEnvVar`. Shell helpers include `shellEscape`, `isFishShell`, and `exitStatusVar`.
 
-## Headless mode
+The shared API is also exported through `pi-terminal-mux/mux`; Orca-native helpers are exported through `pi-terminal-mux/orca`.
 
-When no backend is detected, `createSurface` returns a `headless:`-prefixed surface, `sendLongCommand` spawns a background child process writing to a log file, and `readScreen` / `pollForExit` / `closeSurface` keep the same semantics — callers need no special-casing.
+## Naming ownership
 
-## Windows PowerShell support
+`createSurfaceRenameContext(surface)` produces the `PI_TERMINAL_RENAME_CONTEXT` protocol for a child launcher. Replace inherited context on every launch and resume.
 
-All platforms keep **Bash as the default** scripting runtime to preserve existing caller semantics. On Windows 11 PowerShell/WezTerm/herdr, opt in explicitly:
+A child pane does not prove exclusive ownership of its tmux window or Orca tab. Child contexts therefore grant neither shared window/tab renaming nor workspace renaming. Invalid contexts never fall back to parent permissions.
 
-- **Command submission (WezTerm)**: the Enter terminator is `\r` on `win32` and `\n` elsewhere, so PowerShell input is submitted exactly once instead of stopping at the continuation prompt.
-- **Long commands (`sendLongCommand`)**: pass `interpreter: "powershell"` to generate a `.ps1` and run it via `powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File <path>` (mux) or `-Command "& <path>"` (headless). Explicit `scriptPath` is preserved as-is; auto paths choose `.ps1`/`.sh` by interpreter. Omitted `interpreter` keeps the existing Bash command, `.sh` paths and `$?` numeric sentinels unchanged.
-- **Screen capture (`readScreen` / `readScreenAsync`)**: pass `{ source: "recent_unwrapped" }` (herdr-only) to select herdr's soft-wrap merged capture; omitted options keep herdr `recent` and other backends keep their own read semantics.
+For ordinary sessions, `resolveTerminalRenameTargets({ tab, workspace })` resolves explicit identities, and `renameTerminalTarget(reference, title)` operates on those captured targets, never on UI focus:
 
-These are opt-in capabilities. Existing Bash callers keep the default Bash runtime; the old interactive-subagents workspace is retired.
+- tmux: window for `tab`, session for `workspace`.
+- Orca: terminal tab for `tab`; `workspace` is unsupported.
+- Headless: naming is unsupported.
 
-## Environment variables
+Legacy `renameCurrentTab` / `renameWorkspace` return discriminated success, unsupported, disabled, or failed results. tmux's legacy operations require `PI_SUBAGENT_RENAME_TMUX_WINDOW=1` / `PI_SUBAGENT_RENAME_TMUX_SESSION=1`; explicit-ID resolution ignores those switches.
 
-| Variable | Description |
-|----------|-------------|
-| `PI_TERMINAL_MUX` / `PI_SUBAGENT_MUX` | Force a backend |
-| `PI_SUBAGENT_ZELLIJ_MIN_COLUMNS` / `PI_SUBAGENT_ZELLIJ_MIN_ROWS` | Minimum usable size for zellij splits (default 50x10; stacks instead when smaller) |
-| `PI_SUBAGENT_RENAME_TMUX_WINDOW` / `PI_SUBAGENT_RENAME_TMUX_SESSION` | Compatibility switches for legacy `getRenameCapability` / `renameCurrentTab` / `renameWorkspace` on tmux; ignored by explicit target resolution |
-| `PI_SUBAGENT_HERDR_MODE` | Herdr surface placement: `split` (default) or `tab` |
-| `PI_SUBAGENT_RENAME_HERDR_WORKSPACE` | Compatibility switch for legacy `getRenameCapability` / `renameWorkspace` on herdr; ignored by explicit target resolution |
-| `PI_EXTENSIONS_LOCALE` | Hint language (`zh-CN` / `en-US` / `auto`), provided by pi-utils |
+## Migration
 
-## Design constraints
+Only tmux and Orca remain in `MuxBackend`. Other backend implementations, native exports/subpaths, WezTerm's `activate` option, and Herdr's read-source options have been removed. Update old backend preferences and imports. This is a breaking reduction of the supported backend/API surface; tmux/Orca calls without startup options remain compatible.
 
-- **No machine coupling**: every backend is selected via runtime detection (env vars + command availability); no hardcoded local paths; missing CLIs degrade backend-by-backend down to headless.
-- **Localized user-facing text**: setup hints go through the [pi-utils](https://www.npmjs.com/package/pi-utils) catalog with complete `zh-CN` and `en-US` entries.
-- **Agent pane anchoring**: the agent's own pane ID on muxy/herdr/otty/orca is captured at module load (`AGENT_MUXY_PANE_ID`, `AGENT_ORCA_TERMINAL_HANDLE` etc.), immune to later focus switches.
+No local executable paths are hardcoded. Orca's caller handle is captured at module load so later UI focus changes cannot redirect splits. Headless keeps the existing Bash default; `sendLongCommand({ interpreter: "powershell" })` explicitly selects PowerShell where available.
 
 ## License
 
 MIT
-
-
-## Scoped naming
-
-`createSurfaceRenameContext(surface)` describes the terminal target a launcher can grant to a child. Pass its JSON value in `PI_TERMINAL_RENAME_CONTEXT`, replacing any inherited value on **every launch and resume**. This protocol is owned by terminal-mux, not by a naming or subagent extension.
-
-`resolveTerminalRenameTargets({ tab, workspace })` returns explicit target IDs and `surface`/`shared` scope, or individual skipped/failed results. `renameTerminalTarget(reference, title)` executes against that captured identity. Callers decide when to rename and which targets to request; the library does not generate titles or change Pi sessions.
-
-A restricted child never renames a workspace. cmux surfaces, muxy/zellij panes, and Herdr panes or explicitly created Herdr tabs can be granted. tmux/WezTerm/Otty/Orca split surfaces do not prove exclusive ownership of their window/tab: naming is skipped rather than expanded to the shared parent. Ordinary sessions require their own target IDs; missing IDs never fall back to focus or the first tab. Explicit target resolution uses backend capability directly, independent of legacy rename opt-ins.
-
-Invalid JSON or an unknown protocol version is an error, not unrestricted access. Legacy child identity variables without this protocol restrict terminal naming until the launcher supplies ownership. This is a cooperation contract for trusted local processes, not a security sandbox. WezTerm/Otty split creation does not rename a shared tab.

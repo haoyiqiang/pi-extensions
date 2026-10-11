@@ -1,15 +1,13 @@
 {
   "name": "pi-terminal-mux",
   "version": "0.6.5",
-  "description": "Terminal multiplexer abstraction for pi extensions \u2014 unified surface API across muxy, cmux, tmux, zellij, wezterm, herdr, otty and orca, with headless fallback",
+  "description": "Terminal surface API for tmux and Orca, with native startup commands and headless fallback",
   "type": "module",
   "main": "./index.ts",
   "exports": {
     ".": "./index.ts",
     "./package.json": "./package.json",
     "./mux": "./src/mux.ts",
-    "./herdr": "./src/herdr.ts",
-    "./otty": "./src/otty.ts",
     "./orca": "./src/orca.ts"
   },
   "files": [
@@ -48,8 +46,8 @@
     "terminal",
     "multiplexer",
     "tmux",
-    "zellij",
-    "wezterm",
+    "orca",
+    "headless",
     "coding-agent"
   ],
   "dependencies": {

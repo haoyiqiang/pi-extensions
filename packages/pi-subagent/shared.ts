@@ -21,7 +21,6 @@ import {
 	isMuxAvailable,
 	muxSetupHint,
 	readScreen,
-	sendLongCommand,
 	shellEscape,
 	TERMINAL_RENAME_CONTEXT_ENV,
 } from "pi-terminal-mux";
@@ -177,17 +176,6 @@ export function removeRunDir(runDir: string): void {
 	rmSync(runDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 }
 
-function shellReadyDelayMs(): number {
-	const raw = process.env.PI_SUBAGENT_SHELL_READY_DELAY_MS?.trim();
-	const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
-	return Number.isFinite(parsed) && parsed >= 0 ? parsed : 500;
-}
-
-function sleepSync(milliseconds: number): void {
-	if (milliseconds <= 0) return;
-	Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
-}
-
 function launcherFor(cwd: string): string {
 	const testLauncher = join(cwd, "pi-test.sh");
 	try {
@@ -212,13 +200,15 @@ function buildLaunchCommand(metadata: RunMetadata, initialArgs: string[]): strin
 		...initialArgs,
 	];
 	if (!args.includes("--extension")) args.push("--extension", extensionPath);
-	const rename = createSurfaceRenameContext(metadata.surface, getMuxBackend());
+	// The new panel ID is not available yet. An empty, restricted context grants no
+	// shared window/tab naming rights and never reuses a suspended run's old panel ID.
+	const rename = createSurfaceRenameContext("", getMuxBackend());
 	const env = [
 		`PI_SUBAGENT_RUN_DIR=${shellEscape(metadata.runDir)}`,
 		`${TERMINAL_RENAME_CONTEXT_ENV}=${shellEscape(JSON.stringify(rename))}`,
 	];
 	const command = [launcherFor(metadata.cwd), ...args].map((arg) => shellEscape(arg)).join(" ");
-	return `cd ${shellEscape(metadata.cwd)} && ${env.join(" ")} ${command}`;
+	return `cd ${shellEscape(metadata.cwd)} && exec env ${env.join(" ")} ${command}`;
 }
 
 /** Open a panel and start the child pi process. The panel id is stored on the run. */
@@ -226,13 +216,14 @@ export function launchRun(metadata: RunMetadata, initialArgs: string[] = []): vo
 	if (!isMuxAvailable()) {
 		throw new Error(`No supported terminal multiplexer found. ${muxSetupHint()}`);
 	}
-	const surface = createSurface(metadata.name ?? metadata.handle);
-	const launched = updateMetadata(metadata.runDir, { surface }) ?? { ...metadata, surface };
-	sleepSync(shellReadyDelayMs());
+	const surface = createSurface(metadata.name ?? metadata.handle, {
+		command: buildLaunchCommand(metadata, initialArgs),
+	});
 	try {
-		sendLongCommand(surface, buildLaunchCommand(launched, initialArgs), {
-			scriptPath: join(metadata.runDir, "launch.sh"),
-		});
+		// Patch only the panel ID: the child may already have recorded its startup state.
+		if (!updateMetadata(metadata.runDir, { surface })) {
+			throw new Error(`Could not record subagent panel: ${metadata.handle}`);
+		}
 	} catch (error) {
 		try {
 			closeSurface(surface);
