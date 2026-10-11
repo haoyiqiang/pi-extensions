@@ -2,15 +2,19 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync,
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { formatRoleCatalog, loadRoles } from "./roles.ts";
 import {
 	closeRunSurface,
 	getAgentDir,
 	inboxDir,
+	inboxMessageId,
+	inboxMessageText,
 	launchRun,
 	listRuns,
 	readMetadata,
 	removeRunDir,
 	runDisplayName,
+	runSurfaceState,
 	surfaceAlive,
 	updateMetadata,
 	waitForRunShutdown,
@@ -54,6 +58,13 @@ export default function subagentExtension(pi: ExtensionAPI) {
 	const runDir = process.env.PI_SUBAGENT_RUN_DIR;
 	if (!runDir) {
 		pi.on("resources_discover", () => ({ skillPaths: [join(packageDir, "skills")] }));
+		pi.on("before_agent_start", (event) => {
+			const catalog = formatRoleCatalog(loadRoles());
+			if (catalog) event.systemPromptOptions.appendSystemPrompt = [
+				event.systemPromptOptions.appendSystemPrompt,
+				catalog,
+			].filter(Boolean).join("\n\n");
+		});
 	}
 
 	if (!runDir) {
@@ -88,22 +99,41 @@ export default function subagentExtension(pi: ExtensionAPI) {
 			// Suspend running children: close the panel but keep transcript and metadata so resuming this
 			// session relaunches them. Children that already exited on their own are discarded.
 			for (const run of listRuns(ctx.sessionManager.getSessionId())) {
-				if (!surfaceAlive(run.surface)) {
+				if (runSurfaceState(run.surface) === "absent") {
 					if (!run.suspended) removeRunDir(run.runDir);
 					continue;
 				}
 				updateMetadata(run.runDir, { suspended: true });
-				closeRunSurface(run.surface);
-				await waitForRunShutdown(run.runDir);
+				try {
+					closeRunSurface(run.surface);
+					await waitForRunShutdown(run.runDir);
+				} catch (error) {
+					const message = error instanceof Error ? error.message : String(error);
+					updateMetadata(run.runDir, { error: message });
+					if (ctx.hasUI) ctx.ui.notify(`Could not suspend ${runDisplayName(run)}: ${message}`, "error");
+				}
 			}
 		});
 		return;
+	}
+
+	const promptFile = readMetadata(runDir)?.appendSystemPromptFile;
+	const appendSystemPrompt = promptFile ? readFileSync(promptFile, "utf8") : undefined;
+	if (appendSystemPrompt) {
+		pi.on("before_agent_start", (event) => {
+			// Keep Pi's discovered APPEND_SYSTEM.md and structured base prompt intact.
+			event.systemPromptOptions.appendSystemPrompt = [
+				event.systemPromptOptions.appendSystemPrompt,
+				appendSystemPrompt,
+			].filter(Boolean).join("\n\n");
+		});
 	}
 
 	let currentContext: ExtensionContext | undefined;
 	let timer: ReturnType<typeof setInterval> | undefined;
 	let processing = false;
 	let sessionName: string | undefined;
+	const inFlight = new Map<string, number>();
 
 	const syncSessionName = (): void => {
 		const metadata = readMetadata(runDir);
@@ -114,49 +144,54 @@ export default function subagentExtension(pi: ExtensionAPI) {
 		sessionName = next;
 	};
 
-	const processInbox = async (): Promise<void> => {
+	const processInbox = (): void => {
 		if (processing || !currentContext) return;
-		syncSessionName();
-		const queueDir = inboxDir(runDir);
-		if (!existsSync(queueDir)) return;
 		processing = true;
 		try {
-			for (const name of readdirSync(queueDir)
-				.filter((entry) => entry.endsWith(".json"))
-				.sort()) {
-				const path = join(queueDir, name);
-				let payload: InboxMessage;
-				try {
-					const value: unknown = JSON.parse(readFileSync(path, "utf8"));
-					if (!isInboxMessage(value)) throw new Error("Invalid inbox message");
-					payload = value;
-				} catch (error) {
-					unlinkSync(path);
-					updateMetadata(runDir, {
-						state: "error",
-						error: error instanceof Error ? error.message : String(error),
-					});
-					continue;
-				}
-
-				updateMetadata(runDir, { state: "busy", error: undefined });
-				try {
-					if (currentContext.isIdle()) {
-						pi.sendUserMessage(payload.message);
-					} else {
-						pi.sendUserMessage(payload.message, {
-							deliverAs: payload.delivery === "followUp" ? "followUp" : "steer",
-						});
-					}
-					unlinkSync(path);
-				} catch (error) {
-					updateMetadata(runDir, {
-						state: currentContext.isIdle() ? "idle" : "busy",
-						error: error instanceof Error ? error.message : String(error),
-					});
-					return;
+			syncSessionName();
+			const queueDir = inboxDir(runDir);
+			if (!existsSync(queueDir)) return;
+			// sendUserMessage returns void and hides asynchronous failures. A receipt
+			// is accepted only after the uniquely tagged user message is persisted.
+			const accepted = new Set<string>();
+			for (const entry of currentContext.sessionManager.getBranch()) {
+				if (entry.type === "message" && entry.message.role === "user") {
+					const id = inboxMessageId(entry.message.content);
+					if (id) accepted.add(id);
 				}
 			}
+			const names = readdirSync(queueDir).filter((entry) => entry.endsWith(".json")).sort();
+			for (const name of names) {
+				if (accepted.has(name)) {
+					unlinkSync(join(queueDir, name));
+					inFlight.delete(name);
+				}
+			}
+			// Serialize idle preflight; do not issue a second prompt while the first
+			// is awaiting auth/input/compaction. Retain unacknowledged disk messages.
+			if (currentContext.isIdle() && inFlight.size > 0) {
+				if (!currentContext.hasPendingMessages() && Date.now() - Math.min(...inFlight.values()) > 5000 &&
+					readMetadata(runDir)?.state !== "error") {
+					updateMetadata(runDir, { state: "error", error: "Message was not accepted; inbox retained. Fix the cause and reload or resume to retry." });
+				}
+				return;
+			}
+			if (readMetadata(runDir)?.state === "error") return;
+			// A reload can retain Pi's in-memory queues while replacing this map.
+			if (inFlight.size === 0 && currentContext.hasPendingMessages()) return;
+			for (const name of names) {
+				if (accepted.has(name) || inFlight.has(name)) continue;
+				const value: unknown = JSON.parse(readFileSync(join(queueDir, name), "utf8"));
+				if (!isInboxMessage(value)) throw new Error(`Invalid inbox message: ${name}`);
+				updateMetadata(runDir, { state: "busy", error: undefined });
+				inFlight.set(name, Date.now());
+				pi.sendUserMessage(inboxMessageText(name, value.message), {
+					deliverAs: value.delivery === "followUp" ? "followUp" : "steer",
+				});
+				return;
+			}
+		} catch (error) {
+			updateMetadata(runDir, { state: "error", error: error instanceof Error ? error.message : String(error) });
 		} finally {
 			processing = false;
 		}
@@ -175,10 +210,10 @@ export default function subagentExtension(pi: ExtensionAPI) {
 		});
 		syncSessionName();
 		if (!timer) {
-			timer = setInterval(() => void processInbox(), 250);
+			timer = setInterval(processInbox, 250);
 			timer.unref();
 		}
-		void processInbox();
+		processInbox();
 	});
 
 	pi.on("agent_start", (_event, ctx) => {
