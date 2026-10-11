@@ -1,5 +1,6 @@
 import { autoCollectEvents } from "./src/events";
 import { clearConfigCache } from "./src/config";
+import { registerSparkConfigCommand } from "./src/config/panel";
 import registerCleanMode from "./src/features/clean-mode";
 import { registerCredits } from "./src/features/credits";
 import { registerEditor } from "./src/features/editor";
@@ -23,6 +24,7 @@ export default function (pi: ExtensionAPI) {
   const events = autoCollectEvents(pi);
   pi.on("session_start", () => { clearConfigCache(); });
 
+  registerSparkConfigCommand(pi);
   registerCleanMode(pi);
   registerCredits(pi);
   registerSessionResources(pi);

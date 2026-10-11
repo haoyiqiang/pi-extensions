@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { TerminalRenameOutcome, TerminalRenameTarget, ResolveRenameOptions } from "pi-terminal-mux";
 import { isTitleEffort, parseConfig, TITLE_EFFORT_LEVELS, type NamingConfig } from "./config.ts";
-import { loadNamingConfig, namingConfigPath, saveNamingConfig } from "../../config/naming-store.ts";
+import { loadNamingConfig } from "../../config/naming-store.ts";
 
 import { getCurrentSessionUserMessages, requestSessionNameWithTimeout, type SessionNameRequester } from "./session-name.ts";
 
@@ -27,8 +27,6 @@ function skipReason(reason: string, setting: string): string {
     "missing-id": "missing an explicit target ID; current focus is not a substitute",
   }[reason] ?? reason;
 }
-const CONFIG_COMMAND_ALIASES = ["config:naming", "naming-config", "pi-naming-config"] as const;
-const CONFIG_RESET_COMMAND = "reset";
 const CONFIG_OPTION = {
   automaticNaming: 0,
   manualNaming: 1,
@@ -87,175 +85,150 @@ export interface NamingConfigStore {
   path(ctx: ExtensionContext): string;
 }
 
-/** 注册配置命令，通过 TUI 菜单和输入框修改命名配置。 */
-export function registerNamingConfigCommand(
-  pi: ExtensionAPI,
-  store: NamingConfigStore = { load: loadNamingConfig, save: saveNamingConfig, path: namingConfigPath },
-): void {
-  const command = {
-    description: "Configure Spark naming",
-    getArgumentCompletions: () => [{ value: CONFIG_RESET_COMMAND, label: CONFIG_RESET_COMMAND }],
-    handler: async (args: string, ctx: ExtensionCommandContext): Promise<void> => {
-      const argument = args.trim();
-      if (argument && argument !== CONFIG_RESET_COMMAND) {
-        report(pi, ctx, { message: "Usage: /config:naming (open the settings menu) or /config:naming reset (restore defaults)", level: "warning" });
-        return;
-      }
-      if (argument === CONFIG_RESET_COMMAND) {
-        try {
-          const path = store.save(parseConfig({}), ctx) ?? store.path(ctx);
-          report(pi, ctx, {
-            message: `Naming configuration saved to ${path}. Run /reload to apply it.`,
-            level: "info",
-          });
-        } catch (error) {
-          report(pi, ctx, { message: `Invalid naming configuration: ${errorMessage(error)}`, level: "error" });
-        }
-        return;
-      }
-      if (!ctx.hasUI) {
-        report(pi, ctx, { message: "Naming configuration requires the TUI; run this command in an interactive Pi session.", level: "warning" });
-        return;
-      }
+/** Detailed naming settings, opened only from Spark's unified configuration panel. */
+export async function openNamingConfigPanel(
+  ctx: ExtensionCommandContext,
+  store: NamingConfigStore,
+): Promise<void> {
+  const notify = (notice: { message: string; level: "info" | "warning" | "error" }) => ctx.ui.notify(notice.message, notice.level);
+  if (!ctx.hasUI) {
+    notify({ message: "Naming configuration requires an interactive Pi session.", level: "warning" });
+    return;
+  }
 
-      let config: NamingConfig;
-      try {
-        const loaded = store.load(ctx);
-        if (loaded === false) {
-          report(pi, ctx, { message: "Naming is disabled for this session. Configure naming in extensions/pi-spark/config.json or use /config:naming reset, then /reload.", level: "info" });
-          return;
-        }
-        config = loaded;
-      } catch (error) {
-        report(pi, ctx, { message: `Invalid naming configuration: ${errorMessage(error)}`, level: "error" });
-        return;
-      }
+  let config: NamingConfig;
+  try {
+    const loaded = store.load(ctx);
+    if (loaded === false) {
+      notify({ message: "Enable naming in /config:spark first.", level: "info" });
+      return;
+    }
+    config = loaded;
+  } catch (error) {
+    notify({ message: `Invalid naming configuration: ${errorMessage(error)}`, level: "error" });
+    return;
+  }
 
-      /** Saves one validated menu change and reports its result. */
-      const save = (next: NamingConfig): boolean => {
-        try {
-          const path = store.save(next, ctx) ?? store.path(ctx);
-          config = next;
-          report(pi, ctx, { message: `Naming configuration saved to ${path}. Run /reload to apply it.`, level: "info" });
-          return true;
-        } catch (error) {
-          report(pi, ctx, { message: `Invalid naming configuration: ${errorMessage(error)}`, level: "error" });
-          return false;
-        }
-      };
-      /** Formats a boolean setting for the localized menu label. */
-      const toggle = (value: boolean): string => value ? "on" : "off";
-      /** Opens a choice list for common values and falls back to text only for custom values. */
-      const chooseSettingValue = async (
-        title: string,
-        current: string,
-        options: readonly string[],
-      ): Promise<string | undefined> => {
-        const customChoice = "Custom…";
-        const cancelChoice = "Cancel";
-        const choices = [
-          ...options.map((value) => `Common value: ${value}`),
-          customChoice,
-          cancelChoice,
-        ];
-        const selected = await ctx.ui.select(title, choices);
-        if (selected === undefined || selected === cancelChoice) return undefined;
-        if (selected === customChoice) return ctx.ui.input(title, current);
-        const index = choices.indexOf(selected);
-        return index >= 0 && index < options.length ? options[index] : undefined;
-      };
-
-      while (true) {
-        const doneChoice = "Done";
-        const choices = [
-          `Automatic naming: ${toggle(config.automaticNaming)}`,
-          `Manual /rename: ${toggle(config.manualNaming)}`,
-          `Name session: ${toggle(config.targets.session)}`,
-          `Name workspace: ${toggle(config.targets.workspace)}`,
-          `Name tab: ${toggle(config.targets.tab)}`,
-          `Maximum title length: ${config.title.maxLength}`,
-          `Preferred title length: ${config.title.preferredLength}`,
-          `Title language: ${config.title.language}`,
-          `Title instructions: ${config.title.instructions || "not set"}`,
-          `Request timeout: ${config.title.timeoutMs} ms`,
-          `Output budget: ${config.title.maxTokens} tokens`,
-          `Thinking effort: ${config.title.effort}`,
-          doneChoice,
-        ];
-        const selected = await ctx.ui.select("Naming settings", choices);
-        if (selected === undefined || selected === doneChoice) return;
-        const selectedIndex = choices.indexOf(selected);
-        let next: NamingConfig | undefined;
-        if (selectedIndex === CONFIG_OPTION.automaticNaming) {
-          next = parseConfig({ ...config, automaticNaming: !config.automaticNaming });
-        } else if (selectedIndex === CONFIG_OPTION.manualNaming) {
-          next = parseConfig({ ...config, manualNaming: !config.manualNaming });
-        } else if (selectedIndex === CONFIG_OPTION.sessionTarget) {
-          next = parseConfig({ ...config, targets: { ...config.targets, session: !config.targets.session } });
-        } else if (selectedIndex === CONFIG_OPTION.workspaceTarget) {
-          next = parseConfig({ ...config, targets: { ...config.targets, workspace: !config.targets.workspace } });
-        } else if (selectedIndex === CONFIG_OPTION.tabTarget) {
-          next = parseConfig({ ...config, targets: { ...config.targets, tab: !config.targets.tab } });
-        } else {
-          let inputTitle = "Request timeout (positive milliseconds)";
-          let inputValue = String(config.title.timeoutMs);
-          let options: readonly string[] = TIMEOUT_PRESETS;
-          if (selectedIndex === CONFIG_OPTION.maxLength) {
-            inputTitle = "Maximum title length (positive integer)";
-            inputValue = String(config.title.maxLength);
-            options = MAX_LENGTH_PRESETS;
-          } else if (selectedIndex === CONFIG_OPTION.preferredLength) {
-            inputTitle = "Preferred title length (positive integer)";
-            inputValue = String(config.title.preferredLength);
-            options = PREFERRED_LENGTH_PRESETS;
-          } else if (selectedIndex === CONFIG_OPTION.language) {
-            inputTitle = "Title language";
-            inputValue = config.title.language;
-            options = LANGUAGE_PRESETS;
-          } else if (selectedIndex === CONFIG_OPTION.instructions) {
-            inputTitle = "Title instructions (can be empty)";
-            inputValue = config.title.instructions;
-            options = [];
-          } else if (selectedIndex === CONFIG_OPTION.maxTokens) {
-            inputTitle = "Output budget (positive integer, shared by thinking and title)";
-            inputValue = String(config.title.maxTokens);
-            options = MAX_TOKENS_PRESETS;
-          } else if (selectedIndex === CONFIG_OPTION.effort) {
-            inputTitle = "Thinking effort";
-            inputValue = config.title.effort;
-            options = TITLE_EFFORT_LEVELS;
-          }
-          const input = selectedIndex === CONFIG_OPTION.instructions
-            ? await ctx.ui.input(inputTitle, inputValue)
-            : await chooseSettingValue(inputTitle, inputValue, options);
-          if (input === undefined) continue;
-          const title = { ...config.title };
-          if (selectedIndex === CONFIG_OPTION.maxLength) title.maxLength = Number(input.trim());
-          else if (selectedIndex === CONFIG_OPTION.preferredLength) title.preferredLength = Number(input.trim());
-          else if (selectedIndex === CONFIG_OPTION.language) title.language = input;
-          else if (selectedIndex === CONFIG_OPTION.instructions) title.instructions = input;
-          else if (selectedIndex === CONFIG_OPTION.maxTokens) title.maxTokens = Number(input.trim());
-          else if (selectedIndex === CONFIG_OPTION.effort) {
-            // 自定义输入可能不是受支持的档位；明确报错并重开菜单，不静默丢弃也不落到其它字段。
-            if (!isTitleEffort(input)) {
-              report(pi, ctx, {
-                message: `Invalid thinking effort: ${input}; allowed: ${TITLE_EFFORT_LEVELS.join(", ")}`,
-                level: "error",
-              });
-              continue;
-            }
-            title.effort = input;
-          } else title.timeoutMs = Number(input.trim());
-          try { next = parseConfig({ ...config, title }); }
-          catch (error) {
-            report(pi, ctx, { message: `Invalid naming configuration: ${errorMessage(error)}`, level: "error" });
-          }
-        }
-        if (next) save(next);
-      }
-    },
+  /** Saves one validated menu change and reports its result. */
+  const save = (next: NamingConfig): boolean => {
+    try {
+      const path = store.save(next, ctx) ?? store.path(ctx);
+      config = next;
+      notify({ message: `Naming configuration saved to ${path}. Run /reload to apply it.`, level: "info" });
+      return true;
+    } catch (error) {
+      notify({ message: `Invalid naming configuration: ${errorMessage(error)}`, level: "error" });
+      return false;
+    }
   };
-  for (const name of CONFIG_COMMAND_ALIASES) pi.registerCommand(name, command);
+  const toggle = (value: boolean): string => value ? "on" : "off";
+  /** Opens a choice list for common values and falls back to text only for custom values. */
+  const chooseSettingValue = async (
+    title: string,
+    current: string,
+    options: readonly string[],
+  ): Promise<string | undefined> => {
+    const customChoice = "Custom…";
+    const cancelChoice = "Cancel";
+    const choices = [
+      ...options.map((value) => `Common value: ${value}`),
+      customChoice,
+      cancelChoice,
+    ];
+    const selected = await ctx.ui.select(title, choices);
+    if (selected === undefined || selected === cancelChoice) return undefined;
+    if (selected === customChoice) return ctx.ui.input(title, current);
+    const index = choices.indexOf(selected);
+    return index >= 0 && index < options.length ? options[index] : undefined;
+  };
+
+  while (true) {
+    const doneChoice = "Done";
+    const choices = [
+      `Automatic naming: ${toggle(config.automaticNaming)}`,
+      `Manual /rename: ${toggle(config.manualNaming)}`,
+      `Name session: ${toggle(config.targets.session)}`,
+      `Name workspace: ${toggle(config.targets.workspace)}`,
+      `Name tab: ${toggle(config.targets.tab)}`,
+      `Maximum title length: ${config.title.maxLength}`,
+      `Preferred title length: ${config.title.preferredLength}`,
+      `Title language: ${config.title.language}`,
+      `Title instructions: ${config.title.instructions || "not set"}`,
+      `Request timeout: ${config.title.timeoutMs} ms`,
+      `Output budget: ${config.title.maxTokens} tokens`,
+      `Thinking effort: ${config.title.effort}`,
+      doneChoice,
+    ];
+    const selected = await ctx.ui.select("Naming settings", choices);
+    if (selected === undefined || selected === doneChoice) return;
+    const selectedIndex = choices.indexOf(selected);
+    let next: NamingConfig | undefined;
+    if (selectedIndex === CONFIG_OPTION.automaticNaming) {
+      next = parseConfig({ ...config, automaticNaming: !config.automaticNaming });
+    } else if (selectedIndex === CONFIG_OPTION.manualNaming) {
+      next = parseConfig({ ...config, manualNaming: !config.manualNaming });
+    } else if (selectedIndex === CONFIG_OPTION.sessionTarget) {
+      next = parseConfig({ ...config, targets: { ...config.targets, session: !config.targets.session } });
+    } else if (selectedIndex === CONFIG_OPTION.workspaceTarget) {
+      next = parseConfig({ ...config, targets: { ...config.targets, workspace: !config.targets.workspace } });
+    } else if (selectedIndex === CONFIG_OPTION.tabTarget) {
+      next = parseConfig({ ...config, targets: { ...config.targets, tab: !config.targets.tab } });
+    } else {
+      let inputTitle = "Request timeout (positive milliseconds)";
+      let inputValue = String(config.title.timeoutMs);
+      let options: readonly string[] = TIMEOUT_PRESETS;
+      if (selectedIndex === CONFIG_OPTION.maxLength) {
+        inputTitle = "Maximum title length (positive integer)";
+        inputValue = String(config.title.maxLength);
+        options = MAX_LENGTH_PRESETS;
+      } else if (selectedIndex === CONFIG_OPTION.preferredLength) {
+        inputTitle = "Preferred title length (positive integer)";
+        inputValue = String(config.title.preferredLength);
+        options = PREFERRED_LENGTH_PRESETS;
+      } else if (selectedIndex === CONFIG_OPTION.language) {
+        inputTitle = "Title language";
+        inputValue = config.title.language;
+        options = LANGUAGE_PRESETS;
+      } else if (selectedIndex === CONFIG_OPTION.instructions) {
+        inputTitle = "Title instructions (can be empty)";
+        inputValue = config.title.instructions;
+        options = [];
+      } else if (selectedIndex === CONFIG_OPTION.maxTokens) {
+        inputTitle = "Output budget (positive integer, shared by thinking and title)";
+        inputValue = String(config.title.maxTokens);
+        options = MAX_TOKENS_PRESETS;
+      } else if (selectedIndex === CONFIG_OPTION.effort) {
+        inputTitle = "Thinking effort";
+        inputValue = config.title.effort;
+        options = TITLE_EFFORT_LEVELS;
+      }
+      const input = selectedIndex === CONFIG_OPTION.instructions
+        ? await ctx.ui.input(inputTitle, inputValue)
+        : await chooseSettingValue(inputTitle, inputValue, options);
+      if (input === undefined) continue;
+      const title = { ...config.title };
+      if (selectedIndex === CONFIG_OPTION.maxLength) title.maxLength = Number(input.trim());
+      else if (selectedIndex === CONFIG_OPTION.preferredLength) title.preferredLength = Number(input.trim());
+      else if (selectedIndex === CONFIG_OPTION.language) title.language = input;
+      else if (selectedIndex === CONFIG_OPTION.instructions) title.instructions = input;
+      else if (selectedIndex === CONFIG_OPTION.maxTokens) title.maxTokens = Number(input.trim());
+      else if (selectedIndex === CONFIG_OPTION.effort) {
+        if (!isTitleEffort(input)) {
+          notify({
+            message: `Invalid thinking effort: ${input}; allowed: ${TITLE_EFFORT_LEVELS.join(", ")}`,
+            level: "error",
+          });
+          continue;
+        }
+        title.effort = input;
+      } else title.timeoutMs = Number(input.trim());
+      try { next = parseConfig({ ...config, title }); }
+      catch (error) {
+        notify({ message: `Invalid naming configuration: ${errorMessage(error)}`, level: "error" });
+      }
+    }
+    if (next) save(next);
+  }
 }
 
 export type NamingConfigSelection = NamingConfig | false;
@@ -400,7 +373,7 @@ export function registerNaming(
       state.attempted = true;
       const config = readConfig(ctx);
       if (!config || !config.manualNaming || !Object.values(config.targets).some(Boolean)) {
-        report(pi, ctx, { message: "Naming is disabled for this session. Configure naming in extensions/pi-spark/config.json or use /config:naming reset, then /reload.", level: "info" });
+        report(pi, ctx, { message: "Naming is disabled for this session. Enable it in /config:spark, then /reload.", level: "info" });
         return;
       }
       await rename(args, ctx, false, config);
@@ -426,6 +399,5 @@ export function registerNaming(
 
 /** Spark owns the runtime and catalog; no configuration I/O at registration. */
 export function registerNamingFeature(pi: ExtensionAPI): void {
-  registerNamingConfigCommand(pi);
   registerNaming(pi, loadNamingConfig);
 }

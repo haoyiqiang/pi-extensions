@@ -7,8 +7,9 @@ import { clearConfigCache } from "../src/config/index.ts";
 import type { ExtensionAPI, ExtensionContext, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { createSurfaceRenameContext, resolveTerminalRenameTargets, TERMINAL_RENAME_CONTEXT_ENV, type TerminalRenameTarget } from "pi-terminal-mux";
 import { parseConfig } from "../src/features/naming/config.ts";
-import { registerNaming, registerNamingConfigCommand, registerNamingFeature, type NamingConfigSelection, type TerminalNamingAdapter } from "../src/features/naming/index.ts";
+import { registerNaming, openNamingConfigPanel, registerNamingFeature, type NamingConfigSelection, type TerminalNamingAdapter } from "../src/features/naming/index.ts";
 import type { SessionNameRequest } from "../src/features/naming/session-name.ts";
+import { openSparkConfigPanel } from "../src/config/panel.ts";
 
 type Input = { text?: string; source?: string };
 type Handler = (event: Input, ctx: ExtensionContext) => unknown;
@@ -90,12 +91,11 @@ test("配置菜单保存 targets 后，reload 的自动与手动入口只作用�
     },
     input: async () => assert.fail("unexpected config input"),
   });
-  registerNamingConfigCommand(menu.pi, {
+  await openNamingConfigPanel(menu.ctx, {
     load: () => saved,
     save: (config) => { saved = config; },
     path: () => "/configured/pi-naming.json",
   });
-  await menu.commands.get("config:naming")!.handler("", menu.ctx);
   assert.equal(saved.targets.session, false);
 
   const manual = harness();
@@ -368,10 +368,10 @@ test("registration does not read config or load mux; terminal loading stays lazy
   assert.equal(h.name(), "Second");
 });
 
-test("Spark feature registers all aliases once without a context or a renderer", () => {
+test("Spark naming registers only the rename operation without a config command", () => {
   const h = harness();
   registerNamingFeature(h.pi);
-  assert.deepEqual([...h.commands.keys()], ["config:naming", "naming-config", "pi-naming-config", "rename"]);
+  assert.deepEqual([...h.commands.keys()], ["rename"]);
   assert.deepEqual([...h.events.keys()], ["session_start", "session_before_switch", "session_before_fork", "session_before_tree", "session_shutdown", "session_tree", "input"]);
 });
 
@@ -535,27 +535,28 @@ test("configuration errors disable side effects without preventing later session
   assert.equal(h.name(), "Valid");
 });
 
-test("all config aliases forward ctx to the store and use its returned path", async () => {
+test("detailed naming panel forwards ctx to the unified store and uses its returned path", async () => {
   const h = harness();
   let loaded = 0;
   let saved = 0;
-  registerNamingConfigCommand(h.pi, {
-    load: (ctx) => { assert.equal(ctx, h.ctx); loaded++; return false; },
+  let calls = 0;
+  Object.assign(h.ctx.ui, {
+    select: async (_title: string, choices: string[]) => ++calls === 1 ? choices[0] : choices.at(-1),
+  });
+  await openNamingConfigPanel(h.ctx, {
+    load: (ctx) => { assert.equal(ctx, h.ctx); loaded++; return parseConfig({}); },
     save: (config, ctx) => {
       assert.equal(ctx, h.ctx);
-      assert.deepEqual(config, parseConfig({}));
+      assert.equal(config.automaticNaming, false);
       saved++;
       return "project/.pi/spark.json";
     },
     path: () => assert.fail("save already returned the selected path"),
   });
-  await h.commands.get("config:naming")!.handler("", h.ctx);
   assert.equal(loaded, 1);
-  for (const alias of ["config:naming", "naming-config", "pi-naming-config"]) {
-    await h.commands.get(alias)!.handler("reset", h.ctx);
-  }
-  assert.equal(saved, 3);
-  assert.equal(h.notices.filter((notice) => notice.includes("project/.pi/spark.json")).length, 3);
+  assert.equal(saved, 1);
+  assert.equal(h.commands.size, 0);
+  assert.equal(h.notices.filter((notice) => notice.includes("project/.pi/spark.json")).length, 1);
 });
 
 test("non-UI reports send the Pi message without triggering a turn", async () => {
@@ -601,14 +602,25 @@ test("production registration selects Spark naming per context and sends config 
       h.events.get("session_start")!({}, h.ctx);
       await h.commands.get("rename")!.handler("Project title", h.ctx);
       assert.equal(h.name(), "Project title");
-      await h.commands.get("naming-config")!.handler("reset", h.ctx);
+      const resetNaming = async () => {
+        const actions = ["Session and terminal naming:", "Reset", "Back", "Done"];
+        Object.assign(h.ctx.ui, {
+          select: async (_title: string, choices: string[]) => {
+            const prefix = actions.shift();
+            return prefix ? choices.find((choice) => choice.startsWith(prefix)) : undefined;
+          },
+          confirm: async () => true,
+        });
+        await openSparkConfigPanel(h.ctx);
+      };
+      await resetNaming();
       assert.deepEqual(JSON.parse(readFileSync(projectCanonical, "utf8")), { naming: parseConfig({}), metrics: false });
       assert.deepEqual(JSON.parse(readFileSync(projectPath, "utf8")), { naming: { targets: { workspace: false, tab: false } }, metrics: false });
       assert.deepEqual(JSON.parse(readFileSync(globalPath, "utf8")), global);
       Object.assign(h.ctx, { cwd: disabled });
       h.switchSession("global-session");
       h.events.get("session_start")!({}, h.ctx);
-      await h.commands.get("pi-naming-config")!.handler("reset", h.ctx);
+      await resetNaming();
       assert.deepEqual(JSON.parse(readFileSync(globalCanonical, "utf8")), { naming: parseConfig({}), footer: false });
       assert.deepEqual(JSON.parse(readFileSync(globalPath, "utf8")), global);
     } finally {

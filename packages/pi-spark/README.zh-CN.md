@@ -49,7 +49,7 @@ pi install git:github.com/maplezzk/pi-extensions
 
 - agent 运行时保持展开，`agent_settled` 后自动收起；本轮手动切换过时尊重手动状态。
 - 全屏 TUI 可以点击运行头、动作组和单条工具摘要。
-- `/clean config` 和 `/config:clean-mode` 打开配置面板；`/config:clean-mode key=on|off` 可直接修改布尔项。
+- 用 `/config:spark` → Clean mode → Detailed settings 配置折叠与活动区行数。
 - `cleanMode: false` 关闭所有折叠。只有 `spark.json` 没有 `cleanMode` 时，才读取旧的 `extensions/pi-clean-mode/config.json`。
 - 如果还安装了 `npm:pi-clean-mode`，请移除，否则命令和快捷键会冲突。
 
@@ -60,14 +60,14 @@ pi install git:github.com/maplezzk/pi-extensions
 - `on-stop`（默认）：运行期间对话区保持安静，agent 停下后通过原生通知显示一行汇总，包含耗时、混合 TPS、TTFT、token、stall 和成本；没有 TPS 样本时仍会显示总耗时。
 - `live`：每轮结束通过原生通知显示一行；多轮运行停下后再补一条 `⏱ <耗时>` 通知。
 - metrics 不注册自定义 entry renderer，也不向 session 写入用于展示的 entry。
-- 用 `/config:metrics`，或 `/config:metrics enable|disable|live|on-stop|reset` 配置。只有 `spark.json` 没有 `metrics` 字段时，才会读取旧的 `extensions/pi-metrics/config.json`。
+- 用 `/config:spark` → Metrics 切换开关及 `live` / `on-stop`。只有 `spark.json` 没有 `metrics` 字段时，才会读取旧的 `extensions/pi-metrics/config.json`。
 
 ### 会话资源
 
 在输入框的词边界键入 `#`，spark 编辑器上方会打开分类型的资源选择器。它收集当前会话里成功工具结果中的文件、网页和 PR/MR。Enter 插入普通引用，例如 `#src/index.ts`，不会重新读取文件，也不会写入隐藏上下文。
 
 - 选择器包在 spark 编辑器外面，两边不再互相替换。
-- 用 `/config:session-resources`，或 `/config:session-resources enable|disable`。`show|hide` 和 `/session-resources` 仍是别名。
+- 用 `/config:spark` → Session resources 开启或关闭选择器。
 - `resources: false` 关闭选择器。只有 `spark.json` 没有 `resources` 时，才会读取旧配置里显式的 `"enabled": false`。
 - 如果还安装了 `npm:pi-session-resources`，请移除，否则命令会冲突。
 
@@ -77,7 +77,7 @@ pi install git:github.com/maplezzk/pi-extensions
 
 - 新的未命名会话收到第一条真实用户输入时，在后台生成标题；自动命名只尝试一次，不覆盖已有标题，也不处理扩展注入的输入。
 - `/rename [名称]` 使用显式名称；省略名称时综合**当前分支全部用户消息**生成。后续明确纠正优先，“继续”等流程性消息不应盖过主要任务。
-- `/config:naming` 打开配置菜单，`/config:naming reset` 恢复默认值；`/naming-config` 和 `/pi-naming-config` 保留为别名。
+- 用 `/config:spark` → Session and terminal naming → Detailed settings 配置命名；该功能菜单同时提供重置入口。
 - `naming.targets` 分别控制 Pi 会话、工作区和标签页。关闭两个终端目标后，只命名会话，不加载终端适配器；`naming: false` 同时关闭自动和手动命名。
 - 使用当前 Pi 模型及鉴权发起独立后台请求；OpenAI Codex 使用独立 UUIDv7 会话并在结束后清理。生成名称受长度限制，显式名称不截断。
 - 手动请求使旧自动请求失效，会话变化使旧结果及错误失效。单个终端目标失败或不受支持，不影响其他目标。
@@ -107,6 +107,8 @@ pi remove npm:pi-naming
 - 回顾可以使用独立配置的模型，不必使用当前工作模型。
 
 ## 配置
+
+运行 `/config:spark` 打开统一配置面板。选择功能后可切换开关，调整 editor/footer/metrics 的常用选项，或通过带校验的 JSON 编辑完整配置（包括 credits provider、命名、预设和 recap）。修改立即保存并保留其他功能；项目文件显式配置了该功能时写项目，否则写全局。保存后执行 `/reload` 让全部修改生效。配置仅保留这一入口，旧的功能配置命令及别名（包括 `/clean config`）已移除。`/clean`、`/rename`、`/preset`、`/recap` 等操作命令保留。
 
 配置读取顺序：`<agent-dir>/extensions/pi-spark/config.json`（全局）与当前项目的 `.pi/extensions/pi-spark/config.json`（项目覆盖同名字段）。新文件不存在时，才只读旧的 `spark.json`。agent 目录遵守 `PI_CODING_AGENT_DIR`。命名默认值示例见 [config.example.json](./config.example.json)。
 

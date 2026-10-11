@@ -26,7 +26,7 @@ test("integrated clean mode keeps its commands, shortcuts, and lifecycle handler
   registerCleanMode(pi);
 
   assert.ok(commands.has("clean"));
-  assert.ok(commands.has("config:clean-mode"));
+  assert.deepEqual([...commands.keys()], ["clean"]);
   assert.ok(shortcuts.has("f2"));
   assert.ok(shortcuts.has("shift+f2"));
   for (const event of ["session_start", "agent_start", "agent_settled", "session_shutdown"]) {

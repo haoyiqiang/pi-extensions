@@ -2,7 +2,6 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { loadConfig } from "../../config/index.ts";
 import { collectSessionResources, collectToolResources } from "./collector.ts";
 import { isResourcesEnabled } from "./config.ts";
-import { registerSessionResourcesCommand } from "./command.ts";
 import { ensureSessionResourceRuntime } from "./runtime.ts";
 
 function syncEnabled(ctx: ExtensionContext): void {
@@ -12,7 +11,6 @@ function syncEnabled(ctx: ExtensionContext): void {
 /** Collects session resources and registers the # picker commands. */
 export function registerSessionResources(pi: ExtensionAPI): void {
   const runtime = ensureSessionResourceRuntime();
-  registerSessionResourcesCommand(pi);
 
   pi.on("session_start", (_event, ctx) => {
     syncEnabled(ctx);

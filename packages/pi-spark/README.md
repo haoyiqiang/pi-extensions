@@ -74,7 +74,7 @@ Clean mode collapses an entire agent run into one duration header, leaving the f
 
 - The run stays expanded while the agent is working and collapses after `agent_settled`, unless you manually changed it during that run.
 - Fullscreen TUI supports clicking the run header, action groups, and individual tool summaries.
-- `/clean config` and `/config:clean-mode` open the interactive settings panel. `/config:clean-mode key=on|off` changes a boolean directly.
+- Run `/config:spark` → Clean mode → Detailed settings to configure folding and activity rows.
 - Set `cleanMode` to `false` to disable all folding. An existing `extensions/pi-clean-mode/config.json` is read only when `spark.json` does not set `cleanMode`.
 - Remove `npm:pi-clean-mode` if it is still installed, or its commands and shortcuts will conflict.
 
@@ -85,14 +85,14 @@ pi-spark shows session elapsed time and token-generation telemetry through Pi's 
 - `on-stop` (default): the transcript stays quiet during the run. When the agent settles, one native notification reports elapsed time, blended TPS, TTFT, tokens, stalls, and cost. If no TPS sample is available, it still reports elapsed time.
 - `live`: one native notification is emitted at the end of every turn. A multi-turn run also gets a final `⏱ <duration>` notification.
 - Metrics do not register a custom entry renderer or write display entries into the session.
-- Run `/config:metrics`, or `/config:metrics enable|disable|live|on-stop|reset`. An existing `extensions/pi-metrics/config.json` is used only when `spark.json` does not set `metrics`.
+- Run `/config:spark` → Metrics to toggle telemetry or select `live` / `on-stop`. An existing `extensions/pi-metrics/config.json` is used only when `spark.json` does not set `metrics`.
 
 ### Session resources
 
 Typing `#` at a token boundary opens a tabbed picker above the spark editor. It lists files, web URLs, and PR/MR links collected from successful tool results in the current session. Enter inserts a normal reference such as `#src/index.ts`; it does not read the file again or add hidden context.
 
 - The picker stays outside the spark editor, so the two no longer replace each other.
-- Run `/config:session-resources`, or `/config:session-resources enable|disable`. `show`/`hide` and `/session-resources` remain aliases.
+- Run `/config:spark` → Session resources to enable or disable the picker.
 - Set `resources` to `false` to disable it. An old `extensions/pi-session-resources/config.json` with `"enabled": false` is used only when `spark.json` does not set `resources`.
 - Remove `npm:pi-session-resources` if it is still installed, or the command names conflict.
 
@@ -102,7 +102,7 @@ Naming is now a Spark feature, migrated from `pi-naming`.
 
 - The first real user input in a new, unnamed session generates a title in the background. Automatic naming attempts once, never overwrites an existing title, and ignores extension-injected input.
 - `/rename [name]` applies an explicit name or generates one from **all user messages on the current branch**. Later corrections take precedence; procedural follow-ups such as “continue” do not replace the main topic.
-- `/config:naming` opens the settings menu; `/config:naming reset` restores defaults. `/naming-config` and `/pi-naming-config` remain aliases.
+- Run `/config:spark` → Session and terminal naming → Detailed settings to configure naming; the same feature menu provides a reset action.
 - `naming.targets` independently controls the Pi session, workspace and tab. Set both terminal targets to `false` for session-only naming without loading the terminal adapter. Set `naming: false` to disable automatic and manual naming.
 - Naming uses the current Pi model/authentication and makes a separate background request. OpenAI Codex requests use isolated UUIDv7 sessions and clean them up afterwards. Generated names obey the length limit; explicit names are not truncated.
 - Manual requests supersede pending automatic requests. Session changes invalidate pending results and errors. Failed or unsupported terminal targets do not prevent the other targets from being named.
@@ -134,6 +134,8 @@ pi-spark generates a short recap of the current session after it goes idle, or o
 ![Recap](./assets/screenshot-recap.png)
 
 ## Configuration
+
+Run `/config:spark` to open the unified configuration panel. Select a feature to toggle it, change common editor/footer/metrics options, or edit its complete settings as validated JSON (including credits providers, naming, presets, and recap). Changes are saved immediately and preserve other features. The panel writes the project file when it explicitly owns the selected feature; otherwise it writes the global file. Run `/reload` after saving to apply all changes. This is the only configuration entrypoint: the former feature-specific commands and aliases, including `/clean config`, have been removed. Operational commands such as `/clean`, `/rename`, `/preset`, and `/recap` remain.
 
 pi-spark reads config from `<agent-dir>/extensions/pi-spark/config.json` and from the current project's `.pi/extensions/pi-spark/config.json`. Project config overrides matching global fields. A retired `spark.json` in the agent directory or `.pi/` is read only when the new file is absent. The agent directory respects `PI_CODING_AGENT_DIR`. See [config.example.json](./config.example.json) for naming defaults.
 

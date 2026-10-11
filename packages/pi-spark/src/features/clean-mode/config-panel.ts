@@ -3,7 +3,7 @@
  *
  * Pi 的 `/settings` 只管理内核选项，不接受扩展注册配置项，所以扩展要自己提供界面：
  * 用 `ctx.ui.custom` 临时接管编辑器，里面用 Pi 自带的 `SettingsList` 画配置列表，
- * 行数项再开一层 `SelectList` 二级选择。改一项立刻写文件并重装补丁，关掉面板即已生效。
+ * 行数项再开一层 `SelectList` 二级选择。由 `/config:spark` 打开，改动通过宿主保存，`/reload` 后生效。
  */
 
 import { type ExtensionCommandContext, getSelectListTheme, getSettingsListTheme } from "@earendil-works/pi-coding-agent";
@@ -204,7 +204,7 @@ export interface ConfigPanelHandlers {
 	onChange(config: CleanModeConfig, id: string): void;
 }
 
-/** 打开配置面板；用户改动即时生效，Esc 关闭。 */
+/** 打开清爽模式子面板；改动交给宿主保存，Esc 返回统一面板。 */
 export async function openConfigPanel(
 	ctx: ExtensionCommandContext,
 	handlers: ConfigPanelHandlers,

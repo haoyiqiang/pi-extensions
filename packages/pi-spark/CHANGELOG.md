@@ -4,6 +4,7 @@
 
 ### Features
 
+* add `/config:spark`, a unified configuration panel with feature switches, common options, validated JSON editing, and project-aware persistence
 * absorb pi-metrics elapsed time, TPS, TTFT, token, and cost telemetry; configure it with `metrics` in `spark.json` or `/config:metrics`
 * absorb the pi-session-resources `#` picker into the spark editor; configure it with `resources` in `spark.json` or `/config:session-resources`
 * absorb pi-clean-mode transcript folding, activity rows, action groups, commands, and shortcuts; configure it with `cleanMode` in `spark.json` or `/config:clean-mode`
@@ -14,6 +15,7 @@
 
 ### Breaking changes
 
+* consolidate all Spark configuration under `/config:spark`; remove feature-specific config commands, their aliases, and `/clean config`, while keeping clean-mode and naming settings as subpanels
 * stop persisting per-turn `tps` session entries; metrics remain available through native notifications and the `tps:telemetry` event
 * remove automatic session title generation; use `pi-naming` for session and terminal names
 * remove the scrolling `write` preview; `write` display stays with `pi-extensions-tool-display`

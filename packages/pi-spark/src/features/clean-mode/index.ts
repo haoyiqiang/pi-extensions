@@ -13,9 +13,7 @@
 import { type ExtensionAPI, type ExtensionCommandContext, type ExtensionContext, AssistantMessageComponent } from "@earendil-works/pi-coding-agent";
 import { Container, type Component, type TUI } from "@earendil-works/pi-tui";
 
-import { loadConfig, saveConfig } from "./config-store.js";
-import { parseToggleValue, withBooleanConfigField } from "./config-fields.js";
-import { openConfigPanel } from "./config-panel.js";
+import { loadConfig } from "./config-store.js";
 import { debugLog, debugLogPath } from "./debug-logger.js";
 import { activityClassLabel, buildActivityLines, buildRunStatusLines, classifyToolActivity, createActivitySnapshot, dominantActivityClass, extractOutputTail, extractThoughtHead, toolActivityDetail, toolActivityLabel, type ActivityCounters, type ActivitySnapshot } from "./activity.js";
 import { clearActivityArea, createActivityAreaRuntime, startActivityTimer, type ActivityAreaDeps, type ActivityAreaRuntime, type ActivityUiHost } from "./activity-area.js";
@@ -42,16 +40,10 @@ const TOGGLE_GROUPS_SHORTCUT = "shift+f2";
 const PROBE_WIDGET_KEY = "pi-clean-mode-probe";
 /** 切换折叠状态的命令名。 */
 const TOGGLE_COMMAND = "clean";
-/** 查看与修改配置的命令名。 */
-const CONFIG_COMMAND = "config:clean-mode";
 /** 一轮开始时本轮工具调用计数的初值。 */
 const INITIAL_RUN_TOOL_COUNT = 0;
 /** 空渲染结果；探针组件用它表示「不占任何行」。 */
 const NO_LINES: string[] = [];
-/** 配置命令里 `key=value` 的最大切分段数。 */
-const ASSIGNMENT_PART_LIMIT = 2;
-/** `/clean` 后面跟这个参数时打开配置面板，而不是切换折叠。 */
-const CONFIG_PANEL_ARG = "config";
 
 /** 不渲染任何内容的组件，用于挂载探针并取得 TUI 句柄。 */
 const NO_CONTENT_COMPONENT: Component = {
@@ -502,36 +494,6 @@ function toggleCollapsed(runtime: Runtime, ctx: ExtensionContext | ExtensionComm
 	ctx.ui.notify(next ? `Clean mode: work collapsed, press ${TOGGLE_SHORTCUT} to expand` : `Clean mode: work expanded, press ${TOGGLE_SHORTCUT} to collapse`, "info");
 }
 
-/**
- * 尝试把 `key=value` 写入配置：校验字段、写入并让配置立即生效。
- *
- * 返回 false 表示参数不是可识别的配置赋值，由调用方改走其它入口（打开配置面板）。
- */
-function applyConfigAssignment(
-	runtime: Runtime,
-	args: string,
-	ctx: ExtensionCommandContext,
-): boolean {
-	const assignment = args.trim();
-	if (!assignment.includes("=")) {
-		return false;
-	}
-
-	const parts = assignment.split("=", ASSIGNMENT_PART_LIMIT);
-	const value = parseToggleValue(parts[1] ?? "");
-	const nextConfig =
-		value === undefined
-			? undefined
-			: withBooleanConfigField(runtime.config, (parts[0] ?? "").trim(), value);
-
-	if (!nextConfig) {
-		return false;
-	}
-
-	applyLiveConfig(runtime, nextConfig, ctx, { announceSaved: true });
-	return true;
-}
-
 /** 批量展开或收起全部动作组，并按当前状态提示用户。 */
 function toggleAllActionGroups(
 	runtime: Runtime,
@@ -544,69 +506,16 @@ function toggleAllActionGroups(
 	ctx.ui.notify(expand ? `Clean mode: all action groups expanded, press ${TOGGLE_GROUPS_SHORTCUT} to collapse` : `Clean mode: all action groups collapsed, press ${TOGGLE_GROUPS_SHORTCUT} to expand`, "info");
 }
 
-/** 写入配置时的附加选项。 */
-interface ApplyConfigOptions {
-	/** 存盘成功后是否提示；面板里逐项切换不提示，避免刷屏。 */
-	announceSaved?: boolean;
-}
-
-/**
- * 写入一项新配置并让它立即生效：存盘、重装补丁、重绘。
- *
- * 存盘失败也要先把新配置用在本次会话里，用户不至于改了没反应；失败只提示不静默。
- */
-function applyLiveConfig(
-	runtime: Runtime,
-	config: CleanModeConfig,
-	ctx: ExtensionCommandContext,
-	options: ApplyConfigOptions = {},
-): void {
-	runtime.config = config;
-	const result = saveConfig(config);
-	installPatches(runtime);
-	requestRender(runtime);
-
-	if (!result.success) {
-		ctx.ui.notify(`Failed to save clean mode configuration: ${result.error ?? ""}`, "error");
-		return;
-	}
-
-	if (options.announceSaved) {
-		ctx.ui.notify("Clean mode configuration saved", "info");
-	}
-}
-
-/** 打开配置面板；改动即时写入并生效。 */
-function openCleanModeConfigPanel(runtime: Runtime, ctx: ExtensionCommandContext): Promise<void> {
-	return openConfigPanel(ctx, {
-		getConfig: () => runtime.config,
-		onChange: (config) => applyLiveConfig(runtime, config, ctx),
-	});
-}
-
-/** 处理 `/config:clean-mode key=on|off`；没有合法赋值时打开配置面板。 */
-function handleConfigCommand(
-	runtime: Runtime,
-	args: string,
-	ctx: ExtensionCommandContext,
-): void | Promise<void> {
-	if (applyConfigAssignment(runtime, args, ctx)) {
-		return;
-	}
-
-	return openCleanModeConfigPanel(runtime, ctx);
-}
-
-/** `/clean` 的入口：`/clean config` 打开配置面板，其余情况切换折叠状态。 */
+/** `/clean` only toggles transcript folding; settings live in `/config:spark`. */
 function handleToggleCommand(
 	runtime: Runtime,
 	args: string,
 	ctx: ExtensionCommandContext,
-): void | Promise<void> {
-	if (args.trim() === CONFIG_PANEL_ARG) {
-		return openCleanModeConfigPanel(runtime, ctx);
+): void {
+	if (args.trim()) {
+		ctx.ui.notify("Usage: /clean toggles folding. Configure clean mode with /config:spark.", "warning");
+		return;
 	}
-
 	toggleCollapsed(runtime, ctx);
 }
 
@@ -796,8 +705,4 @@ export default function registerCleanMode(pi: ExtensionAPI): void {
 		handler: (ctx) => toggleAllActionGroups(runtime, ctx),
 	});
 
-	pi.registerCommand(CONFIG_COMMAND, {
-		description: "Clean mode: open the settings panel, or pass key=on/off",
-		handler: async (args, ctx) => handleConfigCommand(runtime, args, ctx),
-	});
 }
