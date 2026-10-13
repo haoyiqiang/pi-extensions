@@ -33,7 +33,7 @@ import type {
 import { performance } from "node:perf_hooks";
 import { appendDistillFallbackAudit, registerDistillFallbackRenderer } from "./fallback-renderer.ts";
 import { getTextContent, hasNonTextContent } from "./output-limit.ts";
-import { updateJsonObjectAtomic, resolveAgentDir } from "pi-utils";
+import { updateJsonObjectAtomic, resolveAgentDir } from "@kevinhao/pi-utils";
 import { archiveSource, type SourceArtifact } from "./archive.ts";
 import { buildEvidencePrompt, validateEvidence, formatEvidence } from "./evidence.ts";
 import { processingConfig, processingEnabled, isMutationTool, processingReceipt } from "./processing-config.ts";

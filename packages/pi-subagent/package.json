@@ -1,5 +1,5 @@
 {
-  "name": "pi-subagent",
+  "name": "@kevinhao/pi-subagent",
   "version": "0.1.0",
   "description": "Persistent Pi subagents in a terminal panel, managed by the subagent CLI",
   "type": "module",
@@ -38,11 +38,11 @@
   },
   "license": "MIT",
   "author": "earendil-works",
-  "homepage": "https://github.com/maplezzk/pi-extensions/tree/main/packages/pi-subagent",
-  "bugs": "https://github.com/maplezzk/pi-extensions/issues",
+  "homepage": "https://github.com/haoyiqiang/pi-extensions/tree/main/packages/pi-subagent",
+  "bugs": "https://github.com/haoyiqiang/pi-extensions/issues",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/maplezzk/pi-extensions.git",
+    "url": "git+https://github.com/haoyiqiang/pi-extensions.git",
     "directory": "packages/pi-subagent"
   },
   "publishConfig": {
@@ -57,8 +57,8 @@
     "subagent"
   ],
   "dependencies": {
-    "pi-terminal-mux": "^0.6.5",
-    "pi-utils": "^0.1.0"
+    "@kevinhao/pi-terminal-mux": "^0.6.5",
+    "@kevinhao/pi-utils": "^0.1.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.87.1",

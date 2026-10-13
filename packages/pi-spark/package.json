@@ -1,5 +1,5 @@
 {
-  "name": "pi-spark",
+  "name": "@kevinhao/pi-spark",
   "version": "0.28.0",
   "description": "Pi package for a compact TUI, clean transcript, credits, presets, recap, metrics, naming, and session resources",
   "type": "module",
@@ -32,20 +32,20 @@
     "themes": [
       "./themes"
     ],
-    "image": "https://raw.githubusercontent.com/zlliang/pi-spark/main/assets/cover.png"
+    "image": "https://raw.githubusercontent.com/haoyiqiang/pi-extensions/main/packages/pi-spark/assets/cover.png"
   },
   "engines": {
     "node": ">=22"
   },
   "license": "MIT",
   "author": "zlliang",
-  "homepage": "https://github.com/maplezzk/pi-extensions/tree/main/packages/pi-spark",
+  "homepage": "https://github.com/haoyiqiang/pi-extensions/tree/main/packages/pi-spark",
   "bugs": {
-    "url": "https://github.com/maplezzk/pi-extensions/issues"
+    "url": "https://github.com/haoyiqiang/pi-extensions/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/maplezzk/pi-extensions.git",
+    "url": "git+https://github.com/haoyiqiang/pi-extensions.git",
     "directory": "packages/pi-spark"
   },
   "publishConfig": {
@@ -77,8 +77,8 @@
     "parse-duration": "^2.1.8",
     "pretty-ms": "^9.3.0",
     "zod": "^4.4.3",
-    "pi-terminal-mux": "^0.6.5",
-    "pi-utils": "^0.1.0"
+    "@kevinhao/pi-terminal-mux": "^0.6.5",
+    "@kevinhao/pi-utils": "^0.1.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-agent-core": ">=0.87.0 <1.0.0",

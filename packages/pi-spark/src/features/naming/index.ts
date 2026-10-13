@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { TerminalRenameOutcome, TerminalRenameTarget, ResolveRenameOptions } from "pi-terminal-mux";
+import type { TerminalRenameOutcome, TerminalRenameTarget, ResolveRenameOptions } from "@kevinhao/pi-terminal-mux";
 import { isTitleEffort, parseConfig, TITLE_EFFORT_LEVELS, type NamingConfig } from "./config.ts";
 import { loadNamingConfig } from "../../config/naming-store.ts";
 
@@ -55,7 +55,7 @@ export interface TerminalNamingAdapter {
 
 /** 终端能力按需加载；session-only 使用不依赖终端运行环境。 */
 async function loadTerminalAdapter(): Promise<TerminalNamingAdapter> {
-  const mux = await import("pi-terminal-mux");
+  const mux = await import("@kevinhao/pi-terminal-mux");
   return { resolve: mux.resolveTerminalRenameTargets, rename: mux.renameTerminalTarget };
 }
 

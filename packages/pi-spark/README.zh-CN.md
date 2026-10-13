@@ -1,4 +1,4 @@
-# pi-spark
+# @kevinhao/pi-spark
 
 用于 [Pi](https://pi.dev/) 的日常体验增强扩展。
 
@@ -8,10 +8,10 @@
 
 ```bash
 # 从 npm 安装本包
-pi install npm:pi-spark
+pi install npm:@kevinhao/pi-spark
 
 # 或安装整个扩展仓库
-pi install git:github.com/maplezzk/pi-extensions
+pi install git:github.com/haoyiqiang/pi-extensions
 ```
 
 安装后执行 `/reload` 或重启 Pi。

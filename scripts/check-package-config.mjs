@@ -233,12 +233,12 @@ for (const dir of packageDirs) {
     ...ownedExtensionEntries,
   ].flatMap((path) => (path.endsWith(".ts") ? (existsSync(path) ? [path] : []) : collectTypeScriptFiles(path))))];
   const importsPiUtils = runtimeSourceFiles.some((path) =>
-    /(?:from|import\s*\()\s*["']pi-utils["']/.test(readFileSync(path, "utf8")),
+    /(?:from|import\s*\()\s*["']@kevinhao\/pi-utils["']/.test(readFileSync(path, "utf8")),
   );
-  if (importsPiUtils && !pkgJson.dependencies?.["pi-utils"]) {
-    error(`${label}: runtime imports pi-utils, but it is not declared in dependencies`);
+  if (importsPiUtils && !pkgJson.dependencies?.["@kevinhao/pi-utils"]) {
+    error(`${label}: runtime imports @kevinhao/pi-utils, but it is not declared in dependencies`);
   }
-  if (pkgJson.name !== "pi-utils" && (pkgJson.pi?.extensions ?? []).some((entry) => String(entry).includes("i18n-entry"))) {
+  if (pkgJson.name !== "@kevinhao/pi-utils" && (pkgJson.pi?.extensions ?? []).some((entry) => String(entry).includes("i18n-entry"))) {
     error(`${label}: pi-utils is a library; do not load it through an i18n-entry shim`);
   }
 

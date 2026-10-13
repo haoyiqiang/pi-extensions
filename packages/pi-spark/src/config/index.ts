@@ -1,5 +1,5 @@
 import { defu } from "defu";
-import { readJsonObjectResult } from "pi-utils";
+import { readJsonObjectResult } from "@kevinhao/pi-utils";
 
 import { readLegacyCleanModeConfig } from "./legacy-clean-mode";
 import { readLegacyMetricsConfig } from "./legacy-metrics";

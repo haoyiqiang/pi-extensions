@@ -1,4 +1,4 @@
-# pi-models-discovery
+# @kevinhao/pi-models-discovery
 
 通用模型发现插件：读取 `~/.pi/agent/models.json` 中带 `"discoverModels": true` 的 provider，请求 `GET {baseUrl}/models` 自动发现模型并注册，无需手写 `models` 数组。首次发现成功后模型列表持久化到本地缓存，之后每次启动直接读缓存，**不再请求网络**。
 
@@ -7,7 +7,7 @@
 ## 安装
 
 ```bash
-pi install npm:pi-models-discovery
+pi install npm:@kevinhao/pi-models-discovery
 ```
 
 ## 配置

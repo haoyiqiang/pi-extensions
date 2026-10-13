@@ -1,8 +1,8 @@
-# pi-subagent
+# @kevinhao/pi-subagent
 
 Observable, persistent Pi subagents for independent reviews, investigations, and delegated implementation.
 
-Each subagent runs in its own terminal panel, opened through [`pi-terminal-mux`](../pi-terminal-mux), with a dedicated Pi JSONL session. The parent can inspect status, wait for durable results, steer active work, or queue follow-ups. The panel stays visible beside the current terminal; there is no `/subagent` attach command.
+Each subagent runs in its own terminal panel, opened through [`@kevinhao/pi-terminal-mux`](../pi-terminal-mux), with a dedicated Pi JSONL session. The parent can inspect status, wait for durable results, steer active work, or queue follow-ups. The panel stays visible beside the current terminal; there is no `/subagent` attach command.
 
 ## Requirements
 
@@ -13,7 +13,7 @@ Each subagent runs in its own terminal panel, opened through [`pi-terminal-mux`]
 ## Install
 
 ```bash
-pi install npm:pi-subagent
+pi install npm:@kevinhao/pi-subagent
 # or, for one run:
 pi -e npm:pi-subagent
 ```

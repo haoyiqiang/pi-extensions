@@ -1,4 +1,4 @@
-# pi-action-fusion
+# @kevinhao/pi-action-fusion
 
 Fuse a single-file `edit` or `write` with an optional follow-up command. Adapted from NVIDIA's [SoL-Pi Action Fusion](https://github.com/NVlabs/SoL-Pi). No extra model calls and no context compaction or output summarization.
 

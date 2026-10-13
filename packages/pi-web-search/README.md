@@ -1,4 +1,4 @@
-# @maplezzk/pi-web-search
+# @kevinhao/pi-web-search
 
 Lightweight web access for Pi with three composable tools:
 
@@ -11,7 +11,7 @@ The package deliberately omits PDF, local-video, curator, and persistent search-
 ## Install
 
 ```bash
-pi install npm:@maplezzk/pi-web-search
+pi install npm:@kevinhao/pi-web-search
 ```
 
 Node.js 22 or newer is required.
@@ -191,8 +191,8 @@ Model authentication is resolved through Pi's model registry, including provider
 
 ```bash
 npm install
-npm run typecheck -w @maplezzk/pi-web-search
-npm test -w @maplezzk/pi-web-search
+npm run typecheck -w @kevinhao/pi-web-search
+npm test -w @kevinhao/pi-web-search
 npm run check
 ```
 

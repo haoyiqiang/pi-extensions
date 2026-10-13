@@ -1,8 +1,8 @@
-# pi-subagent
+# @kevinhao/pi-subagent
 
 可观察、可持久化的 Pi 子代理，用于独立审查、调查和委派实现。
 
-每个子代理通过 [`pi-terminal-mux`](../pi-terminal-mux) 在独立终端分栏中运行，并拥有自己的 Pi JSONL 会话。父会话可以查看状态、等待结果、转向正在进行的工作，或排队后续消息。分栏就在当前终端旁边，没有 `/subagent` 附着命令。
+每个子代理通过 [`@kevinhao/pi-terminal-mux`](../pi-terminal-mux) 在独立终端分栏中运行，并拥有自己的 Pi JSONL 会话。父会话可以查看状态、等待结果、转向正在进行的工作，或排队后续消息。分栏就在当前终端旁边，没有 `/subagent` 附着命令。
 
 ## 要求
 
@@ -13,7 +13,7 @@
 ## 安装
 
 ```bash
-pi install npm:pi-subagent
+pi install npm:@kevinhao/pi-subagent
 # 或只在这一次启动时加载：
 pi -e npm:pi-subagent
 ```

@@ -1,5 +1,5 @@
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import { extensionConfigPath, readJsonObject } from "pi-utils";
+import { extensionConfigPath, readJsonObject } from "@kevinhao/pi-utils";
 import { parseConfig } from "../features/naming/config.ts";
 import type { NamingConfig } from "../features/naming/config.ts";
 

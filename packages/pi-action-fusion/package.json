@@ -1,5 +1,5 @@
 {
-  "name": "pi-action-fusion",
+  "name": "@kevinhao/pi-action-fusion",
   "version": "0.1.0",
   "description": "Fuse Pi file edits and writes with an optional follow-up shell command",
   "type": "module",
@@ -32,11 +32,11 @@
   },
   "license": "MIT",
   "author": "maplezzk",
-  "homepage": "https://github.com/maplezzk/pi-extensions/tree/main/packages/pi-action-fusion",
-  "bugs": "https://github.com/maplezzk/pi-extensions/issues",
+  "homepage": "https://github.com/haoyiqiang/pi-extensions/tree/main/packages/pi-action-fusion",
+  "bugs": "https://github.com/haoyiqiang/pi-extensions/issues",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/maplezzk/pi-extensions.git",
+    "url": "git+https://github.com/haoyiqiang/pi-extensions.git",
     "directory": "packages/pi-action-fusion"
   },
   "publishConfig": {
@@ -57,7 +57,7 @@
     "typebox": "^1.3.7"
   },
   "dependencies": {
-    "pi-utils": "^0.1.0"
+    "@kevinhao/pi-utils": "^0.1.0"
   },
   "devDependencies": {
     "@earendil-works/pi-agent-core": "0.87.1",

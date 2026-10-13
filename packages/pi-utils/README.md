@@ -1,9 +1,9 @@
-# pi-utils
+# @kevinhao/pi-utils
 
 Shared foundation for Pi extensions:
 
 - portable JSON configuration I/O (`src/config.ts`);
-- deterministic test fixtures (`createExtensionRegistrationHarness`, temp-directory isolation, and the `pi-utils/rpiv` Pi/UI/session helpers).
+- deterministic test fixtures (`createExtensionRegistrationHarness`, temp-directory isolation, and the `@kevinhao/pi-utils/rpiv` Pi/UI/session helpers).
 
 The package replaces the former `pi-extensions-config`, `pi-extensions-i18n`, and `@maplezzk/pi-test-utils` packages.
 
@@ -12,7 +12,7 @@ The package replaces the former `pi-extensions-config`, `pi-extensions-i18n`, an
 This package is an npm library, not a Pi extension. Feature packages depend on it directly. Do not add it to a Pi extension manifest, and do not install it with `pi install`.
 
 ```bash
-npm install pi-utils
+npm install @kevinhao/pi-utils
 ```
 
 ## Configuration I/O
@@ -31,7 +31,7 @@ import {
   extensionConfigPath,
   readJsonObject,
   updateJsonObjectAtomic,
-} from "pi-utils";
+} from "@kevinhao/pi-utils";
 
 const path = extensionConfigPath("pi-example");
 const current = readJsonObject(path) ?? {};
@@ -51,7 +51,7 @@ Deterministic helpers for this monorepo's tests live in the same package:
 
 - `withTempDir` and `withTempAgentDir` isolate temporary directories and `PI_CODING_AGENT_DIR`;
 - `createExtensionRegistrationHarness` records ownership of commands, tools, shortcuts, flags, entry renderers, message renderers, and event handlers, and throws immediately on collisions;
-- `pi-utils/rpiv` provides adapted Pi/UI/session/manifest fixtures with upstream MIT attribution in `RPIV-LICENSE`.
+- `@kevinhao/pi-utils/rpiv` provides adapted Pi/UI/session/manifest fixtures with upstream MIT attribution in `RPIV-LICENSE`.
 
 These helpers are test-only surfaces; product packages import them from test files only.
 

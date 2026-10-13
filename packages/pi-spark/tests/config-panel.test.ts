@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { initTheme } from "@earendil-works/pi-coding-agent";
-import { withTempAgentDir } from "pi-utils";
+import { withTempAgentDir } from "@kevinhao/pi-utils";
 import { clearConfigCache, loadConfig } from "../src/config/index.ts";
 import { openSparkConfigPanel, registerSparkConfigCommand } from "../src/config/panel.ts";
 import { projectSparkConfigPath, readConfigObject, sparkConfigPath } from "../src/config/store.ts";

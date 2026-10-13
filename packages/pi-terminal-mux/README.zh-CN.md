@@ -1,4 +1,4 @@
-# pi-terminal-mux
+# @kevinhao/pi-terminal-mux
 
 供 Pi 扩展使用的终端 surface API，仅支持 **tmux**、**Orca** 和 **headless** 后台进程。
 
@@ -7,13 +7,13 @@
 ## 安装
 
 ```bash
-npm install pi-terminal-mux
+npm install @kevinhao/pi-terminal-mux
 ```
 
 ## 创建时启动命令
 
 ```ts
-import { createSurface, createSurfaceSplit, readScreen, closeSurface } from "pi-terminal-mux";
+import { createSurface, createSurfaceSplit, readScreen, closeSurface } from "@kevinhao/pi-terminal-mux";
 
 const surface = createSurface("my-agent", {
   command: "pi --session /tmp/child.jsonl",
@@ -39,7 +39,7 @@ closeSurface(surface);
 不传 options 的既有调用保持原来的行为：
 
 ```ts
-import { createSurface, sendLongCommand } from "pi-terminal-mux";
+import { createSurface, sendLongCommand } from "@kevinhao/pi-terminal-mux";
 
 const surface = createSurface("my-agent");
 const scriptPath = sendLongCommand(surface, "pi --session /tmp/child.jsonl", {
@@ -78,7 +78,7 @@ const scriptPath = sendLongCommand(surface, "pi --session /tmp/child.jsonl", {
 
 探测工具包括 `getMuxBackend`、`isMuxAvailable`、`isHeadlessMode`、`muxSetupHint`、`getAgentPaneId`、`backendAgentPaneEnvVar`；shell 工具包括 `shellEscape`、`isFishShell`、`exitStatusVar`。
 
-统一 API 同样从 `pi-terminal-mux/mux` 导出；Orca 原生工具从 `pi-terminal-mux/orca` 导出。
+统一 API 同样从 `@kevinhao/pi-terminal-mux/mux` 导出；Orca 原生工具从 `@kevinhao/pi-terminal-mux/orca` 导出。
 
 ## 改名归属
 

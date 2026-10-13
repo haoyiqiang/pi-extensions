@@ -1,5 +1,5 @@
 {
-  "name": "@maplezzk/pi-web-search",
+  "name": "@kevinhao/pi-web-search",
   "version": "1.6.0",
   "description": "Lightweight LLM and API web search, URL context, and web fetch tools for Pi",
   "type": "module",
@@ -32,11 +32,11 @@
   },
   "license": "MIT",
   "author": "maplezzk",
-  "homepage": "https://github.com/maplezzk/pi-extensions/tree/main/packages/pi-web-search",
-  "bugs": "https://github.com/maplezzk/pi-extensions/issues",
+  "homepage": "https://github.com/haoyiqiang/pi-extensions/tree/main/packages/pi-web-search",
+  "bugs": "https://github.com/haoyiqiang/pi-extensions/issues",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/maplezzk/pi-extensions.git",
+    "url": "git+https://github.com/haoyiqiang/pi-extensions.git",
     "directory": "packages/pi-web-search"
   },
   "publishConfig": {
@@ -55,7 +55,7 @@
   ],
   "dependencies": {
     "undici": "^7.29.1",
-    "pi-utils": "^0.1.0"
+    "@kevinhao/pi-utils": "^0.1.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": ">=0.80.0",

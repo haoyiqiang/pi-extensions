@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { extensionConfigPath, readJsonObjectResult, resolveAgentDir } from "pi-utils";
+import { extensionConfigPath, readJsonObjectResult, resolveAgentDir } from "@kevinhao/pi-utils";
 import { parseProcessingConfig, type ProcessingConfig } from "./processing-config.ts";
 
 const DEFAULT_MIN_CHARS = 200;

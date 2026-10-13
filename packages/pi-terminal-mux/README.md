@@ -1,4 +1,4 @@
-# pi-terminal-mux
+# @kevinhao/pi-terminal-mux
 
 Terminal surface API for Pi extensions, supporting **tmux**, **Orca**, and **headless** background processes.
 
@@ -7,13 +7,13 @@ Terminal surface API for Pi extensions, supporting **tmux**, **Orca**, and **hea
 ## Install
 
 ```bash
-npm install pi-terminal-mux
+npm install @kevinhao/pi-terminal-mux
 ```
 
 ## Create and start a command
 
 ```ts
-import { createSurface, createSurfaceSplit, readScreen, closeSurface } from "pi-terminal-mux";
+import { createSurface, createSurfaceSplit, readScreen, closeSurface } from "@kevinhao/pi-terminal-mux";
 
 const surface = createSurface("my-agent", {
   command: "pi --session /tmp/child.jsonl",
@@ -39,7 +39,7 @@ Returning a handle confirms creation/submission, not application readiness or su
 Existing calls without options keep their previous behavior:
 
 ```ts
-import { createSurface, sendLongCommand } from "pi-terminal-mux";
+import { createSurface, sendLongCommand } from "@kevinhao/pi-terminal-mux";
 
 const surface = createSurface("my-agent");
 const scriptPath = sendLongCommand(surface, "pi --session /tmp/child.jsonl", {
@@ -78,7 +78,7 @@ Types `CreateSurfaceOptions` and `CreateSurfaceSplitOptions` both expose `comman
 
 Detection helpers include `getMuxBackend`, `isMuxAvailable`, `isHeadlessMode`, `muxSetupHint`, `getAgentPaneId`, and `backendAgentPaneEnvVar`. Shell helpers include `shellEscape`, `isFishShell`, and `exitStatusVar`.
 
-The shared API is also exported through `pi-terminal-mux/mux`; Orca-native helpers are exported through `pi-terminal-mux/orca`.
+The shared API is also exported through `@kevinhao/pi-terminal-mux/mux`; Orca-native helpers are exported through `@kevinhao/pi-terminal-mux/orca`.
 
 ## Naming ownership
 

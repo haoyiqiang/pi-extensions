@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { updateJsonObjectAtomic } from "pi-utils";
+import { updateJsonObjectAtomic } from "@kevinhao/pi-utils";
 
 import { createActionFusionExtension } from "./src/action-fusion.ts";
 import { loadActionFusionConfig } from "./src/config.ts";

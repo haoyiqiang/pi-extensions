@@ -1,5 +1,5 @@
 {
-  "name": "pi-terminal-mux",
+  "name": "@kevinhao/pi-terminal-mux",
   "version": "0.6.5",
   "description": "Terminal surface API for tmux and Orca, with native startup commands and headless fallback",
   "type": "module",
@@ -28,11 +28,11 @@
   },
   "license": "MIT",
   "author": "maplezzk",
-  "homepage": "https://github.com/maplezzk/pi-extensions/tree/main/packages/pi-terminal-mux",
-  "bugs": "https://github.com/maplezzk/pi-extensions/issues",
+  "homepage": "https://github.com/haoyiqiang/pi-extensions/tree/main/packages/pi-terminal-mux",
+  "bugs": "https://github.com/haoyiqiang/pi-extensions/issues",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/maplezzk/pi-extensions.git",
+    "url": "git+https://github.com/haoyiqiang/pi-extensions.git",
     "directory": "packages/pi-terminal-mux"
   },
   "publishConfig": {
@@ -51,7 +51,7 @@
     "coding-agent"
   ],
   "dependencies": {
-    "pi-utils": "^0.1.0"
+    "@kevinhao/pi-utils": "^0.1.0"
   },
   "devDependencies": {
     "@types/node": "24.12.4",

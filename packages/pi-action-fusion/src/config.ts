@@ -1,4 +1,4 @@
-import { extensionConfigPath, readJsonObjectResult } from "pi-utils";
+import { extensionConfigPath, readJsonObjectResult } from "@kevinhao/pi-utils";
 
 export interface ActionFusionConfig {
   enabled: boolean;

@@ -1,5 +1,5 @@
 {
-  "name": "pi-utils",
+  "name": "@kevinhao/pi-utils",
   "version": "0.1.0",
   "description": "Shared portable config I/O and deterministic test fixtures for Pi extensions",
   "type": "module",
@@ -28,11 +28,11 @@
   },
   "license": "MIT",
   "author": "maplezzk",
-  "homepage": "https://github.com/maplezzk/pi-extensions/tree/main/packages/pi-utils",
-  "bugs": "https://github.com/maplezzk/pi-extensions/issues",
+  "homepage": "https://github.com/haoyiqiang/pi-extensions/tree/main/packages/pi-utils",
+  "bugs": "https://github.com/haoyiqiang/pi-extensions/issues",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/maplezzk/pi-extensions.git",
+    "url": "git+https://github.com/haoyiqiang/pi-extensions.git",
     "directory": "packages/pi-utils"
   },
   "publishConfig": {

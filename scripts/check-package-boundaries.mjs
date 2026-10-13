@@ -7,26 +7,26 @@ const ROOT = resolve(import.meta.dirname, "..");
 const PACKAGES_DIR = join(ROOT, "packages");
 
 const PACKAGE_LAYERS = new Map([
-  ["pi-utils", "foundation"],
-  ["pi-terminal-mux", "foundation"],
-  ["pi-spark", "product"],
-  ["pi-distill", "capability"],
-  ["pi-action-fusion", "capability"],
-  ["@maplezzk/pi-web-search", "capability"],
-  ["pi-models-discovery", "capability"],
-  ["pi-subagent", "capability"],
+  ["@kevinhao/pi-utils", "foundation"],
+  ["@kevinhao/pi-terminal-mux", "foundation"],
+  ["@kevinhao/pi-spark", "product"],
+  ["@kevinhao/pi-distill", "capability"],
+  ["@kevinhao/pi-action-fusion", "capability"],
+  ["@kevinhao/pi-web-search", "capability"],
+  ["@kevinhao/pi-models-discovery", "capability"],
+  ["@kevinhao/pi-subagent", "capability"],
 ]);
 
 const ALLOWED_WORKSPACE_EDGES = new Set([
-  "pi-terminal-mux -> pi-utils",
-  "pi-spark -> pi-utils",
-  "pi-spark -> pi-terminal-mux",
-  "pi-distill -> pi-utils",
-  "pi-action-fusion -> pi-utils",
-  "@maplezzk/pi-web-search -> pi-utils",
-  "pi-models-discovery -> pi-utils",
-  "pi-subagent -> pi-terminal-mux",
-  "pi-subagent -> pi-utils",
+  "@kevinhao/pi-terminal-mux -> @kevinhao/pi-utils",
+  "@kevinhao/pi-spark -> @kevinhao/pi-utils",
+  "@kevinhao/pi-spark -> @kevinhao/pi-terminal-mux",
+  "@kevinhao/pi-distill -> @kevinhao/pi-utils",
+  "@kevinhao/pi-action-fusion -> @kevinhao/pi-utils",
+  "@kevinhao/pi-web-search -> @kevinhao/pi-utils",
+  "@kevinhao/pi-models-discovery -> @kevinhao/pi-utils",
+  "@kevinhao/pi-subagent -> @kevinhao/pi-terminal-mux",
+  "@kevinhao/pi-subagent -> @kevinhao/pi-utils",
 ]);
 
 const errors = [];

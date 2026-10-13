@@ -1,4 +1,4 @@
-# @maplezzk/pi-web-search
+# @kevinhao/pi-web-search
 
 为 Pi 提供三个轻量且可组合的联网工具：
 
@@ -11,7 +11,7 @@
 ## 安装
 
 ```bash
-pi install npm:@maplezzk/pi-web-search
+pi install npm:@kevinhao/pi-web-search
 ```
 
 需要 Node.js 22 或更高版本。
@@ -158,8 +158,8 @@ API provider 优先级：本次调用 `provider` → `PI_WEB_SEARCH_API_PROVIDER
 
 ```bash
 npm install
-npm run typecheck -w @maplezzk/pi-web-search
-npm test -w @maplezzk/pi-web-search
+npm run typecheck -w @kevinhao/pi-web-search
+npm test -w @kevinhao/pi-web-search
 npm run check
 ```
 

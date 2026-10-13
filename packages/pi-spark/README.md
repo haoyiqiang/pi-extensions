@@ -1,6 +1,6 @@
 ![Cover](./assets/cover.png)
 
-# pi-spark
+# @kevinhao/pi-spark
 
 [Pi](https://pi.dev/) package that polishes your daily experience.
 
@@ -9,9 +9,9 @@
 ## Install
 ```bash
 # Install this package from npm (recommended)
-pi install npm:pi-spark
+pi install npm:@kevinhao/pi-spark
 # Or install all extensions from this monorepo
-pi install git:github.com/maplezzk/pi-extensions
+pi install git:github.com/haoyiqiang/pi-extensions
 ```
 
 Reload or restart Pi after installation.

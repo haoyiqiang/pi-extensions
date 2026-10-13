@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { withTempDir } from "pi-utils";
+import { withTempDir } from "@kevinhao/pi-utils";
 import { patchGlobalFeature, projectOverridesFeature, projectSparkConfigPath, readConfigObject, sparkConfigPath } from "../src/config/store.ts";
 
 test("feature patches preserve sibling spark settings and leave no temporary file", async () => {

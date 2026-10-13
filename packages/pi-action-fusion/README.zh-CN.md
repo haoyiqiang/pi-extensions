@@ -1,4 +1,4 @@
-# pi-action-fusion
+# @kevinhao/pi-action-fusion
 
 将单文件 `edit` 或 `write` 与可选的后续命令合并为一次工具调用。改编自 NVIDIA 的 [SoL-Pi Action Fusion](https://github.com/NVlabs/SoL-Pi)。不额外调用模型，不压缩上下文，也不摘要工具输出。
 

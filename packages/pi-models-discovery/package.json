@@ -1,5 +1,5 @@
 {
-  "name": "pi-models-discovery",
+  "name": "@kevinhao/pi-models-discovery",
   "version": "1.4.0",
   "description": "Pi extension: discover models from {baseUrl}/models for providers marked with discoverModels in models.json",
   "type": "module",
@@ -29,11 +29,11 @@
   },
   "license": "MIT",
   "author": "maplezzk",
-  "homepage": "https://github.com/maplezzk/pi-extensions/tree/main/packages/pi-models-discovery",
-  "bugs": "https://github.com/maplezzk/pi-extensions/issues",
+  "homepage": "https://github.com/haoyiqiang/pi-extensions/tree/main/packages/pi-models-discovery",
+  "bugs": "https://github.com/haoyiqiang/pi-extensions/issues",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/maplezzk/pi-extensions.git",
+    "url": "git+https://github.com/haoyiqiang/pi-extensions.git",
     "directory": "packages/pi-models-discovery"
   },
   "publishConfig": {
@@ -51,7 +51,7 @@
     "@earendil-works/pi-coding-agent": ">=0.80.0"
   },
   "dependencies": {
-    "pi-utils": "^0.1.0"
+    "@kevinhao/pi-utils": "^0.1.0"
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "0.87.1",

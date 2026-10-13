@@ -1,4 +1,4 @@
-# pi-distill
+# @kevinhao/pi-distill
 
 > **保留原文，把上下文留给决策。**
 
@@ -9,7 +9,7 @@
 ## 安装与启用
 
 ```bash
-pi install npm:pi-distill
+pi install npm:@kevinhao/pi-distill
 ```
 
 运行 `/reload`，再通过 `/config:distill` 选择模型和配置处理。`/pi-distill` 是兼容别名；`/distill:stats` 显示本会话结果、尝试次数、用量、预计上下文节省和成本。交互式命令需要带 UI 的会话，工具结果处理也支持无界面运行。

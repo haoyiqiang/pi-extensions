@@ -1,5 +1,5 @@
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
-import { extensionConfigPath, readJsonObject, updateJsonObjectAtomic } from "pi-utils";
+import { extensionConfigPath, readJsonObject, updateJsonObjectAtomic } from "@kevinhao/pi-utils";
 import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { SparkConfig, SparkConfigInput } from "./schema.ts";

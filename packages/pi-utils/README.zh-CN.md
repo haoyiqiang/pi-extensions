@@ -1,9 +1,9 @@
-# pi-utils
+# @kevinhao/pi-utils
 
 Pi 扩展的共享基础设施：
 
 - 可移植的 JSON 配置读写（`src/config.ts`）；
-- 确定性的测试 fixture（`createExtensionRegistrationHarness`、临时目录隔离，以及 `pi-utils/rpiv` 的 Pi／UI／会话辅助）。
+- 确定性的测试 fixture（`createExtensionRegistrationHarness`、临时目录隔离，以及 `@kevinhao/pi-utils/rpiv` 的 Pi／UI／会话辅助）。
 
 本包取代了原先的 `pi-extensions-config`、`pi-extensions-i18n` 和 `@maplezzk/pi-test-utils`。
 
@@ -12,7 +12,7 @@ Pi 扩展的共享基础设施：
 本包是 npm 工具库，不是 Pi 扩展。功能包直接依赖它。不要把它写进 Pi 扩展清单，也不要用 `pi install` 安装。
 
 ```bash
-npm install pi-utils
+npm install @kevinhao/pi-utils
 ```
 
 ## 配置读写
@@ -31,7 +31,7 @@ import {
   extensionConfigPath,
   readJsonObject,
   updateJsonObjectAtomic,
-} from "pi-utils";
+} from "@kevinhao/pi-utils";
 
 const path = extensionConfigPath("pi-example");
 const current = readJsonObject(path) ?? {};
@@ -51,7 +51,7 @@ updateJsonObjectAtomic(path, (config) => {
 
 - `withTempDir` 与 `withTempAgentDir` 隔离临时目录和 `PI_CODING_AGENT_DIR`；
 - `createExtensionRegistrationHarness` 记录命令、工具、快捷键、flag、entry renderer、message renderer 和事件处理器的所有权，遇到注册冲突立即抛错；
-- `pi-utils/rpiv` 提供适配自上游的 Pi／UI／会话／manifest fixture，MIT 归属保留于 `RPIV-LICENSE`。
+- `@kevinhao/pi-utils/rpiv` 提供适配自上游的 Pi／UI／会话／manifest fixture，MIT 归属保留于 `RPIV-LICENSE`。
 
 这些是测试专用接口，产品包只在测试文件中引用。
 

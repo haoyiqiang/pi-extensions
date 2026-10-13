@@ -1,4 +1,4 @@
-# pi-models-discovery
+# @kevinhao/pi-models-discovery
 
 Generic model discovery extension: reads providers marked with `"discoverModels": true` in `~/.pi/agent/models.json`, requests `GET {baseUrl}/models`, and registers the discovered models automatically — no handwritten `models` array required. After the first successful discovery the model list is persisted to a local cache, so subsequent startups read the cache and **perform no network requests**.
 
@@ -7,7 +7,7 @@ Suitable for local/self-hosted LLM proxies (one gateway exposing many models), O
 ## Install
 
 ```bash
-pi install npm:pi-models-discovery
+pi install npm:@kevinhao/pi-models-discovery
 ```
 
 ## Configuration

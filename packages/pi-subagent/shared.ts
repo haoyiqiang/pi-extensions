@@ -12,7 +12,7 @@ import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { extensionConfigPath } from "pi-utils";
+import { extensionConfigPath } from "@kevinhao/pi-utils";
 import {
 	closeSurface,
 	createSurface,
@@ -24,7 +24,7 @@ import {
 	readScreen,
 	shellEscape,
 	TERMINAL_RENAME_CONTEXT_ENV,
-} from "pi-terminal-mux";
+} from "@kevinhao/pi-terminal-mux";
 
 export type RunState = "starting" | "busy" | "idle" | "exited" | "error";
 

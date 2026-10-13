@@ -1,4 +1,4 @@
-# pi-distill
+# @kevinhao/pi-distill
 
 > **Keep the source. Spend context on decisions.**
 
@@ -9,7 +9,7 @@ One post-tool processing extension with two mutually exclusive strategies: **ord
 ## Install and enable
 
 ```bash
-pi install npm:pi-distill
+pi install npm:@kevinhao/pi-distill
 ```
 
 Run `/reload`, then `/config:distill` to select a model and configure processing. `/pi-distill` remains a compatibility alias. `/distill:stats` reports per-session results, attempts, usage, estimated context savings and cost. UI commands require a UI-capable session; result processing also works headlessly.
