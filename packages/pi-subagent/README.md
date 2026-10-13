@@ -123,13 +123,25 @@ The three built-in roles follow [tintinweb/pi-subagents](https://github.com/tint
 | [explore](skills/subagent/references/explore.md) | Targeted file, symbol, and reference lookups; specify quick, medium, or very thorough search breadth | `read,bash,grep,find,ls` |
 | [plan](skills/subagent/references/plan.md) | Read-only implementation planning with concrete steps, trade-offs, and critical files | `read,bash,grep,find,ls` |
 
-All three inherit model and thinking; no upstream model pin is copied. Explore and Plan instructions are adapted from the reference and retain its [MIT license](skills/subagent/references/LICENSE). General-purpose has brief task-driven guidance and no special tool restriction; omitting `--role` remains valid. Instructions are additive, not the upstream replacement mode. None requires TODO tooling, report files, commits, or a multi-phase approval workflow.
+All three inherit model and thinking unless a preset pins them; no upstream model pin is copied. Explore and Plan instructions are adapted from the reference and retain its [MIT license](skills/subagent/references/LICENSE). General-purpose has brief task-driven guidance and no special tool restriction; omitting `--role` remains valid. Instructions are additive, not the upstream replacement mode. None requires TODO tooling, report files, commits, or a multi-phase approval workflow.
 
 Use `general-purpose` or a plain child for reviews, design-document audits, cross-file consistency checks, and broader analysis; `explore` is a focused search role. Follow the task's authorization for edits, checks, and commits. Roles do not grant permissions, sandbox Bash, or automatically stop the child.
 
 For custom instructions, use repeatable `--append-system-prompt <text|path>`. Existing files are read verbatim, including any frontmatter; other values are literal text. Verify custom paths exist. Relative paths resolve from the invoking shell's directory, even with `--cwd`. A selected role comes first, followed by extra additions in flag order. The combined content is saved as `append-system-prompt.md` in the run directory and appended to Pi's normal system prompt, preserving `APPEND_SYSTEM.md`. Follow-ups, reloads, and resume reuse that snapshot. Ordinary Pi settings and context files are still discovered normally.
 
 `--prompt` is the task's user message; `--file` is a task attachment. A role alone is not a task: supply at least one of them. Children start with a new conversation, not a fork of the parent's history. There is no system-prompt replacement mode.
+
+## Configure
+
+`/config:subagent` opens a TUI panel for the role presets. Select a role to edit its fields:
+
+- Model: any available session model, or inherit the parent's.
+- Thinking: cycle through Pi's thinking levels, or inherit the parent's.
+- Tools: toggle tools from the session's tool list, inherit Pi's defaults, or disable all tools.
+- Extensions: toggle ordinary discovery or individual sources. Candidates come from configured packages and Pi's extension directories; selecting any source replaces ordinary discovery.
+- Prompt (Markdown): edit the role's Markdown body in Pi's editor; the frontmatter is preserved.
+
+Preset changes are written back to `skills/subagent/references/<role>.md`, preserving the Markdown body and unrelated frontmatter. Spawn options still override the presets: `--model`, `--thinking`, `--tools`, and `-e`/`-ne` replace the role's values for that run.
 
 ## Isolation
 

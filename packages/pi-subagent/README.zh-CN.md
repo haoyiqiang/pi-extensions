@@ -123,13 +123,25 @@ extensions: true
 | [explore](skills/subagent/references/explore.md) | 定位文件、符号和引用；指定 quick、medium 或 very thorough 搜索范围 | `read,bash,grep,find,ls` |
 | [plan](skills/subagent/references/plan.md) | 只读分析并返回包含具体步骤、取舍和关键文件的实现计划 | `read,bash,grep,find,ls` |
 
-三个角色都继承模型和 thinking，不复制上游模型固定值。Explore 和 Plan 指令根据参考项目适配，并保留其 [MIT 许可证](skills/subagent/references/LICENSE)。general-purpose 使用简短的任务驱动指令，不特别限制工具；省略 `--role` 仍可启动普通子代理。所有指令保持追加模式，不使用上游替换模式。不强制要求 TODO 工具、报告文件、提交或多阶段审批流程。
+三个角色默认继承模型和 thinking，预设有固定值时以预设为准，不复制上游模型固定值。Explore 和 Plan 指令根据参考项目适配，并保留其 [MIT 许可证](skills/subagent/references/LICENSE)。general-purpose 使用简短的任务驱动指令，不特别限制工具；省略 `--role` 仍可启动普通子代理。所有指令保持追加模式，不使用上游替换模式。不强制要求 TODO 工具、报告文件、提交或多阶段审批流程。
 
 代码审查、设计文档审计、跨文件一致性检查及开放式分析使用 `general-purpose` 或普通子代理，不交给定位型 `explore`。编辑、检查和提交遵循本次任务授权。角色不授予操作权限、不将 Bash 变成沙箱，也不自动停止实例。
 
 自定义指令继续使用可重复的 `--append-system-prompt <text|path>`。已有文件按原文读取，包括可能存在的 frontmatter；其他值按字面文本处理。确认自定义文件路径存在；相对路径从调用 shell 的目录解析，不受 `--cwd` 影响。选中角色正文在前，额外指令按参数顺序追加。合并内容保存为 run 目录中的 `append-system-prompt.md`，追加到 Pi 正常系统提示，保留 `APPEND_SYSTEM.md`。后续消息、`/reload` 和恢复运行沿用快照。普通 Pi 配置和上下文文件仍正常发现。
 
 `--prompt` 是任务用户消息，`--file` 是任务附件。角色本身不是任务，仍需至少一个上述输入。子代理从新对话开始，不 fork 父会话历史，也不提供系统提示替换模式。
+
+## 配置
+
+`/config:subagent` 打开角色预设的 TUI 面板。选择角色后可编辑：
+
+- Model：会话中任一可用模型，或继承父会话模型。
+- Thinking：循环切换 Pi 的 thinking 级别，或继承父会话。
+- Tools：从会话工具列表逐个开关；可改为继承 Pi 默认工具或禁用全部工具。
+- Extensions：多选普通发现或单个扩展来源。候选来自已配置的包与 Pi 的扩展目录；选中任一来源会替换普通发现。
+- Prompt (Markdown)：用 Pi 编辑器编辑角色正文，frontmatter 保持不变。
+
+预设修改写回 `skills/subagent/references/<role>.md`，保留正文与未涉及的 frontmatter 字段。spawn 参数仍覆盖预设：`--model`、`--thinking`、`--tools`、`-e`/`-ne` 会替换本次运行的角色值。
 
 ## 隔离
 

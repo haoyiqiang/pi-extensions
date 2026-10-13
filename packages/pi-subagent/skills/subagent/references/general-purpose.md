@@ -1,7 +1,9 @@
 ---
 name: general-purpose
 description: Complete implementation, research, code review, and other multi-step tasks that do not fit the focused explore or plan roles.
-extensions: true
+model: cpa/deepseek-v4.1-flash
+thinking: xhigh
+extensions: [../../../../pi-models-discovery]
 ---
 
 # General-Purpose Agent

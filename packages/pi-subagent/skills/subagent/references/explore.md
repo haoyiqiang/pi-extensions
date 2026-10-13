@@ -1,8 +1,10 @@
 ---
 name: explore
 description: Quickly locate files, symbols, references, and existing implementations through read-only search. Do not use for code review, design-document auditing, cross-file consistency checks, or open-ended analysis. Specify search breadth as quick, medium, or very thorough.
+model: cpa/deepseek-v4.1-flash
+thinking: low
 tools: [read, bash, grep, find, ls]
-extensions: true
+extensions: [../../../../pi-models-discovery]
 ---
 
 # CRITICAL: READ-ONLY MODE - NO FILE MODIFICATIONS

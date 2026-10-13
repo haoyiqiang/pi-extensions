@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -6,6 +6,11 @@ import { parseFrontmatter } from "@earendil-works/pi-coding-agent";
 
 export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 const rolesDir = join(dirname(fileURLToPath(import.meta.url)), "skills", "subagent", "references");
+
+/** Path of a role's Markdown file; the name is the file stem. */
+export function roleFilePath(name: string): string {
+	return join(rolesDir, `${name}.md`);
+}
 
 export interface Role {
 	name: string;
@@ -58,6 +63,70 @@ export function loadRoles(directory = rolesDir): Role[] {
 	if (new Set(roles.map((role) => role.name)).size !== roles.length)
 		throw new Error(`Duplicate role names in ${directory}`);
 	return roles;
+}
+
+export interface RoleConfigPatch {
+	/** Omitted fields stay unchanged; null removes the field so the role inherits the default. */
+	model?: string | null;
+	thinking?: string | null;
+	tools?: string[] | null;
+	extensions?: boolean | string[] | null;
+}
+
+const PLAIN_YAML = /^[A-Za-z0-9_][A-Za-z0-9_./~+-]*$/;
+
+/** Serialize one frontmatter value in the style the role files already use. */
+function serializeYaml(value: string | boolean | string[]): string {
+	if (typeof value === "boolean") return String(value);
+	if (typeof value === "string") return PLAIN_YAML.test(value) ? value : JSON.stringify(value);
+	return `[${value.map((item) => (PLAIN_YAML.test(item) ? item : JSON.stringify(item))).join(", ")}]`;
+}
+
+/** Replace, insert, or remove one top-level frontmatter key without reformatting the rest of the file. */
+function setFrontmatterField(content: string, key: string, serialized?: string): string {
+	const block = /^---\r?\n([\s\S]*?)\r?\n---/.exec(content);
+	if (!block) throw new Error("Role file has no frontmatter block");
+	const lines = block[1].split(/\r?\n/);
+	const index = lines.findIndex((line) => line.startsWith(`${key}:`));
+	if (serialized === undefined) {
+		if (index >= 0) lines.splice(index, 1);
+	} else if (index >= 0) {
+		lines[index] = `${key}: ${serialized}`;
+	} else {
+		lines.push(`${key}: ${serialized}`);
+	}
+	return content.replace(block[0], `---\n${lines.join("\n")}\n---`);
+}
+
+/** Update one role's presets in place; only supplied fields are touched. */
+export function updateRoleConfig(name: string, patch: RoleConfigPatch): void {
+	const path = roleFilePath(name);
+	let content = readFileSync(path, "utf8");
+	if (patch.model !== undefined) {
+		if (patch.model !== null && !/^[^/\s]+\/\S+$/.test(patch.model))
+			throw new Error(`Role model must use provider/model: ${patch.model}`);
+		content = setFrontmatterField(content, "model", patch.model === null ? undefined : serializeYaml(patch.model));
+	}
+	if (patch.thinking !== undefined) {
+		if (patch.thinking !== null && !THINKING_LEVELS.includes(patch.thinking as typeof THINKING_LEVELS[number]))
+			throw new Error(`Invalid thinking level: ${patch.thinking}`);
+		content = setFrontmatterField(content, "thinking", patch.thinking === null ? undefined : serializeYaml(patch.thinking));
+	}
+	if (patch.tools !== undefined)
+		content = setFrontmatterField(content, "tools", patch.tools === null ? undefined : serializeYaml(patch.tools));
+	if (patch.extensions !== undefined)
+		content = setFrontmatterField(content, "extensions", patch.extensions === null ? undefined : serializeYaml(patch.extensions));
+	writeFileSync(path, content);
+}
+
+/** Update one role's Markdown body, keeping its frontmatter block untouched. */
+export function updateRolePrompt(name: string, prompt: string): void {
+	const path = roleFilePath(name);
+	const content = readFileSync(path, "utf8");
+	const end = content.indexOf("\n---", 4);
+	if (end < 0) throw new Error(`Role file has no frontmatter block: ${path}`);
+	if (!prompt.trim()) throw new Error(`Role prompt is empty: ${path}`);
+	writeFileSync(path, `${content.slice(0, end + 4)}\n\n${prompt.trim()}\n`);
 }
 
 export interface RuntimeOptions {

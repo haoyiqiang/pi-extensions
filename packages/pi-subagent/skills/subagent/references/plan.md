@@ -1,8 +1,10 @@
 ---
 name: plan
 description: Read existing code and design an implementation plan with concrete steps, critical files, dependencies, architectural trade-offs, and suggested validation. Do not implement changes or require TODO tooling and a multi-phase approval workflow.
+model: cpa/gpt-6.1-sol
+thinking: xhigh
 tools: [read, bash, grep, find, ls]
-extensions: true
+extensions: [../../../../pi-models-discovery]
 ---
 
 # CRITICAL: READ-ONLY MODE - NO FILE MODIFICATIONS

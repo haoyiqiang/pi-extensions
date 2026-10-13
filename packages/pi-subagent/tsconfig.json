@@ -10,5 +10,5 @@
     "verbatimModuleSyntax": true,
     "types": ["node"]
   },
-  "include": ["index.ts", "shared.ts", "roles.ts", "subagent.ts"]
+  "include": ["index.ts", "shared.ts", "roles.ts", "config-panel.ts", "extension-sources.ts", "subagent.ts"]
 }

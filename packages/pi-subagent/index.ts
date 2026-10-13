@@ -2,6 +2,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync,
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { openSubagentConfigPanel } from "./config-panel.ts";
 import { formatRoleCatalog, loadRoles } from "./roles.ts";
 import {
 	closeRunSurface,
@@ -113,6 +114,10 @@ export default function subagentExtension(pi: ExtensionAPI) {
 					if (ctx.hasUI) ctx.ui.notify(`Could not suspend ${runDisplayName(run)}: ${message}`, "error");
 				}
 			}
+		});
+		pi.registerCommand("config:subagent", {
+			description: "Configure subagent role presets (model, thinking, tools, extensions)",
+			handler: (_args, ctx) => openSubagentConfigPanel(pi, ctx),
 		});
 		return;
 	}
