@@ -1,6 +1,6 @@
 {
   "name": "@kevinhao/pi-terminal-mux",
-  "version": "0.6.5",
+  "version": "0.7.0",
   "description": "Terminal surface API for tmux and Orca, with native startup commands and headless fallback",
   "type": "module",
   "main": "./index.ts",

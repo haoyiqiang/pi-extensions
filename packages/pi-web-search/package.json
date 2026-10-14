@@ -1,6 +1,6 @@
 {
   "name": "@kevinhao/pi-web-search",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "Lightweight LLM and API web search, URL context, and web fetch tools for Pi",
   "type": "module",
   "main": "./index.ts",

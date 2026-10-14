@@ -1,6 +1,6 @@
 {
   "name": "@kevinhao/pi-action-fusion",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Fuse Pi file edits and writes with an optional follow-up shell command",
   "type": "module",
   "main": "./index.ts",
