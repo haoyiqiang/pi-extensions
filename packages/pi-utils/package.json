@@ -1,6 +1,6 @@
 {
   "name": "@kevinhao/pi-utils",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Shared portable config I/O and deterministic test fixtures for Pi extensions",
   "type": "module",
   "main": "./index.ts",
