@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.5.0](https://github.com/haoyiqiang/pi-extensions/compare/pi-models-discovery-v1.4.0...pi-models-discovery-v1.5.0) (2026-10-14)
+
+
+### Features
+
+* **pi-models-discovery:** 发现模型默认暴露 xhigh/max 思考等级 ([817e092](https://github.com/haoyiqiang/pi-extensions/commit/817e09204cd87fa0fcf6e2cd37a3fed33c6abcb8))
+* **pi-models-discovery:** 发现模型默认暴露 xhigh/max 思考等级 ([5241ae4](https://github.com/haoyiqiang/pi-extensions/commit/5241ae4926106d82d0d43097043fd6a2d2df20f0))
+* show notices as filled transcript blocks under the message ([eb00293](https://github.com/haoyiqiang/pi-extensions/commit/eb002934f273df12cb109e54817dd16fdb09d52a))
+* 为每个扩展提供配置 Skill ([626a731](https://github.com/haoyiqiang/pi-extensions/commit/626a73155279e44e89ca10f59b91cea6d174e63d))
+* 为每个扩展提供配置 Skill ([9bb7374](https://github.com/haoyiqiang/pi-extensions/commit/9bb737457af0ece197894b4b9488373ab5f8e38f))
+* 所有扩展提示统一加来源标签与颜色 ([21ad9d9](https://github.com/haoyiqiang/pi-extensions/commit/21ad9d97347118a9817ae445bc03544b7c1c66da))
+* 所有扩展提示统一加来源标签与颜色 ([a06c6f8](https://github.com/haoyiqiang/pi-extensions/commit/a06c6f86367fc7b43f14b34f754bddc4b6dd340a))
+* 提示改成会话区的带底色消息块，判定结论落在消息下方 ([f42992d](https://github.com/haoyiqiang/pi-extensions/commit/f42992d39af35e3fda33f681f833d89408cb4a3a))
+
+
+### Bug Fixes
+
+* pi peer 范围只保留下限 &gt;=0.80.0 ([fdc012c](https://github.com/haoyiqiang/pi-extensions/commit/fdc012c7a0a968712cea4430afd7780eab53420b))
+* **pi-models-discovery:** 移除发现模型硬编码的 thinkingLevelMap ([bc64dcc](https://github.com/haoyiqiang/pi-extensions/commit/bc64dcc55e089b33102a861aea9eee8d239406bf))
+* **pi-models-discovery:** 移除发现模型硬编码的 thinkingLevelMap ([8ed08cb](https://github.com/haoyiqiang/pi-extensions/commit/8ed08cb29f835b3599e61f822948d17171901591))
+* 去掉 pi peer 上界并升级依赖到 0.85.1 ([28e897e](https://github.com/haoyiqiang/pi-extensions/commit/28e897eb45d76e91ca8ac6ac2a508a36c76c5682))
+* 将配置 Skill 放入各扩展根目录 ([57a9863](https://github.com/haoyiqiang/pi-extensions/commit/57a98635e63856df6631f3cfe724c325b28f15cc))
+* 放宽 pi peer 范围并升级依赖到 0.85.1 ([3444c0c](https://github.com/haoyiqiang/pi-extensions/commit/3444c0cb4836006348fc6a9fbd30fe36bdc98ced))
+
 ## [1.4.0](https://github.com/maplezzk/pi-extensions/compare/pi-models-discovery-v1.3.1...pi-models-discovery-v1.4.0) (2026-09-21)
 
 

@@ -20,6 +20,28 @@
 * remove automatic session title generation; use `pi-naming` for session and terminal names
 * remove the scrolling `write` preview; `write` display stays with `pi-extensions-tool-display`
 
+## [0.29.0](https://github.com/haoyiqiang/pi-extensions/compare/pi-spark-v0.28.0...pi-spark-v0.29.0) (2026-10-14)
+
+
+### Features
+
+* add i18n catalogs for blackhole, context-view, rewind, and spark ([2eca7e8](https://github.com/haoyiqiang/pi-extensions/commit/2eca7e8801c992bdcb1b2059d847f51ae7b581f1))
+* add shared config foundation ([903140a](https://github.com/haoyiqiang/pi-extensions/commit/903140a53de3ff7d98576abf051721a51058953e))
+* **spark:** absorb session and terminal naming ([c0cde78](https://github.com/haoyiqiang/pi-extensions/commit/c0cde789fbe66baeabb659e30cb4a6ee2c693b62))
+
+
+### Bug Fixes
+
+* **spark:** use native notifications for metrics ([08f25d6](https://github.com/haoyiqiang/pi-extensions/commit/08f25d6863ca67af8fdb0594bf8a3f47a29d77f9))
+* unify subagent controls and workflow lifecycle policy ([7126ba5](https://github.com/haoyiqiang/pi-extensions/commit/7126ba5bc29715a8903bb4faece70e957374659e))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @kevinhao/pi-terminal-mux bumped from ^0.6.5 to ^0.7.0
+
 ## [0.28.0](https://github.com/zlliang/pi-spark/compare/v0.27.0...v0.28.0) (2026-09-22)
 
 
