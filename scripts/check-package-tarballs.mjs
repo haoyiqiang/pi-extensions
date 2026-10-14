@@ -47,7 +47,8 @@ for (const { directory: packageDirectory, kind } of packageTargets) {
       stdio: ["ignore", "pipe", "inherit"],
     });
     const parsed = JSON.parse(output);
-    report = parsed[0];
+    // npm 11 returns an array; npm 12 returns an object keyed by package name.
+    report = Array.isArray(parsed) ? parsed[0] : Object.values(parsed)[0];
   } catch (error) {
     errors.push(`${manifest.name ?? packageDirectory}: npm pack --dry-run failed: ${error.message}`);
     continue;
