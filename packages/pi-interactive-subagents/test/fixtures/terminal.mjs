@@ -38,6 +38,11 @@ function start(command) {
   writeFileSync(path("command"), command);
   if (existsSync(path("no-runtime"))) return;
   const fd = openSync(path("screen"), "w");
+  if (existsSync(path("complete-during-inventory"))) {
+    // Hold the real writer until the controller enters native inventory, then
+    // let readiness, settlement and process exit all precede that call's return.
+    command = `while [ ! -f "$SUBAGENT_TEST_TERMINAL/inventory-entered" ]; do sleep 0.01; done; ${command}; touch "$SUBAGENT_TEST_TERMINAL/startup-exited"`;
+  }
   const child = spawn("bash", ["-c", command], { env: { ...process.env, SUBAGENT_TEST_TERMINAL: root, TMUX_PANE: surface }, stdio: ["ignore", fd, fd], detached: true });
   writeFileSync(path("pid"), String(child.pid));
   closeSync(fd);
@@ -65,6 +70,16 @@ switch (command) {
     break;
   }
   case "list-panes": {
+    if (existsSync(path("complete-during-inventory")) && existsSync(path("pid"))) {
+      writeFileSync(path("inventory-entered"), "release startup");
+      const deadline = performance.now() + 8_000;
+      while (!existsSync(path("startup-exited")) && performance.now() < deadline) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+      if (!existsSync(path("startup-exited"))) {
+        writeFileSync(path("inventory-timed-out"), "fixture synchronization failed");
+        throw new Error("Fixture child did not exit during inventory");
+      }
+      if (readFileSync(path("complete-during-inventory"), "utf8") === "absent") writeFileSync(path("surface"), "gone");
+    }
     if (existsSync(path("inventory-unknown"))) throw new Error("Fixture inventory unavailable");
     const present = multi ? readdirSync(join(base, "surfaces")).filter((id) => readFileSync(join(base, "surfaces", id, "surface"), "utf8") === "open")
       : existsSync(path("surface")) && readFileSync(path("surface"), "utf8") === "open" ? [surface] : [];
