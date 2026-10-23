@@ -235,18 +235,19 @@ npm run test:integration --workspace pi-interactive-subagents
 # Optional: PI_TEST_MODEL=provider/model PI_TEST_TIMEOUT=120000
 ```
 
-This includes the [#3 native-tool prefactor](https://github.com/haoyiqiang/pi-extensions/issues/3)
-and [#4 role/loadout safety](https://github.com/haoyiqiang/pi-extensions/issues/4), not
-all of [Spec #2](https://github.com/haoyiqiang/pi-extensions/issues/2). It also includes
+This includes the [#3 native-tool prefactor](https://github.com/haoyiqiang/pi-extensions/issues/3),
+[#4 role/loadout safety](https://github.com/haoyiqiang/pi-extensions/issues/4),
 [#5 settled outcomes](https://github.com/haoyiqiang/pi-extensions/issues/5) and
-[#6 terminal startup/liveness](https://github.com/haoyiqiang/pi-extensions/issues/6). Public-tool tests
+[#6 terminal startup/liveness](https://github.com/haoyiqiang/pi-extensions/issues/6), not
+all of [Spec #2](https://github.com/haoyiqiang/pi-extensions/issues/2). Public-tool tests
 cover role aliases/precedence/visibility, missing versus empty tools, invalid resources
-and snapshots, model/cwd/identity/skill/isolation replay, lifetime policy and nested refusals.
-Terminal tests use the existing child runtime and executable tmux/Orca stand-ins, with
-independently controlled parent/child clocks for readiness, long work and lost liveness.
-The mux suite retains its startup-command/inventory contracts. No paid model or real
-terminal smoke run is required for the deterministic suite. Durable messaging,
-stable identity/single-writer ownership and complete parent recovery remain separate slices.
+and snapshots, model/cwd/identity/skill/isolation replay, lifetime policy, nested refusals
+and settled result publication. Terminal tests use the existing child runtime and
+executable tmux/Orca stand-ins, with independently controlled parent/child clocks for
+readiness, long work and lost liveness. The mux suite retains its startup-command/inventory
+contracts. No paid model or real terminal smoke run is required for the deterministic
+suite. Durable messaging, stable identity/single-writer ownership and complete parent
+recovery remain separate slices.
 See the repository `GLOSSARY.md` and `docs/adr/0001-pause-uncertain-delegated-actions.md`
 for the reviewed domain language and recovery policy.
 

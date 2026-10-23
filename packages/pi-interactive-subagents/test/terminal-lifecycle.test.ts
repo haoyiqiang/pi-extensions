@@ -61,12 +61,27 @@ async function withTerminal(backend: "tmux" | "orca" | "unsupported", run: (h: a
 }
 const task = "Return the exact phrase: native startup complete.";
 
+async function refusal(operation: Promise<any>): Promise<Error> {
+  let failure: Error | undefined;
+  await assert.rejects(operation, (error) => {
+    if (!(error instanceof Error)) return false;
+    failure = error;
+    return true;
+  });
+  return failure!;
+}
+
+function terminalDiagnostic(failure: Error) {
+  const reference = failure.message.match(/(?:Diagnostic: |inspect )([^\n]+\.json)\.?$/)?.[1];
+  assert.ok(reference, "tool failures must expose their inspectable artifact reference");
+  return JSON.parse(readFileSync(reference, "utf8"));
+}
+
 test("unsupported environments refuse native delegation without promising headless support", async () => {
   await withTerminal("unsupported", async ({ call, terminal }) => {
-    const result = await call("subagent", { agent: "echo", task });
-    assert.equal(result.isError, true);
-    assert.match(result.content[0].text, /tmux.*Orca/i);
-    assert.match(result.content[0].text, /headless.*not supported/i);
+    const result = await refusal(call("subagent", { agent: "echo", task }));
+    assert.match(result.message, /tmux.*Orca/i);
+    assert.match(result.message, /headless.*not supported/i);
     assert.equal(existsSync(join(terminal, "surface")), false);
   });
 });
@@ -74,9 +89,7 @@ test("unsupported environments refuse native delegation without promising headle
 test("a supported backend without the parent terminal identity cannot launch against current focus", async () => {
   await withTerminal("tmux", async ({ call, terminal }) => {
     delete process.env.TMUX_PANE;
-    const refused = await call("subagent", { agent: "echo", task });
-    assert.equal(refused.isError, true);
-    assert.match(refused.content[0].text, /parent terminal/i);
+    await assert.rejects(call("subagent", { agent: "echo", task }), /parent terminal/i);
     assert.equal(existsSync(join(terminal, "surface")), false);
   });
 });
@@ -96,12 +109,11 @@ async function advanceUntil(t: any, read: () => any, milliseconds = 40_000) {
 test("native creation failure is not retried and retains inspectable launch diagnostics", async () => {
   await withTerminal("tmux", async ({ terminal, call, commands }) => {
     writeFileSync(join(terminal, "create-fails"), "backend failure");
-    const failed = await call("subagent", { agent: "echo", task });
-    assert.equal(failed.isError, true);
-    assert.match(failed.content[0].text, /creation failed/i);
+    const failed = await refusal(call("subagent", { agent: "echo", task }));
+    assert.match(failed.message, /creation failed/i);
     assert.equal(commands().filter((event: any) => event.args[0] === "split-window").length, 1);
-    assert.equal(existsSync(failed.details.launchScriptFile), true);
-    const diagnostic = JSON.parse(readFileSync(failed.details.terminalRecordFile, "utf8"));
+    const diagnostic = terminalDiagnostic(failed);
+    assert.equal(existsSync(diagnostic.launchScriptFile), true);
     assert.equal(diagnostic.phase, "create-failed");
     assert.equal(diagnostic.inventory, "unknown", "a failed create receipt cannot prove absence");
     assert.equal(diagnostic.closure, "unconfirmed");
@@ -114,12 +126,11 @@ test("missing child readiness fails finitely and confirms owned startup cleanup"
     t.mock.timers.enable({ apis: ["Date", "setTimeout", "setInterval"], now: Date.now() });
     try {
       let result: any;
-      void call("subagent", { agent: "echo", task }).then((value: any) => { result = value; });
+      void refusal(call("subagent", { agent: "echo", task })).then((value) => { result = value; });
       const failed = await advanceUntil(t, () => result);
-      assert.equal(failed.isError, true);
-      assert.match(failed.content[0].text, /ready|readiness/i);
+      assert.match(failed.message, /ready|readiness/i);
       assert.equal(readFileSync(join(terminal, "surface"), "utf8"), "closed");
-      assert.equal(failed.details.closure, "confirmed");
+      assert.equal(terminalDiagnostic(failed).closure, "confirmed");
     } finally { t.mock.timers.reset(); }
   });
 });
@@ -130,14 +141,12 @@ test("startup cleanup uncertainty retains an inspectable record and blocks a rep
     t.mock.timers.enable({ apis: ["Date", "setTimeout", "setInterval"], now: Date.now() });
     try {
       let result: any;
-      void call("subagent", { agent: "echo", name: "Not ready", task }).then((value: any) => { result = value; });
+      void refusal(call("subagent", { agent: "echo", name: "Not ready", task })).then((value) => { result = value; });
       const failed = await advanceUntil(t, () => result);
-      assert.equal(failed.isError, true);
-      assert.equal(failed.details.closure, "unconfirmed");
-      const record = JSON.parse(readFileSync(failed.details.terminalRecordFile, "utf8"));
+      const record = terminalDiagnostic(failed);
       assert.equal(record.inventory, "unknown");
       assert.equal(record.closure, "unconfirmed");
-      assert.equal((await call("subagent_message", { name: "Not ready", message: task })).isError, true);
+      await assert.rejects(call("subagent_message", { name: "Not ready", message: task }), /uncertain/i);
     } finally { t.mock.timers.reset(); }
   });
 });
@@ -156,7 +165,7 @@ test("a present surface after failed closure retains success and reports unconfi
       assert.equal(record.inventory, "present");
       assert.equal(record.closure, "unconfirmed");
       assert.equal(JSON.parse(readFileSync(result.message.details.resultFile, "utf8")).outcome, "succeeded");
-      assert.equal((await call("subagent_message", { name: "Close failure", message: task })).isError, true);
+      await assert.rejects(call("subagent_message", { name: "Close failure", message: task }), /uncertain/i);
     } finally { t.mock.timers.reset(); }
   });
 });
@@ -191,9 +200,7 @@ test("unknown inventory and failed capture retain work, refuse unsafe delivery, 
     const uncertain = await waitFor(() => parent.sentMessages.find((event: any) => event.message.details?.inventory === "unknown"), "inventory uncertainty feedback");
     assert.match(uncertain.message.content, /unknown/);
     assert.equal(results().length, 0);
-    const message = await call("subagent_message", { name: "Uncertain", message: "Do not launch a replacement" });
-    assert.equal(message.isError, true);
-    assert.match(message.content[0].text, /unknown|uncertain/i);
+    await assert.rejects(call("subagent_message", { name: "Uncertain", message: "Do not launch a replacement" }), /unknown|uncertain/i);
     assert.equal(commands().filter((event: any) => event.args[0] === "split-window").length, 1);
     writeFileSync(join(terminal, "finish"), "release");
     const result = await waitFor(() => results()[0], "durable success despite inventory loss");
@@ -206,8 +213,8 @@ test("unknown inventory and failed capture retain work, refuse unsafe delivery, 
       assert.equal(evidence.inventory, "unknown");
       assert.equal(evidence.closure, "unconfirmed");
       assert.equal(JSON.parse(readFileSync(result.message.details.resultFile, "utf8")).outcome, "succeeded");
-      const refused = await call("subagent_message", { name: "Uncertain", message: task });
-      assert.equal(refused.isError, true, "unconfirmed cleanup cannot free the session for a new writer");
+      await assert.rejects(call("subagent_message", { name: "Uncertain", message: task }), /uncertain/i,
+        "unconfirmed cleanup cannot free the session for a new writer");
     } finally { t.mock.timers.reset(); }
   });
 });

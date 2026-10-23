@@ -148,12 +148,12 @@ test("native delegation acknowledges launch before child completion and automati
   writeFileSync(join(bin, "pi"), `#!/bin/sh\nexec ${runtimeCommand} "$@"\n`, { mode: 0o755 });
   process.env.PATH = `${bin}:${process.env.PATH}`;
   process.env.TMUX = "isolated-fixture";
+  process.env.PI_TERMINAL_MUX = "tmux";
   process.env.TMUX_PANE = "%isolated-parent";
   process.env.SUBAGENT_TEST_TERMINAL = terminal;
   process.env.PI_CODING_AGENT_DIR = join(root, "agent-config");
-  process.env.PI_SUBAGENT_SHELL_READY_DELAY_MS = "0";
   for (const key of Object.keys(process.env)) {
-    if (key.startsWith("PI_SUBAGENT_") && key !== "PI_SUBAGENT_SHELL_READY_DELAY_MS") delete process.env[key];
+    if (key.startsWith("PI_SUBAGENT_")) delete process.env[key];
   }
   process.chdir(project);
   const webExtension = join(root, "web-extension.ts");
@@ -430,8 +430,8 @@ test("native delegation acknowledges launch before child completion and automati
     if (existsSync(join(terminal, "pid"))) {
       try { process.kill(-Number(readFileSync(join(terminal, "pid"), "utf8")), "SIGKILL"); } catch {}
     }
-    // Drain the adapter's debounced layout operation before restoring PATH.
-    // Otherwise a delayed callback could accidentally reach a real tmux.
+    // Explicitly release the isolated fixture; detaching a watcher no longer
+    // closes a surface or infers process termination.
     if (existsSync(join(terminal, "surface"))) {
       closeSurface("%fixture");
       await waitFor(() => existsSync(join(terminal, "layout")) &&
