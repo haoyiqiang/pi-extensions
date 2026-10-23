@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import subagents, { registerToolExtension } from "../pi-extension/subagents/index.ts";
-import { createMockExtensionApi, plainTheme, waitFor } from "./harness.ts";
+import { createMockExtensionApi, waitFor } from "./harness.ts";
 import { shellEscape } from "../pi-extension/subagents/tmux.ts";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
@@ -72,14 +72,10 @@ async function withRoles(run: (h: any) => Promise<void>) {
 const task = "Return the exact phrase: loadout verified.";
 
 test("omitted tools fail before launch while an explicit empty set keeps only control tools", { timeout: 30_000 }, async () => {
-  await withRoles(async ({ role, call, terminal, received, finish, parent }) => {
+  await withRoles(async ({ role, call, terminal, received, finish }) => {
     role("missing-tools", "name: missing-tools\nauto-exit: true");
-    const refused = await call("subagent", { agent: "missing-tools", task });
-    assert.equal(refused.isError, true);
-    assert.match(refused.content[0].text, /tools/i);
+    await assert.rejects(() => call("subagent", { agent: "missing-tools", task }), /explicitly declare tools/);
     assert.equal(existsSync(join(terminal, "surface")), false);
-    const rendered = parent.tool("subagent").renderResult(refused, {}, plainTheme).render(100).join("\n");
-    assert.doesNotMatch(rendered, /started|✓/);
     role("empty-tools", "name: empty-tools\ntools:\nauto-exit: true");
     const launched = await call("subagent", { agent: "empty-tools", task });
     assert.equal(launched.details.status, "started");
@@ -95,8 +91,7 @@ test("unknown tools, missing backing extensions and ungranted delegation tools f
     registerToolExtension("missing_fixture_tool", join(root, "not-installed.ts"));
     for (const tools of ["made_up_tool", "*", "+bash", "missing_fixture_tool", "subagent", "ask_question,bash,*"]) {
       role("unsafe", `name: unsafe\ntools: ${tools}\nauto-exit: true`);
-      const refused = await call("subagent", { agent: "unsafe", task });
-      assert.equal(refused.isError, true, tools);
+      await assert.rejects(() => call("subagent", { agent: "unsafe", task }), Error, tools);
       assert.equal(existsSync(join(terminal, "surface")), false, tools);
     }
   });
@@ -148,8 +143,7 @@ test("resume replays resolved model, cwd, identity, skills, isolation and lifeti
     assert.ok(!second.args.includes(replacement), "resume cannot rediscover a different backing extension");
     await finish();
     rmSync(extension);
-    const unavailable = await call("subagent_message", { name: launched.details.name, message: task });
-    assert.equal(unavailable.isError, true, "a missing pinned extension cannot fall back to the replacement");
+    await assert.rejects(() => call("subagent_message", { name: launched.details.name, message: task }), /Cannot safely resume/, "a missing pinned extension cannot fall back to the replacement");
   });
 });
 
@@ -169,9 +163,7 @@ test("resume refuses empty, partial, unknown-version and unavailable-resource sn
       { ...original, skills: [{ name: "gone", path: "/missing/SKILL.md" }] }];
     for (const snapshot of invalid) {
       writeFileSync(path, JSON.stringify(snapshot));
-      const refused = await call("subagent_message", { name: launched.details.name, message: task });
-      assert.equal(refused.isError, true, JSON.stringify(snapshot));
-      assert.match(refused.content[0].text, /fresh|re-delegat/i);
+      await assert.rejects(() => call("subagent_message", { name: launched.details.name, message: task }), /fresh|re-delegat/i, JSON.stringify(snapshot));
       assert.equal(readFileSync(join(terminal, "surface"), "utf8"), "closed");
       assert.equal(readFileSync(launched.details.sessionFile, "utf8"), history);
     }
@@ -190,19 +182,17 @@ test("nested launch, steering and resume use the pinned role policy, not ambient
     await received();
     process.env.PI_SUBAGENT_SESSION = managed.details.sessionFile;
     process.env.PI_SUBAGENT_ALLOWED = "forbidden";
-    assert.equal((await call("subagent_message", { name: forbidden.details.name, message: task })).isError, true, "running targets obey the same pinned policy");
+    await assert.rejects(() => call("subagent_message", { name: forbidden.details.name, message: task }), /allowlist/, "running targets obey the same pinned policy");
     delete process.env.PI_SUBAGENT_SESSION;
     await finish();
     process.env.PI_SUBAGENT_SESSION = managed.details.sessionFile;
     process.env.PI_SUBAGENT_ALLOWED = "manager,forbidden";
     process.env.PI_SUBAGENT_AGENT = "forged-identity";
     for (const agent of ["manager", "forbidden", "unknown", ""]) {
-      const refused = await call("subagent", { agent, task });
-      assert.equal(refused.isError, true, agent);
+      await assert.rejects(() => call("subagent", { agent, task }), Error, agent);
       assert.equal(readFileSync(join(terminal, "surface"), "utf8"), "closed");
     }
-    const refused = await call("subagent_message", { name: forbidden.details.name, message: task });
-    assert.equal(refused.isError, true);
+    await assert.rejects(() => call("subagent_message", { name: forbidden.details.name, message: task }), /allowlist/);
     const listed = await call("subagents_list", {});
     assert.deepEqual(listed.details.agents.map((a: any) => a.name), ["allowed"]);
     const allowed = await call("subagent", { agent: "allowed", task });
@@ -214,8 +204,7 @@ test("nested launch, steering and resume use the pinned role policy, not ambient
     const noGrantSession = allowed.details.sessionFile;
     process.env.PI_SUBAGENT_SESSION = noGrantSession;
     process.env.PI_SUBAGENT_ALLOWED = "manager,forbidden";
-    const noGrant = await call("subagent", { agent: "forbidden", task });
-    assert.equal(noGrant.isError, true, "absence of a delegation grant is deny-all even if this extension is explicitly loaded");
+    await assert.rejects(() => call("subagent", { agent: "forbidden", task }), /allowlist/, "absence of a delegation grant is deny-all even if this extension is explicitly loaded");
   });
 });
 
@@ -257,8 +246,7 @@ test("invalid profile values and missing selected skills fail before launch", { 
   await withRoles(async ({ role, call, terminal }) => {
     for (const field of ["thinking: invalid", "auto-exit: maybe", "no-skills: maybe", "session-mode: unknown", "system-prompt: unknown", "skills: not-installed", "model: fixture/not-installed", "cli: unknown"]) {
       role("invalid", `name: invalid\ntools: read\n${field}`);
-      const refused = await call("subagent", { agent: "invalid", task });
-      assert.equal(refused.isError, true, field);
+      await assert.rejects(() => call("subagent", { agent: "invalid", task }), Error, field);
       assert.equal(existsSync(join(terminal, "surface")), false, field);
     }
   });
@@ -275,7 +263,7 @@ test("only fully pinned restrictive legacy loadouts can resume", { timeout: 45_0
     const legacy = Object.fromEntries(["agent", "toolAllowlist", "model", "thinking", "systemPromptMode", "identity", "spawnable", "autoExit", "cwd", "agentDir"].map((key) => [key, snapshot[key]]));
     for (const unsafe of [{ ...legacy, model: null }, { ...legacy, cwd: null }, { ...legacy, toolAllowlist: null }, { ...legacy, toolAllowlist: "read,web_search,ask_question" }]) {
       writeFileSync(path, JSON.stringify(unsafe));
-      assert.equal((await call("subagent_message", { name: launched.details.name, message: task })).isError, true);
+      await assert.rejects(() => call("subagent_message", { name: launched.details.name, message: task }), /Cannot safely resume/);
       assert.equal(readFileSync(join(terminal, "surface"), "utf8"), "closed");
     }
     writeFileSync(path, JSON.stringify(legacy));

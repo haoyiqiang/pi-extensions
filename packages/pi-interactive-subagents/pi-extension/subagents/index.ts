@@ -1,7 +1,7 @@
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { keyHint, loadSkills } from "@earendil-works/pi-coding-agent";
 import { BUILTIN_TOOLS, SPAWNING_TOOLS, THINKING_LEVELS, validateLoadout } from "./loadout.ts";
-import { Type, type Static } from "typebox";
+import { Type, type Static, type TSchema } from "typebox";
 import { Box, Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -517,6 +517,34 @@ function muxUnavailableResult() {
  */
 function getArtifactDir(sessionDir: string, sessionId: string): string {
   return join(sessionDir, "artifacts", sessionId);
+}
+
+// Supported Pi marks every resolved execute() as successful, regardless of a
+// returned isError flag. Keep refusal handling at the native management boundary
+// so launch, resume and delivery errors all use Pi's actual exception contract.
+function registerManagementTool<TParams extends TSchema, TDetails>(
+  pi: ExtensionAPI,
+  tool: ToolDefinition<TParams, TDetails>,
+): void {
+  pi.registerTool<TParams, TDetails>({
+    ...tool,
+    async execute(...args) {
+      const result = await tool.execute(...args);
+      if ("isError" in result && result.isError === true) {
+        throw new Error(result.content.map((part) => part.type === "text" ? part.text : "").join("\n"));
+      }
+      return result;
+    },
+    renderResult: tool.renderResult && ((result, options, theme, context) => {
+      // Pi's exception result contains content but no original details. In
+      // particular, listing errors must not become "No definitions found".
+      if (context?.isError) {
+        const text = result.content.map((part) => part.type === "text" ? part.text : "").join("\n");
+        return new Text(theme.fg("error", text), 0, 0);
+      }
+      return tool.renderResult!(result, options, theme, context);
+    }),
+  });
 }
 
 const statusConfig = loadStatusConfig();
@@ -1725,7 +1753,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
   // + explicit -e). See launchSubagent().
 
   // ── subagent tool ──
-  pi.registerTool({
+  registerManagementTool(pi, {
       name: "subagent",
       label: "Subagent",
       description:
@@ -1958,7 +1986,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
     });
 
   // ── subagents_list tool ──
-  pi.registerTool({
+  registerManagementTool(pi, {
       name: "subagents_list",
       label: "List Subagents",
       description:
@@ -2013,7 +2041,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 
 
   // ── subagent_message tool ──
-  pi.registerTool({
+  registerManagementTool(pi, {
       name: "subagent_message",
       label: "Message Subagent",
       description:
