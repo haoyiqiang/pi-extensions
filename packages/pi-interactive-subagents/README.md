@@ -177,12 +177,51 @@ Status display is configured via `config.json` in the extension directory (copy 
 
 ## Requirements
 
-- [pi](https://github.com/badlogic/pi-mono)
+- [Pi](https://github.com/earendil-works/pi) 0.87.1 or newer
+- Node.js 22.19 or newer
 - [tmux](https://github.com/tmux/tmux)
 
 ```bash
 tmux new -A -s pi 'pi'
 ```
+
+## Development and verification
+
+From the repository root:
+
+```bash
+npm ci
+npm run typecheck --workspace pi-interactive-subagents
+npm test --workspace pi-interactive-subagents
+```
+
+The workspace lockfile is authoritative. Pi and TUI imports use the supported
+`@earendil-works` packages, with `typebox` schemas; no temporary legacy aliases or
+personal extension installs are required. The package manifest can be loaded
+normally, for example `pi -e ./packages/pi-interactive-subagents`.
+
+The default suite uses the shared registered-tool/lifecycle harness, real temporary
+sessions, a deterministic child runtime process, and executable terminal stand-ins.
+It verifies native asynchronous launch and follow-up acknowledgements, child task
+receipt, automatic parent results, and visible widgets/rendering. It makes no model
+requests and does not use an existing tmux server or user terminal. A separate loader
+check exercises Pi's normal package-manifest and control-extension loading.
+
+Real-process terminal smoke tests remain explicitly opt-in:
+
+```bash
+# Inside a disposable tmux session; requires configured model credentials.
+# This command starts real Pi processes and can incur model charges.
+npm run test:integration --workspace pi-interactive-subagents
+# Optional: PI_TEST_MODEL=provider/model PI_TEST_TIMEOUT=120000
+```
+
+This is the [#3 prefactor](https://github.com/haoyiqiang/pi-extensions/issues/3), not
+all of [Spec #2](https://github.com/haoyiqiang/pi-extensions/issues/2). Launch and
+follow-up share observation/result delivery, but existing lifecycle semantics are
+preserved; settlement, durable messaging and reload recovery remain later slices.
+See the repository `GLOSSARY.md` and `docs/adr/0001-pause-uncertain-delegated-actions.md`
+for the reviewed domain language and recovery policy.
 
 ## Acknowledgements
 

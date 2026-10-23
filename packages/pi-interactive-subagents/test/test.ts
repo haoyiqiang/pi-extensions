@@ -4,7 +4,8 @@ import { mkdtempSync, writeFileSync, readFileSync, mkdirSync, rmSync, existsSync
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { visibleWidth } from "@mariozechner/pi-tui";
+import { visibleWidth } from "@earendil-works/pi-tui";
+import { createMockExtensionApi } from "./harness.ts";
 import * as subagentsModule from "../pi-extension/subagents/index.ts";
 
 import {
@@ -78,43 +79,6 @@ function withTempDir(run: (dir: string) => void) {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
-}
-
-function createMockExtensionApi() {
-  const registeredTools: Array<any> = [];
-  const registeredCommands: Array<any> = [];
-  const registeredMessageRenderers: Array<any> = [];
-  const sentUserMessages: string[] = [];
-  const sentMessages: Array<any> = [];
-  return {
-    registeredTools,
-    registeredCommands,
-    registeredMessageRenderers,
-    sentUserMessages,
-    sentMessages,
-    api: {
-      on() {},
-      registerTool(tool: any) {
-        registeredTools.push(tool);
-      },
-      registerCommand(name: string, command: any) {
-        registeredCommands.push({ name, ...command });
-      },
-      registerMessageRenderer(name: string, renderer: any) {
-        registeredMessageRenderers.push({ name, renderer });
-      },
-      registerShortcut() {},
-      sendUserMessage(message: string) {
-        sentUserMessages.push(message);
-      },
-      sendMessage(message: any, options?: any) {
-        sentMessages.push({ message, options });
-      },
-      getAllTools() {
-        return [];
-      },
-    } as any,
-  };
 }
 
 function restoreEnvVar(name: string, value: string | undefined) {
@@ -1209,7 +1173,8 @@ describe("subagent discovery", () => {
   it("getToolExtensionPath maps custom tools and skips built-ins", () => {
     assert.equal(testApi.getToolExtensionPath("read"), undefined);
     assert.equal(testApi.getToolExtensionPath("bash"), undefined);
-    assert.ok(testApi.getToolExtensionPath("web_search")?.endsWith("web-search/index.ts"));
+    // External web tools are supplied by runtime registration, covered by the
+    // native lifecycle test; no personal ~/.pi installation is assumed here.
     assert.ok(testApi.getToolExtensionPath("safe_bash")?.endsWith("tools/safe-bash.ts"));
     // Spawning tools are registered by this extension itself.
     assert.ok(testApi.getToolExtensionPath("subagent")?.endsWith("index.ts"));
@@ -1648,17 +1613,8 @@ describe("subagent-done.ts", () => {
     // asking run is still open fires `input` but NOT `agent_start`, so the flag
     // must be cleared on `input` or the session parks forever.
     function setupCapturingExtension(sessionFile: string) {
-      const handlers = new Map<string, Array<(...args: any[]) => void>>();
-      const tools: any[] = [];
-      const api = {
-        on(event: string, handler: (...args: any[]) => void) {
-          if (!handlers.has(event)) handlers.set(event, []);
-          handlers.get(event)!.push(handler);
-        },
-        registerTool(t: any) { tools.push(t); },
-        registerCommand() {}, registerMessageRenderer() {}, registerShortcut() {},
-        sendUserMessage() {}, sendMessage() {}, getAllTools() { return []; },
-      } as any;
+      const mock = createMockExtensionApi();
+      const { api, registeredTools: tools } = mock;
       const saved = {
         session: process.env.PI_SUBAGENT_SESSION,
         name: process.env.PI_SUBAGENT_NAME,
@@ -1670,8 +1626,7 @@ describe("subagent-done.ts", () => {
       process.env.PI_SUBAGENT_AGENT = "scout";
       process.env.PI_SUBAGENT_AUTO_EXIT = "1";
       subagentDoneExtension(api);
-      const emit = (event: string, ...args: any[]) =>
-        (handlers.get(event) ?? []).forEach((h) => h(...args));
+      const emit = mock.emit;
       const restore = () => {
         restoreEnvVar("PI_SUBAGENT_SESSION", saved.session);
         restoreEnvVar("PI_SUBAGENT_NAME", saved.name);
