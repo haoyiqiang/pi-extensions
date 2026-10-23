@@ -289,7 +289,7 @@ test("native delegation acknowledges launch before child completion and automati
     const resumed = await parent.tool("subagent_message").execute("resume-1", {
       name: "Echo", message: "Return the exact phrase: follow-up task complete.",
     }, undefined, undefined, ctx);
-    assert.equal(resumed.details.status, "started");
+    assert.equal(resumed.details.status, "queued");
     assert.equal(resumed.details.sessionFile, launched.details.sessionFile);
     assert.equal(parent.sentMessages.length, 1, "resume also acknowledges before completion");
     const followUp = await waitFor(() => existsSync(join(terminal, "received.json"))
@@ -341,7 +341,7 @@ test("native delegation acknowledges launch before child completion and automati
       }, undefined, undefined, ctx);
       await waitFor(() => existsSync(join(terminal, "received.json")) ? true : undefined, `${marker} receipt`);
       writeFileSync(join(terminal, "finish"), "release");
-      const event = await waitFor(() => parent.sentMessages[count], `${outcome} result`);
+      const event = await waitFor(() => parent.sentMessages.slice(count).find((event) => event.message.customType === "subagent_result"), `${outcome} result`);
       assert.equal(event.message.details.outcome, outcome);
       assert.equal(event.message.details.exitCode, 1);
       const evidence = JSON.parse(readFileSync(event.message.details.resultFile, "utf8"));
@@ -400,7 +400,7 @@ test("native delegation acknowledges launch before child completion and automati
       const steered = await parent.tool("subagent_message").execute("resident-followup", {
         name: "Resident", message: `Return the exact phrase: resident follow-up.\n${marker}`,
       }, undefined, undefined, ctx);
-      assert.equal(steered.details.status, "steered");
+      assert.equal(steered.details.status, "queued");
       const task = await waitFor(() => existsSync(join(terminal, "received.json"))
         ? JSON.parse(readFileSync(join(terminal, "received.json"), "utf8")) : undefined, "resident next receipt");
       assert.match(task.task, /resident follow-up/);
@@ -439,7 +439,7 @@ test("native delegation acknowledges launch before child completion and automati
     const residentResume = await parent.tool("subagent_message").execute("resident-resume", {
       name: "Resident", message: "Return the exact phrase: snapshot policy restored.",
     }, undefined, undefined, ctx);
-    assert.equal(residentResume.details.status, "started");
+    assert.equal(residentResume.details.status, "queued");
     const restored = await waitFor(() => existsSync(join(terminal, "received.json"))
       ? JSON.parse(readFileSync(join(terminal, "received.json"), "utf8")) : undefined, "resident resume receipt");
     assert.equal(restored.autoExit, "0");

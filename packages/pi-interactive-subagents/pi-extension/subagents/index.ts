@@ -33,6 +33,7 @@ import {
 } from "@kevinhao/pi-terminal-mux";
 
 import { SubagentRuns, normalizeSubagentName, projectRun, writerExited, type SubagentRun } from "./runs.ts";
+import { SubagentInbox } from "./inbox.ts";
 import {
   getSessionId,
   readSubagentLoadout,
@@ -48,7 +49,6 @@ import {
   capStatusLines,
   classifyStatus,
   createStatusState,
-  forceStatusAfterInterrupt,
   formatStatusAggregate,
   formatTransitionLine,
   observeStatus,
@@ -675,6 +675,7 @@ interface RunningSubagent {
   closure?: "confirmed" | "unconfirmed";
   closing?: boolean;
   launchError?: string;
+  uncertaintyNotified?: string;
 }
 
 const READY_TIMEOUT_MS = 15_000;
@@ -1111,11 +1112,9 @@ function terminalDeliveryError(running: RunningSubagent): string | null {
 }
 
 /**
- * Type a follow-up message into a running subagent's live pane. Newlines are
- * collapsed to spaces because each newline submits a turn in the child's TUI
- * editor; a multi-line message would otherwise fire as several partial turns.
+ * Legacy Claude-only transport. Managed Pi instructions never use terminal keys.
  */
-function steerSubagent(
+function legacyTerminalMessage(
   running: RunningSubagent,
   message: string,
   send: (surface: string, command: string) => void = sendCommand,
@@ -1200,7 +1199,6 @@ export const __test__ = {
   formatWidgetRightLabel,
   observeRunningSubagent,
   getToolExtensionPath,
-  steerSubagent,
   resolveResultPresentation,
   formatElapsed,
   formatTokens,
@@ -1368,6 +1366,7 @@ async function launchSubagent(
       `PI_SUBAGENT_AUTO_EXIT=${loadout.autoExit ? "1" : "0"}`,
       `PI_SUBAGENT_SESSION=${shellEscape(subagentSessionFile)}`,
       `PI_SUBAGENT_ID=${shellEscape(id)}`,
+      "PI_SUBAGENT_INBOX_ONLY=0",
       `PI_SUBAGENT_RUN_ID=${shellEscape(record.id)}`,
       `PI_SUBAGENT_GENERATION=${record.generation}`,
       `PI_SUBAGENT_ACTIVITY_FILE=${shellEscape(activityFile)}`,
@@ -1485,6 +1484,13 @@ async function watchSubagent(
       for (;;) {
         observationSignal.throwIfAborted();
         if (!isCurrent(running)) return null;
+        const uncertain = new SubagentInbox(sessionFile).snapshot(running.runs?.resolve({ id: running.subagentId })).messages.find((message) => message.uncertainty)?.uncertainty;
+        if (uncertain && running.uncertaintyNotified !== uncertain.actionId) {
+          const line = `${name}: paused for uncertain action ${uncertain.actionId} (message ${uncertain.messageId}). ${uncertain.reason} Ordinary follow-up/resume cannot authorize repetition. Reconcile, or obtain explicit user authorization and call subagent_message with authorization: { actionId, decision: "retry" | "confirm-completed", reason }.`;
+          latestPi?.sendMessage({ customType: "subagent_status", content: line, display: true,
+            details: { id: running.subagentId, name, eventId: `subagent-uncertain:${uncertain.actionId}`, uncertainty: uncertain, lines: [line], overflow: 0 } }, { triggerTurn: true, deliverAs: "steer" });
+          running.uncertaintyNotified = uncertain.actionId;
+        }
         const published = readSubagentOutcomes(sessionFile, running.id, running.lastResultSequence, running.generation)[0];
         if (published) {
           const { result, resultFile } = published;
@@ -1965,7 +1971,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         const run = projectRun(record);
         const inventory = run.backend === getMuxBackend() && run.surface ? surfaceState(run.surface) : "unknown";
         const heartbeat = readSubagentLiveness(run.sessionFile, run.executionId);
-        return { ...run, liveness: { surface: inventory, writer: writerExited(run) ? "exited" : "claimed-or-unknown", heartbeatAt: heartbeat,
+        const inbox = new SubagentInbox(run.sessionFile).snapshot(run);
+        return { ...run, ...inbox, ...(inbox.paused ? { state: "paused-uncertain" } : {}), liveness: { surface: inventory, writer: writerExited(run) ? "exited" : "claimed-or-unknown", heartbeatAt: heartbeat,
           responsive: heartbeat === null ? "unknown" : Date.now() - heartbeat < 20_000 ? "responsive" : "unresponsive" } };
       };
       if (params.id || params.name !== undefined) {
@@ -2037,25 +2044,23 @@ export default function subagentsExtension(pi: ExtensionAPI) {
       name: "subagent_message",
       label: "Message Subagent",
       description:
-        "Send a message to a subagent by stable id or unique name owned by your parent session. Both must agree when supplied together. " +
-        "so the SAME name works whether the subagent is running or finished: if it is still running, your message steers its live session; " +
-        "if it has finished, your message resumes that session and continues it. " +
-        "`message` and either `id` or `name` are required. Concurrent startup requests fail explicitly; they are not durably queued in this slice. " +
-        "Steering a running subagent returns immediately with a local acknowledgement and does NOT, by itself, emit a new result. " +
-        "Resuming is a fire-and-forget async call: when the resumed sub-agent finishes, the harness AUTOMATICALLY delivers its result as a steer message that wakes you up. " +
-        "DO NOT poll, sleep, tail logs, or read session files to detect completion — the harness handles delivery. " +
-        "DO NOT fabricate or assume results. After calling, either end your turn or work on other independent tasks.",
-      promptSnippet:
-        "Message a collaborator by stable id or unique name: steers active work, starts a new generation for completed work. " +
-        "`message` and an owned target are required. Busy/uncertain writer refusals are not acceptance; full queuing is not provided yet. " +
-        "Do not poll or fabricate results.",
+        "Durably queue an exact instruction for an owned Pi subagent by id or unique name. auto/steer redirects busy work and starts a prompt when idle; followUp waits behind automatic work. " +
+        "Concurrent completed-session messages share one fenced writer. messageId is an optional retry/dedup key; reusing it with different bytes/mode fails. " +
+        "Queued is not child acceptance, transcript consumption, settlement, or completion; subagent_status exposes that evidence. Results arrive automatically; do not poll for completion. " +
+        "Uncertain consumption/effects pause only this collaborator, including ordinary new messages. Only explicit user authorization/reconciliation of the exact actionId releases it: retry permits repeating that instruction; confirm-completed records that it must not repeat. " +
+        "Never infer permission from generic follow-up/resume. Claude children retain legacy terminal messaging without managed-Pi delivery guarantees.",
+      promptSnippet: "Queue exact subagent instructions (auto, steer, followUp). A durable queue acknowledgement is not consumption/completion. Uncertainty requires explicit affected-action authorization, never routine resume.",
       parameters: Type.Object({
         id: Type.Optional(Type.String({ description: "Stable collaborator id owned by this parent session." })),
         name: Type.Optional(Type.String({ description: "Unique assigned name. If id is also supplied, both must identify the same collaborator." })),
-        message: Type.String({
-          description:
-            "The message to deliver: a follow-up instruction for a running subagent, or the next task for a resumed session.",
-        }),
+        message: Type.Optional(Type.String({ description: "Exact instruction bytes. Required unless explicitly resolving an uncertain action." })),
+        messageId: Type.Optional(Type.String({ minLength: 1, maxLength: 200, description: "Stable logical message id for safe caller retries." })),
+        deliverAs: Type.Optional(Type.Union([Type.Literal("auto"), Type.Literal("steer"), Type.Literal("followUp")])),
+        authorization: Type.Optional(Type.Object({
+          actionId: Type.String({ description: "Exact uncertain actionId from status; not a collaborator or generic resume id." }),
+          decision: Type.Union([Type.Literal("retry"), Type.Literal("confirm-completed")]),
+          reason: Type.String({ minLength: 1, description: "Explicit user permission to repeat this action, or reliable reconciliation confirming it must not repeat." }),
+        })),
       }),
 
       renderCall(args, theme) {
@@ -2070,6 +2075,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
       renderResult(result, _opts, theme) {
         const details = result.details as any;
 
+        if (details?.status === "queued" || details?.status === "paused-uncertain") {
+          return new Text(theme.fg("accent", "○") + " " + theme.fg("toolTitle", theme.bold(details.name)) +
+            theme.fg("dim", details.paused ? " — durably queued, paused for explicit confirmation" : ` — ${details.message?.state ?? "queued"} (not task completion)`), 0, 0);
+        }
         if (details?.status === "steered") {
           return new Text(
             theme.fg("success", "✓") +
@@ -2098,47 +2107,26 @@ export default function subagentsExtension(pi: ExtensionAPI) {
       },
 
       async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-        if (!params.message?.trim()) throw new Error("message is required; request not accepted");
+        if (params.message === undefined && !params.authorization) throw new Error("message is required unless resolving an exact uncertain action; request not accepted");
+        if (params.message !== undefined && !params.message.trim()) throw new Error("message is required; request not accepted");
         const runs = runsFor(ctx);
         const entry = runs.resolve(params);
         const requestedName = entry.name;
-        if (entry.state === "starting") throw new Error("Subagent launch is busy; this request was not accepted");
-
-        if (!hasSupportedParentTerminal()) {
-          return muxUnavailableResult();
-        }
-
-        // ── Steer a running subagent ──
-        // A name that matches a currently-running subagent always steers it.
-        const runningMatch = Array.from(runningSubagents.values()).find((r) => r.subagentId === entry.id && r.generation === entry.generation);
-        if (runningMatch && !writerExited(entry)) {
+        const runningMatch = Array.from(runningSubagents.values()).find((r) => r.subagentId === entry.id && r.id === entry.executionId);
+        if (runningMatch?.cli === "claude") {
+          if (!params.message) throw new Error("Claude messaging does not support durable action authorization");
           const error = delegationError(runningMatch.agent) ?? terminalDeliveryError(runningMatch);
           if (error) throw new Error(error);
-          const delivered = steerSubagent(runningMatch, params.message);
+          const delivered = legacyTerminalMessage(runningMatch, params.message);
           if ("error" in delivered) throw new Error(delivered.error);
-          let running = runningMatch;
-          if (runningMatch.settled) {
-            const next = runs.nextTask(entry.id, entry.generation, runningMatch.lastResultSequence ?? 0);
-            runningMatch.abortController?.abort();
-            running = { ...runningMatch, generation: next.generation, settled: false, abortController: undefined };
-            runningSubagents.set(running.id, running);
-            startSubagentWatch(pi, running);
-          }
-          running.statusState = forceStatusAfterInterrupt(running.statusState, Date.now());
-          updateWidget();
-          return { content: [{ type: "text", text: `Message delivered to running subagent "${running.name}".` }],
-            details: { id: entry.id, generation: running.generation, name: entry.name, status: "steered" } };
+          return { content: [{ type: "text", text: "Legacy Claude terminal message sent (no managed-Pi delivery guarantee)." }], details: { status: "steered", name: entry.name } };
         }
-
-        // ── Resume a finished session by name ──
-        const message = params.message;
-        const name = requestedName; // identity preservation: the resumed run reclaims its name
+        if (!entry.writerToken) throw new Error("Legacy writer ownership is uncertain; request not accepted");
+        const message = params.message ?? "Explicitly reconciled uncertain action";
+        const name = requestedName;
         const startTime = Date.now();
-        if (entry.backend !== getMuxBackend()) throw new Error("Recorded backend differs; writer state is uncertain, request not accepted");
-        if (!writerExited(entry)) throw new Error("Prior writer is active or uncertain; no takeover or replacement started, request not accepted");
-
         const sessionPath = entry.sessionFile;
-        if (!sessionPath || !existsSync(sessionPath)) {
+        if (!sessionPath || (writerExited(entry) && !existsSync(sessionPath))) {
           const err =
             `Subagent "${requestedName}" is registered but its session file is gone ` +
             `(${sessionPath}). It cannot be resumed. Spawn a fresh subagent instead.`;
@@ -2163,9 +2151,52 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         }
         const policyError = delegationError(loadout.agent);
         if (policyError) return { isError: true, content: [{ type: "text", text: policyError }], details: { error: policyError } };
+        const inbox = new SubagentInbox(sessionPath);
+        const prepare = () => {
+          const target = runs.messageTarget(entry.id);
+          if (!target.launch) return target;
+          if (!hasSupportedParentTerminal()) throw new Error("Managed subagent resume requires a supported terminal; headless is not supported");
+          if (entry.backend !== getMuxBackend()) throw new Error("Recorded backend differs; writer state is uncertain, request not accepted");
+          return { run: runs.resume(target.run.id, target.run.generation, loadout), launch: true };
+        };
+        let queued = inbox.enqueue(entry, params, prepare);
+        if (queued.waitingForExit) {
+          const deadline = Date.now() + CLOSE_TIMEOUT_MS;
+          while (!writerExited(queued.run) && Date.now() < deadline) await delay(25);
+          if (writerExited(queued.run)) queued = inbox.enqueue(runs.resolve({ id: entry.id }), params, prepare);
+        }
+        const acknowledgement = {
+          content: [{ type: "text" as const, text: queued.paused
+            ? `Instruction retained for "${name}", but this collaborator is paused: reconcile or explicitly authorize the affected actionId. Ordinary follow-up is not permission to retry.`
+            : `Instruction durably queued for "${name}". This is not child consumption or task completion; results arrive automatically.` }],
+          details: { id: entry.id, generation: queued.run.generation, name, status: queued.paused ? "paused-uncertain" : "queued", paused: queued.paused, message: queued.message },
+        };
+        if (!queued.launch) {
+          if (runningMatch && runningMatch.generation !== queued.run.generation) {
+            runningMatch.abortController?.abort();
+            const running = { ...runningMatch, generation: queued.run.generation, lastResultSequence: queued.run.resultAfterSequence, settled: false, abortController: undefined };
+            runningSubagents.set(running.id, running);
+            startSubagentWatch(pi, running);
+          } else if (!runningMatch && !queued.paused && queued.run.surface && ["starting", "running"].includes(queued.run.state)) {
+            // Explicit messaging can observe its existing writer without
+            // launching/taking over Pi. Automatic reload takeover is separate.
+            const running: RunningSubagent = {
+              id: queued.run.executionId, subagentId: entry.id, generation: queued.run.generation, runs,
+              name, task: message, surface: queued.run.surface, startTime: queued.run.startTime,
+              sessionFile: sessionPath, agent: loadout.agent, interactive: loadout.interactive,
+              lastResultSequence: queued.run.resultAfterSequence,
+              activityFile: getSubagentActivityFile(getArtifactDir(ctx.sessionManager.getSessionDir(), ctx.sessionManager.getSessionId()), queued.run.executionId),
+              statusState: createStatusState({ source: "pi", startTimeMs: queued.run.startTime }),
+            };
+            runningSubagents.set(running.id, running);
+            startSubagentWatch(pi, running);
+          }
+          updateWidget();
+          return acknowledgement;
+        }
         const { autoExit, interactive } = loadout;
         const resumedSessionId = entry.sessionId ?? getSessionId(sessionPath) ?? requestedName;
-        const record = runs.resume(entry.id, entry.generation, loadout);
+        const record = queued.run;
         const id = record.executionId;
 
         // Build pi resume command
@@ -2179,18 +2210,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         // Replay the model, identity, and pinned tool/extension restrictions.
         applySandboxToParts(parts, loadout, { artifactDir, name: `${record.id}-${id}` });
 
-        let resumeMsgFile: string | undefined;
-        if (params.message) {
-          resumeMsgFile = join(
-            artifactDir,
-            "subagent-resume",
-            `${record.id}-${id}.md`,
-          );
-          mkdirSync(dirname(resumeMsgFile), { recursive: true });
-          const identity = loadout.systemPromptMode === "task" && loadout.identity ? `${loadout.identity}\n\n` : "";
-          writeFileSync(resumeMsgFile, identity + message, "utf8");
-          parts.push(shellEscape(`@${resumeMsgFile}`));
-        }
+        // Resume opens the pinned session idle. Only the durable ID-bearing inbox
+        // starts its next prompt; no second positional copy may bypass deduplication.
 
         // Build env prefix — replay the snapshot's config dir + spawn whitelist
         // so the resumed process resolves the same agents/extensions and keeps
@@ -2202,6 +2223,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         resumeEnvParts.push(`PI_SUBAGENT_NAME=${shellEscape(name)}`);
         resumeEnvParts.push(`PI_SUBAGENT_SESSION=${shellEscape(sessionPath)}`);
         resumeEnvParts.push(`PI_SUBAGENT_ID=${shellEscape(id)}`);
+        resumeEnvParts.push("PI_SUBAGENT_INBOX_ONLY=1");
         resumeEnvParts.push(`PI_SUBAGENT_RUN_ID=${shellEscape(record.id)}`);
         resumeEnvParts.push(`PI_SUBAGENT_GENERATION=${record.generation}`);
         resumeEnvParts.push(`PI_SUBAGENT_ACTIVITY_FILE=${shellEscape(activityFile)}`);
@@ -2255,8 +2277,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         startSubagentWatch(pi, running);
 
         return {
-          content: [{ type: "text", text: `Session "${name}" resumed.` }],
+          content: acknowledgement.content,
           details: {
+            ...acknowledgement.details,
             id: record.id,
             generation: record.generation,
             name,
@@ -2266,7 +2289,6 @@ export default function subagentsExtension(pi: ExtensionAPI) {
             terminalRecordFile: terminalRecordFile(running),
             surface,
             readiness: "ready",
-            status: "started",
           },
         };
       },

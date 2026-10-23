@@ -173,6 +173,14 @@ test("supported Pi reports management refusals as tool failures without launchin
       assert.match(child.task, new RegExp(`${mode} context`));
       await finish((started.details as any).id);
     }
+    const queued = await call("subagent_message", { id: (launched.details as any).id, message: "Return the exact phrase: structured queued input.", messageId: "contract-id" });
+    assert.equal(queued.isError, false);
+    assert.equal((queued.details as any).status, "queued");
+    const conflict = await call("subagent_message", { id: (launched.details as any).id, message: "Different bytes", messageId: "contract-id" });
+    assert.equal(conflict.isError, true, "message ID conflicts must use the actual Pi execution-failure contract");
+    const unauthorized = await call("subagent_message", { id: (launched.details as any).id, authorization: { actionId: "not-an-uncertain-action", decision: "retry", reason: "Generic resume is insufficient" } });
+    assert.equal(unauthorized.isError, true);
+    assert.match(JSON.stringify(unauthorized.content), /exact.*actionId/);
   } finally {
     await session?.extensionRunner?.emit({ type: "session_shutdown", reason: "quit" });
     session?.dispose();

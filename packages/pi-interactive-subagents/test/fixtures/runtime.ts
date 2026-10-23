@@ -1,10 +1,10 @@
-// Deterministic Pi runtime boundary: real child bridge and storage, no model calls.
+// Deterministic Pi process boundary: actual SessionManager and child bridge, controlled queues/provider IO.
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import subagentDone from "../../pi-extension/subagents/subagent-done.ts";
 import { mock } from "node:test";
-// Load the same exported SDK class without initializing the unrelated CLI/UI
-// dependency graph in every terminal stand-in. No private methods are used.
+// Same exported SDK class, without initializing the unrelated CLI/UI graph in
+// each terminal stand-in. Only public SessionManager APIs are used.
 const { SessionManager }: typeof import("@earendil-works/pi-coding-agent") = await import(
   new URL("./core/session-manager.js", import.meta.resolve("@earendil-works/pi-coding-agent")).href
 );
@@ -13,10 +13,10 @@ import { createMockExtensionApi, plainTheme, waitFor } from "../harness.ts";
 const args = process.argv.slice(2);
 const sessionFile = args[args.indexOf("--session") + 1];
 const root = process.env.SUBAGENT_TEST_TERMINAL!;
+writeFileSync(join(root, "control-pid"), String(process.pid));
 if (process.env.SUBAGENT_TEST_CLOCK) {
   const realInterval = setInterval;
   mock.timers.enable({ apis: ["Date", "setTimeout", "setInterval"], now: Number(process.env.SUBAGENT_TEST_CLOCK) });
-  // Advance the child event-loop clock independently of the parent's clock.
   realInterval(() => {
     if (!existsSync(join(root, "clock"))) return;
     const at = Number(readFileSync(join(root, "clock"), "utf8"));
@@ -25,51 +25,80 @@ if (process.env.SUBAGENT_TEST_CLOCK) {
   }, 10).unref();
 }
 const taskArg = args.at(-1)!;
-let task = taskArg.startsWith("@") ? readFileSync(taskArg.slice(1), "utf8") : taskArg;
+let task: string | undefined = process.env.PI_SUBAGENT_INBOX_ONLY === "1" ? undefined : taskArg.startsWith("@") ? readFileSync(taskArg.slice(1), "utf8") : taskArg;
 const runtime = createMockExtensionApi();
+const pending: any[] = [];
+const received: any[] = [];
+runtime.api.sendMessage = (message: any, options: any) => {
+  pending.push({ ...message, options });
+  received.push({ ...message, options });
+  writeFileSync(join(root, "inbox-received.tmp"), JSON.stringify(received));
+  renameSync(join(root, "inbox-received.tmp"), join(root, "inbox-received.json"));
+};
 const widgets: string[] = [];
 let shutdown = false;
 mkdirSync(dirname(sessionFile), { recursive: true });
-if (!existsSync(sessionFile)) {
-  writeFileSync(sessionFile, JSON.stringify({ type: "session", version: 3, id: "fixture-child", cwd: process.cwd() }) + "\n");
-}
-let session = SessionManager.open(sessionFile); // The fenced fixture owns this writer.
+if (!existsSync(sessionFile)) writeFileSync(sessionFile, JSON.stringify({ type: "session", version: 3, id: "fixture-child", cwd: process.cwd() }) + "\n");
+let session = SessionManager.open(sessionFile); // This fenced process owns the writer.
 let assistantCount = session.getEntries().filter((entry) => entry.type === "message" && entry.message.role === "assistant").length;
 let abandonedLeaf: string | undefined;
-if (task.includes("ABANDONED_BRANCH")) {
+function abandonOldBranch() {
   const activeLeaf = session.getLeafId();
   abandonedLeaf = session.appendMessage({ role: "assistant", content: [{ type: "text", text: "An old abandoned answer must never complete this task." }], stopReason: "stop" } as any);
   if (activeLeaf) session.branch(activeLeaf); else session.resetLeaf();
 }
+if (task?.includes("ABANDONED_BRANCH")) abandonOldBranch();
 const ctx = {
-  get model() { return { provider: "fixture", id: task.includes("UNKNOWN_CAPACITY") ? "claude-fixture-unknown" : "parent-model", ...(task.includes("UNKNOWN_CAPACITY") ? {} : { contextWindow: 64_000 }) }; },
+  get model() { return { provider: "fixture", id: task?.includes("UNKNOWN_CAPACITY") ? "claude-fixture-unknown" : "parent-model", ...(task?.includes("UNKNOWN_CAPACITY") ? {} : { contextWindow: 64_000 }) }; },
   sessionManager: {
-    getBranch: () => session.getBranch(),
-    getEntries: () => session.getEntries(),
+    getBranch: () => session.getBranch(), getEntries: () => session.getEntries(),
     buildSessionProjection: () => session.buildSessionProjection(),
-    getSessionId: () => session.getSessionId(),
-    getLeafId: () => session.getLeafId(),
+    getSessionId: () => session.getSessionId(), getLeafId: () => session.getLeafId(),
   },
+  // This fixture's raw user inputs happen only at startup/resident idle; its
+  // mid-run inputs use Pi's managed custom-message path instead.
+  isIdle: () => true,
   hasUI: true,
-  ui: {
-    setWidget(_name: string, factory: any) {
-      widgets.push(factory({}, plainTheme).render(100).join("\n"));
-    },
-  },
+  ui: { setWidget(_name: string, factory: any) { widgets.push(factory({}, plainTheme).render(100).join("\n")); } },
   shutdown() { shutdown = true; },
 };
 subagentDone(runtime.api);
 await runtime.emit("session_start", {}, ctx);
+async function consume(message: any) {
+  abandonedLeaf = undefined;
+  if (message.content.includes("ABANDONED_BRANCH")) abandonOldBranch();
+  // Real Pi notifies extensions before appending message_end, then offers the
+  // finalized custom message to context before its provider request.
+  await runtime.emit("message_end", { message: { role: "custom", ...message } }, ctx);
+  session.appendCustomMessageEntry(message.customType, message.content, true, message.details);
+  await runtime.emit("context", { messages: [{ role: "custom", ...message }] }, ctx);
+  writeFileSync(join(root, "consumed.tmp"), JSON.stringify(session.getEntries().filter((entry) => entry.type === "custom_message").map((entry) => ({ content: entry.content, details: entry.details }))));
+  renameSync(join(root, "consumed.tmp"), join(root, "consumed.json"));
+  return message.content as string;
+}
 for (;;) {
-  await runtime.emit("input", { text: task, source: "interactive" }, ctx);
-  await runtime.emit("before_agent_start", { prompt: task }, ctx);
-  session.appendMessage({ role: "user", content: task, timestamp: Date.now() });
+  if (task === undefined) {
+    await waitFor(() => pending.length ? true : undefined, "durable next input", 120_000);
+    task = await consume(pending.shift());
+  } else {
+    await runtime.emit("input", { text: task, source: "interactive" }, ctx);
+    await runtime.emit("before_agent_start", { prompt: task }, ctx);
+    session.appendMessage({ role: "user", content: task, timestamp: Date.now() });
+  }
   await runtime.emit("agent_start", {}, ctx);
   if (task.includes("LONG_PROVIDER")) await runtime.emit("before_provider_request", {}, ctx);
   if (task.includes("LONG_TOOL")) await runtime.emit("tool_execution_start", { toolCallId: "long-tool", toolName: "bash" }, ctx);
   writeFileSync(join(root, "received.tmp"), JSON.stringify({ context: session.buildSessionContext().messages, header: session.getHeader(), task, widgets, tools: runtime.registeredTools.map((tool) => tool.name), args, autoExit: process.env.PI_SUBAGENT_AUTO_EXIT, cwd: process.cwd(), env: Object.fromEntries(Object.entries(process.env).filter(([key]) => key.startsWith("PI_SUBAGENT_") || key === "PI_CODING_AGENT_DIR" || key === "PI_TERMINAL_RENAME_CONTEXT")) }));
   renameSync(join(root, "received.tmp"), join(root, "received.json"));
   await waitFor(() => existsSync(join(root, "finish")) ? true : undefined, "permission to complete delegated task", 120_000);
+  for (let index = pending.findIndex((m) => m.options.deliverAs !== "followUp"); index >= 0; index = pending.findIndex((m) => m.options.deliverAs !== "followUp")) {
+    const steering = await consume(pending.splice(index, 1)[0]);
+    if (steering.includes("Return the exact phrase:")) task = steering;
+  }
+  if (task.includes("ASK_AFTER_INPUT")) {
+    await runtime.tool("ask_question").execute("fixture-question", { question: "Confirm the next step?" }, undefined, undefined, ctx);
+    await runtime.emit("context", { messages: session.getBranch().filter((entry) => entry.type === "custom_message").map((entry) => ({ role: "custom", ...entry })) }, ctx);
+  }
   if (task.includes("EXIT_WITHOUT_RESULT")) {
     appendFileSync(sessionFile, '{"type":"message","id":"unfinished');
     process.exitCode = 2;
@@ -92,9 +121,7 @@ for (;;) {
     ...(task.includes("FINAL_ERROR") ? { errorMessage: "provider retries exhausted: 529 overloaded" } : {}),
   };
   const entry = { type: "message", id: `fixture-answer-${assistantCount++}`, parentId: session.getLeafId(), message };
-  if (!task.includes("NO_OUTPUT")) {
-    appendFileSync(sessionFile, JSON.stringify(entry) + "\n");
-  }
+  if (!task.includes("NO_OUTPUT")) appendFileSync(sessionFile, JSON.stringify(entry) + "\n");
   session = SessionManager.open(sessionFile);
   if (abandonedLeaf) session.branch(abandonedLeaf);
   if (task.includes("USAGE_EVENTS")) {
@@ -109,20 +136,20 @@ for (;;) {
   if (task.includes("PARTIAL_TAIL")) appendFileSync(sessionFile, '{"type":"message","id":"unfinished');
   await runtime.emit("agent_end", { messages: [message] }, ctx);
   if (shutdown) throw new Error("Child shut down before final settlement");
+  if (pending.length) { task = undefined; continue; }
   await runtime.emit("agent_before_settle", { outcome: message.stopReason === "error" ? "error" : message.stopReason === "aborted" ? "aborted" : "completed" }, ctx);
+  if (pending.length) { task = undefined; continue; }
   await runtime.emit("agent_settled", {}, ctx);
   if (task.includes("LONG_OUTPUT")) {
-    // Result persistence won the race with process/surface loss; screen reads
-    // can no longer help the parent and must not reverse the task outcome.
     writeFileSync(join(root, "diagnostics-unavailable"), "gone");
     writeFileSync(join(root, "surface"), "gone");
     shutdown = true;
   }
   if (shutdown) break;
   writeFileSync(join(root, "parked"), "waiting");
-  await waitFor(() => existsSync(join(root, "next-task")) || existsSync(join(root, "close-resident")) ? true : undefined, "resident/manual next input or closure", 120_000);
+  await waitFor(() => pending.length || existsSync(join(root, "next-task")) || existsSync(join(root, "close-resident")) ? true : undefined, "resident/manual next input or closure", 120_000);
   if (existsSync(join(root, "close-resident"))) break;
-  task = readFileSync(join(root, "next-task"), "utf8");
-  rmSync(join(root, "next-task"));
+  if (pending.length) task = undefined;
+  else { task = readFileSync(join(root, "next-task"), "utf8"); rmSync(join(root, "next-task")); }
 }
 await runtime.emit("session_shutdown", { reason: "quit" }, ctx);

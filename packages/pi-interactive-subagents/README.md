@@ -69,14 +69,37 @@ subagent_status({}); // recorded collaborators, not role definitions
 subagent_status({ id: "<stable id>", name: "scout" });
 ```
 
-- **Running** — the message is typed into the live pane (newlines flattened) and picked up at the next turn boundary. The call returns immediately; the eventual completion still arrives as a steer message.
-- **Finished** — the session is resumed with the message as the follow-up task: fire-and-forget, result steered back later. The resumed run reclaims its original name and restores its recorded lifetime and notification policies.
+- **Running** — exact message strings (including indentation, CRLF and trailing newlines) are durably published, then the child bridge uses Pi's ID-bearing custom-message interface. No terminal keys, editor focus, slash-command expansion or shell interpretation participates. `deliverAs: "auto"` (default) and `"steer"` steer busy work; `"followUp"` waits behind the current automatic work. All modes start a prompt when idle.
+- **Finished / starting** — concurrent instructions queue behind a single fenced writer reservation, rather than launching once per message. A completed child reclaims its stable identity and pinned loadout. An auto-exiting writer is not replaced until its exit is positively observed.
+
+Optional `messageId` makes caller retries idempotent within that collaborator's inbox. Reuse the same ID, exact bytes and delivery mode; conflicting reuse fails. Queue order uses an explicit monotonically allocated `sequence`, not wall-clock/random filename order. Steering can intentionally run before an earlier follow-up, as Pi's two queues require.
+
+Tool acknowledgements and `subagent_status.messages` separate evidence:
+
+- `queued`: the full instruction is durably retained; the child has not acknowledged reading it.
+- `accepted`: the child durably acknowledged it, possibly only queued in Pi memory. A void `sendMessage()` return is **not** consumption.
+- `consumed`: its exact attempt ID is present in the persisted child transcript; `contextObserved` separately records exposure to a model request. This does **not** prove requested external effects or task completion.
+- `settled`: Pi reached final settlement for that input, or an explicit reconciliation resolved it. `evidence.settled` distinguishes actual Pi settlement from a recorded `resolution`.
+- `uncertain` / `paused-uncertain`: dispatch may have reached Pi or tools without a trustworthy final settlement. The full instruction, transcript association and affected `actionId` remain available; ordinary messages remain queued, not permission to repeat it.
+
+Receiver restart automatically redelivers demonstrably never-dispatched input with the same logical ID. A dispatch-intent crash gap is conservatively paused, even when transcript inclusion can be established. Neither runtime reconstruction nor generic follow-up clears that pause. After checking the affected operation with the user, resolve the exact action explicitly:
+
+```typescript
+subagent_message({ id, authorization: {
+  actionId: "<uncertainty.actionId from status>",
+  decision: "retry", // user explicitly permits repeating this instruction
+  reason: "User checked the destination and authorized this affected action again."
+} });
+// Or decision: "confirm-completed" after reliable reconciliation; do not repeat it.
+```
+
+The original evidence is retained, including authorized prior attempts. Only this collaborator is paused; the parent can continue independent work. This is controlled-interface deduplication, **not exactly-once model calls or arbitrary external side effects**. Atomic fsynced records plus observed Pi JSONL writes cover process restart; they do not promise machine/power-loss durability for Pi's transcript.
 
 Each parent's `artifacts/<sessionId>/subagent-runs.json` retains ownership, child session, terminal/backend, validated effective loadout, writer identity, work generation and latest result reference. Atomic publication is combined with short cross-process critical sections, so unrelated concurrent updates and name reservations cannot overwrite one another. Read/write failures are errors, not an empty registry or a successful launch. Legacy interactive name registries remain inspectable; normalized duplicate aliases are ambiguous and require ID addressing. Unknown legacy writers cannot be resumed just because their surface is missing.
 
 The managed-Pi startup script runs a **single-use writer gate before Pi opens the transcript** (opening can itself migrate/write history). Its persistent claim outlives the parent process and is reusable only after the gate observes Pi's actual exit. Replayed native startup commands fail before opening Pi. Heartbeat age, a completed task, a missing surface and a parent restart are **not** writer-exit proof. A killed exit observer or an orphaned short mutation lock is retained for inspection rather than stolen on a stale timeout. This deliberately favors a diagnosable refusal over two writers.
 
-While a launch/resume is reserved, another request fails explicitly as **not accepted**; this slice does not durably queue it. A replacement controller can query a live writer but does not steer, restart or take it over. Old-generation observation and cleanup cannot update or close its replacement. `subagent_status` and the widget project the same retained outcomes; completed resident surfaces are not counted as running delegated work. Full inbox acceptance/consumption, reload takeover, suspension and notification replay remain out of scope here.
+A replacement controller can query retained state and publish instructions to the existing fenced receiver without taking over its writer. Old-generation observation and cleanup cannot update or close its replacement. `subagent_status` and the widget project retained outcomes; completed resident surfaces are not counted as running delegated work. Full parent-runtime reload takeover, suspension and notification replay remain separate lifecycle work. Optional Claude children retain legacy terminal messaging and are not covered by the managed-Pi inbox guarantees.
 
 **Resume replays the original loadout.** Before launch, a versioned, validated `<session>.loadout.json` snapshot records the actual tool allowlist and extension paths, qualified model, thinking, identity/prompt mode, selected skill paths, cwd/config root, isolation options, delegation policy and auto-exit/resident policy. Editing, moving or deleting the role does not change a resumed child. Required resources and model availability are checked again; references pin paths, not dependency file contents.
 
@@ -253,7 +276,8 @@ This includes the [#3 native-tool prefactor](https://github.com/haoyiqiang/pi-ex
 [#4 role/loadout safety](https://github.com/haoyiqiang/pi-extensions/issues/4),
 [#5 settled outcomes](https://github.com/haoyiqiang/pi-extensions/issues/5) and
 [#6 terminal startup/liveness](https://github.com/haoyiqiang/pi-extensions/issues/6) and
-[#7 persistent identity/single-writer status](https://github.com/haoyiqiang/pi-extensions/issues/7), not
+[#7 persistent identity/single-writer status](https://github.com/haoyiqiang/pi-extensions/issues/7) and
+[#8 durable inbox/uncertainty](https://github.com/haoyiqiang/pi-extensions/issues/8), not
 all of [Spec #2](https://github.com/haoyiqiang/pi-extensions/issues/2). Public-tool tests
 cover role aliases/precedence/visibility, missing versus empty tools, invalid resources
 and snapshots, model/cwd/identity/skill/isolation replay, lifetime policy, nested refusals
@@ -263,8 +287,15 @@ readiness, long work and lost liveness. The mux suite retains its startup-comman
 contracts. No paid model or real terminal smoke run is required for the deterministic
 suite. Real controller processes also race name allocation and double resume against
 shared temporary storage, replay stale/duplicate startup scripts, and verify generation
-fencing and status after runtime recreation. Durable messaging and complete parent
-recovery remain separate slices.
+fencing and status after runtime recreation. Supported Pi AgentSession/provider cases verify
+preparation, steering/follow-up/idle queues and real transcript evidence, not synchronous
+mock consumption. Genuine child-control process restarts cover safe never-dispatched
+redelivery, uncertain in-memory/transcript consumption, explicit retry/reconciliation,
+retained IDs and independent target routing. Test-file concurrency is bounded; the
+real-Pi queue fixtures use a controlled controller clock around cold SDK startup while
+still requiring the real bridge-ready signal. Production readiness bounds are unchanged
+and tested separately by the terminal lifecycle suite. Complete parent recovery remains
+a separate slice.
 See the repository `GLOSSARY.md` and `docs/adr/0001-pause-uncertain-delegated-actions.md`
 for the reviewed domain language and recovery policy.
 
