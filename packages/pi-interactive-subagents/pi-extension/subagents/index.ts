@@ -1801,11 +1801,12 @@ async function finishControl(owner: ParentRuntime, runs: SubagentRuns, record: S
   }
   const closed = inventory === "absent";
   const projected = projectRun(runs.resolve({ id: record.id }));
-  const terminal = record.control?.kind === "suspend" && !!projected.latestResult && projected.latestResult.generation === record.generation;
+  const floor = Math.max(record.resultAfterSequence, readCheckpoint(record)?.resultAfterSequence ?? 0);
+  const terminal = record.control?.kind === "suspend" && !!projected.latestResult && projected.latestResult.generation === record.generation && projected.latestResult.sequence > floor;
   runs.update(record.id, record.generation, {
     state: terminal ? projected.state : record.control?.kind === "stop" ? closed ? "stopped" : "stopping" : closed ? "suspended" : "suspending",
     ...(terminal ? { control: undefined } : {}),
-    closure: closed ? "confirmed" : "unconfirmed",
+    closure: closed ? "confirmed" : "unconfirmed", resultAfterSequence: floor,
     diagnostic: closed ? !terminal && record.control?.kind === "suspend" && !readCheckpoint(record)
       ? "Writer exited without a verified interruption checkpoint; consumption/effects remain uncertain. Inspect retained history and subagent_status for exact-action reconciliation; no automatic continuation."
       : undefined : `${diagnostic || `Terminal inventory ${inventory}; closure not confirmed`}. Owner/history retained; retry subagent_stop or restore when closure is known.`,
@@ -1861,7 +1862,7 @@ function restoreSuspended(owner: ParentRuntime, runs: SubagentRuns, record: Suba
     const childSessionId = getSessionId(run.sessionFile);
     const children = childSessionId ? new SubagentRuns(childSessionId, run.sessionFile, dirname(run.sessionFile)) : undefined;
     const arrivedResult = children && new SubagentNotifications(children).list().some((event) => event.state === "persisted" && event.message.customType === "subagent_result" &&
-      children.list().some((child) => child.id === event.message.details.id && child.generation === event.message.details.generation));
+      children.list().some((child) => child.id === event.message.details.id && child.generation === event.message.details.generation && ["completed", "failed", "aborted"].includes(projectRun(child).state)));
     const continuation = (checkpoint.wait === "continue" || (checkpoint.wait === "descendants" && arrivedResult))
       ? `Continue the suspended delegated work from the recorded active history (interruption leaf ${checkpoint.leafId ?? "root"}). This is a new continuation, not a replay of the original task or a checkpoint of shell/network activity. Honor completed effects, pending questions and descendant results; never repeat an uncertain action without its exact authorization.${snapshot.resolution ? ` Explicit affected-action resolution: ${JSON.stringify(snapshot.resolution)}. Apply only this decision; confirm-completed means do not repeat that action.` : ""}` : undefined;
     const queued = inbox.enqueue(run, { ...(continuation ? { message: continuation, messageId: `subagent-continuation:${run.control.id}` } : {}) },

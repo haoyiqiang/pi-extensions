@@ -10,6 +10,7 @@ export interface SubagentCheckpoint {
   requestId: string;
   executionId: string;
   leafId: string | null;
+  resultAfterSequence: number;
   wait: "continue" | "question" | "descendants";
   uncertainty?: { actionId: string; reason: string; activeTools: string[] };
 }

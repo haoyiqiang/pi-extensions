@@ -87,6 +87,34 @@ test("normal parent quit suspends and restores known work with an explicit conti
   }, "pi-runtime.ts");
 });
 
+test("an old resident result cannot complete newer human work during suspension", { timeout: 90_000 }, async () => {
+  await withIdentity(async ({ boot, call, terminal, project, parent, ctx }) => {
+    writeFileSync(join(project, ".pi/agents/resident.md"), "---\nname: resident\ntools:\nauto-exit: false\n---\nStay available\n");
+    const launched = await boot("subagent", { agent: "resident", task: "First known task" });
+    const requests = () => existsSync(join(terminal, "provider-input.jsonl")) ? readFileSync(join(terminal, "provider-input.jsonl"), "utf8").trim().split("\n").map((line: string) => JSON.parse(line)) : [];
+    const release = (request: any) => writeFileSync(join(terminal, `release-${request.call}`), "complete");
+    release(await waitFor(() => requests()[0], "resident initial task"));
+    await waitFor(() => parent.sentMessages.find((event: any) => event.message.customType === "subagent_result"), "first durable resident result");
+    writeFileSync(join(terminal, "runtime-command.json"), JSON.stringify({ id: "manual-work", action: "input", text: "New human task remains unfinished" }));
+    await waitFor(() => requests()[1], "manual work after resident settlement");
+    rmSync(join(terminal, "runtime-command.json")); // The fixture driver must not resend human input to a replacement process.
+    await parent.emit("session_shutdown", { reason: "quit" }, ctx);
+    const suspended = (await call("subagent_status", { id: launched.details.id })).details.subagent;
+    assert.equal(suspended.state, "suspended", "a previous durable outcome is not a terminal result for newer human work");
+    assert.ok(existsSync(suspended.latestResult.resultFile), "the previous result is still retained");
+    await parent.emit("session_start", { reason: "resume" }, ctx);
+    const continuation = await waitFor(() => requests()[2], "useful continuation of newer human work", 30_000);
+    assert.ok(continuation.inputs.includes("New human task remains unfinished"));
+    assert.match(continuation.inputs.at(-1), /new continuation/);
+    release(continuation);
+    await waitFor(() => parent.sentMessages.find((event: any) => event.message.customType === "subagent_result" && event.message.details.generation === 2), "new resident work settles");
+    const completed = (await call("subagent_status", { id: launched.details.id })).details.subagent;
+    assert.equal(completed.loadout.autoExit, false);
+    assert.equal(completed.liveness.surface, "present");
+    await call("subagent_stop", { id: launched.details.id });
+  }, "pi-runtime.ts");
+});
+
 test("safe suspension preserves never-dispatched followUp behind useful continuation of the current task", { timeout: 90_000 }, async () => {
   await withIdentity(async ({ boot, call, terminal, parent, ctx }) => {
     const launched = await boot("subagent", { agent: "echo", task: "Known current work" });
@@ -128,6 +156,7 @@ test("a suspended question keeps its exact wait and only the correlated event st
     assert.equal(questions.length, 2);
     writeFileSync(join(terminal, "runtime-command.json"), JSON.stringify({ id: "abandoned-tail", action: "abandon-tail" }));
     await waitFor(() => existsSync(join(terminal, "command-abandoned-tail-done")) ? true : undefined, "active branch differs from physical tail");
+    rmSync(join(terminal, "runtime-command.json"));
     await parent.emit("session_shutdown", { reason: "new" }, ctx);
     assert.equal((await status()).checkpoint.wait, "question");
     await parent.emit("session_start", { reason: "resume" }, ctx);

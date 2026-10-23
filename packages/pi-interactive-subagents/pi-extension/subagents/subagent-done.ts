@@ -128,10 +128,14 @@ export default function (pi: ExtensionAPI) {
     inbox?.suspend();
     const pending = mailbox?.snapshot();
     const unknown = pending?.messages.find((message) => message.uncertainty)?.uncertainty;
+    const wait = mailbox?.questions().some((question) => question.state !== "answered") ? "question"
+      : descendants?.pendingResults(ctx, executionId) ? "descendants" : "continue";
+    // Resident human input can start work without a parent inbox generation.
+    // An older outcome must not complete that newer active-branch work.
+    const unfinished = wait !== "continue" || ctx.sessionManager.getBranch().some((entry) => !seenEntries.has(entry.id) && (entry.type === "message" || entry.type === "custom_message"));
     const checkpoint: SubagentCheckpoint = {
-      requestId: request.id, executionId, leafId: ctx.sessionManager.getLeafId(),
-      wait: mailbox?.questions().some((question) => question.state !== "answered") ? "question"
-        : descendants?.pendingResults(ctx, executionId) ? "descendants" : "continue",
+      requestId: request.id, executionId, leafId: ctx.sessionManager.getLeafId(), resultAfterSequence: unfinished ? sequence : 0,
+      wait,
       ...(interruptedTools.length ? { uncertainty: { actionId: unknown?.actionId ?? `subagent-action:${request.id}`, reason: "A tool was active at interruption; abort/shutdown does not prove its external effects. Reconcile or explicitly authorize this exact action before continuation.", activeTools: interruptedTools } }
         : unknown ? { uncertainty: { actionId: unknown.actionId, reason: unknown.reason, activeTools: unknown.activeTools } } : {}),
     };
