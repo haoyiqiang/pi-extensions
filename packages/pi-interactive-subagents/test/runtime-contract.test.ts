@@ -36,11 +36,14 @@ test("supported Pi reports management refusals as tool failures without launchin
   try {
     let nextCalls: ToolCall[] = [];
     let callSequence = 0;
+    let providerRequests = 0;
+    let providerGate: Promise<void> | undefined;
     const modelRuntime = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: null, refreshOnCreate: false });
     modelRuntime.registerProvider("contract-fixture", {
       api: "contract-fixture", apiKey: "fixture-only", baseUrl: "http://unused.invalid",
       models: [{ id: "parent", name: "Deterministic fixture", reasoning: false, input: ["text"], contextWindow: 100_000, maxTokens: 1024, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }],
       streamSimple(model) {
+        providerRequests++;
         const stream = createAssistantMessageEventStream();
         const toolCalls = nextCalls;
         nextCalls = [];
@@ -50,18 +53,21 @@ test("supported Pi reports management refusals as tool failures without launchin
           usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
         };
         stream.push({ type: "start", partial: message });
-        if (toolCalls.length) {
-          for (const [contentIndex, toolCall] of toolCalls.entries()) {
-            stream.push({ type: "toolcall_start", contentIndex, partial: message });
-            stream.push({ type: "toolcall_end", contentIndex, toolCall, partial: message });
+        const complete = () => {
+          if (toolCalls.length) {
+            for (const [contentIndex, toolCall] of toolCalls.entries()) {
+              stream.push({ type: "toolcall_start", contentIndex, partial: message });
+              stream.push({ type: "toolcall_end", contentIndex, toolCall, partial: message });
+            }
+          } else {
+            stream.push({ type: "text_start", contentIndex: 0, partial: message });
+            stream.push({ type: "text_end", contentIndex: 0, content: "Tool result received.", partial: message });
           }
-        } else {
-          stream.push({ type: "text_start", contentIndex: 0, partial: message });
-          stream.push({ type: "text_end", contentIndex: 0, content: "Tool result received.", partial: message });
-        }
-        message.stopReason = toolCalls.length ? "toolUse" : "stop";
-        stream.push({ type: "done", reason: message.stopReason, message });
-        stream.end();
+          message.stopReason = toolCalls.length ? "toolUse" : "stop";
+          stream.push({ type: "done", reason: message.stopReason, message });
+          stream.end();
+        };
+        if (providerGate) void providerGate.then(complete); else complete();
         return stream;
       },
     });
@@ -90,6 +96,26 @@ test("supported Pi reports management refusals as tool failures without launchin
       assert.ok(result && result.role === "toolResult", `Pi must execute ${name}`);
       return result;
     };
+    // Minimum supported Pi does not initially flush custom entries until an
+    // assistant exists. A real bound API call can therefore return and its
+    // manager can contain the notification while the actual file is absent.
+    let releaseProvider!: () => void;
+    providerGate = new Promise<void>((resolve) => { releaseProvider = resolve; });
+    const coldTool = session.extensionRunner!.getToolDefinition("subagent")!;
+    const cold = await coldTool.execute("cold-parent", { agent: "safe", task: "Return the exact phrase: first parent notification." }, undefined, undefined, session.extensionRunner!.createContext());
+    writeFileSync(join(terminal, "finish"), "complete before any parent assistant");
+    await waitFor(() => providerRequests === 1 ? true : undefined, "actual Pi custom notification request before first assistant");
+    const inMemory = session.sessionManager.getEntries().find((entry: any) => entry.type === "custom_message" && entry.customType === "subagent_result");
+    assert.ok(inMemory, "the genuine Pi manager already contains the result");
+    assert.equal(existsSync(session.sessionFile!), false, "Pi 0.87.1 has not flushed this new parent yet");
+    const coldStatus = await session.extensionRunner!.getToolDefinition("subagent_status")!.execute("cold-status", { id: (cold.details as any).id }, undefined, undefined, session.extensionRunner!.createContext());
+    assert.equal((coldStatus.details as any).subagent.notifications.find((event: any) => event.type === "subagent_result").state, "dispatched-unconfirmed", "in-memory inclusion is never a durable receipt");
+    providerGate = undefined;
+    releaseProvider();
+    await session.waitForIdle();
+    await waitFor(() => readFileSync(join(terminal, "surface"), "utf8") === "closed" ? true : undefined, "initial notification cleanup");
+    for (const file of ["surface", "received.json", "finish"]) rmSync(join(terminal, file), { force: true });
+
     const refused = await call("subagent", { agent: "unsafe", task: "Must never run." });
     assert.match(JSON.stringify(refused.content), /explicitly declare tools/);
     assert.equal(refused.isError, true, "a resolved execute result must not turn a refused launch into success");
@@ -150,7 +176,7 @@ test("supported Pi reports management refusals as tool failures without launchin
     assert.match(receipt.task, /Return the exact phrase: accepted asynchronously\./, "the child task arrives as a new instruction");
     assert.equal(receipt.context.at(-1).role, "user");
     assert.equal(receipt.context.at(-1).content, receipt.task, "Pi's child context ends with the newly delegated instruction");
-    assert.equal(session.messages.some((message) => message.role === "custom" && message.customType === "subagent_result"), false, "launch returns while child completion is still gated");
+    assert.equal(session.messages.some((message) => message.role === "custom" && message.customType === "subagent_result" && (message.details as any)?.id === (launched.details as any).id), false, "launch returns while this child's completion is still gated");
     assert.deepEqual(executionErrors, [true, true, true, true, true, false, false]);
     const finish = async (id: string) => {
       writeFileSync(join(terminal, "finish"), "release");
@@ -181,6 +207,26 @@ test("supported Pi reports management refusals as tool failures without launchin
     const unauthorized = await call("subagent_message", { id: (launched.details as any).id, authorization: { actionId: "not-an-uncertain-action", decision: "retry", reason: "Generic resume is insufficient" } });
     assert.equal(unauthorized.isError, true);
     assert.match(JSON.stringify(unauthorized.content), /exact.*actionId/);
+
+    // Notification acknowledgement must come from actual supported-Pi JSONL,
+    // not the ExtensionAPI's void return or its in-memory manager. Even an
+    // abandoned, context-edited notification is a delivered logical event.
+    const eventId = (forkResult as any).details.eventId;
+    assert.equal(typeof eventId, "string");
+    const persisted = () => readFileSync(session!.sessionFile!, "utf8").trim().split("\n").map((line) => JSON.parse(line))
+      .filter((entry) => entry.type === "custom_message" && entry.details?.eventId === eventId);
+    assert.equal(persisted().length, 1);
+    const deliveredEntry = manager.getEntries().find((entry: any) => entry.type === "custom_message" && entry.details?.eventId === eventId)!;
+    manager.appendContextEdit(deliveredEntry.id, null);
+    manager.branch(deliveredEntry.parentId!);
+    const requestsBeforeReload = providerRequests;
+    await session.reload();
+    await session.waitForIdle();
+    assert.equal(persisted().length, 1, "a lost outbox receipt must not duplicate the actual parent message");
+    assert.equal(providerRequests, requestsBeforeReload, "reloading must not wake the parent again for a delivered event on an abandoned branch");
+    const statusTool = session.extensionRunner!.getToolDefinition("subagent_status")!;
+    const recovered = await statusTool.execute("history-proof", { id: (launched.details as any).id }, undefined, undefined, session.extensionRunner!.createContext());
+    assert.ok((recovered.details as any).subagent.notifications.some((event: any) => event.eventId === eventId && event.state === "persisted"));
   } finally {
     await session?.extensionRunner?.emit({ type: "session_shutdown", reason: "quit" });
     session?.dispose();

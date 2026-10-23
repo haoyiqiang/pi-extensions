@@ -17,7 +17,7 @@ import {
   renameSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   getMuxBackend,
   createSurface,
@@ -34,6 +34,7 @@ import {
 
 import { SubagentRuns, normalizeSubagentName, projectRun, writerExited, type SubagentRun } from "./runs.ts";
 import { SubagentInbox } from "./inbox.ts";
+import { SubagentNotifications } from "./notifications.ts";
 import {
   getSessionId,
   readSubagentLoadout,
@@ -89,8 +90,16 @@ const POLL_ABORT_KEY = Symbol.for("pi-subagents/poll-abort-controller");
   (globalThis as any)[POLL_ABORT_KEY] = new AbortController();
 }
 
-function getModuleAbortSignal(): AbortSignal {
-  return ((globalThis as any)[POLL_ABORT_KEY] as AbortController).signal;
+interface ParentRuntime {
+  pi: ExtensionAPI;
+  ctx: ExtensionContext;
+  abort: AbortController;
+  notifications: SubagentNotifications;
+  observed: Set<string>;
+}
+let runtime: ParentRuntime | null = null;
+function assertRuntime(owner: ParentRuntime | null): asserts owner is ParentRuntime {
+  if (!owner || runtime !== owner || owner.abort.signal.aborted) throw new Error("Parent runtime detached; no further subagent mutation accepted");
 }
 
 const SubagentParams = Type.Object({
@@ -538,6 +547,9 @@ function registerManagementTool<TParams extends TSchema, TDetails>(
   pi.registerTool<TParams, TDetails>({
     ...tool,
     async execute(...args) {
+      if ((tool.name === "subagent" || tool.name === "subagent_message") && runtime && runtime.pi !== pi) {
+        throw new Error("Stale parent tool runtime; no mutation accepted");
+      }
       const result = await tool.execute(...args);
       if ("isError" in result && result.isError === true) {
         throw new Error(result.content.map((part) => part.type === "text" ? part.text : "").join("\n"));
@@ -637,6 +649,9 @@ interface SubagentResult {
  * State for a launched (but not yet completed) subagent.
  */
 interface RunningSubagent {
+  owner?: ParentRuntime;
+  observing?: boolean;
+  backend?: string;
   id: string;
   subagentId?: string;
   generation?: number;
@@ -686,7 +701,8 @@ function fencedCommand(command: string, run: SubagentRun): string {
   return [process.execPath, join(SUBAGENTS_DIR, "writer.mjs"), run.sessionFile, run.executionId, run.writerToken, command].map(shellEscape).join(" ");
 }
 function isCurrent(running: RunningSubagent): boolean {
-  return !running.runs || running.runs.current(running.subagentId!, running.generation!);
+  return (!running.owner || (runtime === running.owner && !running.owner.abort.signal.aborted && (!running.observing || running.owner.notifications.owns()))) &&
+    (!running.runs || running.runs.current(running.subagentId!, running.generation!));
 }
 function forgetRunning(running: RunningSubagent): void {
   if (runningSubagents.get(running.id) === running) runningSubagents.delete(running.id);
@@ -723,9 +739,15 @@ async function closeOwnedSurface(running: RunningSubagent): Promise<void> {
       if (!isCurrent(running)) return;
     }
   }
+  if (!isCurrent(running) || (running.backend && running.backend !== getMuxBackend())) return;
   let diagnostic: string | undefined;
   running.terminalState = surfaceState(running.surface);
-  if (running.terminalState !== "absent") {
+  if (running.terminalState === "unknown") {
+    running.closure = "unconfirmed";
+    recordTerminal(running, "closure-unconfirmed", "Terminal inventory unknown; no close attempted");
+    return;
+  }
+  if (running.terminalState === "present") {
     try { closeSurface(running.surface); }
     catch (error) { diagnostic = error instanceof Error ? error.message : String(error); }
   }
@@ -751,6 +773,7 @@ async function confirmSubagentReady(running: RunningSubagent): Promise<void> {
   try {
     recordTerminal(running, "starting");
     for (;;) {
+      if (!isCurrent(running)) throw new Error("Parent observer detached during startup; child and ownership retained");
       running.terminalState = surfaceState(running.surface);
       const exited = existsSync(processExitFile(running.sessionFile, running.id));
       // Native inventory can outlast the entire child run. Sample readiness and
@@ -765,6 +788,7 @@ async function confirmSubagentReady(running: RunningSubagent): Promise<void> {
       await delay(250);
     }
   } catch (cause) {
+    if (!isCurrent(running)) throw cause;
     running.launchError = cause instanceof Error ? cause.message : String(cause);
     await closeOwnedSurface(running);
     if (running.closure === "confirmed") forgetRunning(running);
@@ -793,8 +817,6 @@ const RUNNING_CHILDREN_COUNT_KEY = Symbol.for("pi-subagents/running-children-cou
 
 /** Latest ExtensionContext from session_start, used for widget updates. */
 let latestCtx: ExtensionContext | null = null;
-/** Latest ExtensionAPI, used to deliver ask_question notifications from the watcher. */
-let latestPi: ExtensionAPI | null = null;
 
 /** Interval timer for widget re-renders. */
 let widgetInterval: ReturnType<typeof setInterval> | null = null;
@@ -1133,19 +1155,18 @@ function legacyTerminalMessage(
 }
 
 function startStatusRefresh(pi: ExtensionAPI) {
-  if (statusInterval) return;
+  if (statusInterval || !runtime) return;
+  const owner = runtime;
 
   statusInterval = setInterval(() => {
-    if (runningSubagents.size === 0) {
-      if (statusInterval) {
-        clearInterval(statusInterval);
-        statusInterval = null;
-        (globalThis as any)[STATUS_INTERVAL_KEY] = null;
-      }
-      return;
-    }
+    if (runtime !== owner || owner.abort.signal.aborted) return;
+    try {
+      reconnectObservers(owner);
+      owner.notifications.deliver(pi);
+    } catch (error) { console.error("Subagent recovery failed:", error); }
+    if (!owner.notifications.owns()) return;
 
-    const transitionLines: string[] = [];
+    let notificationsPending = false;
     const now = Date.now();
     let shouldRefreshWidget = false;
 
@@ -1156,33 +1177,31 @@ function startStatusRefresh(pi: ExtensionAPI) {
       if (nextState.currentKind !== running.statusState.currentKind) {
         shouldRefreshWidget = true;
       }
-      running.statusState = nextState;
-
       // Interactive subagents (long-running, user-driven) intentionally don't
       // wake the parent session on stalled/recovered transitions — the user is
       // working in the subagent's pane, and a steer message here would burn an
       // orchestrator turn on a no-op "still waiting" ping. Widget still updates.
       if (transition && !running.interactive && (statusConfig.enabled || snapshot.statusLabel?.includes("uncertain") || transition === "recovered")) {
-        transitionLines.push(formatTransitionLine(running.name, snapshot, transition));
+        const lines = [formatTransitionLine(running.name, snapshot, transition)];
+        // The retained evidence, not a reload timestamp or batch grouping,
+        // identifies this transition. A later heartbeat/activity can identify
+        // another stall/recovery without replaying the unchanged old one.
+        const evidence = [running.id, running.generation, transition, snapshot.kind,
+          nextState.lastActivitySequence, nextState.livenessAtMs, nextState.snapshotState];
+        const eventId = `subagent-status:${createHash("sha256").update(JSON.stringify(evidence)).digest("hex")}`;
+        const capped = capStatusLines(lines, statusConfig.lineLimit);
+        owner.notifications.publish({ customType: "subagent_status", content: formatStatusAggregate(lines, statusConfig.lineLimit), display: true,
+          details: { eventId, id: running.subagentId, generation: running.generation, lines: capped.visibleLines, overflow: capped.overflow } });
+        notificationsPending = true;
       }
+      running.statusState = nextState;
     }
 
     if (shouldRefreshWidget) updateWidget();
-
-    if (transitionLines.length > 0) {
-      const capped = capStatusLines(transitionLines, statusConfig.lineLimit);
-      pi.sendMessage(
-        {
-          customType: "subagent_status",
-          content: formatStatusAggregate(transitionLines, statusConfig.lineLimit),
-          display: true,
-          details: { lines: capped.visibleLines, overflow: capped.overflow },
-        },
-        { triggerTurn: true, deliverAs: "steer" },
-      );
-    }
+    if (notificationsPending) owner.notifications.deliver(pi);
   }, 1000);
 
+  statusInterval.unref?.();
   (globalThis as any)[STATUS_INTERVAL_KEY] = statusInterval;
 }
 
@@ -1208,11 +1227,14 @@ export const __test__ = {
 };
 
 function startWidgetRefresh() {
-  if (widgetInterval) return;
+  if (widgetInterval || !runtime) return;
+  const owner = runtime;
   updateWidget(); // immediate first render
   widgetInterval = setInterval(() => {
+    if (runtime !== owner || owner.abort.signal.aborted) return;
     updateWidget();
   }, 1000);
+  widgetInterval.unref?.();
   (globalThis as any)[WIDGET_INTERVAL_KEY] = widgetInterval;
 }
 
@@ -1269,6 +1291,8 @@ async function launchSubagent(
   ctx: Pick<ExtensionContext, "sessionManager" | "cwd" | "model" | "modelRegistry">,
   options: { definition: ListedAgentDefinition; thinking: string },
 ): Promise<RunningSubagent> {
+  const owner = runtime;
+  assertRuntime(owner);
   const startTime = Date.now();
   const id = randomUUID();
 
@@ -1343,6 +1367,7 @@ async function launchSubagent(
       const launchScriptFile = join(artifactDir, "subagent-scripts", `${record.id}-${id}.sh`);
       const surface = createSubagentSurface(params.name, command, launchScriptFile, subagentSessionFile, id);
       const running: RunningSubagent = {
+        owner, backend: record.backend,
         id, subagentId: record.id, generation: record.generation, runs,
         name: params.name, task: params.task, agent: params.agent, surface, startTime,
         sessionFile: subagentSessionFile, launchScriptFile, cli: "claude", sentinelFile,
@@ -1388,6 +1413,7 @@ async function launchSubagent(
     const launchScriptFile = join(artifactDir, "subagent-scripts", `${record.id}-${id}.sh`);
     const surface = createSubagentSurface(params.name, fencedCommand(piCommand, record), launchScriptFile, subagentSessionFile, id);
     const running: RunningSubagent = {
+      owner, backend: record.backend,
       id, subagentId: record.id, generation: record.generation, runs,
       name: params.name, task: params.task, agent: params.agent, surface, startTime,
       sessionFile: subagentSessionFile, launchScriptFile, activityFile,
@@ -1397,10 +1423,10 @@ async function launchSubagent(
     runningSubagents.set(id, running);
     runs.update(record.id, record.generation, { surface });
     await confirmSubagentReady(running);
-    runs.update(record.id, record.generation, { state: "running", sessionId: getSessionId(subagentSessionFile) });
+    if (isCurrent(running)) runs.update(record.id, record.generation, { state: "running", sessionId: getSessionId(subagentSessionFile) });
     return running;
   } catch (cause) {
-    runs.update(record.id, record.generation, { state: "failed", diagnostic: cause instanceof Error ? cause.message : String(cause) });
+    if (runtime === owner && !owner.abort.signal.aborted) runs.update(record.id, record.generation, { state: "failed", diagnostic: cause instanceof Error ? cause.message : String(cause) });
     throw cause;
   }
 }
@@ -1430,46 +1456,36 @@ function copyClaudeSession(sentinelFile: string): string | null {
   }
 }
 
-/**
- * Detect an `ask_question` signal from a still-running subagent and notify the
- * orchestrator without ending the subagent. Each subagent has its own
- * `${sessionFile}.ask` file and its own watcher, so parallel questions from
- * multiple subagents are delivered independently. The file is deleted after
- * delivery so it fires once per question (a subagent may ask again later).
- */
+/** Retain the legacy single-question slot; #11 owns multiple questions/replies. */
 function deliverPendingQuestion(running: RunningSubagent): void {
+  if (!isCurrent(running)) return;
   const askFile = `${running.sessionFile}.ask`;
-  let payload: any = null;
-  try {
-    if (!existsSync(askFile)) return;
-    payload = JSON.parse(readFileSync(askFile, "utf-8"));
-  } catch {
-    // Malformed/partway-written file — drop it and move on.
-  }
-  try {
-    unlinkSync(askFile);
-  } catch {}
-  if (!payload?.question) return;
+  if (!existsSync(askFile)) return;
+  const payload = JSON.parse(readFileSync(askFile, "utf-8"));
+  if (!payload?.question) throw new Error(`Invalid pending question retained at ${askFile}`);
+  if (payload.executionId && payload.executionId !== running.id) return;
+  const eventId = payload.eventId ?? `subagent-question:${running.id}:${createHash("sha256").update(payload.question).digest("hex")}`;
 
   const name = running.name; // unique per session (deduped at spawn) — targets the reply
   const sessionId = existsSync(running.sessionFile) ? getSessionId(running.sessionFile) : null;
   const elapsed = Math.floor((Date.now() - running.startTime) / 1000);
   const replyHint = `\n\nReply with subagent_message({ name: "${name}", message: "…" }) — the same name works whether it is still running or has since exited. It stays open until you reply.`;
 
-  latestPi?.sendMessage(
+  running.owner!.notifications.publish(
     {
       customType: "subagent_question",
       content: `Sub-agent "${name}" asks (${formatElapsed(elapsed)}):\n\n${payload.question}${replyHint}`,
       display: true,
       details: {
+        eventId, id: running.subagentId, generation: running.generation,
         name,
         agent: running.agent,
         question: payload.question,
         ...(sessionId ? { sessionId } : {}),
       },
     },
-    { triggerTurn: true, deliverAs: "steer" },
   );
+  running.owner!.notifications.deliver(running.owner!.pi);
 }
 
 async function watchSubagent(
@@ -1479,7 +1495,7 @@ async function watchSubagent(
   const { name, task, surface, startTime, sessionFile } = running;
 
   try {
-    const observationSignal = AbortSignal.any([signal, getModuleAbortSignal()]);
+    const observationSignal = AbortSignal.any([signal, running.owner!.abort.signal]);
     if (running.cli !== "claude") {
       for (;;) {
         observationSignal.throwIfAborted();
@@ -1487,10 +1503,12 @@ async function watchSubagent(
         const uncertain = new SubagentInbox(sessionFile).snapshot(running.runs?.resolve({ id: running.subagentId })).messages.find((message) => message.uncertainty)?.uncertainty;
         if (uncertain && running.uncertaintyNotified !== uncertain.actionId) {
           const line = `${name}: paused for uncertain action ${uncertain.actionId} (message ${uncertain.messageId}). ${uncertain.reason} Ordinary follow-up/resume cannot authorize repetition. Reconcile, or obtain explicit user authorization and call subagent_message with authorization: { actionId, decision: "retry" | "confirm-completed", reason }.`;
-          latestPi?.sendMessage({ customType: "subagent_status", content: line, display: true,
-            details: { id: running.subagentId, name, eventId: `subagent-uncertain:${uncertain.actionId}`, uncertainty: uncertain, lines: [line], overflow: 0 } }, { triggerTurn: true, deliverAs: "steer" });
+          running.owner!.notifications.publish({ customType: "subagent_status", content: line, display: true,
+            details: { id: running.subagentId, name, eventId: `subagent-uncertain:${uncertain.actionId}`, uncertainty: uncertain, lines: [line], overflow: 0 } });
+          running.owner!.notifications.deliver(running.owner!.pi);
           running.uncertaintyNotified = uncertain.actionId;
         }
+        deliverPendingQuestion(running);
         const published = readSubagentOutcomes(sessionFile, running.id, running.lastResultSequence, running.generation)[0];
         if (published) {
           const { result, resultFile } = published;
@@ -1510,14 +1528,15 @@ async function watchSubagent(
         const now = Date.now();
         if (running.lastInventoryAt === undefined || now - running.lastInventoryAt >= 1_000) {
           const previous = running.terminalState;
-          running.terminalState = surfaceState(surface);
+          running.terminalState = running.backend === getMuxBackend() ? surfaceState(surface) : "unknown";
           running.lastInventoryAt = now;
           if (running.terminalState === "unknown" && previous !== "unknown") {
             recordTerminal(running, "inventory-unknown", "Terminal inventory unavailable; execution is uncertain, not absent");
             const line = `${name}: terminal inventory unknown; work is retained, no automatic restart or termination.`;
-            latestPi?.sendMessage({ customType: "subagent_status", content: line, display: true,
-              details: { name, surface, inventory: "unknown", lines: [line], overflow: 0, terminalRecordFile: terminalRecordFile(running) },
-            }, { triggerTurn: true, deliverAs: "steer" });
+            running.owner!.notifications.publish({ customType: "subagent_status", content: line, display: true,
+              details: { eventId: `subagent-inventory:${running.id}:${running.generation}`, id: running.subagentId, generation: running.generation, name, surface, inventory: "unknown", lines: [line], overflow: 0, terminalRecordFile: terminalRecordFile(running) },
+            });
+            running.owner!.notifications.deliver(running.owner!.pi);
           }
         }
         const exited = existsSync(processExitFile(sessionFile, running.id));
@@ -1525,7 +1544,7 @@ async function watchSubagent(
           // Publication can race inventory/process observation. Durable results
           // always win, even after the surface is already gone.
           if (readSubagentOutcomes(sessionFile, running.id, running.lastResultSequence, running.generation).length > 0) continue;
-          if (running.settled) return null;
+          if (running.settled && running.lastResultSequence !== running.runs?.resolve({ id: running.subagentId }).resultAfterSequence) return null;
           const errorMessage = exited
             ? `Child process exited (${readFileSync(processExitFile(sessionFile, running.id), "utf8")}) without a durable settled result`
             : `Terminal surface ${surface} confirmed absent before settlement; delegated work was interrupted. History is retained; no automatic restart.`;
@@ -1543,7 +1562,6 @@ async function watchSubagent(
           continue;
         }
         observeRunningSubagent(running);
-        deliverPendingQuestion(running);
         await new Promise<void>((resolve) => setTimeout(resolve, 250));
       }
     }
@@ -1556,6 +1574,7 @@ async function watchSubagent(
       },
     });
 
+    if (!isCurrent(running)) return null;
     const elapsed = Math.floor((Date.now() - startTime) / 1000);
 
     if (running.cli === "claude") {
@@ -1599,9 +1618,10 @@ async function watchSubagent(
     // A storage/observation failure is not proof that a managed child settled
     // or stopped. Preserve ownership and evidence instead of killing it.
     if (running.cli !== "claude") {
-      if (signal.aborted || getModuleAbortSignal().aborted) return null;
+      if (signal.aborted || !isCurrent(running)) return null;
       throw err;
     }
+    if (!isCurrent(running)) return null;
     try {
       closeSurface(surface);
     } catch {}
@@ -1635,10 +1655,11 @@ async function reconcileClosure(pi: ExtensionAPI, running: RunningSubagent): Pro
   if (running.closure === "confirmed") forgetRunning(running);
   else {
     const line = `${running.name}: surface closure unconfirmed (inventory=${running.terminalState}); history and ownership retained.`;
-    pi.sendMessage({ customType: "subagent_status", content: line, display: true,
-      details: { name: running.name, surface: running.surface, closure: running.closure,
+    running.owner!.notifications.publish({ customType: "subagent_status", content: line, display: true,
+      details: { eventId: `subagent-closure:${running.id}:${running.generation}`, id: running.subagentId, generation: running.generation, name: running.name, surface: running.surface, closure: running.closure,
         terminalRecordFile: terminalRecordFile(running), lines: [line], overflow: 0 },
-    }, { triggerTurn: true, deliverAs: "steer" });
+    });
+    running.owner!.notifications.deliver(pi);
   }
   updateWidget();
 }
@@ -1648,6 +1669,9 @@ function startSubagentWatch(
   pi: ExtensionAPI,
   running: RunningSubagent,
 ): void {
+  if (!isCurrent(running) || !running.owner?.notifications.owns() || running.owner.observed.has(`${running.id}:${running.generation}`)) return;
+  running.observing = true;
+  running.owner.observed.add(`${running.id}:${running.generation}`);
   // The tool's signal ends with its acknowledgement, not with delegated work.
   const watcherAbort = new AbortController();
   running.abortController = watcherAbort;
@@ -1657,7 +1681,7 @@ function startSubagentWatch(
   void (async () => {
     for (;;) {
       const result = await watchSubagent(running, watcherAbort.signal);
-      if (watcherAbort.signal.aborted || getModuleAbortSignal().aborted || !isCurrent(running)) return;
+      if (watcherAbort.signal.aborted || !isCurrent(running)) return;
       if (!result) {
         await reconcileClosure(pi, running);
         return;
@@ -1667,12 +1691,13 @@ function startSubagentWatch(
         ...(result.sessionId ? { sessionId: result.sessionId } : {}),
         ...(result.resultFile ? { latestResult: { resultFile: result.resultFile, outcome: result.outcome!, sequence: result.sequence!, generation: running.generation! } } : {}),
       })) return;
-      pi.sendMessage(
+      running.owner!.notifications.publish(
         {
           customType: "subagent_result",
           content: resolveResultPresentation(result, running.name),
           display: true,
           details: {
+            eventId: `subagent-result:${running.subagentId ?? running.id}:${running.generation}:${running.id}:${result.sequence ?? 0}`,
             id: running.subagentId ?? running.id, generation: running.generation,
             name: running.name,
             task: running.task,
@@ -1691,9 +1716,9 @@ function startSubagentWatch(
             ...(result.usage ? { usage: result.usage } : {}),
           },
         },
-        { triggerTurn: true, deliverAs: "steer" },
       );
-      // Keep descendant work outstanding until its result is accepted by Pi.
+      running.owner!.notifications.deliver(pi);
+      // Dispatch is not persisted incorporation; notification evidence is retained.
       running.lastResultSequence = result.sequence;
       running.settled = true;
       if (!result.keepAlive) {
@@ -1707,46 +1732,76 @@ function startSubagentWatch(
   })().catch((err) => {
     // Keep the result artifact and ownership when notification cannot be accepted.
     const diagnostic = `Subagent "${running.name}" result delivery failed: ${err?.message ?? String(err)}`;
+    if (!isCurrent(running)) return;
+    running.observing = false;
+    running.owner?.observed.delete(`${running.id}:${running.generation}`);
     latestCtx?.ui.notify?.(diagnostic, "error");
     console.error(diagnostic);
   });
 }
 
+function reconnectObservers(owner: ParentRuntime): void {
+  if (runtime !== owner || owner.abort.signal.aborted || !owner.notifications.acquire()) return;
+  const runs = runsFor(owner.ctx);
+  for (const record of runs.list()) {
+    if (!record.loadout || !record.writerToken || !record.surface || owner.observed.has(`${record.executionId}:${record.generation}`)) continue;
+    const previous = runningSubagents.get(record.executionId);
+    // A local launch owns readiness until it returns; don't create a parallel
+    // watcher/cleanup path in the middle of that asynchronous handshake.
+    if (previous?.generation === record.generation && record.state === "starting") continue;
+    previous?.abortController?.abort();
+    const running: RunningSubagent = {
+      owner, backend: record.backend,
+      id: record.executionId, subagentId: record.id, generation: record.generation, runs,
+      name: record.name, task: "", agent: record.loadout.agent, surface: record.surface,
+      sessionFile: record.sessionFile, startTime: record.startTime,
+      interactive: record.loadout.interactive, lastResultSequence: record.resultAfterSequence,
+      settled: !["starting", "running"].includes(projectRun(record).state),
+      activityFile: getSubagentActivityFile(runs.directory, record.executionId),
+      statusState: createStatusState({ source: "pi", startTimeMs: record.startTime }),
+    };
+    runningSubagents.set(running.id, running);
+    startSubagentWatch(owner.pi, running);
+  }
+}
+
+function detachRuntime(owner: ParentRuntime, preserveQueued: boolean): void {
+  owner.abort.abort();
+  if (runtime !== owner) return;
+  if (widgetInterval) clearInterval(widgetInterval);
+  if (statusInterval) clearInterval(statusInterval);
+  widgetInterval = statusInterval = null;
+  (globalThis as any)[WIDGET_INTERVAL_KEY] = null;
+  (globalThis as any)[STATUS_INTERVAL_KEY] = null;
+  if (latestCtx?.hasUI) latestCtx.ui.setWidget("subagent-status", undefined);
+  latestCtx = null;
+  for (const agent of runningSubagents.values()) agent.abortController?.abort();
+  runningSubagents.clear();
+  runtime = null;
+  owner.notifications.release(preserveQueued);
+}
+
 export default function subagentsExtension(pi: ExtensionAPI) {
-  latestPi = pi;
+  let boundRuntime: ParentRuntime | null = null;
   // Capture the UI context for widget updates
-  pi.on("session_start", (_event, ctx) => {
+  pi.on("session_start", (event, ctx) => {
+    if (runtime) detachRuntime(runtime, event.reason === "reload");
     latestCtx = ctx;
-    // pi runs multiple sessions in one process. A prior session's shutdown
-    // aborts the shared module poll-abort controller; install a fresh one so
-    // subagents spawned in this session aren't watched against a dead signal.
-    // See https://github.com/HazAT/pi-interactive-subagents/issues/5
-    const prevAbort = (globalThis as any)[POLL_ABORT_KEY] as AbortController | undefined;
-    if (!prevAbort || prevAbort.signal.aborted) {
-      (globalThis as any)[POLL_ABORT_KEY] = new AbortController();
-    }
-    // Read-only UI reconstruction, not watcher takeover or automatic restart.
+    const runs = runsFor(ctx);
+    const abort = new AbortController();
+    (globalThis as any)[POLL_ABORT_KEY] = abort;
+    runtime = boundRuntime = { pi, ctx, abort, notifications: new SubagentNotifications(runs), observed: new Set() };
+    runningSubagents.clear();
+    // Reattach observation only. Even confirmed-dead work never starts Pi here.
+    reconnectObservers(runtime);
+    runtime.notifications.deliver(pi);
     startWidgetRefresh();
+    startStatusRefresh(pi);
   });
 
   // Clean up on session shutdown
-  pi.on("session_shutdown", (_event, _ctx) => {
-    if (widgetInterval) {
-      clearInterval(widgetInterval);
-      widgetInterval = null;
-      (globalThis as any)[WIDGET_INTERVAL_KEY] = null;
-    }
-    if (statusInterval) {
-      clearInterval(statusInterval);
-      statusInterval = null;
-      (globalThis as any)[STATUS_INTERVAL_KEY] = null;
-    }
-    const moduleAbort = (globalThis as any)[POLL_ABORT_KEY] as AbortController | undefined;
-    if (moduleAbort) moduleAbort.abort();
-    for (const [_id, agent] of runningSubagents) {
-      agent.abortController?.abort();
-    }
-    runningSubagents.clear();
+  pi.on("session_shutdown", (event) => {
+    if (boundRuntime === runtime && boundRuntime) detachRuntime(boundRuntime, event.reason === "reload");
   });
 
   // The spawning tools are always registered here. Whether a child process can
@@ -1972,7 +2027,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         const inventory = run.backend === getMuxBackend() && run.surface ? surfaceState(run.surface) : "unknown";
         const heartbeat = readSubagentLiveness(run.sessionFile, run.executionId);
         const inbox = new SubagentInbox(run.sessionFile).snapshot(run);
-        return { ...run, ...inbox, ...(inbox.paused ? { state: "paused-uncertain" } : {}), liveness: { surface: inventory, writer: writerExited(run) ? "exited" : "claimed-or-unknown", heartbeatAt: heartbeat,
+        const notifications = new SubagentNotifications(runs).list().filter((event) => event.message.details.id === run.id)
+          .map((event) => ({ eventId: event.message.details.eventId, type: event.message.customType, state: event.state }));
+        return { ...run, ...inbox, notifications, ...(inbox.paused ? { state: "paused-uncertain" } : {}), liveness: { surface: inventory, writer: writerExited(run) ? "exited" : "claimed-or-unknown", heartbeatAt: heartbeat,
           responsive: heartbeat === null ? "unknown" : Date.now() - heartbeat < 20_000 ? "responsive" : "unresponsive" } };
       };
       if (params.id || params.name !== undefined) {
@@ -2107,6 +2164,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
       },
 
       async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+        const owner = runtime;
+        assertRuntime(owner);
         if (params.message === undefined && !params.authorization) throw new Error("message is required unless resolving an exact uncertain action; request not accepted");
         if (params.message !== undefined && !params.message.trim()) throw new Error("message is required; request not accepted");
         const runs = runsFor(ctx);
@@ -2153,6 +2212,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         if (policyError) return { isError: true, content: [{ type: "text", text: policyError }], details: { error: policyError } };
         const inbox = new SubagentInbox(sessionPath);
         const prepare = () => {
+          assertRuntime(owner);
           const target = runs.messageTarget(entry.id);
           if (!target.launch) return target;
           if (!hasSupportedParentTerminal()) throw new Error("Managed subagent resume requires a supported terminal; headless is not supported");
@@ -2162,7 +2222,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         let queued = inbox.enqueue(entry, params, prepare);
         if (queued.waitingForExit) {
           const deadline = Date.now() + CLOSE_TIMEOUT_MS;
-          while (!writerExited(queued.run) && Date.now() < deadline) await delay(25);
+          while (!writerExited(queued.run) && Date.now() < deadline) { await delay(25); assertRuntime(owner); }
           if (writerExited(queued.run)) queued = inbox.enqueue(runs.resolve({ id: entry.id }), params, prepare);
         }
         const acknowledgement = {
@@ -2178,9 +2238,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
             runningSubagents.set(running.id, running);
             startSubagentWatch(pi, running);
           } else if (!runningMatch && !queued.paused && queued.run.surface && ["starting", "running"].includes(queued.run.state)) {
-            // Explicit messaging can observe its existing writer without
-            // launching/taking over Pi. Automatic reload takeover is separate.
+            // Explicit sends and automatic recovery share the same observer
+            // owner; neither path takes over the existing Pi writer.
             const running: RunningSubagent = {
+              owner, backend: queued.run.backend,
               id: queued.run.executionId, subagentId: entry.id, generation: queued.run.generation, runs,
               name, task: message, surface: queued.run.surface, startTime: queued.run.startTime,
               sessionFile: sessionPath, agent: loadout.agent, interactive: loadout.interactive,
@@ -2249,6 +2310,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 
         // Register as a running subagent for widget tracking
         const running: RunningSubagent = {
+          owner, backend: record.backend,
           id,
           subagentId: record.id, generation: record.generation, runs,
           name,
@@ -2270,9 +2332,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         try { await confirmSubagentReady(running); }
         catch (cause) {
           const error = cause instanceof Error ? cause.message : String(cause);
-          runs.update(record.id, record.generation, { state: "failed", diagnostic: error });
+          if (runtime === owner && !owner.abort.signal.aborted) runs.update(record.id, record.generation, { state: "failed", diagnostic: error });
           return { isError: true, content: [{ type: "text", text: error }], details: { error, ...(cause as any)?.details } };
         }
+        assertRuntime(owner);
         runs.update(record.id, record.generation, { state: "running" });
         startSubagentWatch(pi, running);
 
@@ -2298,6 +2361,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
   pi.registerCommand("subagent", {
     description: "Spawn a subagent: /subagent <agent> <task>",
     handler: async (args, ctx) => {
+      if (boundRuntime) assertRuntime(boundRuntime);
       const trimmed = args.trim();
       if (!trimmed) {
         ctx.ui.notify("Usage: /subagent <agent> [task]", "warning");
