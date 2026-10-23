@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import subagents, { registerToolExtension } from "../pi-extension/subagents/index.ts";
 import { createMockExtensionApi, waitFor } from "./harness.ts";
-import { shellEscape } from "../pi-extension/subagents/tmux.ts";
+import { closeSurface, shellEscape } from "../pi-extension/subagents/tmux.ts";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 
@@ -25,7 +25,7 @@ async function withRoles(run: (h: any) => Promise<void>) {
   const command = [process.execPath, "--import", fileURLToPath(import.meta.resolve("tsx")), join(testDir, "fixtures/runtime.ts")].map(shellEscape).join(" ");
   writeFileSync(join(bin, "pi"), `#!/bin/sh\nexec ${command} "$@"\n`, { mode: 0o755 });
   for (const key of Object.keys(process.env)) if (key.startsWith("PI_SUBAGENT_")) delete process.env[key];
-  Object.assign(process.env, { PATH: `${bin}:${process.env.PATH}`, TMUX: "fixture", TMUX_PANE: "%fixture-parent", SUBAGENT_TEST_TERMINAL: terminal, PI_CODING_AGENT_DIR: config, PI_SUBAGENT_SHELL_READY_DELAY_MS: "0" });
+  Object.assign(process.env, { PATH: `${bin}:${process.env.PATH}`, TMUX: "fixture", TMUX_PANE: "%fixture-parent", SUBAGENT_TEST_TERMINAL: terminal, PI_CODING_AGENT_DIR: config, PI_TERMINAL_MUX: "tmux" });
   process.chdir(project);
   const parentFile = join(sessions, "parent.jsonl");
   writeFileSync(parentFile, JSON.stringify({ type: "session", version: 3, id: "roles-parent", cwd: project }) + "\n");
@@ -62,7 +62,7 @@ async function withRoles(run: (h: any) => Promise<void>) {
     if (existsSync(join(terminal, "pid"))) {
       try { process.kill(-Number(readFileSync(join(terminal, "pid"), "utf8")), "SIGKILL"); } catch {}
     }
-    if (existsSync(join(terminal, "surface"))) await waitFor(() => existsSync(join(terminal, "layout")) && readFileSync(join(terminal, "layout"), "utf8") === "closed" ? true : undefined, "terminal cleanup");
+    if (existsSync(join(terminal, "surface"))) closeSurface("%fixture");
     process.chdir(previousCwd);
     process.env = previousEnv;
     rmSync(root, { recursive: true, force: true });

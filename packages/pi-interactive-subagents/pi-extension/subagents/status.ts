@@ -1,4 +1,6 @@
 import { readFileSync } from "node:fs";
+import { LIVENESS_STALE_AFTER_MS } from "./activity.ts";
+import type { SurfaceState } from "@kevinhao/pi-terminal-mux";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -59,6 +61,9 @@ export interface SubagentStatusState {
   snapshotProblemSinceMs: number | null;
   snapshotError: string | null;
   currentKind: SubagentStatusKind;
+  /** Managed Pi children require an independent heartbeat, not token activity. */
+  livenessAtMs?: number | null;
+  terminalState?: SurfaceState;
 }
 
 export interface StatusSnapshot {
@@ -380,6 +385,15 @@ export function classifyStatus(state: SubagentStatusState, now: number): StatusS
     const classified = classifyProblemState(state, now);
     kind = classified.kind;
     statusLabel = classified.statusLabel;
+  }
+
+  if (state.livenessAtMs !== undefined && now - (state.livenessAtMs ?? state.startTimeMs) >= LIVENESS_STALE_AFTER_MS) {
+    kind = "stalled";
+    statusLabel = "unresponsive; execution uncertain";
+  }
+  if (state.terminalState === "unknown") {
+    kind = "stalled";
+    statusLabel = "terminal inventory unknown; execution uncertain";
   }
 
   const activeDurationText = state.activeSinceMs == null

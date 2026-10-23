@@ -11,6 +11,7 @@ import { createBackendLogger } from "./shared.ts";
 import type { BackendOps, CreateSurfaceOptions, SurfaceState } from "./types.ts";
 
 const execFileAsync = promisify(execFile);
+const COMMAND_TIMEOUT_MS = 10_000;
 
 /** Tmux 后端日志（统一格式，写入 /tmp/pi-mux-tmux.log） */
 const tmuxLog = createBackendLogger("tmux", "/tmp/pi-mux-tmux.log");
@@ -36,7 +37,7 @@ export const ops: BackendOps = {
     args.push("-P", "-F", "#{pane_id}");
     if (options?.command !== undefined) args.push("--", options.command);
 
-    const pane = execFileSync("tmux", args, { encoding: "utf8" }).trim();
+    const pane = execFileSync("tmux", args, { encoding: "utf8", timeout: COMMAND_TIMEOUT_MS }).trim();
     if (!pane.startsWith("%")) {
       throw new Error(`Unexpected tmux split-window output: ${pane}`);
     }
@@ -74,7 +75,7 @@ export const ops: BackendOps = {
   },
 
   close(surface: string): void {
-    execFileSync("tmux", ["kill-pane", "-t", surface], { encoding: "utf8" });
+    execFileSync("tmux", ["kill-pane", "-t", surface], { encoding: "utf8", timeout: COMMAND_TIMEOUT_MS });
     tmuxLog(`[close] surface=${surface}`);
   },
 

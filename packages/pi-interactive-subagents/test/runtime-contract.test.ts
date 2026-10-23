@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { createAssistantMessageEventStream, type AssistantMessage, type ToolCall } from "@earendil-works/pi-ai";
 import { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager, type AgentSession } from "@earendil-works/pi-coding-agent";
 import subagents from "../pi-extension/subagents/index.ts";
-import { shellEscape } from "../pi-extension/subagents/tmux.ts";
+import { closeSurface, shellEscape } from "../pi-extension/subagents/tmux.ts";
 import { plainTheme, waitFor } from "./harness.ts";
 
 // Approved tool/lifecycle seam, but with the supported Pi AgentSession and real
@@ -28,7 +28,7 @@ test("supported Pi reports management refusals as tool failures without launchin
   const command = [process.execPath, "--import", fileURLToPath(import.meta.resolve("tsx")), join(testDir, "fixtures/runtime.ts")].map(shellEscape).join(" ");
   writeFileSync(join(bin, "pi"), `#!/bin/sh\nexec ${command} "$@"\n`, { mode: 0o755 });
   for (const key of Object.keys(process.env)) if (key.startsWith("PI_SUBAGENT_")) delete process.env[key];
-  Object.assign(process.env, { PATH: `${bin}:${process.env.PATH}`, TMUX: "fixture", TMUX_PANE: "%fixture-parent", SUBAGENT_TEST_TERMINAL: terminal, PI_CODING_AGENT_DIR: agentDir, PI_SUBAGENT_SHELL_READY_DELAY_MS: "0" });
+  Object.assign(process.env, { PATH: `${bin}:${process.env.PATH}`, TMUX: "fixture", TMUX_PANE: "%fixture-parent", SUBAGENT_TEST_TERMINAL: terminal, PI_CODING_AGENT_DIR: agentDir, PI_TERMINAL_MUX: "tmux" });
   process.chdir(project);
   writeFileSync(join(agents, "unsafe.md"), "---\nname: unsafe\n---\nNo tools declaration.\n");
   writeFileSync(join(agents, "safe.md"), "---\nname: safe\ntools:\n---\nConversation and control only.\n");
@@ -97,6 +97,13 @@ test("supported Pi reports management refusals as tool failures without launchin
     assert.match(JSON.stringify(missing.content), /No subagent named/);
     assert.equal(existsSync(join(terminal, "surface")), false);
 
+    delete process.env.TMUX;
+    const unsupported = await call("subagent", { agent: "safe", task: "Must not run headless." });
+    process.env.TMUX = "fixture";
+    assert.equal(unsupported.isError, true, "unsupported terminal refusals use Pi's actual failure contract");
+    assert.match(JSON.stringify(unsupported.content), /headless.*not supported/);
+    assert.equal(existsSync(join(terminal, "surface")), false);
+
     // Exceptions lose structured details in supported Pi. Render the actual
     // error result, not the richer object returned by a shallow execute mock.
     process.env.PI_SUBAGENT_SESSION = join(root, "invalid-caller.jsonl");
@@ -117,14 +124,16 @@ test("supported Pi reports management refusals as tool failures without launchin
     const receipt = await waitFor(() => existsSync(join(terminal, "received.json")) ? JSON.parse(readFileSync(join(terminal, "received.json"), "utf8")) : undefined, "supported Pi launch receipt");
     assert.equal(receipt.args[receipt.args.indexOf("--tools") + 1], "ask_question");
     assert.equal(session.messages.some((message) => message.role === "custom" && message.customType === "subagent_result"), false, "launch returns while child completion is still gated");
-    assert.deepEqual(executionErrors, [true, true, true, false]);
+    assert.deepEqual(executionErrors, [true, true, true, true, false]);
   } finally {
     await session?.extensionRunner?.emit({ type: "session_shutdown", reason: "quit" });
     session?.dispose();
     if (existsSync(join(terminal, "pid"))) {
       try { process.kill(-Number(readFileSync(join(terminal, "pid"), "utf8")), "SIGKILL"); } catch {}
     }
-    if (existsSync(join(terminal, "surface"))) await waitFor(() => existsSync(join(terminal, "layout")) && readFileSync(join(terminal, "layout"), "utf8") === "closed" ? true : undefined, "fixture terminal cleanup");
+    // Watcher detachment is not authority to close work. Teardown owns this
+    // isolated fixture explicitly, after terminating its known child process.
+    if (existsSync(join(terminal, "surface"))) closeSurface("%fixture");
     process.chdir(previousCwd);
     process.env = previousEnv;
     rmSync(root, { recursive: true, force: true });

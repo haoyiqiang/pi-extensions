@@ -11,7 +11,7 @@ export interface SubagentOutcome {
   errorMessage?: string;
   autoExit: boolean;
   source: {
-    kind: "agent_settled" | "process_exit";
+    kind: "agent_settled" | "process_exit" | "surface_absent";
     sessionFile: string;
     sessionId: string;
     entryId: string | null;
@@ -52,7 +52,7 @@ export function readSubagentOutcomes(sessionFile: string, executionId: string, a
       !Number.isInteger(result.sequence) || result.sequence < 1 || typeof result.autoExit !== "boolean" ||
       !["succeeded", "failed", "aborted", "truncated", "no-output"].includes(result.outcome) ||
       result.source?.sessionFile !== sessionFile || typeof result.source.sessionId !== "string" ||
-      !["agent_settled", "process_exit"].includes(result.source.kind) || !Array.isArray(result.source.outputEntryIds)) {
+      !["agent_settled", "process_exit", "surface_absent"].includes(result.source.kind) || !Array.isArray(result.source.outputEntryIds)) {
       throw new Error(`Invalid subagent outcome: ${resultFile}`);
     }
     return { result, resultFile };

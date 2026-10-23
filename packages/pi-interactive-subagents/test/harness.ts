@@ -45,8 +45,8 @@ export const plainTheme = {
 
 /** Bounded synchronization with an external fixture, not a guessed readiness sleep. */
 export async function waitFor<T>(read: () => T | undefined, label: string): Promise<T> {
-  const deadline = Date.now() + 10_000;
-  while (Date.now() < deadline) {
+  const deadline = performance.now() + 10_000;
+  while (performance.now() < deadline) {
     const value = read();
     if (value !== undefined) return value;
     await sleep(10);

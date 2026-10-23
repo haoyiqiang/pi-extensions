@@ -1,12 +1,14 @@
 # pi-interactive-subagents
 
-Async subagents for [pi](https://github.com/badlogic/pi-mono), running in tmux panes. Spawn a sub-agent, keep working in the main session, and get the result steered back when it finishes. Fully non-blocking.
+Async subagents for [Pi](https://github.com/earendil-works/pi), running in native tmux or Orca surfaces. Spawn a sub-agent, keep working in the main session, and get the result steered back when it settles.
 
-**tmux-only fork.** See [Acknowledgements](#acknowledgements) for the upstream project, which also supports cmux, zellij, and WezTerm.
+This integration supports **tmux and Orca**, not headless delegation. The shared `pi-terminal-mux` library's headless contract for other consumers is unchanged.
 
 ## How it works
 
-`subagent()` returns immediately. The sub-agent runs in its own tmux pane — a right split off the parent pi pane, so pane creation never steals keyboard focus. A live widget above the input tracks every running sub-agent, and when one finishes, its result is steered into the main session as a notification that triggers a new turn.
+`subagent()` returns after native startup and the child bridge's ready signal, **not after task completion**. The complete launch command is supplied when mux creates the surface: a detached tmux split or an Orca split placed relative to the parent terminal. There is no interactive-shell startup delay or launch-key injection, and creation does not steal focus. A live widget tracks work; durable results are steered back automatically. Core tool feedback and result delivery work even when the parent runtime has no UI.
+
+Launch and resume replace inherited terminal-rename authority with a restricted surface context. A child cannot rename its parent's shared tmux window/session or Orca workspace/tab through the terminal naming API. Arguments, names and cwd are shell-quoted; task content is passed as a quoted argument or artifact, not evaluated as shell code.
 
 ```
 ╭─ Subagents ──────────────────────────── 2 running ─╮
@@ -17,19 +19,21 @@ Async subagents for [pi](https://github.com/badlogic/pi-mono), running in tmux p
 
 Spawn several in parallel — they run concurrently and steer results back independently as each finishes.
 
-Panes are kept evenly sized: the extension re-applies an `even-horizontal` layout after every spawn and exit (debounced). The layout is a single constant, `SUBAGENT_TMUX_LAYOUT` in `pi-extension/subagents/tmux.ts` — change it to any named tmux layout (`main-vertical`, `tiled`, …).
+### Terminal confidence and bounded failures
 
-If your shell startup is slow and launch commands get dropped before the prompt is ready, raise the delay:
+- Inventory distinguishes **present**, **absent** and **unknown**. Failed screen capture is never proof of disappearance. Unknown inventory retains work and ownership; it does not trigger a replacement launch, delete evidence or invent success. Live-pane messaging is refused while the terminal cannot be verified.
+- A confirmed missing surface preserves any already-published result. Without a settled result it produces a durable, diagnosable interruption/failure rather than waiting for a screen marker forever.
+- The child publishes an independent heartbeat every 5 seconds. A long tool or provider request remains healthy without token/activity events. After 20 seconds without a fresh heartbeat, status becomes **unresponsive; execution uncertain**, not completed or automatically killed. A new heartbeat recovers the display.
+- Child readiness has a 15-second budget after native creation. Failed startup cleans up its owned surface and confirms absence where possible. Closure reconciliation has a 3-second budget after the bounded backend close call; backend command/inventory timeouts are additional finite bounds. The obsolete `PI_SUBAGENT_SHELL_READY_DELAY_MS` setting is no longer used.
+- Failed or unconfirmed closure retains an inspectable `<session>.terminal-<execution>.json` diagnostic and ownership, and emits a status message with that path. It does not reverse durable success or claim a completed cleanup. An ambiguous create receipt retains its launch script/diagnostic and is never automatically retried; an unidentified surface may require manual terminal inspection.
 
-```bash
-export PI_SUBAGENT_SHELL_READY_DELAY_MS=2500   # default: 500
-```
+These terminal diagnostics are not a persistent run controller. Cross-reload ownership reconstruction and full parent recovery belong to subsequent lifecycle slices.
 
 ## Tools
 
 | Tool | Description |
 | --- | --- |
-| `subagent` | Spawn a sub-agent in a dedicated tmux pane (async) |
+| `subagent` | Spawn a sub-agent in a dedicated tmux/Orca surface (async) |
 | `subagent_message` | Message a sub-agent by name — steers it if running, resumes its session if finished |
 | `subagents_list` | List available agent definitions |
 | `ask_question` | *(sub-agent sessions only)* Ask the orchestrator a question and wait for the reply |
@@ -180,7 +184,7 @@ Set a per-agent default with `cwd:` in frontmatter. Relative role cwd resolves a
 
 ## Status widget & configuration
 
-The widget tracks each sub-agent from a runtime activity snapshot written by the child: `starting`, `active` (turn/provider/tool work), `waiting` (open for input or another stage), `stalled` (no valid snapshot for too long), or `running` (fallback). Sub-agent sessions also show their own tools widget — toggle it with `Ctrl+Alt+O`. Completion messages expand with `Ctrl+O`.
+The widget combines the child's business-activity snapshot with independent heartbeat freshness and terminal inventory: `starting`, `active` (turn/provider/tool work), `waiting` (open for input or another stage), `stalled` (uncertain/unresponsive), or `running` (legacy CLI fallback). A frozen activity snapshot is not proof that the child is still responsive. Sub-agent sessions also show their own tools widget — toggle it with `Ctrl+Alt+O`. Completion messages expand with `Ctrl+O`.
 
 Status display is configured via `config.json` in the extension directory (copy `config.json.example`; it's gitignored):
 
@@ -194,7 +198,7 @@ Status display is configured via `config.json` in the extension directory (copy 
 
 - [Pi](https://github.com/earendil-works/pi) 0.87.1 or newer
 - Node.js 22.19 or newer
-- [tmux](https://github.com/tmux/tmux)
+- A parent terminal inside [tmux](https://github.com/tmux/tmux) or Orca, with its parent pane/terminal identity available
 
 ```bash
 tmux new -A -s pi 'pi'
@@ -232,13 +236,18 @@ npm run test:integration --workspace pi-interactive-subagents
 ```
 
 This includes the [#3 native-tool prefactor](https://github.com/haoyiqiang/pi-extensions/issues/3),
-[#4 role/loadout safety](https://github.com/haoyiqiang/pi-extensions/issues/4) and
-[#5 settled durable results](https://github.com/haoyiqiang/pi-extensions/issues/5), not
+[#4 role/loadout safety](https://github.com/haoyiqiang/pi-extensions/issues/4),
+[#5 settled outcomes](https://github.com/haoyiqiang/pi-extensions/issues/5) and
+[#6 terminal startup/liveness](https://github.com/haoyiqiang/pi-extensions/issues/6), not
 all of [Spec #2](https://github.com/haoyiqiang/pi-extensions/issues/2). Public-tool tests
 cover role aliases/precedence/visibility, missing versus empty tools, invalid resources
 and snapshots, model/cwd/identity/skill/isolation replay, lifetime policy, nested refusals
-and settled result publication. Durable messaging, stable identity/single-writer ownership
-and complete parent recovery remain separate slices.
+and settled result publication. Terminal tests use the existing child runtime and
+executable tmux/Orca stand-ins, with independently controlled parent/child clocks for
+readiness, long work and lost liveness. The mux suite retains its startup-command/inventory
+contracts. No paid model or real terminal smoke run is required for the deterministic
+suite. Durable messaging, stable identity/single-writer ownership and complete parent
+recovery remain separate slices.
 See the repository `GLOSSARY.md` and `docs/adr/0001-pause-uncertain-delegated-actions.md`
 for the reviewed domain language and recovery policy.
 

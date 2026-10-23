@@ -1,6 +1,25 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
+/** Independent event-loop heartbeat: activity events alone never prove responsiveness. */
+export const LIVENESS_INTERVAL_MS = 5_000;
+export const LIVENESS_STALE_AFTER_MS = 20_000;
+
+export function writeSubagentLiveness(sessionFile: string, executionId: string): void {
+  const file = `${sessionFile}.liveness-${executionId}`;
+  mkdirSync(dirname(file), { recursive: true });
+  const temporary = `${file}.tmp-${process.pid}`;
+  writeFileSync(temporary, JSON.stringify({ version: 1, executionId, at: Date.now() }), "utf8");
+  renameSync(temporary, file);
+}
+
+export function readSubagentLiveness(sessionFile: string, executionId: string): number | null {
+  try {
+    const value = JSON.parse(readFileSync(`${sessionFile}.liveness-${executionId}`, "utf8"));
+    return value.version === 1 && value.executionId === executionId && Number.isFinite(value.at) ? value.at : null;
+  } catch { return null; }
+}
+
 export type SubagentActivityPhase = "starting" | "active" | "waiting" | "done";
 export type SubagentActivityScope = "agent" | "turn" | "provider" | "streaming" | "tool";
 
