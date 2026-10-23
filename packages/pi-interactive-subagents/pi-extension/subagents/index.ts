@@ -1,7 +1,7 @@
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { keyHint } from "@mariozechner/pi-coding-agent";
-import { Type, type Static } from "@sinclair/typebox";
-import { Box, Text, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { keyHint } from "@earendil-works/pi-coding-agent";
+import { Type, type Static } from "typebox";
+import { Box, Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -1166,8 +1166,8 @@ function startWidgetRefresh() {
  * Call watchSubagent() on the returned object to observe completion.
  */
 async function launchSubagent(
-  params: typeof SubagentParams.static,
-  ctx: { sessionManager: { getSessionFile(): string | null; getSessionId(): string; getSessionDir(): string }; cwd: string },
+  params: Static<typeof SubagentParams> & { name: string },
+  ctx: Pick<ExtensionContext, "sessionManager" | "cwd">,
   options?: { surface?: string },
 ): Promise<RunningSubagent> {
   const startTime = Date.now();
@@ -1640,6 +1640,70 @@ async function watchSubagent(
   }
 }
 
+/** One observation and notification path for both fresh and resumed work. */
+function startSubagentWatch(
+  pi: ExtensionAPI,
+  running: RunningSubagent,
+  resume?: { entryCountBefore: number; sessionId: string },
+): void {
+  // The tool's signal ends with its acknowledgement, not with delegated work.
+  const watcherAbort = new AbortController();
+  running.abortController = watcherAbort;
+  startWidgetRefresh();
+  startStatusRefresh(pi);
+
+  void watchSubagent(running, watcherAbort.signal)
+    .then((result) => {
+      updateWidget();
+      if (resume) {
+        const entries = getNewEntries(running.sessionFile, resume.entryCountBefore);
+        result = {
+          ...result,
+          sessionFile: running.sessionFile,
+          sessionId: resume.sessionId,
+          summary: findLastAssistantMessage(entries) ??
+            (result.errorMessage
+              ? `Subagent error: ${result.errorMessage}`
+              : result.exitCode !== 0
+                ? `Resumed session exited with code ${result.exitCode}`
+                : "Resumed session exited without new output"),
+        };
+      }
+      pi.sendMessage(
+        {
+          customType: "subagent_result",
+          content: resolveResultPresentation(result, running.name),
+          display: true,
+          details: {
+            name: running.name,
+            task: running.task,
+            agent: running.agent,
+            exitCode: result.exitCode,
+            elapsed: result.elapsed,
+            sessionFile: result.sessionFile,
+            ...(result.sessionId ? { sessionId: result.sessionId } : {}),
+            ...(result.errorMessage ? { errorMessage: result.errorMessage } : {}),
+            ...(result.claudeSessionId ? { claudeSessionId: result.claudeSessionId } : {}),
+            ...(result.stats ? { stats: result.stats } : {}),
+          },
+        },
+        { triggerTurn: true, deliverAs: "steer" },
+      );
+    })
+    .catch((err) => {
+      updateWidget();
+      pi.sendMessage(
+        {
+          customType: "subagent_result",
+          content: `${resume ? "Resume" : `Sub-agent "${running.name}"`} error: ${err?.message ?? String(err)}`,
+          display: true,
+          details: { name: running.name, task: running.task, error: err?.message },
+        },
+        { triggerTurn: true, deliverAs: "steer" },
+      );
+    });
+}
+
 export default function subagentsExtension(pi: ExtensionAPI) {
   latestPi = pi;
   // Capture the UI context for widget updates
@@ -1718,11 +1782,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         // Strict whitelist at every depth. The caller's permitted set is:
         //   • a restricted subagent (PI_SUBAGENT_ALLOWED) → only its pinned agents;
         //   • a top-level session → every discoverable agent, i.e. exactly what
-        //     `subagents_list` shows.
-        // Every spawn must name an agent in that set. The lone exception is a
-        // top-level `fork: true` clone, which has no role and inherits the
-        // caller's own already-trusted toolset. Without this guard a missing or
-        // unknown `agent` silently launches an unrestricted, full-toolset child.
+        //     `subagents_list` shows (including explicitly addressable hidden roles).
+        // Every spawn must name an agent in that set. Context mode is selected
+        // by the role, not by an agentless fork override. Without this guard a
+        // missing or unknown `agent` could launch an unrestricted child.
         const permittedAgents = SUBAGENT_ALLOWLIST
           ? [...SUBAGENT_ALLOWLIST]
           : discoverAgentDefinitions().map((a) => a.name);
@@ -1801,7 +1864,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         // from then on uniqueRunningName tracks it via the running map.
         let running;
         try {
-          running = await launchSubagent(params, ctx);
+          running = await launchSubagent({ ...params, name: params.name! }, ctx);
         } finally {
           if (reservedName) reservedNames.delete(reservedName);
         }
@@ -1814,55 +1877,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
           sessionId: getSessionId(running.sessionFile),
         });
 
-        // Create a separate AbortController for the watcher
-        // (the tool's signal completes when we return)
-        const watcherAbort = new AbortController();
-        running.abortController = watcherAbort;
-
-        // Start widget refresh and status supervision when the first agent launches
-        startWidgetRefresh();
-        startStatusRefresh(pi);
-
-        // Fire-and-forget: start watching in background
-        watchSubagent(running, watcherAbort.signal)
-          .then((result) => {
-            updateWidget(); // reflect removal from Map immediately
-
-            const presentation = resolveResultPresentation(result, running.name);
-
-            pi.sendMessage(
-              {
-                customType: "subagent_result",
-                content: presentation,
-                display: true,
-                details: {
-                  name: running.name,
-                  task: running.task,
-                  agent: running.agent,
-                  exitCode: result.exitCode,
-                  elapsed: result.elapsed,
-                  sessionFile: result.sessionFile,
-                  ...(result.sessionId ? { sessionId: result.sessionId } : {}),
-                  ...(result.errorMessage ? { errorMessage: result.errorMessage } : {}),
-                  ...(result.claudeSessionId ? { claudeSessionId: result.claudeSessionId } : {}),
-                  ...(result.stats ? { stats: result.stats } : {}),
-                },
-              },
-              { triggerTurn: true, deliverAs: "steer" },
-            );
-          })
-          .catch((err) => {
-            updateWidget();
-            pi.sendMessage(
-              {
-                customType: "subagent_result",
-                content: `Sub-agent "${running.name}" error: ${err?.message ?? String(err)}`,
-                display: true,
-                details: { name: running.name, task: running.task, error: err?.message },
-              },
-              { triggerTurn: true, deliverAs: "steer" },
-            );
-          });
+        startSubagentWatch(pi, running);
 
         // Return immediately
         return {
@@ -1944,7 +1959,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         }
 
         // Fallback (shouldn't happen)
-        const text = typeof result.content[0]?.text === "string" ? result.content[0].text : "";
+        const text = result.content[0]?.type === "text" ? result.content[0].text : "";
         return new Text(theme.fg("dim", text), 0, 0);
       },
     });
@@ -2067,7 +2082,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         }
 
         // Fallback / error
-        const text = typeof result.content[0]?.text === "string" ? result.content[0].text : "";
+        const text = result.content[0]?.type === "text" ? result.content[0].text : "";
         return new Text(theme.fg("dim", text), 0, 0);
       },
 
@@ -2251,59 +2266,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
           }),
         };
         runningSubagents.set(id, running);
-        startWidgetRefresh();
-        startStatusRefresh(pi);
-
-        // Fire-and-forget watcher
-        const watcherAbort = new AbortController();
-        running.abortController = watcherAbort;
-
-        watchSubagent(running, watcherAbort.signal)
-          .then((result) => {
-            updateWidget();
-
-            const allEntries = getNewEntries(sessionPath, entryCountBefore);
-            const summary = findLastAssistantMessage(allEntries) ??
-              (result.errorMessage
-                ? `Subagent error: ${result.errorMessage}`
-                : result.exitCode !== 0
-                  ? `Resumed session exited with code ${result.exitCode}`
-                  : "Resumed session exited without new output");
-            const presentation = resolveResultPresentation(
-              { ...result, summary, sessionFile: sessionPath, sessionId: resumedSessionId },
-              name,
-            );
-
-            pi.sendMessage(
-              {
-                customType: "subagent_result",
-                content: presentation,
-                display: true,
-                details: {
-                  name,
-                  task: message,
-                  exitCode: result.exitCode,
-                  elapsed: result.elapsed,
-                  sessionFile: sessionPath,
-                  sessionId: resumedSessionId,
-                  ...(result.errorMessage ? { errorMessage: result.errorMessage } : {}),
-                },
-              },
-              { triggerTurn: true, deliverAs: "steer" },
-            );
-          })
-          .catch((err) => {
-            updateWidget();
-            pi.sendMessage(
-              {
-                customType: "subagent_result",
-                content: `Resume error: ${err?.message ?? String(err)}`,
-                display: true,
-                details: { name, error: err?.message },
-              },
-              { triggerTurn: true, deliverAs: "steer" },
-            );
-          });
+        startSubagentWatch(pi, running, { entryCountBefore, sessionId: resumedSessionId });
 
         return {
           content: [{ type: "text", text: `Session "${name}" resumed.` }],
@@ -2355,6 +2318,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
     if (!details) return undefined;
 
     return {
+      invalidate() {},
       render(width: number): string[] {
         const name = details.name ?? "subagent";
         const exitCode = details.exitCode ?? 0;
@@ -2468,6 +2432,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
     if (lines.length === 0 && overflow === 0) return undefined;
 
     return {
+      invalidate() {},
       render(width: number): string[] {
         const lineWidth = Math.max(0, width - 6);
         const contentLines = [
@@ -2495,6 +2460,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
     if (!details) return undefined;
 
     return {
+      invalidate() {},
       render(width: number): string[] {
         const name = details.name ?? "subagent";
         const agentTag = details.agent ? theme.fg("dim", ` (${details.agent})`) : "";
@@ -2526,4 +2492,3 @@ export default function subagentsExtension(pi: ExtensionAPI) {
   });
 
 }
-// test

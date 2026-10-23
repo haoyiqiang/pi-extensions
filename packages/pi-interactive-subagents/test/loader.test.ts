@@ -1,0 +1,34 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { discoverAndLoadExtensions } from "@earendil-works/pi-coding-agent";
+
+// Use Pi's normal directory/manifest loading, not custom aliases or an author's
+// extension installation. Direct imports in the other tests independently verify
+// that the source does not require the loader's legacy compatibility aliases.
+test("supported Pi loads the package manifest and child control extensions", async () => {
+  const root = mkdtempSync(join(tmpdir(), "subagents-loader-"));
+  const packageDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+  const saved = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = join(root, "agent");
+  try {
+    const loaded = await discoverAndLoadExtensions([
+      packageDir,
+      join(packageDir, "pi-extension/subagents/subagent-done.ts"),
+      join(packageDir, "pi-extension/subagents/tools/safe-bash.ts"),
+    ], root, process.env.PI_CODING_AGENT_DIR);
+    assert.deepEqual(loaded.errors, []);
+    assert.equal(loaded.extensions.length, 3);
+    const tools = loaded.extensions.flatMap((extension) => [...extension.tools.keys()]);
+    assert.deepEqual(tools.sort(), ["ask_question", "safe_bash", "subagent", "subagent_message", "subagents_list"]);
+    assert.ok(loaded.extensions[0].commands.has("subagent"));
+    assert.ok(loaded.extensions[0].messageRenderers.has("subagent_result"));
+  } finally {
+    if (saved === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = saved;
+    rmSync(root, { recursive: true, force: true });
+  }
+});

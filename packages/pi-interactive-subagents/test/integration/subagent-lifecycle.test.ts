@@ -17,7 +17,8 @@
  */
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   getAvailableBackends,
   createTestEnv,
@@ -198,12 +199,16 @@ for (const backend of backends) {
       const surface = createTrackedSurface(env, `fork-${id}`);
       await sleep(1000);
 
+      writeFileSync(join(env.dir, ".pi/agents/test-fork.md"), [
+        "---", "name: test-fork", "tools: bash", "auto-exit: true", "session-mode: fork", "---",
+        "Complete the task directly.",
+      ].join("\n"));
       const task = [
         `Call the subagent tool with these EXACT parameters:`,
         `  name: "Fork-${id}"`,
-        `  fork: true`,
+        `  agent: "test-fork"`,
         `  task: "Run this bash command: echo 'FORK_OK_${id}' > '${markerFile}'"`,
-        `Do not set the agent parameter. Just set name, fork, and task.`,
+        `Context mode is configured on the role, not a tool parameter.`,
         `After you receive the result, say FORK_COMPLETE.`,
       ].join("\n");
 
@@ -238,36 +243,28 @@ for (const backend of backends) {
       }
     });
 
-    // ── caller_ping ──
+    // ── ask_question + name-based reply ──
 
-    it("subagent caller_ping sends notification back to the parent", async () => {
+    it("subagent asks a question and continues after the parent's reply", async () => {
       const id = uniqueId();
+      const markerFile = join(env.dir, `question-${id}.txt`);
 
-      const surface = createTrackedSurface(env, `ping-${id}`);
+      const surface = createTrackedSurface(env, `question-${id}`);
       await sleep(1000);
 
       const task = [
         `Call the subagent tool with these EXACT parameters:`,
         `  name: "Ping-${id}"`,
-        `  agent: "test-ping"`,
-        `  task: "PING_TEST_${id}"`,
-        `Just call the subagent tool once. Do not do anything else before calling it.`,
+        `  agent: "test-question"`,
+        `  task: "Ask the parent which token to write, then after their reply write that token to ${markerFile} using bash."`,
+        `When the child asks you a question, reply using subagent_message with name "Ping-${id}" and message "Write QUESTION_ANSWERED_${id}".`,
+        `Do not write the file yourself.`,
       ].join("\n");
 
       startPi(surface, env.dir, task);
 
-      // The test-ping agent calls caller_ping, which steers a "needs help" message
-      // back to the outer pi. Look for it on screen.
-      const screen = await waitForScreen(
-        surface,
-        /needs help|PING|caller_ping|ping/i,
-        PI_TIMEOUT,
-      );
-
-      assert.ok(
-        /needs help|PING/i.test(screen),
-        `Screen should show ping notification. Got:\n${screen.slice(-800)}`,
-      );
+      const answer = await waitForFile(markerFile, PI_TIMEOUT, new RegExp(`QUESTION_ANSWERED_${id}`));
+      assert.equal(answer.trim(), `QUESTION_ANSWERED_${id}`);
     });
 
     // ── Agent discovery ──
@@ -300,7 +297,7 @@ for (const backend of backends) {
 
     // ── Subagent with custom system prompt ──
 
-    it("passes systemPrompt to subagent", async () => {
+    it("loads the system prompt from the selected role", async () => {
       const id = uniqueId();
       const markerFile = `/tmp/pi-integ-sysprompt-${id}.txt`;
       trackTempFile(env, markerFile);
@@ -308,11 +305,14 @@ for (const backend of backends) {
       const surface = createTrackedSurface(env, `sysprompt-${id}`);
       await sleep(1000);
 
+      writeFileSync(join(env.dir, ".pi/agents/test-identity.md"), [
+        "---", "name: test-identity", "tools: bash", "auto-exit: true", "system-prompt: append", "---",
+        "You are the CUSTOM_PROMPT_ACTIVE test role. Complete the requested task directly.",
+      ].join("\n"));
       const task = [
         `Call the subagent tool with these parameters:`,
         `  name: "SysP-${id}"`,
-        `  agent: "test-echo"`,
-        `  systemPrompt: "Always start your response with CUSTOM_PROMPT_ACTIVE."`,
+        `  agent: "test-identity"`,
         `  task: "Write 'SYSPROMPT_${id}' to ${markerFile} using bash: echo 'SYSPROMPT_${id}' > '${markerFile}'"`,
         `After the subagent completes, say SYSPROMPT_TEST_DONE.`,
       ].join("\n");
