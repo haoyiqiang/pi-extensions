@@ -17,6 +17,11 @@ switch (command) {
     if (args.includes("-l")) {
       writeFileSync(path("command"), args.at(-1));
     } else if (args.at(-1) === "Enter") {
+      const command = readFileSync(path("command"), "utf8");
+      if (!command.startsWith("bash ")) {
+        writeFileSync(path("next-task"), command);
+        break;
+      }
       const fd = openSync(path("screen"), "w");
       const child = spawn("bash", ["-c", readFileSync(path("command"), "utf8")], {
         env: process.env, stdio: ["ignore", fd, fd], detached: true,
@@ -27,6 +32,7 @@ switch (command) {
     }
     break;
   case "capture-pane":
+    if (existsSync(path("diagnostics-unavailable"))) throw new Error("Fixture surface already disappeared");
     if (existsSync(path("screen"))) process.stdout.write(readFileSync(path("screen")));
     break;
   case "kill-pane":

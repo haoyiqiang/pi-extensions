@@ -50,14 +50,7 @@ import {
   getSubagentActivityFile,
   readSubagentActivityFile,
 } from "../pi-extension/subagents/activity.ts";
-import {
-  shouldMarkUserTookOver,
-  shouldAutoExitOnAgentEnd,
-  findLatestAssistantError,
-  runningChildrenCount,
-} from "../pi-extension/subagents/subagent-done.ts";
 import subagentDoneExtension from "../pi-extension/subagents/subagent-done.ts";
-import { __pollForExitTest__ } from "../pi-extension/subagents/tmux.ts";
 
 // --- Helpers ---
 
@@ -1101,19 +1094,19 @@ describe("subagent discovery", () => {
       testApi.resolveEffectiveInteractive({ name: "A", task: "T" }, { autoExit: true }),
       false,
     );
-    // Agents without auto-exit ARE interactive — parent does not receive status transition pings.
+    // Explicit resident agents default to quiet status notifications.
     assert.equal(
       testApi.resolveEffectiveInteractive({ name: "A", task: "T" }, { autoExit: false }),
       true,
     );
     assert.equal(
       testApi.resolveEffectiveInteractive({ name: "A", task: "T" }, {}),
-      true,
+      false,
     );
-    // Bare spawn with no agent defs (e.g. /iterate fork) is interactive by default.
+    // Omitted policy is autonomous, independent of notification configuration.
     assert.equal(
       testApi.resolveEffectiveInteractive({ name: "A", task: "T" }, null),
-      true,
+      false,
     );
   });
 
@@ -1435,114 +1428,6 @@ describe("subagent discovery", () => {
   });
 });
 describe("subagent-done.ts", () => {
-  describe("shouldMarkUserTookOver", () => {
-    it("ignores the initial injected task before the first agent run", () => {
-      assert.equal(shouldMarkUserTookOver(false), false);
-    });
-
-    it("treats later input as manual takeover", () => {
-      assert.equal(shouldMarkUserTookOver(true), true);
-    });
-  });
-
-  describe("shouldAutoExitOnAgentEnd", () => {
-    it("auto-exits after normal completion when there was no takeover", () => {
-      const messages = [{ role: "assistant", stopReason: "stop" }];
-      assert.equal(shouldAutoExitOnAgentEnd(false, messages), true);
-    });
-
-    it("auto-exits after normal completion even when the user sent the prompt", () => {
-      const messages = [{ role: "assistant", stopReason: "stop" }];
-      assert.equal(shouldAutoExitOnAgentEnd(true, messages), true);
-    });
-
-    it("stays open after Escape aborts the run", () => {
-      const messages = [{ role: "assistant", stopReason: "aborted" }];
-      assert.equal(shouldAutoExitOnAgentEnd(false, messages), false);
-    });
-
-    it("still exits when the latest turn ended with stopReason=error", () => {
-      // Auto-exit subagents must shut down on retry-exhaustion errors so the
-      // parent is woken. The error sidecar (written separately) carries the
-      // failure detail; staying open would just strand the worker.
-      const messages = [{ role: "assistant", stopReason: "error", errorMessage: "529 overloaded" }];
-      assert.equal(shouldAutoExitOnAgentEnd(false, messages), true);
-    });
-  });
-
-  describe("findLatestAssistantError", () => {
-    it("returns the error info from a stopReason=error message", () => {
-      const messages = [
-        { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "ok" }] },
-        { role: "toolResult", content: [] },
-        { role: "assistant", stopReason: "error", errorMessage: "Anthropic 529 Overloaded" },
-      ];
-      assert.deepEqual(findLatestAssistantError(messages), {
-        errorMessage: "Anthropic 529 Overloaded",
-        stopReason: "error",
-      });
-    });
-
-    it("returns null when the latest assistant turn completed normally", () => {
-      const messages = [
-        { role: "assistant", stopReason: "error", errorMessage: "old failure" },
-        { role: "user", content: [] },
-        { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "done" }] },
-      ];
-      assert.equal(findLatestAssistantError(messages), null);
-    });
-
-    it("returns null when the latest assistant turn was aborted by the user", () => {
-      const messages = [{ role: "assistant", stopReason: "aborted" }];
-      assert.equal(findLatestAssistantError(messages), null);
-    });
-
-    it("falls back to a placeholder when stopReason=error has no errorMessage field", () => {
-      const messages = [{ role: "assistant", stopReason: "error" }];
-      const info = findLatestAssistantError(messages);
-      assert.ok(info);
-      assert.equal(info!.stopReason, "error");
-      assert.match(info!.errorMessage, /stopReason=error/);
-    });
-
-    it("returns null when messages is undefined or empty", () => {
-      assert.equal(findLatestAssistantError(undefined), null);
-      assert.equal(findLatestAssistantError([]), null);
-    });
-  });
-
-  describe("runningChildrenCount", () => {
-    const KEY = Symbol.for("pi-subagents/running-children-count");
-    function withGlobal(value: unknown, run: () => void) {
-      const prev = (globalThis as any)[KEY];
-      (globalThis as any)[KEY] = value;
-      try {
-        run();
-      } finally {
-        (globalThis as any)[KEY] = prev;
-      }
-    }
-
-    it("returns 0 when the spawning tools aren't loaded (no global)", () => {
-      withGlobal(undefined, () => {
-        assert.equal(runningChildrenCount(), 0);
-      });
-    });
-
-    it("reflects the live child count published by index.ts", () => {
-      withGlobal(() => 3, () => {
-        assert.equal(runningChildrenCount(), 3);
-      });
-    });
-
-    it("treats zero/negative/non-number/throwing getters as 0", () => {
-      withGlobal(() => 0, () => assert.equal(runningChildrenCount(), 0));
-      withGlobal(() => -1, () => assert.equal(runningChildrenCount(), 0));
-      withGlobal(() => "two", () => assert.equal(runningChildrenCount(), 0));
-      withGlobal(() => { throw new Error("boom"); }, () => assert.equal(runningChildrenCount(), 0));
-    });
-  });
-
   describe("ask_question tool", () => {
     function setupSubagentExtension(sessionFile: string) {
       const saved = {
@@ -1609,139 +1494,9 @@ describe("subagent-done.ts", () => {
       }
     });
 
-    // Regression tests for the mid-run reply race: a reply steered in while the
-    // asking run is still open fires `input` but NOT `agent_start`, so the flag
-    // must be cleared on `input` or the session parks forever.
-    function setupCapturingExtension(sessionFile: string) {
-      const mock = createMockExtensionApi();
-      const { api, registeredTools: tools } = mock;
-      const saved = {
-        session: process.env.PI_SUBAGENT_SESSION,
-        name: process.env.PI_SUBAGENT_NAME,
-        agent: process.env.PI_SUBAGENT_AGENT,
-        autoExit: process.env.PI_SUBAGENT_AUTO_EXIT,
-      };
-      process.env.PI_SUBAGENT_SESSION = sessionFile;
-      process.env.PI_SUBAGENT_NAME = "scout-2";
-      process.env.PI_SUBAGENT_AGENT = "scout";
-      process.env.PI_SUBAGENT_AUTO_EXIT = "1";
-      subagentDoneExtension(api);
-      const emit = mock.emit;
-      const restore = () => {
-        restoreEnvVar("PI_SUBAGENT_SESSION", saved.session);
-        restoreEnvVar("PI_SUBAGENT_NAME", saved.name);
-        restoreEnvVar("PI_SUBAGENT_AGENT", saved.agent);
-        restoreEnvVar("PI_SUBAGENT_AUTO_EXIT", saved.autoExit);
-      };
-      const ask = async () => {
-        const tool = tools.find((t) => t.name === "ask_question");
-        await tool.execute("c1", { question: "v1 or v2?" }, undefined, undefined, { shutdown() {} });
-      };
-      return { emit, ask, restore };
-    }
-
-    it("exits (does not park) when the reply arrives mid-run via input", async () => {
-      const dir = createTestDir();
-      const { emit, ask, restore } = setupCapturingExtension(join(dir, "s.jsonl"));
-      try {
-        emit("agent_start");
-        await ask(); // sets awaitingAnswer mid-run
-        // Reply arrives MID-RUN as a steer: input fires, no new agent_start.
-        emit("input");
-        let shutdown = false;
-        emit("agent_end", { messages: [] }, { shutdown() { shutdown = true; } });
-        assert.equal(shutdown, true, "reply consumed mid-run → agent_end should exit, not park");
-      } finally {
-        restore();
-        rmSync(dir, { recursive: true, force: true });
-      }
-    });
-
-    it("parks as waiting at agent_end while the reply is still pending (no input yet)", async () => {
-      const dir = createTestDir();
-      const { emit, ask, restore } = setupCapturingExtension(join(dir, "s.jsonl"));
-      try {
-        emit("agent_start");
-        await ask();
-        // No input yet — the orchestrator has not replied.
-        let shutdown = false;
-        emit("agent_end", { messages: [] }, { shutdown() { shutdown = true; } });
-        assert.equal(shutdown, false, "pending question with no reply must park, not exit");
-      } finally {
-        restore();
-        rmSync(dir, { recursive: true, force: true });
-      }
-    });
-
-    it("exits when the reply arrives as a new turn (agent_start also clears the flag)", async () => {
-      const dir = createTestDir();
-      const { emit, ask, restore } = setupCapturingExtension(join(dir, "s.jsonl"));
-      try {
-        emit("agent_start");
-        await ask();
-        let shutdown1 = false;
-        emit("agent_end", { messages: [] }, { shutdown() { shutdown1 = true; } });
-        assert.equal(shutdown1, false, "parks while waiting");
-        // Reply arrives as a fresh turn after the subagent had parked.
-        emit("input");
-        emit("agent_start");
-        let shutdown2 = false;
-        emit("agent_end", { messages: [] }, { shutdown() { shutdown2 = true; } });
-        assert.equal(shutdown2, true, "after the reply turn, agent_end should exit");
-      } finally {
-        restore();
-        rmSync(dir, { recursive: true, force: true });
-      }
-    });
   });
 });
 
-describe("tmux.ts interpretExitSidecar", () => {
-  const { interpretExitSidecar } = __pollForExitTest__;
-
-  it("no longer decodes ping payloads (ask_question keeps the session open instead)", () => {
-    // ask_question writes a `.ask` signal, not a `.exit` ping sidecar, so an
-    // unknown `type: "ping"` payload now falls through to a clean done.
-    assert.deepEqual(
-      interpretExitSidecar({ type: "ping", name: "Worker", message: "need help" }),
-      { reason: "done", exitCode: 0 },
-    );
-  });
-
-  it("decodes done payloads", () => {
-    assert.deepEqual(interpretExitSidecar({ type: "done" }), {
-      reason: "done",
-      exitCode: 0,
-    });
-  });
-
-  it("decodes error payloads and propagates the message with a non-zero exit code", () => {
-    assert.deepEqual(
-      interpretExitSidecar({
-        type: "error",
-        errorMessage: "Anthropic 529 Overloaded after 3 retries",
-        stopReason: "error",
-      }),
-      {
-        reason: "error",
-        exitCode: 1,
-        errorMessage: "Anthropic 529 Overloaded after 3 retries",
-      },
-    );
-  });
-
-  it("falls back to a placeholder when error payload has no errorMessage", () => {
-    const result = interpretExitSidecar({ type: "error" });
-    assert.equal(result.reason, "error");
-    assert.equal(result.exitCode, 1);
-    assert.match(result.errorMessage ?? "", /no errorMessage/);
-  });
-
-  it("treats unknown payload shapes as done", () => {
-    assert.deepEqual(interpretExitSidecar({}), { reason: "done", exitCode: 0 });
-    assert.deepEqual(interpretExitSidecar(null), { reason: "done", exitCode: 0 });
-  });
-});
 describe("commands", () => {
   it("/subagent emits a spawn tool call for a known agent", () => {
     const { api, registeredCommands, sentUserMessages } = createMockExtensionApi();
@@ -1769,7 +1524,7 @@ describe("commands", () => {
 });
 
 describe("tool registration", () => {
-  it("always resumes subagents as autonomous (auto-exit, non-interactive tracking)", () => {
+  it("defaults missing legacy lifecycle policy to autonomous", () => {
     const testApi = (subagentsModule as any).__test__;
 
     assert.deepEqual(testApi.resolveResumeLaunchBehavior(), {
@@ -2302,7 +2057,8 @@ describe("subagent interruption", () => {
       "Worker",
     );
 
-    assert.match(presentation, /failed \(exit code 130\)/);
+    assert.match(presentation, /failed after final settlement/);
+    assert.match(presentation, /exited with code 130/);
     assert.doesNotMatch(presentation, /interrupted/);
     // Follow-ups reference the name (not the session id).
     assert.match(presentation, /subagent_message\(\{ name: "Worker"/);
@@ -2310,17 +2066,13 @@ describe("subagent interruption", () => {
   });
 
   it("renders a clear provider/agent error when errorMessage is set", () => {
-    // Previously, an overload retry-exhaustion produced exitCode 0 with a
-    // stale summary — the orchestrator thought the subagent finished
-    // quickly. With the error sidecar plumbed through, the presentation
-    // must call out the failure, include the underlying error, and tell the
-    // orchestrator how to recover.
+    // Final failure retains useful partial text alongside its diagnostic.
     const testApi = (subagentsModule as any).__test__;
     const presentation = testApi.resolveResultPresentation(
       {
         exitCode: 1,
         elapsed: 14,
-        summary: "ignored when errorMessage is present",
+        summary: "Useful partial work retained.",
         sessionFile: "/tmp/subagent.jsonl",
         sessionId: "019f-xyz",
         errorMessage: "Anthropic 529 Overloaded after 3 retries",
@@ -2329,11 +2081,11 @@ describe("subagent interruption", () => {
     );
 
     assert.match(presentation, /Sub-agent "Worker" failed/);
-    assert.match(presentation, /provider\/agent error — auto-retry exhausted/);
+    assert.match(presentation, /failed after final settlement/);
     assert.match(presentation, /Error: Anthropic 529 Overloaded after 3 retries/);
     assert.match(presentation, /subagent_message\(\{ name: "Worker"/);
     assert.doesNotMatch(presentation, /Session id:/);
-    assert.doesNotMatch(presentation, /ignored when errorMessage is present/);
+    assert.match(presentation, /Useful partial work retained/);
   });
 });
 

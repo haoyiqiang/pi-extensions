@@ -60,7 +60,7 @@ subagent_message({ name: "scout", message: "Also check the auth middleware" });
 ```
 
 - **Running** — the message is typed into the live pane (newlines flattened) and picked up at the next turn boundary. The call returns immediately; the eventual completion still arrives as a steer message.
-- **Finished** — the session is resumed with the message as the follow-up task, like a fresh spawn: fire-and-forget, always autonomous, result steered back later. The resumed run reclaims its original name.
+- **Finished** — the session is resumed with the message as the follow-up task: fire-and-forget, result steered back later. The resumed run reclaims its original name and restores its recorded lifetime and notification policies.
 
 Every spawn records name → session file in `artifacts/<sessionId>/subagent-registry.json`, so names stay addressable across pi restarts. A nested sub-agent that spawns children gets its own registry keyed by its own session id. Resume is refused with a clear error (listing known names) if the name isn't registered, the session file is gone, or the session predates sandboxed resume.
 
@@ -127,12 +127,20 @@ You are a specialized agent that does X...
 
 ### auto-exit
 
-With `auto-exit: true`, the session shuts down when the agent's turn ends — the agent just writes its final message and stops (there is no "done" tool). The last assistant message becomes the summary returned to the parent. Recommended for all autonomous agents.
+Omitting `auto-exit` now defaults to **autonomous** (`true`). The child publishes its final outcome only after Pi's `agent_settled` event: provider retries, queued work, compaction and recovery may still follow a low-level `agent_end`. There is no "done" tool. Autonomous children shut down only after their complete result is durably saved; sessions and results remain available for follow-up.
 
-Notes:
+Set `auto-exit: false` explicitly for a **resident** role. Each settled task still returns a result automatically, but the parent does not close the resident surface. It can accept another task in the same process. Resume restores this policy from the original snapshot rather than forcing autonomous behavior.
 
-- **Manual input does not strand an auto-exit sub-agent.** If a human types into the pane, the session still closes once that turn completes normally — only an escape/abort leaves it open.
-- **Auto-exit is suppressed while work is in flight:** the session parks as `waiting` instead of exiting when an `ask_question` is still unanswered, or when the agent's own child sub-agents are still running (a worker can stop after dispatching children and stays open until the last result returns).
+- **Manual input adds work, not residency.** It never changes the role's recorded lifetime policy. A manual abort is reported distinctly and leaves the child open for inspection or further input.
+- **Pending work suppresses finalization:** an unanswered `ask_question` or outstanding descendant work parks the child as `waiting`. The last descendant remains outstanding until Pi accepts its result.
+
+### Settled results
+
+Managed Pi children retain structured result artifacts containing the complete output, outcome, error diagnostic and exact session-entry source before notifying the parent or requesting shutdown. Success, final failure, manual abort, truncated output and no new output are distinct outcomes. Failure can include useful partial work; neither truncation nor absence of a new answer is shown as unconditional success. A resumed task cannot reuse an earlier task's answer.
+
+Automatic parent messages are bounded previews with a `Full result:` artifact reference. The `subagent_result` message details also include `outcome`, `resultFile` and `source`. Results do not depend on screen text, and a lost surface or failed diagnostic read cannot reverse an already saved outcome. A shell-level exit without a settled result is not success.
+
+This slice retains result evidence but does **not** yet promise result replay or notification deduplication across parent restarts/reloads. Stable addressing, durable inbox transport and correlated multi-question replies are separate lifecycle slices. The optional Claude Code path retains its legacy completion handling; the managed-Pi settlement guarantees do not cover it.
 
 ### interactive
 
