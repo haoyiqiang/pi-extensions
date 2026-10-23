@@ -9,7 +9,7 @@ import subagentDone from "../pi-extension/subagents/subagent-done.ts";
 import { buildSessionProjection, SessionManager } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { createMockExtensionApi, plainTheme, waitFor } from "./harness.ts";
-import { closeSurface, shellEscape } from "../pi-extension/subagents/tmux.ts";
+import { closeSurface, shellEscape } from "@kevinhao/pi-terminal-mux";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 
@@ -263,6 +263,7 @@ test("native delegation acknowledges launch before child completion and automati
     const identityFile = received.args[received.args.indexOf("--append-system-prompt") + 1];
     assert.equal(readFileSync(identityFile, "utf8"), "You are the deterministic echo role.");
     assert.ok(widgets.some((text) => text.includes("Echo")), "parent shows the delegated child");
+    assert.doesNotMatch(widgets.join("\n"), /\x1b\[/, "plain host theme must not be overridden by a hard-coded widget palette");
     assert.equal(parent.sentMessages.length, 0, "child remains active until explicitly released");
     writeFileSync(join(terminal, "finish"), "release");
     const delivered = await waitFor(() => parent.sentMessages.find((event) => event.message.customType === "subagent_result"), "automatic parent result");

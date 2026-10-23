@@ -6,6 +6,20 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { discoverAndLoadExtensions } from "@earendil-works/pi-coding-agent";
 
+test("root distribution loads one native subagent controller and no standalone CLI controller", async () => {
+  const root = mkdtempSync(join(tmpdir(), "subagents-root-loader-"));
+  try {
+    const loaded = await discoverAndLoadExtensions([resolve(import.meta.dirname, "../../..")], root, join(root, "agent"));
+    assert.deepEqual(loaded.errors, []);
+    const tools = loaded.extensions.flatMap((extension) => [...extension.tools.keys()]);
+    for (const name of ["subagent", "subagent_message", "subagents_list", "subagent_status", "subagent_stop"]) {
+      assert.equal(tools.filter((tool) => tool === name).length, 1, `${name} has exactly one default owner`);
+    }
+    assert.equal(loaded.extensions.some((extension) => extension.path.includes("pi-subagent/index.ts")), false,
+      "the independent CLI controller is opt-in, not a competing default lifecycle");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 // Use Pi's normal directory/manifest loading, not custom aliases or an author's
 // extension installation. Direct imports in the other tests independently verify
 // that the source does not require the loader's legacy compatibility aliases.

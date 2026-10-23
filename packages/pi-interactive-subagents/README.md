@@ -4,6 +4,18 @@ Async subagents for [Pi](https://github.com/earendil-works/pi), running in nativ
 
 This integration supports **tmux and Orca**, not headless delegation. The shared `pi-terminal-mux` library's headless contract for other consumers is unchanged.
 
+## Installation and controller ownership
+
+```sh
+pi install git:github.com/haoyiqiang/pi-extensions
+# Or try an existing checkout without changing package settings:
+pi -e /path/to/pi-extensions/packages/pi-interactive-subagents
+```
+
+The root profile loads **this controller exactly once**, not the separate `@kevinhao/pi-subagent` controller. The latter remains independently installable with its existing CLI and separate run store; this integration never imports, deletes or silently migrates that data. It does not edit packages you separately installed. Review any older interactive extension entry yourself and enable only one controller before reload.
+
+This imported workspace is **private, integration-only**. Its upstream npm name, version, repository and MIT attribution are preserved; no npm publication or package-ownership transfer is implied. It is deliberately absent from release-please/npm release jobs, while remaining subject to root architecture, resource, pack and actual independent-install verification. Packed resources include the child bridge, pre-Pi writer gate, selected-tool extensions, role definitions and optional legacy Claude plugin. Web tools resolve the declared `@kevinhao/pi-web-search` dependency, not personal extension aliases; other optional tools must have a valid explicit backing extension.
+
 ## How it works
 
 `subagent()` returns after native startup and the child bridge's ready signal, **not after task completion**. The complete launch command is supplied when mux creates the surface: a detached tmux split or an Orca split placed relative to the parent terminal. There is no interactive-shell startup delay or launch-key injection, and creation does not steal focus. A live widget tracks work; durable results are steered back automatically. Core tool feedback and result delivery work even when the parent runtime has no UI.
@@ -126,11 +138,11 @@ Unanswered questions survive child/parent reload and suppress terminal-result pu
 
 | Agent | Model | Tools | Role |
 | ----- | ----- | ----- | ---- |
-| **scout** | `openrouter/z-ai/glm-5.3` | `read`, `grep`, `find`, `ls` | Fast read-only codebase recon |
-| **researcher** | `openrouter/z-ai/glm-5.3` | `web_search`, `web_fetch`, `safe_bash` | Web research, synthesized into a sourced brief |
-| **worker** | `openrouter/z-ai/glm-5.3` | `read`, `write`, `edit`, `bash`, `web_search`, `web_fetch` + spawning | General implementer; may spawn `scout` and `researcher` |
+| **scout** | parent model | `read`, `grep`, `find`, `ls` | Fast read-only codebase recon |
+| **researcher** | parent model | `web_search`, `web_fetch`, `safe_bash` | Web research, synthesized into a sourced brief |
+| **worker** | parent model | `read`, `write`, `edit`, `bash`, `web_search`, `web_fetch` + spawning | General implementer; may spawn `scout` and `researcher` |
 
-All three are autonomous (`auto-exit: true`) and carry their identity in the system prompt (`system-prompt: append`).
+Bundled roles inherit the current parent model unless a call overrides it; no specific paid provider is required. All three are autonomous (`auto-exit: true`) and carry their identity in the system prompt (`system-prompt: append`).
 
 ## Custom agents
 
@@ -304,14 +316,23 @@ receipt, automatic parent results, and visible widgets/rendering. It makes no ex
 requests and does not use an existing tmux server or user terminal. A separate loader
 check exercises Pi's normal package-manifest and control-extension loading.
 
-Real-process terminal smoke tests remain explicitly opt-in:
+Actual independent packed installation and its native workflow are part of the root `npm run check` through `test:pack`, or can run alone:
 
 ```bash
-# Inside a disposable tmux session; requires configured model credentials.
-# This command starts real Pi processes and can incur model charges.
-npm run test:integration --workspace pi-interactive-subagents
-# Optional: PI_TEST_MODEL=provider/model PI_TEST_TIMEOUT=120000
+npm run test:install --workspace pi-interactive-subagents
 ```
+
+This packs the root, private controller and local runtime dependencies, installs real tarballs plus exact supported Pi peers in a fresh temporary npm consumer (no workspace symlinks), and runs the registered tools with actual Pi AgentSessions and a deterministic local provider. It covers bundled-role discovery/resources, asynchronous spawn, multiline send, independent questions/correlated replies, settled retained results, reload with a live writer, actual parent replacement, automatic known-safe continuation and retained stop. The root composition honors Distill's `outputRequest: RAW` contract. Dependencies use an OS-temporary `pi-subagents-install-cache`; the consumer is removed unless `PI_SUBAGENT_KEEP_INSTALL=1` is explicitly set for diagnosis. No paid model, author-installed alias, or personal configuration is used.
+
+Real-process terminal smoke reuses **the same semantic workflow and provider**, explicitly opt-in:
+
+```bash
+# Only inside a disposable parent tmux session or Orca terminal/workspace:
+PI_SUBAGENT_SMOKE_BACKEND=tmux npm run test:integration -w pi-interactive-subagents
+PI_SUBAGENT_SMOKE_BACKEND=orca npm run test:integration -w pi-interactive-subagents
+```
+
+These create/close real owned child surfaces and load the full root profile, including Spark's terminal naming. Do not run in user-owned work terminals. Only provider IO is local/deterministic; no credentials or paid calls are required. Assertions use native tool results, correlated question IDs, persisted results, continuation inputs and confirmed writer exit/closure, **never broad screen regexes that can match prompt echo**. No environment silently falls back to headless; an explicit supported backend and parent terminal identity are required.
 
 This includes the [#3 native-tool prefactor](https://github.com/haoyiqiang/pi-extensions/issues/3),
 [#4 role/loadout safety](https://github.com/haoyiqiang/pi-extensions/issues/4),
@@ -322,8 +343,8 @@ This includes the [#3 native-tool prefactor](https://github.com/haoyiqiang/pi-ex
 [#9 branch-aware context/results](https://github.com/haoyiqiang/pi-extensions/issues/9) and
 [#10 reload/parent recovery](https://github.com/haoyiqiang/pi-extensions/issues/10),
 [#11 correlated questions/descendant waits](https://github.com/haoyiqiang/pi-extensions/issues/11) and
-[#12 suspension/continuation/retained stop](https://github.com/haoyiqiang/pi-extensions/issues/12), not
-all of [Spec #2](https://github.com/haoyiqiang/pi-extensions/issues/2). Public-tool tests
+[#12 suspension/continuation/retained stop](https://github.com/haoyiqiang/pi-extensions/issues/12), plus
+[#13 installation/compatibility delivery](https://github.com/haoyiqiang/pi-extensions/issues/13). Final two-axis review of [Spec #2](https://github.com/haoyiqiang/pi-extensions/issues/2) remains a separate acceptance gate. Public-tool tests
 cover role aliases/precedence/visibility, missing versus empty tools, invalid resources
 and snapshots, model/cwd/identity/skill/isolation replay, lifetime policy, nested refusals
 and settled result publication. Terminal tests use the existing child runtime and

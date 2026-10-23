@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import subagents, { registerToolExtension } from "../pi-extension/subagents/index.ts";
 import { createMockExtensionApi, waitFor } from "./harness.ts";
-import { closeSurface, shellEscape } from "../pi-extension/subagents/tmux.ts";
+import { closeSurface, shellEscape } from "@kevinhao/pi-terminal-mux";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 
@@ -107,7 +107,8 @@ test("resume replays resolved model, cwd, identity, skills, isolation and lifeti
     const extension = join(config, "extensions/web-fetch/index.ts");
     mkdirSync(dirname(extension), { recursive: true });
     writeFileSync(extension, "export default function () {}\n");
-    const path = role("original", "name: pinned\ntools: read,web_fetch\ncwd: workspace\nskills: fixture-skill\nno-skills: true\nno-prompt-templates: true\nno-context-files: true\nsystem-prompt: replace");
+    registerToolExtension("pinned_fixture_tool", extension);
+    const path = role("original", "name: pinned\ntools: read,pinned_fixture_tool\ncwd: workspace\nskills: fixture-skill\nno-skills: true\nno-prompt-templates: true\nno-context-files: true\nsystem-prompt: replace");
     const launched = await call("subagent", { agent: "pinned", task });
     assert.equal(launched.details.status, "started");
     const first = await received();

@@ -19,7 +19,8 @@
 | [`@kevinhao/pi-models-discovery`](./packages/pi-models-discovery) | 自动发现 models.json 中标记 `discoverModels` 的 provider 的模型列表，启动走持久化缓存，并提供手动刷新命令。 | [English](./packages/pi-models-discovery/README.md) · [中文](./packages/pi-models-discovery/README.zh-CN.md) |
 | [`@kevinhao/pi-utils`](./packages/pi-utils) | 工具库：可移植的 JSON 配置读写，以及确定性的测试 fixture。不是 Pi 扩展。 | [English](./packages/pi-utils/README.md) · [中文](./packages/pi-utils/README.zh-CN.md) |
 | [`@kevinhao/pi-web-search`](./packages/pi-web-search) | 整合 LLM 内置网络搜索、独立 Search API、Gemini/Vertex URL Context、有界网页抓取和可选 GitHub 仓库提取。 | [English](./packages/pi-web-search/README.md) · [中文](./packages/pi-web-search/README.zh-CN.md) |
-| [`@kevinhao/pi-subagent`](./packages/pi-subagent) | 通过 `pi-terminal-mux` 在终端分栏中运行持久子代理，不提供 `/subagent` 命令。 | [English](./packages/pi-subagent/README.md) · [中文](./packages/pi-subagent/README.zh-CN.md) |
+| [`pi-interactive-subagents`](./packages/pi-interactive-subagents) | 默认原生异步子代理控制器，保留会话、关联问题，支持 reload 与安全续作；private Git／本地集成，不发布 npm。 | [English](./packages/pi-interactive-subagents/README.md) · [中文](./packages/pi-interactive-subagents/README.zh-CN.md) |
+| [`@kevinhao/pi-subagent`](./packages/pi-subagent) | 独立选择安装的 CLI／分栏实现，不进入根 profile，不提供 `/subagent` 命令。 | [English](./packages/pi-subagent/README.md) · [中文](./packages/pi-subagent/README.zh-CN.md) |
 
 共享库会发布到 npm 供功能包依赖。[`@kevinhao/pi-utils`](./packages/pi-utils) 是工具库，不是 Pi 扩展，负责可移植的 JSON 配置读写和确定性测试 fixture。[`@kevinhao/pi-terminal-mux`](./packages/pi-terminal-mux) 提供终端 surface 操作。
 
@@ -27,19 +28,19 @@
 
 > `pi-session-tools` 已退役并从本仓库移除。对于历史会话中的 `session-squash` 条目，明确提供兼容逻辑的包仍可读取。
 
-> `pi-interactive-subagents`、`pi-subagents` 与 `pi-workflow` 已退役并从本仓库移除。重新加载前，请先停止旧任务，并移除单独安装的旧入口；不保留旧子代理工具、`/plan`／`/iterate`／`/subagent` 别名及 `/wf` 命令。[`@kevinhao/pi-subagent`](./packages/pi-subagent) 是独立的分栏子代理，不会恢复这些命令。
+> 根 profile 现在只加载统一 [`pi-interactive-subagents`](./packages/pi-interactive-subagents) 一个子代理控制器。`pi-subagents`、`pi-workflow` 仍退役，不恢复 `/plan`／`/iterate`／`/wf`。若曾单独安装旧交互控制器，请自行检查配置，只启用一个入口再 reload；本仓库不自动修改用户额外安装的配置。独立 [`@kevinhao/pi-subagent`](./packages/pi-subagent) CLI 和 run store 保持不变，不静默导入、删除或迁移其历史。
 
 插件管理类斜杠命令统一采用 `/config:<功能>[-动作]` 命名。
 
 ## 一键安装全部扩展
 
-要求：Pi 0.87.1 或经过验证的兼容扩展运行时，以及 Node.js 22 或更高版本。
+要求：Pi 0.87.1 或经过验证的兼容扩展运行时，以及 Node.js 22.19 或更高版本。
 
 ```bash
 pi install git:github.com/haoyiqiang/pi-extensions
 ```
 
-仓库根目录本身也是一个显式维护的全量 Pi profile。manifest 逐项列出扩展入口，并包含 `pi-spark` 主题；`pi-terminal-mux` 等纯库包不会被当成扩展加载。新增 workspace 包不会自动进入这个 profile。
+仓库根目录本身也是一个显式维护的全量 Pi profile。manifest 逐项列出默认扩展入口（排除独立 CLI 控制器），并包含 `pi-spark` 主题；`pi-terminal-mux` 等纯库包不会被当成扩展加载。新增 workspace 包不会自动进入这个 profile。
 
 全量 profile 会有意同时启用若干侵入性能力：`pi-spark` 替换 editor/footer 并折叠运行过程，`pi-distill` 改写工具结果。如果不需要完整组合，已发布的能力包可以通过 npm 单独安装。
 profile 也加载 `pi-action-fusion`，但功能保持关闭，需明确运行 `/config:action-fusion enable` 并 `/reload` 才启用。它不替换 `pi-distill`，也不接管自动压缩。
@@ -69,7 +70,9 @@ npm run check
 
 `check` 会执行 workspace 类型检查、测试，以及可移植性和 i18n 门禁。
 
-已退役的交互式 subagent 与 workflow 产品不再是 workspace、根 profile 入口或发布候选；其外部归档不是本仓库依赖。当前的分栏子代理是 `pi-subagent`。
+导入的交互控制器保留上游名称、版本、仓库与 MIT 归属，作为 private integration-only workspace 进入根部署、打包资源和独立安装门禁，但明确排除 release-please／npm 发布；本次不迁移包所有权。独立公开 `pi-subagent` 保留自己的发布和 CLI 契约。
+
+`npm run check` 实际安装打包后的根套件和独立控制器，用 Pi 0.87.1 与确定性本地 provider 贯通发现、启动、消息、问答、settlement、reload、挂起续作和保留历史的 stop。仅使用临时 npm consumer／受控 cache，不依赖个人扩展路径，不访问付费模型或用户终端。真实 tmux／Orca smoke 需显式选择并在可丢弃的终端运行，见控制器 README。
 
 仓库根 `.npmrc` 固定 `https://registry.npmjs.org/`，保证 lockfile 里的 tarball 地址可移植。用镜像 registry 安装会把地址改写成镜像域名，导致 npm 12+ 的 `npm ci` 报 `EALLOWREMOTE`；`node scripts/check-lockfile-registry.mjs`（已纳入 `npm run check`）在合并前拦下这类改动。
 

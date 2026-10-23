@@ -1,6 +1,18 @@
 {
   "name": "pi-interactive-subagents",
   "version": "3.7.2",
+  "private": true,
+  "main": "./pi-extension/subagents/index.ts",
+  "exports": "./pi-extension/subagents/index.ts",
+  "files": [
+    "pi-extension",
+    "agents",
+    "config.json.example",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE",
+    "tsconfig.json"
+  ],
   "description": "Interactive subagents for pi with native tmux and Orca surfaces",
   "keywords": [
     "pi-package"
@@ -18,10 +30,12 @@
   "scripts": {
     "typecheck": "tsc --noEmit --pretty false",
     "test": "tsx --test --test-concurrency=2 test/test.ts test/lifecycle.test.ts test/role-loadout.test.ts test/terminal-lifecycle.test.ts test/loader.test.ts test/runtime-contract.test.ts test/identity.test.ts",
-    "test:integration": "tsx --test --test-concurrency=1 test/integration/*.test.ts"
+    "test:install": "node ../../scripts/check-subagents-install.mjs",
+    "test:integration": "node ../../scripts/check-subagents-install.mjs --real"
   },
   "dependencies": {
-    "@kevinhao/pi-terminal-mux": "^0.6.5"
+    "@kevinhao/pi-terminal-mux": "^0.6.5",
+    "@kevinhao/pi-web-search": "^1.6.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.87.1",

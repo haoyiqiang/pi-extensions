@@ -4,6 +4,10 @@ Observable, persistent Pi subagents for independent reviews, investigations, and
 
 Each subagent runs in its own terminal panel with a dedicated Pi JSONL session. The parent can inspect status, wait for durable results, steer active work, or queue follow-ups; the panel sits beside the current terminal, so no attach command is needed.
 
+## Compatibility with the root suite
+
+This remains the independently installed CLI/panel implementation, not the root suite's default native controller. The root profile uses `pi-interactive-subagents` and does not load this extension, change separately installed package settings, import this run store or delete its history. Its managed-Pi reliability/retained-stop guarantees do not change the CLI semantics documented below (including this package's destructive `stop`). Choose the controller deliberately; no migration is automatic.
+
 ## Requirements
 
 - Pi

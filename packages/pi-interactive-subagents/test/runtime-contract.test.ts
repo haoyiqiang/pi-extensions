@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { createAssistantMessageEventStream, type AssistantMessage, type ToolCall } from "@earendil-works/pi-ai";
 import { createAgentSession, AgentSessionRuntime, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager, type AgentSession } from "@earendil-works/pi-coding-agent";
 import subagents from "../pi-extension/subagents/index.ts";
-import { closeSurface, shellEscape } from "../pi-extension/subagents/tmux.ts";
+import { closeSurface, shellEscape } from "@kevinhao/pi-terminal-mux";
 import { plainTheme, waitFor } from "./harness.ts";
 
 // Approved tool/lifecycle seam, but with the supported Pi AgentSession and real

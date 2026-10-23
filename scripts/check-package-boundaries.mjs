@@ -15,6 +15,7 @@ const PACKAGE_LAYERS = new Map([
   ["@kevinhao/pi-web-search", "capability"],
   ["@kevinhao/pi-models-discovery", "capability"],
   ["@kevinhao/pi-subagent", "capability"],
+  ["pi-interactive-subagents", "capability"],
 ]);
 
 const ALLOWED_WORKSPACE_EDGES = new Set([
@@ -27,6 +28,8 @@ const ALLOWED_WORKSPACE_EDGES = new Set([
   "@kevinhao/pi-models-discovery -> @kevinhao/pi-utils",
   "@kevinhao/pi-subagent -> @kevinhao/pi-terminal-mux",
   "@kevinhao/pi-subagent -> @kevinhao/pi-utils",
+  "pi-interactive-subagents -> @kevinhao/pi-terminal-mux",
+  "pi-interactive-subagents -> @kevinhao/pi-web-search",
 ]);
 
 const errors = [];
