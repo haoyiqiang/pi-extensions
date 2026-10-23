@@ -21,7 +21,12 @@ async function withTerminal(backend: "tmux" | "orca" | "unsupported", run: (h: a
   const bin = join(root, "bin");
   const sessions = join(root, "sessions");
   for (const dir of [join(project, ".pi/agents"), terminal, bin, sessions]) mkdirSync(dir, { recursive: true });
-  for (const name of ["tmux", "orca"]) copyFileSync(join(testDir, "fixtures/terminal.mjs"), join(bin, name));
+  copyFileSync(join(testDir, "fixtures/terminal.mjs"), join(bin, "tmux"));
+  copyFileSync(join(testDir, "fixtures/terminal.mjs"), join(bin, "orca-runtime.mjs"));
+  // Runtime probing has a 1.5s production bound. Keep this cheap probe free of
+  // Node startup/disk contention; native terminal operations still use the real
+  // executable fixture below, not a mocked controller or mux implementation.
+  writeFileSync(join(bin, "orca"), `#!/bin/sh\nif [ "$1" = status ]; then printf '%s\\n' '{"ok":true,"result":{}}'; else exec ${shellEscape(process.execPath)} ${shellEscape(join(bin, "orca-runtime.mjs"))} "$@"; fi\n`, { mode: 0o755 });
   const runtime = [process.execPath, "--import", fileURLToPath(import.meta.resolve("tsx")), join(testDir, "fixtures/runtime.ts")].map(shellEscape).join(" ");
   writeFileSync(join(bin, "pi"), `#!/bin/sh\nexec ${runtime} "$@"\n`, { mode: 0o755 });
   for (const key of Object.keys(process.env)) if (key.startsWith("PI_SUBAGENT_")) delete process.env[key];

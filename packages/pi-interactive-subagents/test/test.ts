@@ -13,10 +13,6 @@ import {
   getNewEntries,
   countSessionEntryLines,
   getSessionId,
-  readNameRegistry,
-  registerName,
-  resolveNameInRegistry,
-  nameRegistryPath,
   resetSessionIndexCache,
   resolveSessionFileById,
   findLastAssistantMessage,
@@ -273,36 +269,6 @@ describe("session.ts", () => {
       // cheap refresh should index it.
       const b = writeSession(dir, "second.jsonl", "id-second");
       assert.equal(resolveSessionFileById("id-second", dir), b);
-    });
-  });
-
-  describe("subagent name registry", () => {
-    it("registers and resolves a name to its session file", () => {
-      const adir = join(dir, "art-1");
-      registerName(adir, "worker", { sessionFile: "/s/worker.jsonl", sessionId: "id-worker" });
-      const entry = resolveNameInRegistry(adir, "worker");
-      assert.deepEqual(entry, { sessionFile: "/s/worker.jsonl", sessionId: "id-worker" });
-      assert.ok(existsSync(nameRegistryPath(adir)));
-    });
-
-    it("accumulates multiple names and overwrites on re-register", () => {
-      const adir = join(dir, "art-2");
-      registerName(adir, "scout", { sessionFile: "/s/scout.jsonl", sessionId: "id-scout" });
-      registerName(adir, "scout-2", { sessionFile: "/s/scout2.jsonl", sessionId: "id-scout2" });
-      const reg = readNameRegistry(adir);
-      assert.deepEqual(Object.keys(reg).sort(), ["scout", "scout-2"]);
-      // Overwrite scout with a new session file.
-      registerName(adir, "scout", { sessionFile: "/s/scout-new.jsonl", sessionId: "id-scout-new" });
-      assert.equal(resolveNameInRegistry(adir, "scout")!.sessionFile, "/s/scout-new.jsonl");
-    });
-
-    it("returns null for unknown names and {} for a missing/corrupt registry", () => {
-      const adir = join(dir, "art-3");
-      assert.equal(resolveNameInRegistry(adir, "nope"), null);
-      assert.deepEqual(readNameRegistry(adir), {});
-      mkdirSync(adir, { recursive: true });
-      writeFileSync(nameRegistryPath(adir), "not json{", "utf8");
-      assert.deepEqual(readNameRegistry(adir), {});
     });
   });
 
@@ -1454,7 +1420,7 @@ describe("tool registration", () => {
       "agent and task must be required",
     );
     // `name` is now optional and purely cosmetic.
-    assert.match(props.name.description, /cosmetic/i);
+    assert.match(props.name.description, /actual assigned name and stable id/i);
     // The removed override knobs must be gone.
     for (const gone of ["tools", "skills", "systemPrompt", "fork", "interactive", "resumeSessionId"]) {
       assert.equal(props[gone], undefined, `expected ${gone} param to be removed`);
@@ -1482,7 +1448,7 @@ describe("tool registration", () => {
     assert.match(output, /\(unnamed\)/);
   });
 
-  it("registers subagent_message with name + message both required (name-only addressing)", () => {
+  it("registers subagent_message with id/name addressing and a required message", () => {
     const { api, registeredTools } = createMockExtensionApi();
     (subagentsModule as any).default(api);
 
@@ -1492,15 +1458,15 @@ describe("tool registration", () => {
     const props = messageTool.parameters.properties;
     assert.deepEqual(
       Object.keys(props).sort(),
-      ["message", "name"],
-      "only name/message should remain (sessionId dropped)",
+      ["id", "message", "name"],
+      "address by stable id or scoped name (sessionId is not authority)",
     );
     assert.equal(props.message.type, "string");
     assert.equal(props.name.type, "string");
     assert.deepEqual(
       messageTool.parameters.required?.slice().sort(),
-      ["message", "name"],
-      "name and message should both be required",
+      ["message"],
+      "target selection is validated by the management boundary",
     );
     assert.equal(props.sessionId, undefined, "sessionId should be removed");
     assert.equal(props.autoExit, undefined, "autoExit knob should be removed");
@@ -1711,94 +1677,6 @@ describe("subagent interruption", () => {
     assert.equal(names.includes("subagent_resume"), false);
   });
 
-  it("resolves a running subagent by exact name and reports ambiguity", () => {
-    const testApi = (subagentsModule as any).__test__;
-    const runningMap = testApi.runningSubagents as Map<string, any>;
-    runningMap.clear();
-
-    try {
-      runningMap.set("a1", makeRunning({ id: "a1", name: "Worker", surface: "a1", sessionFile: "a1.jsonl" }));
-      runningMap.set("b2", makeRunning({ id: "b2", name: "Worker", surface: "b2", sessionFile: "b2.jsonl" }));
-      runningMap.set("c3", makeRunning({ id: "c3", name: "Scout", surface: "c3", sessionFile: "c3.jsonl" }));
-
-      const byName = testApi.resolveRunningByName("Scout");
-      assert.equal(byName.running.id, "c3");
-
-      const ambiguous = testApi.resolveRunningByName("Worker");
-      assert.match(ambiguous.error, /Ambiguous subagent name/);
-
-      const missing = testApi.resolveRunningByName("Ghost");
-      assert.match(missing.error, /No running subagent named "Ghost"/);
-    } finally {
-      runningMap.clear();
-    }
-  });
-
-  it("uniqueRunningName suffixes defaulted names that collide with running subagents", () => {
-    const testApi = (subagentsModule as any).__test__;
-    const runningMap = testApi.runningSubagents as Map<string, any>;
-    runningMap.clear();
-
-    try {
-      // No collision: base name is returned untouched.
-      assert.equal(testApi.uniqueRunningName("worker"), "worker");
-
-      runningMap.set("a1", makeRunning({ id: "a1", name: "worker", surface: "a1" }));
-      assert.equal(testApi.uniqueRunningName("worker"), "worker-2");
-
-      runningMap.set("b2", makeRunning({ id: "b2", name: "worker-2", surface: "b2" }));
-      assert.equal(testApi.uniqueRunningName("worker"), "worker-3");
-
-      // A distinct base is unaffected by the worker collisions.
-      assert.equal(testApi.uniqueRunningName("scout"), "scout");
-    } finally {
-      runningMap.clear();
-    }
-  });
-
-  it("uniqueRunningName also avoids names already taken in the persistent registry", () => {
-    const testApi = (subagentsModule as any).__test__;
-    const runningMap = testApi.runningSubagents as Map<string, any>;
-    const reserved = testApi.reservedNames as Set<string>;
-    runningMap.clear();
-    reserved.clear();
-
-    try {
-      // A finished subagent's name lives in the registry even though nothing is
-      // running — a fresh default must skip it so names stay unique session-wide.
-      const registryNames = new Set(["worker", "worker-2"]);
-      assert.equal(testApi.uniqueRunningName("worker", registryNames), "worker-3");
-      // A name not in the registry (or running/reserved) is unaffected.
-      assert.equal(testApi.uniqueRunningName("scout", registryNames), "scout");
-      // An empty registry behaves like before.
-      assert.equal(testApi.uniqueRunningName("worker", new Set()), "worker");
-    } finally {
-      runningMap.clear();
-      reserved.clear();
-    }
-  });
-
-  it("uniqueRunningName also avoids names reserved by in-flight parallel spawns", () => {
-    const testApi = (subagentsModule as any).__test__;
-    const runningMap = testApi.runningSubagents as Map<string, any>;
-    const reserved = testApi.reservedNames as Set<string>;
-    runningMap.clear();
-    reserved.clear();
-
-    try {
-      // Simulate the first parallel spawn reserving its default name before it
-      // has registered in runningSubagents.
-      reserved.add(testApi.uniqueRunningName("scout")); // "scout"
-      // The second spawn, running concurrently, must not reuse it.
-      assert.equal(testApi.uniqueRunningName("scout"), "scout-2");
-      reserved.add("scout-2");
-      assert.equal(testApi.uniqueRunningName("scout"), "scout-3");
-    } finally {
-      runningMap.clear();
-      reserved.clear();
-    }
-  });
-
   it("steers a running subagent by typing into its pane (newlines flattened)", () => {
     const testApi = (subagentsModule as any).__test__;
     let sentSurface = "";
@@ -1824,19 +1702,6 @@ describe("subagent interruption", () => {
     });
 
     assert.match(result.error, /Failed to deliver message/);
-  });
-
-  it("requires a message when steering", () => {
-    const testApi = (subagentsModule as any).__test__;
-    const runningMap = testApi.runningSubagents as Map<string, any>;
-    runningMap.clear();
-    try {
-      runningMap.set("a1", makeRunning());
-      const result = testApi.handleSubagentSteer({ name: "Worker", message: "  " }, () => {});
-      assert.match(result.content[0].text, /`message` is required/);
-    } finally {
-      runningMap.clear();
-    }
   });
 
   it("formats exit code 130 as an ordinary failure", () => {

@@ -27,14 +27,15 @@ Spawn several in parallel — they run concurrently and steer results back indep
 - Child readiness has a 15-second budget after native creation. Failed startup cleans up its owned surface and confirms absence where possible. Closure reconciliation has a 3-second budget after the bounded backend close call; backend command/inventory timeouts are additional finite bounds. The obsolete `PI_SUBAGENT_SHELL_READY_DELAY_MS` setting is no longer used.
 - Failed or unconfirmed closure retains an inspectable `<session>.terminal-<execution>.json` diagnostic and ownership, and emits a status message with that path. It does not reverse durable success or claim a completed cleanup. An ambiguous create receipt retains its launch script/diagnostic and is never automatically retried; an unidentified surface may require manual terminal inspection.
 
-These terminal diagnostics are not a persistent run controller. Cross-reload ownership reconstruction and full parent recovery belong to subsequent lifecycle slices.
+Persistent run facts now back identity, status and the widget. Full watcher takeover, inbox transport and parent recovery still belong to subsequent lifecycle slices; reading a record does not restart or take over its child.
 
 ## Tools
 
 | Tool | Description |
 | --- | --- |
 | `subagent` | Spawn a sub-agent in a dedicated tmux/Orca surface (async) |
-| `subagent_message` | Message a sub-agent by name — steers it if running, resumes its session if finished |
+| `subagent_message` | Address an owned collaborator by stable ID or unique name — steer active work or start the next generation |
+| `subagent_status` | List this parent's recorded collaborators, or inspect an ID/name, lifecycle, liveness and latest result reference |
 | `subagents_list` | List available agent definitions |
 | `ask_question` | *(sub-agent sessions only)* Ask the orchestrator a question and wait for the reply |
 
@@ -51,26 +52,35 @@ subagent({ agent: "worker", name: "dark-mode", task: "Implement the dark mode to
 | --------- | ---- | ------- | ----------- |
 | `agent` | string | required | Which agent to spawn (must be known and permitted) |
 | `task` | string | required | Task prompt |
-| `name` | string | agent name | Display name for the pane and widget. Must be unique — duplicates are auto-suffixed (`scout`, `scout-2`, …) |
+| `name` | string | agent name | Readable handle, 1–64 Unicode characters after NFKC/whitespace normalization. Control characters and line breaks are rejected before launch artifacts. Default and explicit collisions are suffixed within the parent (`scout`, `scout-2`, …), shortening the base when necessary |
 | `model` | string | role, then parent model | Override with an exact `provider/model` ID (or an unambiguous exact model ID) |
 | `cwd` | string | agent's `cwd` | Working directory (see [Role folders](#role-folders)) |
 
 ### Messaging
 
-`subagent_message` is addressed **by name only**. Names are unique per session and persist after a sub-agent finishes, so the same name works either way:
+Launch acknowledgement includes **stable `id`, actual assigned `name`, `generation` and startup status**. Completion retains the identity. A follow-up after settlement starts a new work generation; steering active work keeps its generation. A resident child can start another generation without another Pi process.
+
+`subagent_message` accepts `id`, `name`, or both. Both must identify the same collaborator, and every operation is scoped to the current parent session:
 
 ```typescript
 subagent_message({ name: "scout", message: "Also check the auth middleware" });
+subagent_message({ id: "<id returned by subagent>", message: "Review the fix" });
+subagent_status({}); // recorded collaborators, not role definitions
+subagent_status({ id: "<stable id>", name: "scout" });
 ```
 
 - **Running** — the message is typed into the live pane (newlines flattened) and picked up at the next turn boundary. The call returns immediately; the eventual completion still arrives as a steer message.
 - **Finished** — the session is resumed with the message as the follow-up task: fire-and-forget, result steered back later. The resumed run reclaims its original name and restores its recorded lifetime and notification policies.
 
-Every spawn records name → session file in `artifacts/<sessionId>/subagent-registry.json`, so names stay addressable across pi restarts. A nested sub-agent that spawns children gets its own registry keyed by its own session id. Resume is refused with a clear error (listing known names) if the name isn't registered, the session file is gone, or the session predates sandboxed resume.
+Each parent's `artifacts/<sessionId>/subagent-runs.json` retains ownership, child session, terminal/backend, validated effective loadout, writer identity, work generation and latest result reference. Atomic publication is combined with short cross-process critical sections, so unrelated concurrent updates and name reservations cannot overwrite one another. Read/write failures are errors, not an empty registry or a successful launch. Legacy interactive name registries remain inspectable; normalized duplicate aliases are ambiguous and require ID addressing. Unknown legacy writers cannot be resumed just because their surface is missing.
+
+The managed-Pi startup script runs a **single-use writer gate before Pi opens the transcript** (opening can itself migrate/write history). Its persistent claim outlives the parent process and is reusable only after the gate observes Pi's actual exit. Replayed native startup commands fail before opening Pi. Heartbeat age, a completed task, a missing surface and a parent restart are **not** writer-exit proof. A killed exit observer or an orphaned short mutation lock is retained for inspection rather than stolen on a stale timeout. This deliberately favors a diagnosable refusal over two writers.
+
+While a launch/resume is reserved, another request fails explicitly as **not accepted**; this slice does not durably queue it. A replacement controller can query a live writer but does not steer, restart or take it over. Old-generation observation and cleanup cannot update or close its replacement. `subagent_status` and the widget project the same retained outcomes; completed resident surfaces are not counted as running delegated work. Full inbox acceptance/consumption, reload takeover, suspension and notification replay remain out of scope here.
 
 **Resume replays the original loadout.** Before launch, a versioned, validated `<session>.loadout.json` snapshot records the actual tool allowlist and extension paths, qualified model, thinking, identity/prompt mode, selected skill paths, cwd/config root, isolation options, delegation policy and auto-exit/resident policy. Editing, moving or deleting the role does not change a resumed child. Required resources and model availability are checked again; references pin paths, not dependency file contents.
 
-Missing, partial, corrupt or unknown-version snapshots cannot become unrestricted launches. Unsafe legacy records remain readable but cannot resume: the error asks you to delegate a fresh named role and leaves history intact. Only legacy records with explicitly pinned, restrictive built-in/control tools, model/thinking, cwd/config and lifecycle fields can resume; old custom-extension or delegation grants cannot be verified.
+Missing, partial, corrupt or unknown-version snapshots cannot become unrestricted launches. Unsafe legacy records remain readable but cannot resume: the error asks you to delegate a fresh named role and leaves history intact. Restrictive legacy loadout snapshots with explicitly pinned built-in/control tools, model/thinking, cwd/config and lifecycle fields remain supported for otherwise fenced records; old custom-extension or delegation grants cannot be verified. A loadout alone is never proof that a legacy writer exited.
 
 ### ask_question
 
@@ -115,7 +125,7 @@ You are a specialized agent that does X...
 | `model` | string | Exact role model; precedence is call override > role > current parent model |
 | `thinking` | string | `minimal`, `low`, `medium`, or `high` |
 | `tools` | string | **Required.** Omission is a configuration error; an empty `tools:` grants only conversation and required control capabilities (`ask_question`). Strict tool allowlist. Built-ins: `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`. Extension-backed: `web_search`, `web_fetch`, `safe_bash`, `video_extract`, `youtube_search`, `google_image_search`. Only the extensions backing the listed tools are loaded into the child |
-| `subagent_agents` | string | Comma-separated agent names this agent may spawn. **Presence of this field grants the spawning toolset** (`subagent`, `subagent_message`, `subagents_list`) and restricts spawn targets to the list. Omit it and the agent cannot spawn at all |
+| `subagent_agents` | string | Comma-separated agent names this agent may spawn. **Presence of this field grants the spawning toolset** (`subagent`, `subagent_message`, `subagents_list`, `subagent_status`) and restricts spawn targets to the list. Omit it and the agent cannot spawn at all |
 | `skills` | string | Comma-separated skill names to auto-load |
 | `session-mode` | string | `standalone` (default), `lineage-only`, or `fork` — see below |
 | `system-prompt` | string | `append` or `replace`: pass the body as the child's `--append-system-prompt` / `--system-prompt`. Omit and the body is prepended to the task prompt instead |
@@ -149,7 +159,7 @@ Managed Pi children retain structured result artifacts containing the complete o
 
 Automatic parent messages are bounded previews with a `Full result:` artifact reference. The `subagent_result` message details also include `outcome`, `resultFile` and `source`. Results do not depend on screen text, and a lost surface or failed diagnostic read cannot reverse an already saved outcome. A shell-level exit without a settled result is not success.
 
-This slice retains result evidence but does **not** yet promise result replay or notification deduplication across parent restarts/reloads. Stable addressing, durable inbox transport and correlated multi-question replies are separate lifecycle slices. The optional Claude Code path retains its legacy completion handling; the managed-Pi settlement guarantees do not cover it.
+This slice retains result evidence but does **not** yet promise result replay or notification deduplication across parent restarts/reloads. Durable inbox transport and correlated multi-question replies are separate lifecycle slices. The optional Claude Code path retains its legacy completion handling; the managed-Pi settlement guarantees do not cover it.
 
 ### interactive
 
@@ -238,7 +248,8 @@ npm run test:integration --workspace pi-interactive-subagents
 This includes the [#3 native-tool prefactor](https://github.com/haoyiqiang/pi-extensions/issues/3),
 [#4 role/loadout safety](https://github.com/haoyiqiang/pi-extensions/issues/4),
 [#5 settled outcomes](https://github.com/haoyiqiang/pi-extensions/issues/5) and
-[#6 terminal startup/liveness](https://github.com/haoyiqiang/pi-extensions/issues/6), not
+[#6 terminal startup/liveness](https://github.com/haoyiqiang/pi-extensions/issues/6) and
+[#7 persistent identity/single-writer status](https://github.com/haoyiqiang/pi-extensions/issues/7), not
 all of [Spec #2](https://github.com/haoyiqiang/pi-extensions/issues/2). Public-tool tests
 cover role aliases/precedence/visibility, missing versus empty tools, invalid resources
 and snapshots, model/cwd/identity/skill/isolation replay, lifetime policy, nested refusals
@@ -246,7 +257,9 @@ and settled result publication. Terminal tests use the existing child runtime an
 executable tmux/Orca stand-ins, with independently controlled parent/child clocks for
 readiness, long work and lost liveness. The mux suite retains its startup-command/inventory
 contracts. No paid model or real terminal smoke run is required for the deterministic
-suite. Durable messaging, stable identity/single-writer ownership and complete parent
+suite. Real controller processes also race name allocation and double resume against
+shared temporary storage, replay stale/duplicate startup scripts, and verify generation
+fencing and status after runtime recreation. Durable messaging and complete parent
 recovery remain separate slices.
 See the repository `GLOSSARY.md` and `docs/adr/0001-pause-uncertain-delegated-actions.md`
 for the reviewed domain language and recovery policy.
