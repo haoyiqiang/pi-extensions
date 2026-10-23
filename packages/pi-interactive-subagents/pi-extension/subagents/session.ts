@@ -108,8 +108,10 @@ export interface SubagentLoadout {
   identity: string | null;
   /** Agents this subagent was allowed to spawn (for PI_SUBAGENT_ALLOWED). */
   spawnable: string[] | null;
-  /** Whether the agent auto-exits (informational; resume forces autonomous). */
+  /** Resolved lifetime policy, restored unchanged on resume. */
   autoExit: boolean;
+  /** Notification policy is separate from process lifetime. */
+  interactive?: boolean;
   /** Working directory the subagent ran in, or null. */
   cwd: string | null;
   /** PI_CODING_AGENT_DIR the subagent resolved config/extensions from, or null. */

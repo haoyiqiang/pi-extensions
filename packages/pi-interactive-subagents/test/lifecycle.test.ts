@@ -5,12 +5,129 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import subagents, { registerToolExtension } from "../pi-extension/subagents/index.ts";
+import subagentDone from "../pi-extension/subagents/subagent-done.ts";
 import { createMockExtensionApi, plainTheme, waitFor } from "./harness.ts";
-import { shellEscape } from "../pi-extension/subagents/tmux.ts";
+import { closeSurface, shellEscape } from "../pi-extension/subagents/tmux.ts";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 
-test("native delegation acknowledges launch before child completion and automatically returns its result", { timeout: 20_000 }, async () => {
+// Confirmed seam: registered child control tools and Pi lifecycle events.
+test("retry, queued and recovery runs cannot terminate delegated work before final settlement", async () => {
+  const root = mkdtempSync(join(tmpdir(), "subagent-settlement-"));
+  const previousEnv = { ...process.env };
+  process.env.PI_SUBAGENT_SESSION = join(root, "child.jsonl");
+  process.env.PI_SUBAGENT_ID = "settlement-child";
+  process.env.PI_SUBAGENT_AUTO_EXIT = "1";
+  const child = createMockExtensionApi();
+  let shutdown = false;
+  const branch: any[] = [];
+  const ctx = {
+    hasUI: false, ui: { setWidget() {} },
+    sessionManager: { getBranch: () => branch, getSessionId: () => "child-session", getLeafId: () => branch.at(-1)?.id },
+    shutdown() { shutdown = true; },
+  };
+  try {
+    subagentDone(child.api);
+    await child.emit("session_start", {}, ctx);
+    await child.emit("input", { text: "Do the task" }, ctx);
+    await child.emit("agent_start", {}, ctx);
+    const error = { role: "assistant", stopReason: "error", errorMessage: "temporary overload", content: [] };
+    branch.push({ type: "message", id: "retryable-error", message: error });
+    await child.emit("agent_end", { messages: [error] }, ctx);
+    assert.equal(shutdown, false, "agent_end is activity, not exhausted retry evidence");
+    assert.equal(existsSync(`${process.env.PI_SUBAGENT_SESSION}.exit`), false);
+    await child.emit("agent_start", {}, ctx);
+    const interim = { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "First run finished, queued work remains." }] };
+    branch.push({ type: "message", id: "interim-answer", message: interim });
+    await child.emit("agent_end", { messages: [interim] }, ctx);
+    await child.emit("agent_before_settle", { outcome: "completed", continue: true }, ctx);
+    assert.equal(shutdown, false, "pre-settlement continuation cannot publish/exit");
+    branch.push({ type: "compaction", id: "recovery-compaction", summary: "Continue after recovery." });
+    await child.emit("agent_start", {}, ctx);
+    await child.emit("input", { text: "Human clarification while working", source: "interactive" }, ctx);
+    const success = { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "Recovered successfully." }] };
+    branch.push({ type: "message", id: "final-answer", message: success });
+    await child.emit("agent_end", { messages: [success] }, ctx);
+    assert.equal(shutdown, false, "even a successful low-level end can have queued work");
+    await child.emit("agent_before_settle", { outcome: "completed" }, ctx);
+    await child.emit("agent_settled", {}, ctx);
+    assert.equal(shutdown, true, "autonomous work exits only after settlement");
+  } finally {
+    process.env = previousEnv;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("pending questions survive automatic restarts until actual reply input arrives", async () => {
+  const root = mkdtempSync(join(tmpdir(), "subagent-question-settlement-"));
+  const previousEnv = { ...process.env };
+  process.env.PI_SUBAGENT_SESSION = join(root, "child.jsonl");
+  process.env.PI_SUBAGENT_ID = "question-child";
+  process.env.PI_SUBAGENT_AUTO_EXIT = "1";
+  const child = createMockExtensionApi();
+  let shutdown = false;
+  const branch: any[] = [];
+  const ctx = {
+    hasUI: false, ui: { setWidget() {} },
+    sessionManager: { getBranch: () => branch, getSessionId: () => "question-session", getLeafId: () => branch.at(-1)?.id ?? null },
+    shutdown() { shutdown = true; },
+  };
+  try {
+    subagentDone(child.api);
+    await child.emit("session_start", {}, ctx);
+    await child.emit("agent_start", {}, ctx);
+    await child.tool("ask_question").execute("question-1", { question: "Which API version?" }, undefined, undefined, ctx);
+    await child.emit("agent_end", { messages: [] }, ctx);
+    // An automatic recovery run is not a reply from the parent.
+    await child.emit("agent_start", {}, ctx);
+    await child.emit("agent_before_settle", { outcome: "completed" }, ctx);
+    await child.emit("agent_settled", {}, ctx);
+    assert.equal(shutdown, false, "an unanswered question suppresses finalization");
+    await child.emit("input", { text: "Use v2", source: "interactive" }, ctx);
+    await child.emit("agent_start", {}, ctx);
+    branch.push({ type: "message", id: "reply-result", message: {
+      role: "assistant", stopReason: "stop", content: [{ type: "text", text: "Used v2." }],
+    } });
+    await child.emit("agent_before_settle", { outcome: "completed" }, ctx);
+    await child.emit("agent_settled", {}, ctx);
+    assert.equal(shutdown, true);
+  } finally {
+    process.env = previousEnv;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("result persistence failure prevents autonomous exit", async () => {
+  const root = mkdtempSync(join(tmpdir(), "subagent-persist-failure-"));
+  const previousEnv = { ...process.env };
+  writeFileSync(join(root, "blocked"), "not a directory");
+  process.env.PI_SUBAGENT_SESSION = join(root, "blocked", "child.jsonl");
+  process.env.PI_SUBAGENT_ID = "persistence-child";
+  process.env.PI_SUBAGENT_AUTO_EXIT = "1";
+  const child = createMockExtensionApi();
+  const branch: any[] = [];
+  let shutdown = false;
+  const ctx = {
+    hasUI: false, ui: { setWidget() {} },
+    sessionManager: { getBranch: () => branch, getSessionId: () => "persistence-session", getLeafId: () => "answer" },
+    shutdown() { shutdown = true; },
+  };
+  try {
+    subagentDone(child.api);
+    await child.emit("session_start", {}, ctx);
+    branch.push({ type: "message", id: "answer", message: {
+      role: "assistant", stopReason: "stop", content: [{ type: "text", text: "Must not be lost." }],
+    } });
+    await child.emit("agent_before_settle", { outcome: "completed" }, ctx);
+    await assert.rejects(child.emit("agent_settled", {}, ctx), /ENOTDIR|EEXIST/);
+    assert.equal(shutdown, false, "a failed result write cannot be reported as completed exit");
+  } finally {
+    process.env = previousEnv;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("native delegation acknowledges launch before child completion and automatically returns its result", { timeout: 60_000 }, async () => {
   const root = mkdtempSync(join(tmpdir(), "subagents-lifecycle-"));
   const previousEnv = { ...process.env };
   const previousCwd = process.cwd();
@@ -39,7 +156,7 @@ test("native delegation acknowledges launch before child completion and automati
   const webExtension = join(root, "web-extension.ts");
   writeFileSync(webExtension, "export default function () {}\n");
   registerToolExtension("web_search", webExtension);
-  writeFileSync(join(agents, "echo.md"), "---\nname: echo\ntools: read,web_search\nauto-exit: true\nsystem-prompt: append\n---\nYou are the deterministic echo role.\n");
+  writeFileSync(join(agents, "echo.md"), "---\nname: echo\ntools: read,web_search\nsystem-prompt: append\n---\nYou are the deterministic echo role.\n");
   const parentFile = join(sessions, "parent.jsonl");
   writeFileSync(parentFile, JSON.stringify({ type: "session", version: 3, id: "fixture-parent" }) + "\n");
   const parent = createMockExtensionApi();
@@ -67,6 +184,38 @@ test("native delegation acknowledges launch before child completion and automati
       agent: "echo", name: "Echo", task: "Return the exact phrase: deterministic task complete.",
     }, toolAbort.signal, undefined, ctx);
     toolAbort.abort(); // Returning/ending the native tool must not cancel delegated work.
+
+    // This controller is itself a child with owned descendant work. Its bridge
+    // must wait until the last descendant result has actually reached Pi.
+    const envBeforeBridge = { ...process.env };
+    process.env.PI_SUBAGENT_SESSION = parentFile;
+    process.env.PI_SUBAGENT_ID = "delegating-parent";
+    process.env.PI_SUBAGENT_AUTO_EXIT = "1";
+    const bridge = createMockExtensionApi();
+    subagentDone(bridge.api);
+    process.env = envBeforeBridge;
+    let delegatorShutdown = false;
+    const delegatorBranch: any[] = [];
+    const delegatorCtx = {
+      hasUI: false, ui: { setWidget() {} },
+      sessionManager: { getBranch: () => delegatorBranch, getSessionId: () => "fixture-parent", getLeafId: () => delegatorBranch.at(-1)?.id ?? null },
+      shutdown() { delegatorShutdown = true; },
+    };
+    await bridge.emit("session_start", {}, delegatorCtx);
+    delegatorBranch.push({ type: "message", id: "waiting-for-child", message: {
+      role: "assistant", stopReason: "stop", content: [{ type: "text", text: "Waiting for descendant." }],
+    } });
+    await bridge.emit("agent_before_settle", { outcome: "completed" }, delegatorCtx);
+    await bridge.emit("agent_settled", {}, delegatorCtx);
+    assert.equal(delegatorShutdown, false);
+    const acceptMessage = parent.api.sendMessage;
+    parent.api.sendMessage = (message: any, options: any) => {
+      if (message.customType === "subagent_result") {
+        void bridge.emit("agent_settled", {}, delegatorCtx);
+        assert.equal(delegatorShutdown, false, "descendant remains outstanding while its result is accepted");
+      }
+      acceptMessage(message, options);
+    };
     assert.equal(launched.details.status, "started");
     assert.match(launched.content[0].text, /running in the background/);
     assert.equal(parent.sentMessages.length, 0, "launch acceptance is not task completion");
@@ -74,6 +223,7 @@ test("native delegation acknowledges launch before child completion and automati
       ? JSON.parse(readFileSync(join(terminal, "received.json"), "utf8")) : undefined, "child task receipt");
     assert.match(received.task, /Return the exact phrase: deterministic task complete\./);
     assert.deepEqual(received.tools, ["ask_question"]);
+    assert.equal(received.autoExit, "1", "omitted role policy is explicitly autonomous");
     assert.match(received.widgets.join("\n"), /echo/);
     assert.ok(received.args.includes(webExtension), "registered tool extensions do not depend on a personal install");
     const identityFile = received.args[received.args.indexOf("--append-system-prompt") + 1];
@@ -83,8 +233,22 @@ test("native delegation acknowledges launch before child completion and automati
     writeFileSync(join(terminal, "finish"), "release");
     const delivered = await waitFor(() => parent.sentMessages.find((event) => event.message.customType === "subagent_result"), "automatic parent result");
     assert.match(delivered.message.content, /deterministic task complete\./);
+    parent.api.sendMessage = acceptMessage;
+    await bridge.emit("input", { text: "Descendant result accepted" }, delegatorCtx);
+    delegatorBranch.push({ type: "message", id: "incorporated-child", message: {
+      role: "assistant", stopReason: "stop", content: [{ type: "text", text: "Incorporated descendant result." }],
+    } });
+    await bridge.emit("agent_before_settle", { outcome: "completed" }, delegatorCtx);
+    await bridge.emit("agent_settled", {}, delegatorCtx);
+    assert.equal(delegatorShutdown, true, "delegator may finish after incorporating its last child");
     assert.equal(delivered.message.details.name, "Echo");
     assert.equal(delivered.message.details.exitCode, 0);
+    assert.equal(delivered.message.details.outcome, "succeeded");
+    const durable = JSON.parse(readFileSync(delivered.message.details.resultFile, "utf8"));
+    assert.equal(durable.output, "deterministic task complete.");
+    assert.equal(durable.outcome, "succeeded");
+    assert.equal(durable.source.entryId, "fixture-answer-0");
+    assert.equal(durable.source.stopReason, "stop");
     assert.equal(delivered.message.display, true);
     assert.deepEqual(delivered.options, { triggerTurn: true, deliverAs: "steer" });
     assert.equal(readFileSync(join(terminal, "surface"), "utf8"), "closed");
@@ -112,6 +276,149 @@ test("native delegation acknowledges launch before child completion and automati
     assert.match(followUpResult.message.content, /follow-up task complete\./);
     assert.doesNotMatch(followUpResult.message.content, /deterministic task complete/);
     assert.deepEqual(followUpResult.options, { triggerTurn: true, deliverAs: "steer" });
+
+    // Exhausted failure is a settled outcome, and useful partial output survives.
+    rmSync(join(terminal, "received.json"));
+    rmSync(join(terminal, "finish"));
+    await parent.tool("subagent_message").execute("resume-error", {
+      name: "Echo", message: "Return the exact phrase: partial work retained.\nFINAL_ERROR",
+    }, undefined, undefined, ctx);
+    await waitFor(() => existsSync(join(terminal, "received.json")) ? true : undefined, "failing task receipt");
+    assert.equal(parent.sentMessages.length, 2);
+    writeFileSync(join(terminal, "finish"), "release");
+    const failed = await waitFor(() => parent.sentMessages[2], "settled failure result");
+    assert.equal(failed.message.details.outcome, "failed");
+    assert.equal(failed.message.details.exitCode, 1);
+    assert.match(failed.message.content, /partial work retained/);
+    assert.match(failed.message.content, /529 overloaded/);
+    assert.doesNotMatch(failed.message.content, /did not produce a result/);
+    const failureEvidence = JSON.parse(readFileSync(failed.message.details.resultFile, "utf8"));
+    assert.equal(failureEvidence.source.entryId, "fixture-answer-3");
+    assert.deepEqual(failureEvidence.source.outputEntryIds, ["fixture-partial-2"]);
+    const failureView = renderer.renderer(failed.message, { expanded: true }, plainTheme).render(100).join("\n");
+    assert.match(failureView, /✗/);
+    assert.doesNotMatch(failureView, /✓/);
+
+    for (const [marker, outcome, partial] of [
+      ["TRUNCATED", "truncated", "useful but unfinished"],
+      ["NO_OUTPUT", "no-output", "must not reuse earlier answers"],
+      ["EXIT_WITHOUT_RESULT", "failed", "must not turn process exit into success"],
+    ]) {
+      rmSync(join(terminal, "received.json"));
+      rmSync(join(terminal, "finish"));
+      const count = parent.sentMessages.length;
+      await parent.tool("subagent_message").execute(`resume-${marker}`, {
+        name: "Echo", message: `Return the exact phrase: ${partial}\n${marker}`,
+      }, undefined, undefined, ctx);
+      await waitFor(() => existsSync(join(terminal, "received.json")) ? true : undefined, `${marker} receipt`);
+      writeFileSync(join(terminal, "finish"), "release");
+      const event = await waitFor(() => parent.sentMessages[count], `${outcome} result`);
+      assert.equal(event.message.details.outcome, outcome);
+      assert.equal(event.message.details.exitCode, 1);
+      const evidence = JSON.parse(readFileSync(event.message.details.resultFile, "utf8"));
+      assert.equal(evidence.output, marker === "NO_OUTPUT" || marker === "EXIT_WITHOUT_RESULT" ? "" : partial);
+      assert.doesNotMatch(event.message.content, /completed \(/);
+      const view = renderer.renderer(event.message, { expanded: true }, plainTheme).render(100).join("\n");
+      assert.match(view, /✗/);
+      assert.doesNotMatch(view, /✓/);
+    }
+
+    // Aborting an autonomous task reports abort without converting the role
+    // into a resident: its next normal task still exits automatically.
+    rmSync(join(terminal, "received.json"));
+    rmSync(join(terminal, "finish"));
+    const beforeAbort = parent.sentMessages.length;
+    await parent.tool("subagent").execute("spawn-aborted", {
+      agent: "echo", name: "Aborted", task: "Return the exact phrase: partial before abort.\nABORTED",
+    }, undefined, undefined, ctx);
+    await waitFor(() => existsSync(join(terminal, "received.json")) ? true : undefined, "autonomous abort receipt");
+    writeFileSync(join(terminal, "finish"), "release");
+    const aborted = await waitFor(() => parent.sentMessages[beforeAbort], "autonomous aborted result");
+    assert.equal(aborted.message.details.outcome, "aborted");
+    assert.equal(readFileSync(join(terminal, "surface"), "utf8"), "open");
+    rmSync(join(terminal, "received.json"));
+    rmSync(join(terminal, "finish"));
+    await parent.tool("subagent_message").execute("continue-aborted", {
+      name: "Aborted", message: "Return the exact phrase: continued autonomous task.",
+    }, undefined, undefined, ctx);
+    await waitFor(() => existsSync(join(terminal, "received.json")) ? true : undefined, "continued autonomous receipt");
+    writeFileSync(join(terminal, "finish"), "release");
+    const continued = await waitFor(() => parent.sentMessages[beforeAbort + 1], "continued autonomous result");
+    assert.equal(continued.message.details.outcome, "succeeded");
+    assert.equal(readFileSync(join(terminal, "surface"), "utf8"), "closed");
+
+    // Resident task completion is not process termination. Manual/parent input
+    // adds another task without changing the recorded lifetime policy.
+    writeFileSync(join(agents, "resident.md"), "---\nname: resident\ntools: read\nauto-exit: false\n---\nStay available for follow-ups.\n");
+    rmSync(join(terminal, "received.json"));
+    rmSync(join(terminal, "finish"));
+    const count = parent.sentMessages.length;
+    await parent.tool("subagent").execute("spawn-resident", {
+      agent: "resident", name: "Resident", task: "Return the exact phrase: resident first result.",
+    }, undefined, undefined, ctx);
+    const resident = await waitFor(() => existsSync(join(terminal, "received.json"))
+      ? JSON.parse(readFileSync(join(terminal, "received.json"), "utf8")) : undefined, "resident receipt");
+    assert.equal(resident.autoExit, "0");
+    const residentPid = readFileSync(join(terminal, "pid"), "utf8");
+    writeFileSync(join(terminal, "finish"), "release");
+    const residentResult = await waitFor(() => parent.sentMessages[count], "resident result without exit");
+    assert.equal(residentResult.message.details.outcome, "succeeded");
+    assert.equal(readFileSync(join(terminal, "surface"), "utf8"), "open");
+    for (const [marker, outcome] of [["ABORTED", "aborted"], ["", "succeeded"]]) {
+      rmSync(join(terminal, "received.json"));
+      rmSync(join(terminal, "finish"));
+      const next = parent.sentMessages.length;
+      const steered = await parent.tool("subagent_message").execute("resident-followup", {
+        name: "Resident", message: `Return the exact phrase: resident follow-up.\n${marker}`,
+      }, undefined, undefined, ctx);
+      assert.equal(steered.details.status, "steered");
+      const task = await waitFor(() => existsSync(join(terminal, "received.json"))
+        ? JSON.parse(readFileSync(join(terminal, "received.json"), "utf8")) : undefined, "resident next receipt");
+      assert.match(task.task, /resident follow-up/);
+      writeFileSync(join(terminal, "finish"), "release");
+      const event = await waitFor(() => parent.sentMessages[next], "resident next result");
+      assert.equal(event.message.details.outcome, outcome);
+      assert.equal(readFileSync(join(terminal, "surface"), "utf8"), "open");
+      assert.equal(readFileSync(join(terminal, "pid"), "utf8"), residentPid, "follow-up uses the same live process");
+    }
+
+    ctx.hasUI = false; // Delivery does not depend on widgets or terminal UI.
+    rmSync(join(terminal, "received.json"));
+    rmSync(join(terminal, "finish"));
+    const beforeLongResult = parent.sentMessages.length;
+    await parent.tool("subagent_message").execute("resident-long", {
+      name: "Resident", message: "Return the exact phrase: long result.\nLONG_OUTPUT",
+    }, undefined, undefined, ctx);
+    await waitFor(() => existsSync(join(terminal, "received.json")) ? true : undefined, "long task receipt");
+    writeFileSync(join(terminal, "finish"), "release");
+    const longResult = await waitFor(() => parent.sentMessages[beforeLongResult], "bounded automatic result");
+    assert.equal(longResult.message.details.outcome, "succeeded");
+    assert.ok(longResult.message.content.length < 10_000, "automatic parent context is bounded");
+    assert.ok(longResult.message.content.includes(longResult.message.details.resultFile), "full result is directly addressable");
+    await waitFor(() => existsSync(join(terminal, "diagnostics-unavailable")) ? true : undefined, "process/surface exit");
+    const fullResult = JSON.parse(readFileSync(longResult.message.details.resultFile, "utf8"));
+    assert.ok(fullResult.output.length > 40_000);
+    assert.match(fullResult.output, /complete output end$/);
+    assert.equal(fullResult.outcome, "succeeded", "terminal diagnostic loss cannot reverse persisted success");
+    await waitFor(() => readFileSync(join(terminal, "surface"), "utf8") === "closed" ? true : undefined, "confirmed process-exit cleanup");
+
+    // Editing the role cannot silently change a completed child's saved policy.
+    writeFileSync(join(agents, "resident.md"), "---\nname: resident\ntools: read\nauto-exit: true\n---\nChanged role definition.\n");
+    rmSync(join(terminal, "received.json"));
+    rmSync(join(terminal, "finish"));
+    const beforeResidentResume = parent.sentMessages.length;
+    const residentResume = await parent.tool("subagent_message").execute("resident-resume", {
+      name: "Resident", message: "Return the exact phrase: snapshot policy restored.",
+    }, undefined, undefined, ctx);
+    assert.equal(residentResume.details.status, "started");
+    const restored = await waitFor(() => existsSync(join(terminal, "received.json"))
+      ? JSON.parse(readFileSync(join(terminal, "received.json"), "utf8")) : undefined, "resident resume receipt");
+    assert.equal(restored.autoExit, "0");
+    writeFileSync(join(terminal, "finish"), "release");
+    const restoredResult = await waitFor(() => parent.sentMessages[beforeResidentResume], "restored resident result");
+    assert.equal(restoredResult.message.details.outcome, "succeeded");
+    assert.match(restoredResult.message.content, /snapshot policy restored/);
+    assert.equal(readFileSync(join(terminal, "surface"), "utf8"), "open");
   } finally {
     await parent.emit("session_shutdown", { reason: "quit" }, ctx);
     if (existsSync(join(terminal, "pid"))) {
@@ -120,6 +427,7 @@ test("native delegation acknowledges launch before child completion and automati
     // Drain the adapter's debounced layout operation before restoring PATH.
     // Otherwise a delayed callback could accidentally reach a real tmux.
     if (existsSync(join(terminal, "surface"))) {
+      closeSurface("%fixture");
       await waitFor(() => existsSync(join(terminal, "layout")) &&
         readFileSync(join(terminal, "layout"), "utf8") === "closed" ? true : undefined, "fixture terminal cleanup");
     }
