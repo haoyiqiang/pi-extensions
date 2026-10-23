@@ -125,6 +125,40 @@ test("native creation failure is not retried and retains inspectable launch diag
   });
 });
 
+for (const inventory of ["present", "absent"]) {
+  test(`fast completion during startup inventory is accepted when the surface is ${inventory} and delivers a retained result`, { timeout: 30_000 }, async () => {
+    await withTerminal("tmux", async ({ terminal, call, results }) => {
+      writeFileSync(join(terminal, "complete-during-inventory"), inventory);
+      writeFileSync(join(terminal, "finish"), "complete immediately");
+      const launched = await call("subagent", { agent: "echo", name: "Fast", task });
+      assert.equal(existsSync(join(terminal, "inventory-timed-out")), false, "the external fixture must finish inside inventory, not on a later poll");
+      assert.equal(existsSync(join(terminal, "startup-exited")), true);
+      assert.equal(launched.details.status, "started", "acknowledgement accepts launch rather than returning task output");
+      const result = await waitFor(() => results()[0], "automatic fast result");
+      assert.equal(result.message.details.outcome, "succeeded");
+      assert.match(result.message.content, /native startup complete/);
+      const status = (await call("subagent_status", { id: launched.details.id })).details.subagent;
+      assert.equal(status.state, "completed");
+      assert.equal(status.latestResult.outcome, "succeeded");
+      assert.equal(JSON.parse(readFileSync(status.latestResult.resultFile, "utf8")).output, "native startup complete.");
+    });
+  });
+}
+
+test("a real child exit before readiness still fails finitely and retains launch diagnostics", { timeout: 30_000 }, async () => {
+  await withTerminal("tmux", async ({ root, terminal, call }) => {
+    writeFileSync(join(root, "bin/pi"), "#!/bin/sh\nexit 2\n", { mode: 0o755 });
+    writeFileSync(join(terminal, "complete-during-inventory"), "present");
+    const failed = await refusal(call("subagent", { agent: "echo", name: "Crash", task }));
+    assert.equal(existsSync(join(terminal, "inventory-timed-out")), false);
+    assert.match(failed.message, /process exited before its ready signal/i);
+    assert.equal(terminalDiagnostic(failed).closure, "confirmed");
+    const status = (await call("subagent_status", { name: "Crash" })).details.subagent;
+    assert.equal(status.state, "failed");
+    assert.match(status.diagnostic, /process exited before its ready signal/i);
+  });
+});
+
 test("missing child readiness fails finitely and confirms owned startup cleanup", async (t) => {
   await withTerminal("tmux", async ({ terminal, call }) => {
     writeFileSync(join(terminal, "no-runtime"), "never starts the bridge");

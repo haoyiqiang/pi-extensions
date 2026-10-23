@@ -763,13 +763,16 @@ async function confirmSubagentReady(running: RunningSubagent): Promise<void> {
   try {
     recordTerminal(running, "starting");
     for (;;) {
+      running.terminalState = surfaceState(running.surface);
+      const exited = existsSync(processExitFile(running.sessionFile, running.id));
+      // Native inventory can outlast the entire child run. Sample readiness and
+      // durable settlement after absence/exit so fast completion wins that race.
       if (readSubagentLiveness(running.sessionFile, running.id) !== null || readSubagentOutcomes(running.sessionFile, running.id).length) {
         recordTerminal(running, "ready");
         return;
       }
-      running.terminalState = surfaceState(running.surface);
       if (running.terminalState === "absent") throw new Error("Surface disappeared before the child-ready signal");
-      if (existsSync(processExitFile(running.sessionFile, running.id))) throw new Error("Child process exited before its ready signal");
+      if (exited) throw new Error("Child process exited before its ready signal");
       if (Date.now() >= deadline) throw new Error(`Child readiness deadline exceeded (${READY_TIMEOUT_MS}ms; inventory=${running.terminalState})`);
       await delay(250);
     }
