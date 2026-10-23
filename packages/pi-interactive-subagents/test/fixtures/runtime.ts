@@ -39,7 +39,7 @@ for (;;) {
   await runtime.emit("input", { text: task, source: "interactive" }, ctx);
   await runtime.emit("before_agent_start", { prompt: task }, ctx);
   await runtime.emit("agent_start", {}, ctx);
-  writeFileSync(join(root, "received.tmp"), JSON.stringify({ task, widgets, tools: runtime.registeredTools.map((tool) => tool.name), args, autoExit: process.env.PI_SUBAGENT_AUTO_EXIT }));
+  writeFileSync(join(root, "received.tmp"), JSON.stringify({ task, widgets, tools: runtime.registeredTools.map((tool) => tool.name), args, autoExit: process.env.PI_SUBAGENT_AUTO_EXIT, cwd: process.cwd(), env: Object.fromEntries(Object.entries(process.env).filter(([key]) => key.startsWith("PI_SUBAGENT_") || key === "PI_CODING_AGENT_DIR")) }));
   renameSync(join(root, "received.tmp"), join(root, "received.json"));
   await waitFor(() => existsSync(join(root, "finish")) ? true : undefined, "permission to complete delegated task");
   if (task.includes("EXIT_WITHOUT_RESULT")) {
@@ -78,7 +78,8 @@ for (;;) {
   }
   if (shutdown) break;
   writeFileSync(join(root, "parked"), "waiting");
-  await waitFor(() => existsSync(join(root, "next-task")) ? true : undefined, "resident/manual next input");
+  await waitFor(() => existsSync(join(root, "next-task")) || existsSync(join(root, "close-resident")) ? true : undefined, "resident/manual next input or closure");
+  if (existsSync(join(root, "close-resident"))) break;
   task = readFileSync(join(root, "next-task"), "utf8");
   rmSync(join(root, "next-task"));
 }

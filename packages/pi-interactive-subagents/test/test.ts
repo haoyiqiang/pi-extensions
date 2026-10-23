@@ -14,13 +14,9 @@ import {
   countSessionEntryLines,
   getSessionId,
   readNameRegistry,
-  readSubagentLoadout,
   registerName,
   resolveNameInRegistry,
   nameRegistryPath,
-  writeSubagentLoadout,
-  loadoutSidecarPath,
-  type SubagentLoadout,
   resetSessionIndexCache,
   resolveSessionFileById,
   findLastAssistantMessage,
@@ -277,44 +273,6 @@ describe("session.ts", () => {
       // cheap refresh should index it.
       const b = writeSession(dir, "second.jsonl", "id-second");
       assert.equal(resolveSessionFileById("id-second", dir), b);
-    });
-  });
-
-  describe("subagent loadout snapshot", () => {
-    const sample: SubagentLoadout = {
-      agent: "worker",
-      toolAllowlist: "read,write,edit,safe_bash,web_search,subagent,ask_question",
-      model: "openrouter/z-ai/glm-5.2",
-      thinking: "medium",
-      systemPromptMode: "append",
-      identity: "You are a worker agent.",
-      spawnable: ["scout", "researcher"],
-      autoExit: true,
-      cwd: "/work/dir",
-      agentDir: "/home/u/.pi/agent",
-    };
-
-    it("writes the sidecar next to the session file", () => {
-      const sf = join(dir, "s1.jsonl");
-      writeSubagentLoadout(sf, sample);
-      assert.equal(loadoutSidecarPath(sf), sf + ".loadout.json");
-      assert.ok(existsSync(sf + ".loadout.json"));
-    });
-
-    it("round-trips the full loadout", () => {
-      const sf = join(dir, "s2.jsonl");
-      writeSubagentLoadout(sf, sample);
-      assert.deepEqual(readSubagentLoadout(sf), sample);
-    });
-
-    it("returns null when the sidecar is absent", () => {
-      assert.equal(readSubagentLoadout(join(dir, "missing.jsonl")), null);
-    });
-
-    it("returns null when the sidecar is corrupt", () => {
-      const sf = join(dir, "s3.jsonl");
-      writeFileSync(sf + ".loadout.json", "not json{", "utf8");
-      assert.equal(readSubagentLoadout(sf), null);
     });
   });
 
@@ -1230,78 +1188,6 @@ describe("subagent discovery", () => {
     );
   });
 
-  it("buildSubagentToolAllowlist preserves requested tools and adds child control tools", () => {
-    assert.equal(
-      testApi.buildSubagentToolAllowlist("read,bash,web_search"),
-      "read,bash,web_search,ask_question",
-    );
-  });
-
-  it("buildSubagentToolAllowlist returns null without an explicit tool restriction", () => {
-    assert.equal(testApi.buildSubagentToolAllowlist(undefined), null);
-    assert.equal(testApi.buildSubagentToolAllowlist(""), null);
-  });
-
-  it("applySandboxToParts replays model, identity, and default-deny tool restriction", () => {
-    withTempDir((d) => {
-      const parts: string[] = [];
-      testApi.applySandboxToParts(
-        parts,
-        {
-          agent: "worker",
-          toolAllowlist: "read,write,safe_bash",
-          model: "openrouter/z-ai/glm-5.2",
-          thinking: "medium",
-          systemPromptMode: "append",
-          identity: "You are a worker.",
-          spawnable: ["scout"],
-          autoExit: true,
-          cwd: null,
-          agentDir: null,
-        },
-        { artifactDir: d, name: "worker" },
-      );
-      const joined = parts.join(" ");
-      // Model with thinking suffix.
-      assert.ok(joined.includes("--model"), "expected --model");
-      assert.ok(joined.includes("openrouter/z-ai/glm-5.2:medium"), "expected model:thinking");
-      // Identity written to a file and appended.
-      assert.ok(joined.includes("--append-system-prompt"), "expected --append-system-prompt");
-      // Default-deny restriction.
-      assert.ok(parts.includes("--no-extensions"), "expected --no-extensions");
-      const toolsIdx = parts.indexOf("--tools");
-      assert.ok(toolsIdx >= 0, "expected --tools");
-      // The value is shell-escaped (single-quoted) before joining.
-      assert.ok(
-        parts[toolsIdx + 1].includes("read,write,safe_bash"),
-        "expected the tool allowlist as the --tools value",
-      );
-    });
-  });
-
-  it("applySandboxToParts omits restriction flags when the loadout was unrestricted", () => {
-    withTempDir((d) => {
-      const parts: string[] = [];
-      testApi.applySandboxToParts(
-        parts,
-        {
-          agent: null,
-          toolAllowlist: null,
-          model: null,
-          thinking: null,
-          systemPromptMode: null,
-          identity: null,
-          spawnable: null,
-          autoExit: false,
-          cwd: null,
-          agentDir: null,
-        },
-        { artifactDir: d, name: "fork" },
-      );
-      assert.deepEqual(parts, []);
-    });
-  });
-
   it("buildPiPromptArgs inserts separator for artifact-backed launches with skills", () => {
     assert.deepEqual(
       testApi.buildPiPromptArgs({ effectiveSkills: "review,lint", taskDelivery: "artifact", taskArg: "@artifact.md" }),
@@ -1524,23 +1410,13 @@ describe("commands", () => {
 });
 
 describe("tool registration", () => {
-  it("defaults missing legacy lifecycle policy to autonomous", () => {
-    const testApi = (subagentsModule as any).__test__;
-
-    assert.deepEqual(testApi.resolveResumeLaunchBehavior(), {
-      autoExit: true,
-      interactive: false,
-    });
-  });
-
-
   it("rejects a top-level spawn with no agent and no fork", async () => {
     const { api, registeredTools } = createMockExtensionApi();
     (subagentsModule as any).default(api);
     const subagentTool = registeredTools.find((tool) => tool.name === "subagent");
     assert.ok(subagentTool, "expected subagent tool to be registered");
 
-    const result = await subagentTool.execute("call-1", { name: "x", task: "do it" });
+    const result = await subagentTool.execute("call-1", { name: "x", task: "do it" }, undefined, undefined, { cwd: process.cwd() });
     assert.equal(result.details?.error, "agent required");
     assert.match(result.content[0].text, /specify which agent/i);
   });
@@ -1555,7 +1431,7 @@ describe("tool registration", () => {
       name: "x",
       task: "do it",
       agent: "wizard",
-    });
+    }, undefined, undefined, { cwd: process.cwd() });
     assert.equal(result.details?.error, "unknown agent");
     assert.match(result.content[0].text, /not a known agent/i);
   });
