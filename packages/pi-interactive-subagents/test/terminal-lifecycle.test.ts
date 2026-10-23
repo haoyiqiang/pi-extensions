@@ -174,7 +174,7 @@ test("missing child readiness fails finitely and confirms owned startup cleanup"
   });
 });
 
-test("startup cleanup uncertainty retains an inspectable record and blocks a replacement", async (t) => {
+test("startup cleanup uncertainty retains queued instructions without starting a replacement", async (t) => {
   await withTerminal("tmux", async ({ terminal, call }) => {
     for (const flag of ["no-runtime", "inventory-unknown", "close-fails"]) writeFileSync(join(terminal, flag), "unavailable");
     t.mock.timers.enable({ apis: ["Date", "setTimeout", "setInterval"], now: Date.now() });
@@ -185,7 +185,9 @@ test("startup cleanup uncertainty retains an inspectable record and blocks a rep
       const record = terminalDiagnostic(failed);
       assert.equal(record.inventory, "unknown");
       assert.equal(record.closure, "unconfirmed");
-      await assert.rejects(call("subagent_message", { name: "Not ready", message: task }), /uncertain/i);
+      const queued = await call("subagent_message", { name: "Not ready", message: task });
+      assert.equal(queued.details.status, "queued");
+      assert.equal(queued.details.message.state, "queued", "durable retention does not claim a child received it");
     } finally { t.mock.timers.reset(); }
   });
 });
@@ -229,7 +231,7 @@ test("confirmed surface loss without settlement produces a durable interruption 
   });
 });
 
-test("unknown inventory and failed capture retain work, refuse unsafe delivery, and cannot reverse a durable result", async (t) => {
+test("unknown inventory and failed capture retain work, allow structured messages, and cannot reverse a durable result", async (t) => {
   await withTerminal("tmux", async ({ call, terminal, parent, results, commands }) => {
     const launched = await call("subagent", { agent: "echo", name: "Uncertain", task });
     assert.equal(launched.details.status, "started");
@@ -239,7 +241,8 @@ test("unknown inventory and failed capture retain work, refuse unsafe delivery, 
     const uncertain = await waitFor(() => parent.sentMessages.find((event: any) => event.message.details?.inventory === "unknown"), "inventory uncertainty feedback");
     assert.match(uncertain.message.content, /unknown/);
     assert.equal(results().length, 0);
-    await assert.rejects(call("subagent_message", { name: "Uncertain", message: "Do not launch a replacement" }), /unknown|uncertain/i);
+    const queued = await call("subagent_message", { name: "Uncertain", message: `${task}\nDo not launch a replacement` });
+    assert.equal(queued.details.status, "queued", "structured inbox delivery does not depend on terminal inventory");
     assert.equal(commands().filter((event: any) => event.args[0] === "split-window").length, 1);
     writeFileSync(join(terminal, "finish"), "release");
     const result = await waitFor(() => results()[0], "durable success despite inventory loss");

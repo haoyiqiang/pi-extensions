@@ -35,7 +35,7 @@ export function normalizeSubagentName(input: string): string {
 }
 
 /** Short, synchronous critical sections only. Never steal a lock on elapsed time. */
-function transaction<T>(directory: string, action: () => T): T {
+export function transaction<T>(directory: string, action: () => T): T {
   mkdirSync(directory, { recursive: true });
   const lock = join(directory, "subagent-runs.lock");
   const deadline = performance.now() + 2_000;
@@ -50,7 +50,7 @@ function transaction<T>(directory: string, action: () => T): T {
   try { return action(); } finally { rmdirSync(lock); }
 }
 
-function replace(file: string, data: unknown): void {
+export function replace(file: string, data: unknown): void {
   const temporary = `${file}.tmp-${randomUUID()}`;
   const fd = openSync(temporary, "wx", 0o600);
   try { writeFileSync(fd, JSON.stringify(data), "utf8"); fsyncSync(fd); }
@@ -122,7 +122,28 @@ export class SubagentRuns {
       return run;
     });
   }
-  /** Reserve before native creation or any await. Concurrent attempts explicitly fail. */
+  /** Called under the inbox publication lock: concurrent instructions share one reservation. */
+  messageTarget(id: string): { run: SubagentRun; launch: boolean; waitingForExit?: boolean } {
+    return transaction(this.directory, () => {
+      const runs = this.read();
+      const run = runs.find((entry) => entry.id === id);
+      if (!run) throw new Error("Subagent is not owned by this parent");
+      if (!writerExited(run)) {
+        if (!run.writerToken) throw new Error("Legacy writer ownership is uncertain; no request accepted");
+        if (existsSync(writerClosingFile(run.sessionFile, run.executionId))) return { run, launch: false, waitingForExit: true };
+        const projected = projectRun(run);
+        if (run.state !== "starting" && projected.latestResult?.generation === run.generation && projected.latestResult.sequence > run.resultAfterSequence) {
+          run.generation++;
+          run.resultAfterSequence = projected.latestResult.sequence;
+          run.state = "running";
+          replace(this.file, { version: 1, runs });
+        }
+        return { run, launch: false };
+      }
+      return { run, launch: true };
+    });
+  }
+  /** Reserve before native creation or any await. The inbox lock serializes callers. */
   resume(id: string, generation: number, loadout: SubagentLoadout): SubagentRun {
     return transaction(this.directory, () => {
       const runs = this.read();
@@ -146,19 +167,6 @@ export class SubagentRuns {
       return run;
     });
   }
-  /** A new task in a settled resident writer keeps its writer, not its work generation. */
-  nextTask(id: string, generation: number, sequence: number): SubagentRun {
-    return transaction(this.directory, () => {
-      const runs = this.read();
-      const run = runs.find((entry) => entry.id === id);
-      if (!run || run.generation !== generation) throw new Error("Subagent generation changed; request not accepted");
-      run.generation++;
-      run.resultAfterSequence = sequence;
-      run.state = "running";
-      replace(this.file, { version: 1, runs });
-      return run;
-    });
-  }
   /** Every callback carries the generation it observed, never just a friendly name. */
   update(id: string, generation: number, patch: Partial<SubagentRun>): boolean {
     return transaction(this.directory, () => {
@@ -176,6 +184,7 @@ export class SubagentRuns {
 }
 
 export function writerFile(sessionFile: string): string { return `${sessionFile}.writer.json`; }
+export function writerClosingFile(sessionFile: string, executionId: string): string { return `${sessionFile}.closing-${executionId}.json`; }
 
 /** Only the wrapper's observed Pi exit releases a writer, never surface/heartbeat age. */
 export function writerExited(run: SubagentRun): boolean {

@@ -1448,7 +1448,7 @@ describe("tool registration", () => {
     assert.match(output, /\(unnamed\)/);
   });
 
-  it("registers subagent_message with id/name addressing and a required message", () => {
+  it("registers subagent_message with scoped addressing, delivery selection and explicit action authorization", () => {
     const { api, registeredTools } = createMockExtensionApi();
     (subagentsModule as any).default(api);
 
@@ -1458,15 +1458,15 @@ describe("tool registration", () => {
     const props = messageTool.parameters.properties;
     assert.deepEqual(
       Object.keys(props).sort(),
-      ["id", "message", "name"],
+      ["authorization", "deliverAs", "id", "message", "messageId", "name"],
       "address by stable id or scoped name (sessionId is not authority)",
     );
     assert.equal(props.message.type, "string");
     assert.equal(props.name.type, "string");
     assert.deepEqual(
-      messageTool.parameters.required?.slice().sort(),
-      ["message"],
-      "target selection is validated by the management boundary",
+      messageTool.parameters.required?.slice().sort() ?? [],
+      [],
+      "the management boundary requires an instruction or exact-action authorization, plus an owned target",
     );
     assert.equal(props.sessionId, undefined, "sessionId should be removed");
     assert.equal(props.autoExit, undefined, "autoExit knob should be removed");
@@ -1654,20 +1654,6 @@ describe("subagent activity snapshots", () => {
 });
 
 describe("subagent interruption", () => {
-  function makeRunning(overrides: Record<string, unknown> = {}) {
-    return {
-      id: "a1",
-      name: "Worker",
-      task: "",
-      surface: "pane-1",
-      startTime: 0,
-      sessionFile: "worker.jsonl",
-      interactive: false,
-      statusState: createStatusState({ source: "pi", startTimeMs: 0 }),
-      ...overrides,
-    };
-  }
-
   it("registers subagent_message and not the old interrupt/resume tools", () => {
     const { api, registeredTools } = createMockExtensionApi();
     (subagentsModule as any).default(api);
@@ -1675,33 +1661,6 @@ describe("subagent interruption", () => {
     assert.equal(names.includes("subagent_message"), true);
     assert.equal(names.includes("subagent_interrupt"), false);
     assert.equal(names.includes("subagent_resume"), false);
-  });
-
-  it("steers a running subagent by typing into its pane (newlines flattened)", () => {
-    const testApi = (subagentsModule as any).__test__;
-    let sentSurface = "";
-    let sentText = "";
-    const running = makeRunning();
-
-    const result = testApi.steerSubagent(running, "do this\nthen that", (surface: string, text: string) => {
-      sentSurface = surface;
-      sentText = text;
-    });
-
-    assert.deepEqual(result, { ok: true });
-    assert.equal(sentSurface, "pane-1");
-    assert.equal(sentText, "do this then that");
-  });
-
-  it("returns an explicit error when steering delivery fails", () => {
-    const testApi = (subagentsModule as any).__test__;
-    const running = makeRunning();
-
-    const result = testApi.steerSubagent(running, "hi", () => {
-      throw new Error("mux write failed");
-    });
-
-    assert.match(result.error, /Failed to deliver message/);
   });
 
   it("formats exit code 130 as an ordinary failure", () => {

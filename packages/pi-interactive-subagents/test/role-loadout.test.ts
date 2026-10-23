@@ -129,7 +129,7 @@ test("resume replays resolved model, cwd, identity, skills, isolation and lifeti
     process.env.PI_SUBAGENT_AUTO_EXIT = "0";
     process.env.PI_SUBAGENT_ALLOWED = "worker";
     const resumed = await call("subagent_message", { name: launched.details.name, message: task });
-    assert.equal(resumed.details.status, "started");
+    assert.equal(resumed.details.status, "queued");
     const second = await received();
     assert.equal(second.cwd, target);
     assert.equal(second.args[second.args.indexOf("--model") + 1], "fixture/parent-model");
@@ -268,7 +268,7 @@ test("only fully pinned restrictive legacy loadouts can resume", { timeout: 45_0
     }
     writeFileSync(path, JSON.stringify(legacy));
     const resumed = await call("subagent_message", { name: launched.details.name, message: task });
-    assert.equal(resumed.details.status, "started");
+    assert.equal(resumed.details.status, "queued");
     const child = await received();
     assert.equal(child.args[child.args.indexOf("--tools") + 1], "read,ask_question");
     assert.ok(child.args.includes("--no-extensions"));
@@ -291,12 +291,12 @@ test("explicit resident policy and inherited actual cwd survive a changed role a
     ctx.cwd = root;
     process.env.PI_SUBAGENT_AUTO_EXIT = "1";
     const resumed = await call("subagent_message", { name: launched.details.name, message: task });
-    assert.equal(resumed.details.status, "started");
+    assert.equal(resumed.details.status, "queued");
     const second = await received();
     assert.equal(second.cwd, project);
     assert.equal(second.env.PI_SUBAGENT_AUTO_EXIT, "0");
     assert.equal(second.args[second.args.indexOf("--tools") + 1], "read,ask_question");
-    assert.match(second.task, /^Original identity/);
+    assert.equal(second.task, task, "new message bytes are not prefixed with role identity already retained in history");
     writeFileSync(join(terminal, "close-resident"), "manual closure");
     await finish();
   });

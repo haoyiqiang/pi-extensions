@@ -11,7 +11,7 @@ import { createMockExtensionApi, plainTheme, waitFor } from "./harness.ts";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const task = "Return the exact phrase: identity retained.";
-async function withIdentity(run: (h: any) => Promise<void>) {
+async function withIdentity(run: (h: any) => Promise<void>, fixture = "runtime.ts") {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "subagent-identity-")));
   const env = { ...process.env };
   const terminal = join(root, "terminal");
@@ -20,7 +20,7 @@ async function withIdentity(run: (h: any) => Promise<void>) {
   const bin = join(root, "bin");
   for (const dir of [join(project, ".pi/agents"), terminal, sessions, bin]) mkdirSync(dir, { recursive: true });
   copyFileSync(join(testDir, "fixtures/terminal.mjs"), join(bin, "tmux"));
-  const command = [process.execPath, "--import", fileURLToPath(import.meta.resolve("tsx")), join(testDir, "fixtures/runtime.ts")].map(shellEscape).join(" ");
+  const command = [process.execPath, "--import", fileURLToPath(import.meta.resolve("tsx")), join(testDir, "fixtures", fixture)].map(shellEscape).join(" ");
   writeFileSync(join(bin, "pi"), `#!/bin/sh\nexec ${command} "$@"\n`, { mode: 0o755 });
   for (const key of Object.keys(process.env)) if (key.startsWith("PI_SUBAGENT_")) delete process.env[key];
   Object.assign(process.env, { PATH: `${bin}:${env.PATH}`, PI_TERMINAL_MUX: "tmux", TMUX: "fixture", TMUX_PANE: "%fixture-parent", PI_CODING_AGENT_DIR: join(root, "config"), SUBAGENT_TEST_TERMINAL: terminal });
@@ -41,6 +41,9 @@ async function withIdentity(run: (h: any) => Promise<void>) {
     subagents(parent.api);
     await parent.emit("session_start", {}, ctx);
     await run({ root, parent, ctx, call, terminal, sessions, project, widgets });
+  } catch (error) {
+    if (existsSync(join(terminal, "screen"))) console.error(readFileSync(join(terminal, "screen"), "utf8"));
+    throw error;
   } finally {
     await parent.emit("session_shutdown", { reason: "quit" }, ctx);
     const terminals = [terminal, ...(existsSync(join(terminal, "surfaces")) ? readdirSync(join(terminal, "surfaces")).map((id) => join(terminal, "surfaces", id)) : [])];
@@ -68,6 +71,187 @@ test("launch allocates normalized unique explicit names and status retains ident
     const status = await call("subagent_status", { id: first.details.id, name: "Reviewer" });
     assert.equal(status.details.subagent.state, "completed");
     assert.equal(status.details.subagent.latestResult.outcome, "succeeded");
+  });
+});
+
+test("native inbox preserves exact multiline instructions and reports enqueue separately from consumption", { timeout: 30_000 }, async () => {
+  await withIdentity(async ({ call, terminal }) => {
+    const launched = await call("subagent", { agent: "echo", task });
+    const message = "  /not-a-command\r\n```ts\nconst x = 'λ';\n```\n\n  trailing spaces  \n";
+    const queued = await call("subagent_message", { id: launched.details.id, message, messageId: "multiline-1", deliverAs: "followUp" });
+    assert.equal(queued.details.status, "queued");
+    assert.equal(queued.details.message.id, "multiline-1");
+    assert.equal(queued.details.message.state, "queued");
+    const accepted = await waitFor(asyncRead, "child acceptance");
+    function asyncRead() {
+      const file = join(terminal, "inbox-received.json");
+      return existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : undefined;
+    }
+    assert.equal(accepted[0].content, message);
+    assert.equal(accepted[0].options.deliverAs, "followUp");
+    const status = (await call("subagent_status", { id: launched.details.id })).details.subagent;
+    assert.equal(status.messages[0].state, "accepted", "void in-memory queue return is not consumption");
+    const duplicate = await call("subagent_message", { name: launched.details.name, message, messageId: "multiline-1", deliverAs: "followUp" });
+    assert.equal(duplicate.details.message.sequence, 1);
+    await assert.rejects(call("subagent_message", { id: launched.details.id, message: "different", messageId: "multiline-1" }), /message.*id.*different|conflict/i);
+  });
+});
+
+test("supported Pi consumes steering before followUp, preserves bytes, and starts idle prompts without terminal keys", { timeout: 90_000 }, async () => {
+  await withIdentity(async ({ call, terminal, project, parent }) => {
+    writeFileSync(join(terminal, "gate-preparation"), "hold initial prompt before agent_start");
+    writeFileSync(join(project, ".pi/agents/resident.md"), "---\nname: resident\ntools:\nauto-exit: false\n---\nStay available\n");
+    const launched = await call("subagent", { agent: "resident", task });
+    const provider = () => existsSync(join(terminal, "provider-input.jsonl")) ? readFileSync(join(terminal, "provider-input.jsonl"), "utf8").trim().split("\n").map((line: string) => JSON.parse(line)) : [];
+    const release = (request: any) => writeFileSync(join(terminal, `release-${request.call}`), "complete");
+    await waitFor(() => existsSync(join(terminal, "preparing")) ? true : undefined, "actual Pi initial preparation boundary");
+    const followUp = "\nnext automatic task\r\n  preserve this  \n";
+    const steering = "  /literal-slash\n```js\nconst unicode = 'λ';\n```\n";
+    await call("subagent_message", { id: launched.details.id, message: followUp, messageId: "follow-up", deliverAs: "followUp" });
+    await call("subagent_message", { id: launched.details.id, message: steering, messageId: "steering", deliverAs: "auto" });
+    const preparing = (await call("subagent_status", { id: launched.details.id })).details.subagent;
+    assert.deepEqual(preparing.messages.map((m: any) => m.state), ["queued", "queued"], "minimum Pi's isIdle during preparation is not permission for a parallel prompt");
+    assert.equal(provider().length, 0);
+    writeFileSync(join(terminal, "release-preparation"), "continue the same initial run");
+    const first = await waitFor(() => provider()[0], "initial real provider call");
+    let status: any = await waitFor(async () => {
+      const current = (await call("subagent_status", { id: launched.details.id })).details.subagent;
+      return current.messages.every((m: any) => m.state === "accepted") ? current : undefined;
+    }, "durable child acceptance while provider is gated");
+    assert.deepEqual(status.messages.map((m: any) => m.state), ["accepted", "accepted"]);
+    assert.ok(status.messages.every((m: any) => m.evidence.transcriptEntryId === null), "memory queueing is not durable transcript consumption");
+    release(first);
+    const second = await waitFor(() => provider()[1], "steering provider request");
+    assert.equal(second.inputs.at(-1), steering);
+    assert.equal(second.inputs.includes(followUp), false, "followUp waits behind the steered automatic run");
+    status = (await call("subagent_status", { id: launched.details.id })).details.subagent;
+    assert.equal(status.messages.find((m: any) => m.id === "steering").state, "consumed");
+    release(second);
+    const third = await waitFor(() => provider()[2], "followUp provider request");
+    assert.equal(third.inputs.at(-1), followUp);
+    release(third);
+    await waitFor(() => parent.sentMessages.find((e: any) => e.message.customType === "subagent_result"), "real Pi final settlement");
+    status = (await call("subagent_status", { id: launched.details.id })).details.subagent;
+    assert.deepEqual(status.messages.map((m: any) => m.state), ["settled", "settled"]);
+    const idle = await call("subagent_message", { id: launched.details.id, message: "idle prompt", messageId: "idle", deliverAs: "steer" });
+    assert.equal(idle.details.generation, 2);
+    const fourth = await waitFor(() => provider()[3], "idle prompt request");
+    assert.equal(fourth.inputs.at(-1), "idle prompt");
+    release(fourth);
+    const commands = readFileSync(join(terminal, "commands.jsonl"), "utf8");
+    assert.doesNotMatch(commands, /send-keys/, "native inbox must never type into the editor or shell");
+  }, "pi-runtime.ts");
+});
+
+test("a real child-control process restart retains consumed IDs and pauses effects until exact-action authorization", { timeout: 90_000 }, async () => {
+  await withIdentity(async ({ call, terminal, project, parent }) => {
+    writeFileSync(join(project, ".pi/agents/resident.md"), "---\nname: resident\ntools:\nauto-exit: false\n---\nStay available\n");
+    const launched = await call("subagent", { agent: "resident", task });
+    const provider = () => existsSync(join(terminal, "provider-input.jsonl")) ? readFileSync(join(terminal, "provider-input.jsonl"), "utf8").trim().split("\n").map((line: string) => JSON.parse(line)) : [];
+    const release = (request: any) => writeFileSync(join(terminal, `release-${request.call}`), "complete");
+    release(await waitFor(() => provider()[0], "first provider call"));
+    await waitFor(() => parent.sentMessages.find((e: any) => e.message.customType === "subagent_result"), "initial settlement");
+    const instruction = "An external change might happen here.\nDo not repeat without permission.\n";
+    await call("subagent_message", { id: launched.details.id, message: instruction, messageId: "affected-operation" });
+    const interrupted = await waitFor(() => provider()[1], "controlled consumption before crash");
+    const before = (await call("subagent_status", { id: launched.details.id })).details.subagent;
+    assert.equal(before.messages[0].state, "consumed");
+    const entryId = before.messages[0].evidence.transcriptEntryId;
+    process.kill(Number(readFileSync(join(terminal, "control-pid"), "utf8")), "SIGKILL");
+    const uncertain = await waitFor(async () => {
+      const status = (await call("subagent_status", { id: launched.details.id })).details.subagent;
+      return status.paused && status.liveness.writer === "exited" ? status : undefined;
+    }, "positive writer exit and durable uncertainty");
+    assert.equal(uncertain.messages[0].delivery, "consumed");
+    assert.equal(uncertain.messages[0].evidence.transcriptEntryId, entryId);
+    const queued = await call("subagent_message", { id: launched.details.id, message: "Independent next instruction", messageId: "ordinary-followup", deliverAs: "followUp" });
+    assert.equal(queued.details.status, "paused-uncertain", "ordinary follow-up cannot authorize repeating uncertain work");
+    const actionId = uncertain.messages[0].uncertainty.actionId;
+    await assert.rejects(call("subagent_message", { id: launched.details.id, authorization: { actionId: "not-the-action", decision: "retry", reason: "Do it" } }), /exact.*actionId/);
+    const replacementController = await controller(dirname(terminal));
+    try {
+      const reconstructed = (await replacementController.call("subagent_status", { id: launched.details.id })).details.subagent;
+      assert.equal(reconstructed.state, "paused-uncertain");
+      assert.equal(reconstructed.messages[0].uncertainty.actionId, actionId);
+    } finally { replacementController.child.kill("SIGKILL"); }
+    await waitFor(() => parent.sentMessages.find((e: any) => e.message.details?.uncertainty?.actionId === actionId), "parent uncertainty notification");
+    const authorized = await call("subagent_message", { id: launched.details.id, authorization: { actionId, decision: "retry", reason: "User explicitly permits repeating the affected operation after checking the destination." } });
+    assert.equal(authorized.details.status, "queued");
+    const restarted = await waitFor(() => provider().find((r: any) => r.executionId !== interrupted.executionId), "genuine replacement child-control process");
+    assert.equal(restarted.inputs.at(-1), instruction);
+    assert.notEqual(restarted.executionId, interrupted.executionId);
+    release(restarted);
+    const ordinary = await waitFor(() => provider().find((r: any) => r.executionId === restarted.executionId && r.call !== restarted.call), "retained ordinary followup");
+    assert.equal(ordinary.inputs.at(-1), "Independent next instruction");
+    release(ordinary);
+    const final = await waitFor(async () => {
+      const status = (await call("subagent_status", { id: launched.details.id })).details.subagent;
+      return status.messages.every((m: any) => m.state === "settled") ? status : undefined;
+    }, "authorized work settlement");
+    assert.equal(final.paused, false);
+    const duplicate = await call("subagent_message", { id: launched.details.id, message: instruction, messageId: "affected-operation" });
+    assert.equal(duplicate.details.message.state, "settled");
+    assert.equal(duplicate.details.generation, final.generation, "duplicate consumption acknowledgement cannot start new work");
+    const commands = readFileSync(join(terminal, "commands.jsonl"), "utf8").trim().split("\n").map((line: string) => JSON.parse(line));
+    assert.equal(commands.filter((e: any) => e.args[0] === "split-window").length, 2, "only explicit authorization may launch the replacement writer");
+  }, "pi-runtime.ts");
+});
+
+test("a demonstrably never-dispatched instruction is safely redelivered after a real child restart with its original id and order", { timeout: 60_000 }, async () => {
+  await withIdentity(async ({ call, terminal }) => {
+    process.env.SUBAGENT_TEST_CLOCK = String(Date.now()); // Freeze only the external child's receiver polling.
+    const launched = await call("subagent", { agent: "echo", task });
+    const message = "Return the exact phrase: safe queued redelivery.\n\nretain final newline\n";
+    const queued = await call("subagent_message", { id: launched.details.id, message, messageId: "safe-redelivery" });
+    assert.equal(queued.details.message.state, "queued");
+    await waitFor(() => existsSync(join(terminal, "control-pid")) ? true : undefined, "child-control PID");
+    process.kill(Number(readFileSync(join(terminal, "control-pid"), "utf8")), "SIGKILL");
+    await waitFor(async () => (await call("subagent_status", { id: launched.details.id })).details.subagent.liveness.writer === "exited" ? true : undefined, "positive writer exit");
+    delete process.env.SUBAGENT_TEST_CLOCK;
+    rmSync(join(terminal, "received.json"), { force: true });
+    const resent = await call("subagent_message", { id: launched.details.id, message, messageId: "safe-redelivery" });
+    assert.equal(resent.details.message.id, "safe-redelivery");
+    assert.equal(resent.details.message.sequence, 1);
+    assert.equal(resent.details.generation, 2);
+    const consumed = await waitFor(() => existsSync(join(terminal, "consumed.json")) ? JSON.parse(readFileSync(join(terminal, "consumed.json"), "utf8")) : undefined, "redelivery visible to child");
+    assert.deepEqual(consumed.map((m: any) => [m.details.messageId, m.content]), [["safe-redelivery", message]]);
+    writeFileSync(join(terminal, "finish"), "complete");
+    const final = await waitFor(async () => {
+      const status = (await call("subagent_status", { id: launched.details.id })).details.subagent;
+      return status.messages[0].state === "settled" ? status : undefined;
+    }, "redelivered message settlement");
+    assert.equal(final.paused, false);
+    assert.equal(final.messages.length, 1, "one logical instruction, not a fresh copy on retry");
+  });
+});
+
+test("accepted memory-only delivery becomes uncertain after process loss and explicit reconciliation suppresses replay", { timeout: 60_000 }, async () => {
+  await withIdentity(async ({ call, terminal }) => {
+    const launched = await call("subagent", { agent: "echo", task });
+    await call("subagent_message", { id: launched.details.id, message: task, messageId: "accepted-gap", deliverAs: "followUp" });
+    await waitFor(async () => {
+      const message = (await call("subagent_status", { id: launched.details.id })).details.subagent.messages[0];
+      return message?.state === "accepted" && message.evidence.dispatchIntent ? true : undefined;
+    }, "memory-only Pi queue dispatch (not just pre-dispatch receiver acceptance)");
+    process.kill(Number(readFileSync(join(terminal, "control-pid"), "utf8")), "SIGKILL");
+    const paused = await waitFor(async () => {
+      const status = (await call("subagent_status", { id: launched.details.id })).details.subagent;
+      return status.paused && status.liveness.writer === "exited" ? status : undefined;
+    }, "uncertain memory queue after positive child exit");
+    assert.equal(paused.messages[0].evidence.transcriptEntryId, null);
+    assert.equal(paused.messages[0].delivery, "accepted");
+    const ordinary = await call("subagent_message", { id: launched.details.id, message: "Return the exact phrase: reconciled next work.", messageId: "after-reconciliation" });
+    assert.equal(ordinary.details.status, "paused-uncertain");
+    assert.ok((await call("subagents_list", {})).details.agents.some((agent: any) => agent.name === "echo"), "independent parent work remains available");
+    const actionId = paused.messages[0].uncertainty.actionId;
+    await call("subagent_message", { id: launched.details.id, authorization: { actionId, decision: "confirm-completed", reason: "User reconciled the affected action and explicitly instructed us not to repeat it." } });
+    const consumed = await waitFor(() => existsSync(join(terminal, "consumed.json")) ? JSON.parse(readFileSync(join(terminal, "consumed.json"), "utf8")) : undefined, "post-reconciliation child input");
+    assert.deepEqual(consumed.map((m: any) => m.details.messageId), ["after-reconciliation"], "accepted-but-uncertain original must not be silently repeated");
+    const status = (await call("subagent_status", { id: launched.details.id })).details.subagent;
+    assert.equal(status.paused, false);
+    assert.equal(status.messages[0].resolution.actionId, actionId);
+    assert.equal(status.messages[0].evidence.settled, false, "explicit reconciliation is not fabricated Pi settlement");
+    writeFileSync(join(terminal, "finish"), "complete");
   });
 });
 
@@ -130,7 +314,7 @@ async function controller(root: string, parentId?: string) {
   } };
 }
 
-test("cross-process double resume admits one writer, retains id and generation, and reconstructs scoped status", { timeout: 60_000 }, async () => {
+test("cross-process concurrent resume queues both instructions behind one writer and reconstructs scoped status", { timeout: 60_000 }, async () => {
   await withIdentity(async ({ root, call, terminal, parent, ctx }) => {
     const first = await call("subagent", { agent: "echo", name: "Stable", task });
     writeFileSync(join(terminal, "finish"), "complete");
@@ -147,8 +331,9 @@ test("cross-process double resume admits one writer, retains id and generation, 
     try {
       const raced = await Promise.allSettled([a.call("subagent_message", { id: first.details.id, message: task }), b.call("subagent_message", { id: first.details.id, message: task })]);
       const accepted = raced.filter((r) => r.status === "fulfilled");
-      assert.equal(accepted.length, 1, "the other request must explicitly fail, not falsely acknowledge discarded input");
-      const winner = (accepted[0] as PromiseFulfilledResult<any>).value;
+      assert.equal(accepted.length, 2, "both instructions are retained behind the same writer reservation");
+      assert.deepEqual(accepted.map((r) => (r as PromiseFulfilledResult<any>).value.details.message.sequence).sort(), [1, 2]);
+      const winner = accepted.map((r) => (r as PromiseFulfilledResult<any>).value).find((r) => r.details.launchScriptFile)!;
       assert.equal(winner.details.id, first.details.id);
       assert.equal(winner.details.generation, 2);
       const commands = readFileSync(join(terminal, "commands.jsonl"), "utf8").trim().split("\n").map((line: string) => JSON.parse(line));
@@ -161,8 +346,9 @@ test("cross-process double resume admits one writer, retains id and generation, 
       const stale = spawnSync("bash", [first.details.launchScriptFile], { encoding: "utf8" });
       assert.notEqual(stale.status, 0);
       assert.match(stale.stderr, /stale.*writer/i, "old generation cannot reopen Pi even if its native command is replayed");
-      const observer = raced[0].status === "rejected" ? a : b;
-      await assert.rejects(observer.call("subagent_message", { id: first.details.id, message: task }), /writer|owned|active|uncertain|busy/i);
+      const observer = b;
+      const third = await observer.call("subagent_message", { id: first.details.id, message: task });
+      assert.equal(third.details.message.sequence, 3);
       writeFileSync(join(terminal, "finish"), "complete");
       await waitFor(() => existsSync(`${winner.details.sessionFile}.process-exit-${recovered.executionId}`) ? true : undefined, "writer exit");
       const completed = (await observer.call("subagent_status", { id: first.details.id })).details.subagent;
@@ -189,6 +375,15 @@ test("concurrent controllers allocate default and explicit names without losing 
       assert.equal(listed.length, 4);
       assert.equal(new Set(listed.map((r: any) => r.id)).size, 4);
       assert.ok(listed.every((r: any) => r.generation === 1 && r.state === "running" && r.liveness.surface === "present"));
+      await Promise.all(listed.map((run: any, index: number) => call("subagent_message", { id: run.id, messageId: `target-${index}`, message: `Return the exact phrase: target ${index}.\nOnly for ${run.name}`, deliverAs: "followUp" })));
+      for (const run of listed) writeFileSync(join(terminal, "surfaces", run.surface, "finish"), "complete");
+      for (const [index, run] of listed.entries()) {
+        const input = await waitFor(() => {
+          const file = join(terminal, "surfaces", run.surface, "consumed.json");
+          return existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : undefined;
+        }, "correct child's managed input");
+        assert.deepEqual(input.map((message: any) => [message.details.messageId, message.content]), [[`target-${index}`, `Return the exact phrase: target ${index}.\nOnly for ${run.name}`]]);
+      }
     } finally { a.child.kill("SIGKILL"); b.child.kill("SIGKILL"); }
   });
 });
@@ -239,7 +434,8 @@ test("the pre-Pi gate rejects duplicate startup and a replacement runtime cannot
       const status = (await call("subagent_status", { id: launched.details.id })).details.subagent;
       assert.equal(status.liveness.responsive, "unresponsive");
       assert.equal(status.state, "running");
-      await assert.rejects(c.call("subagent_message", { id: launched.details.id, message: task }), /writer.*(active|uncertain)/i);
+      const queued = await c.call("subagent_message", { id: launched.details.id, message: task });
+      assert.equal(queued.details.status, "queued", "existing fenced receiver can accept without writer takeover");
     } finally { t.mock.timers.reset(); c.child.kill("SIGKILL"); }
     writeFileSync(join(terminal, "finish"), "complete");
     await waitFor(() => parent.sentMessages.find((e: any) => e.message.customType === "subagent_result"), "resident settlement");
@@ -263,7 +459,8 @@ test("the pre-Pi gate rejects duplicate startup and a replacement runtime cannot
       assert.equal(recovered.id, launched.details.id);
       assert.equal(recovered.generation, 2);
       assert.equal(recovered.state, "running");
-      await assert.rejects(recreated.call("subagent_message", { id: launched.details.id, message: task }), /writer.*(active|uncertain)/i);
+      const queued = await recreated.call("subagent_message", { id: launched.details.id, message: task });
+      assert.equal(queued.details.status, "queued");
     } finally { recreated.child.kill("SIGKILL"); }
   });
 });

@@ -12,12 +12,14 @@
  * (auto-exit is suppressed for that turn via `awaitingAnswer`), and the parent
  * replies with subagent_message — which lands as the subagent's next turn.
  */
-import type { ExtensionAPI, SessionMessageEntry } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, SessionMessageEntry } from "@earendil-works/pi-coding-agent";
 import { Box, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { createSubagentActivityRecorder, LIVENESS_INTERVAL_MS, writeSubagentLiveness } from "./activity.ts";
 import { writeSubagentOutcome } from "./outcome.ts";
+import { createInboxReceiver, INSTRUCTION_TYPE } from "./inbox.ts";
+import { writerFile } from "./runs.ts";
 
 /**
  * Number of child subagents this session itself still has in flight.
@@ -66,6 +68,7 @@ export default function (pi: ExtensionAPI) {
   const executionId = process.env.PI_SUBAGENT_ID;
   let heartbeat: ReturnType<typeof setInterval> | undefined;
   let sequence = 0;
+  const inbox = sessionFile && executionId && existsSync(writerFile(sessionFile)) ? createInboxReceiver(pi, sessionFile, executionId) : undefined;
   let seenEntries = new Set<string>();
   let activityOutcome: "completed" | "aborted" | "error" = "completed";
   const recorder = createSubagentActivityRecorder({
@@ -133,6 +136,7 @@ export default function (pi: ExtensionAPI) {
   // Show widget + status bar on session start
   pi.on("session_start", (_event, ctx) => {
     recorder.sessionStart();
+    inbox?.start(ctx);
     if (heartbeat) clearInterval(heartbeat);
     if (sessionFile && executionId) {
       writeSubagentLiveness(sessionFile, executionId);
@@ -151,6 +155,8 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("input", () => {
+    if (inbox?.paused()) return { action: "handled" };
+    inbox?.input();
     recorder.input();
     // A submitted message is the orchestrator's (or a human's) reply — the
     // pending ask_question has been answered, however it was delivered. Clear
@@ -163,12 +169,21 @@ export default function (pi: ExtensionAPI) {
     awaitingAnswer = false;
   });
 
+  pi.on("context", (event) => {
+    inbox?.context(event.messages);
+    if (event.messages.some((message) => message.role === "custom" && message.customType === INSTRUCTION_TYPE)) {
+      recorder.input();
+      awaitingAnswer = false;
+    }
+  });
+
   pi.on("before_agent_start", () => {
     recorder.beforeAgentStart();
   });
 
   pi.on("agent_start", () => {
     // Retries/recovery can start another run without any parent reply.
+    inbox?.agentStart();
     recorder.agentStart();
   });
 
@@ -181,9 +196,15 @@ export default function (pi: ExtensionAPI) {
     // The final activity outcome is only supplied at this boundary. Observe it
     // here, but publish nothing until all boundary continuations have settled.
     activityOutcome = event.outcome;
+    inbox?.beforeSettle();
   });
 
-  pi.on("agent_settled", (_event, ctx) => {
+  function publishSettlement(ctx: ExtensionContext) {
+    inbox?.settled(activityOutcome);
+    if (inbox?.hasPending()) {
+      recorder.agentEndWaiting();
+      return;
+    }
     const branch = ctx.sessionManager.getBranch();
     const fresh = branch.filter((entry) => !seenEntries.has(entry.id));
     const instruction = fresh.findLastIndex((entry) => entry.type === "custom_message" || (entry.type === "message" && entry.message.role === "user"));
@@ -237,11 +258,18 @@ export default function (pi: ExtensionAPI) {
 
     if (autoExit && outcome !== "aborted") {
       recorder.agentEndDone();
+      inbox?.closing();
       ctx.shutdown();
       return;
     }
 
     recorder.agentEndWaiting();
+  }
+  pi.on("agent_settled", (_event, ctx) => {
+    // Publication and the close decision share the sender's short lock. A
+    // message either prevents auto-exit or sees a closing writer and waits for
+    // positive exit before a single replacement is reserved.
+    if (inbox) inbox.boundary(() => publishSettlement(ctx)); else publishSettlement(ctx);
   });
 
   pi.on("turn_start", (event) => {
@@ -265,10 +293,12 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("tool_execution_start", (event) => {
+    inbox?.toolStart(event.toolCallId);
     recorder.toolExecutionStart((event as any).toolCallId, (event as any).toolName);
   });
 
   pi.on("tool_call", (event) => {
+    if (inbox?.paused()) return { block: true, reason: "This collaborator has an uncertain action; only explicit affected-action authorization/reconciliation releases it." };
     recorder.toolCall((event as any).toolCallId, (event as any).toolName);
   });
 
@@ -281,10 +311,12 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("tool_execution_end", (event) => {
+    inbox?.toolEnd(event.toolCallId);
     recorder.toolExecutionEnd((event as any).toolCallId, (event as any).toolName);
   });
 
   pi.on("session_shutdown", (event) => {
+    inbox?.stop();
     if (heartbeat) clearInterval(heartbeat);
     heartbeat = undefined;
     recorder.sessionShutdown((event as any).reason);
