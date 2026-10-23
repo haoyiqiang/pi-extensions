@@ -2,11 +2,23 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import subagentDone from "../../pi-extension/subagents/subagent-done.ts";
+import { mock } from "node:test";
 import { createMockExtensionApi, plainTheme, waitFor } from "../harness.ts";
 
 const args = process.argv.slice(2);
 const sessionFile = args[args.indexOf("--session") + 1];
 const root = process.env.SUBAGENT_TEST_TERMINAL!;
+if (process.env.SUBAGENT_TEST_CLOCK) {
+  const realInterval = setInterval;
+  mock.timers.enable({ apis: ["Date", "setTimeout", "setInterval"], now: Number(process.env.SUBAGENT_TEST_CLOCK) });
+  // Advance the child event-loop clock independently of the parent's clock.
+  realInterval(() => {
+    if (!existsSync(join(root, "clock"))) return;
+    const at = Number(readFileSync(join(root, "clock"), "utf8"));
+    if (at > Date.now()) mock.timers.tick(at - Date.now());
+    writeFileSync(join(root, "clock-applied"), String(Date.now()));
+  }, 10).unref();
+}
 const taskArg = args.at(-1)!;
 let task = taskArg.startsWith("@") ? readFileSync(taskArg.slice(1), "utf8") : taskArg;
 const runtime = createMockExtensionApi();
@@ -39,7 +51,9 @@ for (;;) {
   await runtime.emit("input", { text: task, source: "interactive" }, ctx);
   await runtime.emit("before_agent_start", { prompt: task }, ctx);
   await runtime.emit("agent_start", {}, ctx);
-  writeFileSync(join(root, "received.tmp"), JSON.stringify({ task, widgets, tools: runtime.registeredTools.map((tool) => tool.name), args, autoExit: process.env.PI_SUBAGENT_AUTO_EXIT, cwd: process.cwd(), env: Object.fromEntries(Object.entries(process.env).filter(([key]) => key.startsWith("PI_SUBAGENT_") || key === "PI_CODING_AGENT_DIR")) }));
+  if (task.includes("LONG_PROVIDER")) await runtime.emit("before_provider_request", {}, ctx);
+  if (task.includes("LONG_TOOL")) await runtime.emit("tool_execution_start", { toolCallId: "long-tool", toolName: "bash" }, ctx);
+  writeFileSync(join(root, "received.tmp"), JSON.stringify({ task, widgets, tools: runtime.registeredTools.map((tool) => tool.name), args, autoExit: process.env.PI_SUBAGENT_AUTO_EXIT, cwd: process.cwd(), env: Object.fromEntries(Object.entries(process.env).filter(([key]) => key.startsWith("PI_SUBAGENT_") || key === "PI_CODING_AGENT_DIR" || key === "PI_TERMINAL_RENAME_CONTEXT")) }));
   renameSync(join(root, "received.tmp"), join(root, "received.json"));
   await waitFor(() => existsSync(join(root, "finish")) ? true : undefined, "permission to complete delegated task");
   if (task.includes("EXIT_WITHOUT_RESULT")) {

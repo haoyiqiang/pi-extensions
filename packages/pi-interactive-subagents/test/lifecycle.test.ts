@@ -53,6 +53,7 @@ test("retry, queued and recovery runs cannot terminate delegated work before fin
     await child.emit("agent_settled", {}, ctx);
     assert.equal(shutdown, true, "autonomous work exits only after settlement");
   } finally {
+    await child.emit("session_shutdown", { reason: "quit" }, ctx);
     process.env = previousEnv;
     rmSync(root, { recursive: true, force: true });
   }
@@ -92,6 +93,7 @@ test("pending questions survive automatic restarts until actual reply input arri
     await child.emit("agent_settled", {}, ctx);
     assert.equal(shutdown, true);
   } finally {
+    await child.emit("session_shutdown", { reason: "quit" }, ctx);
     process.env = previousEnv;
     rmSync(root, { recursive: true, force: true });
   }
@@ -100,8 +102,8 @@ test("pending questions survive automatic restarts until actual reply input arri
 test("result persistence failure prevents autonomous exit", async () => {
   const root = mkdtempSync(join(tmpdir(), "subagent-persist-failure-"));
   const previousEnv = { ...process.env };
-  writeFileSync(join(root, "blocked"), "not a directory");
-  process.env.PI_SUBAGENT_SESSION = join(root, "blocked", "child.jsonl");
+  process.env.PI_SUBAGENT_SESSION = join(root, "child.jsonl");
+  writeFileSync(`${process.env.PI_SUBAGENT_SESSION}.results`, "not a directory");
   process.env.PI_SUBAGENT_ID = "persistence-child";
   process.env.PI_SUBAGENT_AUTO_EXIT = "1";
   const child = createMockExtensionApi();
@@ -122,6 +124,7 @@ test("result persistence failure prevents autonomous exit", async () => {
     await assert.rejects(child.emit("agent_settled", {}, ctx), /ENOTDIR|EEXIST/);
     assert.equal(shutdown, false, "a failed result write cannot be reported as completed exit");
   } finally {
+    await child.emit("session_shutdown", { reason: "quit" }, ctx);
     process.env = previousEnv;
     rmSync(root, { recursive: true, force: true });
   }
@@ -243,6 +246,7 @@ test("native delegation acknowledges launch before child completion and automati
     await bridge.emit("agent_before_settle", { outcome: "completed" }, delegatorCtx);
     await bridge.emit("agent_settled", {}, delegatorCtx);
     assert.equal(delegatorShutdown, true, "delegator may finish after incorporating its last child");
+    await bridge.emit("session_shutdown", { reason: "quit" }, delegatorCtx);
     assert.equal(delivered.message.details.name, "Echo");
     assert.equal(delivered.message.details.exitCode, 0);
     assert.equal(delivered.message.details.outcome, "succeeded");
@@ -402,7 +406,7 @@ test("native delegation acknowledges launch before child completion and automati
     assert.ok(fullResult.output.length > 40_000);
     assert.match(fullResult.output, /complete output end$/);
     assert.equal(fullResult.outcome, "succeeded", "terminal diagnostic loss cannot reverse persisted success");
-    await waitFor(() => readFileSync(join(terminal, "surface"), "utf8") === "closed" ? true : undefined, "confirmed process-exit cleanup");
+    await waitFor(() => readFileSync(join(terminal, "surface"), "utf8") !== "open" ? true : undefined, "confirmed surface absence");
 
     // Editing the role cannot silently change a completed child's saved policy.
     writeFileSync(join(agents, "resident.md"), "---\nname: resident\ntools: read\nauto-exit: true\n---\nChanged role definition.\n");

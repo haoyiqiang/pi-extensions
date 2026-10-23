@@ -16,7 +16,7 @@ import type { ExtensionAPI, SessionMessageEntry } from "@earendil-works/pi-codin
 import { Box, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { writeFileSync } from "node:fs";
-import { createSubagentActivityRecorder } from "./activity.ts";
+import { createSubagentActivityRecorder, LIVENESS_INTERVAL_MS, writeSubagentLiveness } from "./activity.ts";
 import { writeSubagentOutcome } from "./outcome.ts";
 
 /**
@@ -64,6 +64,7 @@ export default function (pi: ExtensionAPI) {
   const autoExit = process.env.PI_SUBAGENT_AUTO_EXIT !== "0";
   const sessionFile = process.env.PI_SUBAGENT_SESSION;
   const executionId = process.env.PI_SUBAGENT_ID;
+  let heartbeat: ReturnType<typeof setInterval> | undefined;
   let sequence = 0;
   let seenEntries = new Set<string>();
   let activityOutcome: "completed" | "aborted" | "error" = "completed";
@@ -132,12 +133,21 @@ export default function (pi: ExtensionAPI) {
   // Show widget + status bar on session start
   pi.on("session_start", (_event, ctx) => {
     recorder.sessionStart();
+    if (heartbeat) clearInterval(heartbeat);
+    if (sessionFile && executionId) {
+      writeSubagentLiveness(sessionFile, executionId);
+      heartbeat = setInterval(() => {
+        try { writeSubagentLiveness(sessionFile, executionId); }
+        catch (error) { console.error("Subagent liveness publication failed:", error); }
+      }, LIVENESS_INTERVAL_MS);
+      heartbeat.unref?.();
+    }
     seenEntries = new Set(ctx.sessionManager.getBranch().map((entry) => entry.id));
     const tools = pi.getAllTools();
     toolNames = tools.map((t) => t.name).sort();
     denied = parseDeniedTools(deniedToolsValue);
 
-    renderWidget(ctx, null);
+    if (ctx.hasUI) renderWidget(ctx, null);
   });
 
   pi.on("input", () => {
@@ -275,6 +285,8 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("session_shutdown", (event) => {
+    if (heartbeat) clearInterval(heartbeat);
+    heartbeat = undefined;
     recorder.sessionShutdown((event as any).reason);
   });
 
