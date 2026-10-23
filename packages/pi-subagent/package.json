@@ -13,9 +13,6 @@
   "files": [
     "index.ts",
     "shared.ts",
-    "roles.ts",
-    "config-panel.ts",
-    "extension-sources.ts",
     "subagent.ts",
     "skills",
     "README.md",
@@ -57,8 +54,7 @@
     "subagent"
   ],
   "dependencies": {
-    "@kevinhao/pi-terminal-mux": "^0.6.5",
-    "@kevinhao/pi-utils": "^0.1.0"
+    "@kevinhao/pi-terminal-mux": "^0.6.5"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.87.1",

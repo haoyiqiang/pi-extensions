@@ -1,41 +1,59 @@
 ---
 name: subagent
-description: Spawn and communicate with observable Pi subagents for independent reviews, investigations, planning, and delegated implementation work.
+description: Spawn and communicate with observable Pi subagents for second opinions, independent investigations, and delegated implementation work.
 ---
 
 # Subagent
 
-Use the `subagent` CLI to delegate work to a separate Pi process with its own terminal panel and durable conversation. Managed subagents cannot spawn nested subagents, and this skill is not loaded into their sessions.
-
-Use `subagent --help` or `subagent <command> --help` when unsure about syntax or defaults; do not repeat queries whose answers are already in context.
+Use the `subagent` CLI to delegate work to a separate Pi process with its own context and terminal panel. Managed subagents cannot spawn nested subagents, and this skill is not loaded into their sessions.
 
 ## Spawn
 
-Give each child a short, descriptive name. The generated handle is its stable identifier:
+Give each child a short, descriptive name. The name appears in the parent UI, while the generated handle remains its stable identifier:
 
 ```sh
 subagent spawn --name implementation --prompt "Complete task"
 ```
 
-The child inherits the parent Pi provider, model, and reasoning level from the bash environment. Override them only deliberately or as requested. Never pass `$PI_PROVIDER`, `$PI_MODEL`, or `$PI_REASONING_LEVEL` back explicitly.
+By default, the child inherits the current Pi provider, model, and reasoning level from the bash environment. Use `--provider`, `--model`, or `--thinking` only when deliberately choosing a different configuration, for example a faster model for simple investigation or a stronger model for difficult review. Never pass `$PI_PROVIDER`, `$PI_MODEL`, or `$PI_REASONING_LEVEL` back to the CLI explicitly.
 
-`--cwd` defaults to the current directory. The child does not inherit the parent's conversation: supply a self-contained task with the scope, necessary context, constraints, and expected result. Repeat `--prompt` and `--file` as needed; both enter the first user turn.
+`--cwd` defaults to the current directory. Repeat `--prompt` and `--file` as needed; Pi receives all of them in the first user turn. Run `subagent spawn` directly without piping or redirecting its concise output.
 
-Select reusable roles from the names and descriptions already advertised in the parent's system prompt. Do not read every role body or run `roles` just to rediscover that catalog; use `subagent roles` only to inspect presets when needed. Check required capabilities and authorization. Use a plain child if no role fits or its workflow conflicts with the task.
+## Tools
+
+Without `--tools`, Pi enables its four default tools:
+
+- `read` - Read text files and images.
+- `bash` - Execute shell commands. This can also modify files, so it is not a read-only capability.
+- `edit` - Apply exact text replacements to existing files.
+- `write` - Create or overwrite files.
+
+Three additional built-in tools are available but off by default:
+
+- `grep` - Search file contents.
+- `find` - Find files by glob pattern.
+- `ls` - List directory contents.
+
+`--tools` is a comma-separated allowlist across built-in, extension, and custom tools. Common choices:
 
 ```sh
-subagent spawn --role explore --name investigation --prompt "Find authentication entry points; search breadth: medium"
+# Enforced read-only repository investigation
+--tools read,grep,find,ls
+
+# Investigation that may run tests or other commands; bash can modify files
+--tools read,bash,grep,find,ls
+
+# Implementation work: omit --tools to use the defaults
 ```
 
-Use `explore` for targeted file, symbol, and reference lookups; specify search breadth as quick, medium, or very thorough. Use `plan` for read-only implementation planning. Use `general-purpose` or a plain child for implementation, reviews, and broader analysis. Do not route reviews or cross-file consistency audits to `explore`. None of these roles requires TODO tooling, report files, or commits. All inherit model and thinking; `explore` and `plan` preset read-only tools, while `general-purpose` retains CLI/Pi tool defaults.
+## Isolation flags
 
-`--role` applies model, thinking, tools, and extensions presets from `references/`. Explicit CLI options override presets; omitted fields use parent/Pi defaults. Any `-e/-ne` replaces the whole extension preset, not just its source list. The role body is appended without frontmatter to Pi's normal system prompt, preserving `APPEND_SYSTEM.md`. Resolved settings and instructions are saved for follow-ups and resume.
+- `--no-extensions` - Disable normal extension discovery. Use for an independent run that should not inherit unrelated extension behavior or extension-provided tools. The subagent control bridge is still explicitly loaded.
+- `--no-skills` - Hide installed skills from the child. Use for tightly specified tasks that should rely only on the supplied prompt and files.
+- `--no-prompt-templates` - Disable prompt-template commands. Usually unnecessary, but useful when testing a minimal child environment.
+- `--no-context-files` - Ignore repository instruction files such as `AGENTS.md` and `CLAUDE.md`. Use only when those instructions would bias an independent investigation. Do not use for implementation unless intentionally bypassing repository guidance.
 
-Use `--append-system-prompt` for custom text or files, `--prompt` for the task, and `--file` for task attachments. Resolve custom file paths from the invoking shell's directory, even with `--cwd`; verify they exist and quote absolute paths.
-
-Bash can modify files despite read-only role instructions; tool selection is not a sandbox. Retain repository guidance for implementation unless intentionally overridden.
-
-Run spawn directly, without piping or redirecting its concise output. Keep the handle and panel ID. Panel creation is not proof of task completion; do not attach to a separate tmux session.
+Spawn prints a random handle and the panel ID. Outside tmux or Orca the child runs headless: the ID starts with `headless:` and there is no panel to look at, so read results through `status` and `wait`. Keep the handle for later commands. Subagents persist after their current turn completes: `wait`, completion, and becoming idle do not terminate them. They survive `/reload`. When the spawning Pi session quits or is replaced, they are suspended and reopened with their history when that session is resumed. They are only removed by `subagent stop`.
 
 ## Inspect and wait
 
@@ -45,27 +63,24 @@ subagent list
 subagent wait <handle>
 ```
 
-Use `list` to rediscover existing runs and handles; use `roles` only to inspect role presets not already in context.
+Run `subagent list` at any time to rediscover active subagents and their handles, names, and current states if you no longer remember them.
 
-`wait` returns the durable non-aborted assistant response when the child is idle and its inbox is empty. An aborted reply keeps waiting for continuation; errors, child exit, and timeout fail. An interactive question is not completion: obtain the user's answer and continue the same child.
-
-Run wait directly so bash returns the response. Do not redirect or pipe it unless the user asks for an artifact, and do not infer completion from terminal text. Set the bash timeout above wait's deadline; consult `subagent wait --help` for defaults and overrides. Timeout does not stop the child.
-
-Verify findings and actual code changes before reporting completion; distinguish checks performed from checks merely recommended.
+`wait` follows the durable session state and prints the latest final assistant response. Run it directly so the bash tool returns that response; do not redirect it to a file or pipe it unless the user explicitly asks for an artifact. Do not infer completion from captured terminal text. Set the bash timeout above `wait`'s default 1800-second deadline.
 
 ## Communicate
 
 ```sh
-subagent rename <handle> "new display name"
+# Change the name shown in the parent UI.
+subagent rename <handle> "new name"
 
-# Idle: starts a new task. Busy: steers current work.
+# Idle: starts a new prompt. Busy: steers the current work.
 subagent send <handle> "message"
 
-# Busy: queues another turn after current work finishes.
+# Busy: waits until current work finishes, then starts another turn.
 subagent send <handle> --follow-up "message"
 ```
 
-Messages use the control inbox; do not send terminal keys. Renaming changes only the display label, not the handle or role instructions.
+Names are 1–64 characters and need not be unique. Messages use the subagent extension's control inbox; do not send terminal keys.
 
 ## Stop
 
@@ -73,6 +88,4 @@ Messages use the control inbox; do not send terminal keys. Renaming changes only
 subagent stop <handle>
 ```
 
-Explicitly stop each child when it is no longer needed. Completion and wait do not terminate it. Stop confirms panel closure before deleting the transcript, metadata, and role snapshot; retain needed findings first. If closure fails or cannot be verified, it reports an error and keeps the run. Keep an idle child only for concrete follow-up work.
-
-Children survive `/reload`. Parent quit or session replacement suspends live children; resuming the parent reopens them with their own history and saved role instructions.
+Explicitly stop every subagent when it is no longer needed; do not leave completed subagents running idle. This closes the panel and removes the run transcript and metadata; when closure cannot be confirmed the run is preserved. Keep an idle subagent alive only when concrete follow-up work is expected, then stop it afterward.

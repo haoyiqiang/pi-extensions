@@ -33,7 +33,7 @@
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { BfsSplitStateManager, createBackendLogger, hasCommand, withFileLock } from "./shared.ts";
-import type { BackendOps, CreateSurfaceOptions } from "./types.ts";
+import type { BackendOps, CreateSurfaceOptions, SurfaceState } from "./types.ts";
 
 const ORCA_RUNTIME_CHECK_TIMEOUT_MS = 1_500;
 const ORCA_COMMAND_TIMEOUT_MS = 10_000;
@@ -489,5 +489,9 @@ export const ops: BackendOps = {
   /** 重命名 orca terminal 所在 tab */
   rename(surface: string, name: string): void {
     renameOrcaTerminal(surface, name);
+  },
+  /** 查询 terminal 是否存在；查询失败归一为 unknown */
+  state(surface: string): SurfaceState {
+    return queryOrcaTerminalState(surface).kind;
   },
 };

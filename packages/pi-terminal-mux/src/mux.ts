@@ -34,6 +34,7 @@ export {
   readScreen,
   readScreenAsync,
   closeSurface,
+  surfaceState,
   renameSurface,
   getRenameCapability,
   renameCurrentTab,
@@ -53,6 +54,7 @@ export type {
   RenameCapability,
   RenameResult,
 } from "./surface.ts";
+export type { SurfaceState } from "./backends/types.ts";
 
 export {
   TERMINAL_RENAME_CONTEXT_ENV,

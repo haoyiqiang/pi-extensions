@@ -11,10 +11,10 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { getMuxBackend, muxLog, muxSetupHint } from "./detection.ts";
-import { isHeadlessSurface, createHeadlessSurface, closeHeadlessSurface, sendHeadlessEscape, readHeadlessScreen, readHeadlessScreenAsync, spawnHeadlessProcess, getHeadlessProcessExit, drainHeadlessProcess } from "./headless.ts";
+import { isHeadlessSurface, createHeadlessSurface, closeHeadlessSurface, sendHeadlessEscape, readHeadlessScreen, readHeadlessScreenAsync, spawnHeadlessProcess, getHeadlessProcessExit, drainHeadlessProcess, headlessSurfaceState } from "./headless.ts";
 import { shellEscape, powershellEscape } from "./shell.ts";
 import type { MuxBackend } from "./detection.ts";
-import type { BackendOps, CreateSurfaceOptions } from "./backends/types.ts";
+import type { BackendOps, CreateSurfaceOptions, SurfaceState } from "./backends/types.ts";
 import { ops as tmuxOps } from "./backends/tmux.ts";
 import { ops as orcaOps, AGENT_ORCA_TERMINAL_HANDLE, renameOrcaTerminal } from "./backends/orca.ts";
 
@@ -255,6 +255,20 @@ export function closeSurface(surface: string): void {
 
   const backend = requireMuxBackend();
   backendOps[backend].close(surface);
+}
+
+/**
+ * Query whether a surface still exists.
+ *
+ * A failed screen read must not be reported as absence, so this asks the backend
+ * for its inventory. Headless surfaces are tracked by their managed child process.
+ */
+export function surfaceState(surface: string): SurfaceState {
+  if (!surface) return "unknown";
+  if (isHeadlessSurface(surface)) return headlessSurfaceState(surface);
+  const backend = getMuxBackend();
+  if (!backend) return "unknown";
+  return backendOps[backend].state(surface);
 }
 
 /**

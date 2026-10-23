@@ -19,6 +19,7 @@ import type { WriteStream } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { isMuxAvailable } from "./detection.ts";
+import type { SurfaceState } from "./backends/types.ts";
 
 // ── 常量 ──
 
@@ -144,6 +145,14 @@ export function spawnHeadlessProcess(
 /**
  * 关闭 headless surface：先 SIGTERM，HEADLESS_KILL_TIMEOUT_MS 后若仍存活则 SIGKILL。
  */
+/** Headless surfaces have no inventory; the managed child process is the authority. */
+export function headlessSurfaceState(surface: string): SurfaceState {
+  if (!isHeadlessSurface(surface)) return "unknown";
+  const proc = headlessProcesses.get(surface);
+  if (!proc) return "absent";
+  return proc.child.exitCode === null && proc.child.signalCode === null ? "present" : "absent";
+}
+
 export function closeHeadlessSurface(surface: string): void {
   const proc = headlessProcesses.get(surface);
   if (!proc) return;

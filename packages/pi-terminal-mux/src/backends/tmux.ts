@@ -5,10 +5,10 @@
  * Tmux 没有 pane 级命名，rename 退化为 window 命名。
  */
 
-import { execFileSync, execFile } from "node:child_process";
+import { execFileSync, execFile, spawnSync } from "node:child_process";
 import { promisify } from "node:util";
 import { createBackendLogger } from "./shared.ts";
-import type { BackendOps, CreateSurfaceOptions } from "./types.ts";
+import type { BackendOps, CreateSurfaceOptions, SurfaceState } from "./types.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -84,5 +84,12 @@ export const ops: BackendOps = {
       encoding: "utf8",
     }).trim();
     execFileSync("tmux", ["rename-window", "-t", windowId, name], { encoding: "utf8" });
+  },
+
+  state(surface: string): SurfaceState {
+    const result = spawnSync("tmux", ["list-panes", "-a", "-F", "#{pane_id}"], { encoding: "utf8", timeout: 5000 });
+    if (result.status === 0) return result.stdout.split(/\s+/).includes(surface) ? "present" : "absent";
+    if (/no server running|error connecting.*No such file|failed to connect.*No such file/.test(result.stderr ?? "")) return "absent";
+    return "unknown";
   },
 };
