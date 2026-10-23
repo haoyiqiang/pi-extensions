@@ -23,7 +23,7 @@ test("supported Pi loads the package manifest and child control extensions", asy
     assert.deepEqual(loaded.errors, []);
     assert.equal(loaded.extensions.length, 3);
     const tools = loaded.extensions.flatMap((extension) => [...extension.tools.keys()]);
-    assert.deepEqual(tools.sort(), ["ask_question", "safe_bash", "subagent", "subagent_message", "subagents_list"]);
+    assert.deepEqual(tools.sort(), ["ask_question", "safe_bash", "subagent", "subagent_message", "subagent_status", "subagents_list"]);
     assert.ok(loaded.extensions[0].commands.has("subagent"));
     assert.ok(loaded.extensions[0].messageRenderers.has("subagent_result"));
   } finally {

@@ -63,9 +63,3 @@ export function readSubagentOutcomes(sessionFile: string, executionId: string, a
 export function processExitFile(sessionFile: string, executionId: string): string {
   return `${sessionFile}.process-exit-${executionId}`;
 }
-
-export function withProcessExitRecord(command: string, sessionFile: string, executionId: string): string {
-  const file = processExitFile(sessionFile, executionId);
-  const quote = (value: string) => "'" + value.replace(/'/g, "'\\''") + "'";
-  return `${command}; code=$?; printf '%s' "$code" > ${quote(`${file}.tmp`)}; mv ${quote(`${file}.tmp`)} ${quote(file)}`;
-}

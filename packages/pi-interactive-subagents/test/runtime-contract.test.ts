@@ -74,7 +74,7 @@ test("supported Pi reports management refusals as tool failures without launchin
     assert.ok(model, "the deterministic local provider must be available");
     ({ session } = await createAgentSession({
       cwd: project, agentDir, modelRuntime, model,
-      thinkingLevel: "off", tools: ["subagent", "subagent_message", "subagents_list"],
+      thinkingLevel: "off", tools: ["subagent", "subagent_message", "subagents_list", "subagent_status"],
       sessionManager: SessionManager.create(project, join(root, "sessions")), settingsManager, resourceLoader,
     }));
     await session.bindExtensions({});
@@ -97,6 +97,9 @@ test("supported Pi reports management refusals as tool failures without launchin
     assert.match(JSON.stringify(missing.content), /No subagent named/);
     assert.equal(existsSync(join(terminal, "surface")), false);
 
+    const foreign = await call("subagent_status", { id: "not-owned" });
+    assert.equal(foreign.isError, true, "status ownership failures use Pi's actual exception contract");
+    assert.match(JSON.stringify(foreign.content), /owned by this parent/);
     delete process.env.TMUX;
     const unsupported = await call("subagent", { agent: "safe", task: "Must not run headless." });
     process.env.TMUX = "fixture";
@@ -124,7 +127,7 @@ test("supported Pi reports management refusals as tool failures without launchin
     const receipt = await waitFor(() => existsSync(join(terminal, "received.json")) ? JSON.parse(readFileSync(join(terminal, "received.json"), "utf8")) : undefined, "supported Pi launch receipt");
     assert.equal(receipt.args[receipt.args.indexOf("--tools") + 1], "ask_question");
     assert.equal(session.messages.some((message) => message.role === "custom" && message.customType === "subagent_result"), false, "launch returns while child completion is still gated");
-    assert.deepEqual(executionErrors, [true, true, true, true, false]);
+    assert.deepEqual(executionErrors, [true, true, true, true, true, false]);
   } finally {
     await session?.extensionRunner?.emit({ type: "session_shutdown", reason: "quit" });
     session?.dispose();
