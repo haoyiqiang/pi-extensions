@@ -2,7 +2,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createAssistantMessageEventStream, type AssistantMessage } from "@earendil-works/pi-ai";
-import { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { createAgentSession, AgentSessionRuntime, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import childBridge from "../../pi-extension/subagents/subagent-done.ts";
 import subagents from "../../pi-extension/subagents/index.ts";
 import { waitFor } from "../harness.ts";
@@ -19,7 +19,7 @@ let request = 0;
 modelRuntime.registerProvider("fixture", {
   api: "inbox-fixture", apiKey: "fixture-only", baseUrl: "http://unused.invalid",
   models: [{ id: "parent-model", name: "Controlled inbox provider", reasoning: false, input: ["text"], contextWindow: 100_000, maxTokens: 1024, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }],
-  streamSimple(model, context) {
+  streamSimple(model, context, options) {
     const stream = createAssistantMessageEventStream();
     const call = `${executionId}-${++request}`;
     const inputs = context.messages.filter((m) => m.role === "user").map((m) => typeof m.content === "string" ? m.content : m.content.filter((part) => part.type === "text").map((part) => part.text).join(""));
@@ -37,7 +37,14 @@ modelRuntime.registerProvider("fixture", {
       usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
     stream.push({ type: "start", partial: message });
     void (async () => {
-      await waitFor(() => existsSync(join(root, `release-${call}`)) ? true : undefined, "provider release", 120_000);
+      await waitFor(() => options?.signal?.aborted || existsSync(join(root, `release-${call}`)) ? true : undefined, "provider release", 120_000);
+      if (options?.signal?.aborted) {
+        message.content = [];
+        message.stopReason = "aborted";
+        stream.push({ type: "error", reason: "aborted", error: message });
+        stream.end();
+        return;
+      }
       if (calls.length) for (const [contentIndex, toolCall] of calls.entries()) {
         stream.push({ type: "toolcall_start", contentIndex, partial: message });
         stream.push({ type: "toolcall_end", contentIndex, toolCall, partial: message });
@@ -70,7 +77,9 @@ const { session } = await createAgentSession({ cwd: process.cwd(), agentDir, mod
 let settlements = 0;
 session.subscribe((event) => { if (event.type === "agent_settled") writeFileSync(join(root, "settlements"), String(++settlements)); });
 const keepAlive = setInterval(() => {}, 1000);
-await session.bindExtensions({ shutdownHandler: () => { clearInterval(keepAlive); session.dispose(); } });
+const host = new AgentSessionRuntime(session, { cwd: process.cwd(), agentDir, modelRuntime, settingsManager, resourceLoader: loader, diagnostics: [] },
+  async () => { throw new Error("This controlled child host does not replace sessions"); });
+await session.bindExtensions({ shutdownHandler: () => { void host.dispose().finally(() => clearInterval(keepAlive)); } });
 writeFileSync(join(root, "received.json"), JSON.stringify({ args, executionId }));
 let commandId: string | undefined;
 setInterval(() => {
@@ -80,6 +89,12 @@ setInterval(() => {
   commandId = command.id;
   void (async () => {
     if (command.action === "reload") await session.reload();
+    else if (command.action === "abandon-tail") {
+      const leaf = session.sessionManager.getLeafId();
+      session.sessionManager.appendCustomMessageEntry("fixture_abandoned", "Abandoned physical tail must never resume work.", true);
+      if (leaf) session.sessionManager.branch(leaf); else session.sessionManager.resetLeaf();
+      session.refreshContext();
+    }
     else await session.prompt(command.text, { streamingBehavior: "steer", expandPromptTemplates: false });
     writeFileSync(join(root, `command-${command.id}-done`), "done");
   })();

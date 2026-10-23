@@ -5,9 +5,12 @@ import { spawn } from "node:child_process";
 import { basename, join } from "node:path";
 import { randomUUID } from "node:crypto";
 
-const base = process.env.SUBAGENT_TEST_TERMINAL;
+const base = process.env.SUBAGENT_TEST_TERMINAL_BASE ?? process.env.SUBAGENT_TEST_TERMINAL;
 if (!base) throw new Error("Missing isolated terminal directory");
-let root = base;
+let root = process.env.SUBAGENT_TEST_TERMINAL ?? base;
+function surfacesIn(directory) {
+  return readdirSync(directory, { recursive: true }).map(String).filter((file) => file.endsWith("/surface")).map((file) => join(directory, file.slice(0, -"/surface".length)));
+}
 const multi = process.env.SUBAGENT_TEST_MULTI === "1";
 const path = (name) => join(root, name);
 const executable = basename(process.argv[1]).replace("-runtime.mjs", "");
@@ -22,7 +25,7 @@ if (orca && args[0] === "status") { json({}); process.exit(0); }
 if (orca) command = ({ split: "split-window", create: "split-window", list: "list-panes", send: "send-keys", read: "capture-pane", close: "kill-pane" })[command] ?? command;
 
 if (multi) {
-  const surfaces = join(base, "surfaces");
+  const surfaces = join(root, "surfaces");
   mkdirSync(surfaces, { recursive: true });
   if (command === "split-window") {
     surface += `-${randomUUID()}`;
@@ -30,7 +33,8 @@ if (multi) {
     mkdirSync(root);
   } else {
     const target = args.includes("-t") ? value("-t") : args.includes("--terminal") ? value("--terminal") : undefined;
-    if (target && existsSync(join(surfaces, target))) { surface = target; root = join(surfaces, target); }
+    const found = target && surfacesIn(base).find((directory) => basename(directory) === target);
+    if (found) { surface = target; root = found; }
   }
 }
 
@@ -81,7 +85,7 @@ switch (command) {
       if (readFileSync(path("complete-during-inventory"), "utf8") === "absent") writeFileSync(path("surface"), "gone");
     }
     if (existsSync(path("inventory-unknown"))) throw new Error("Fixture inventory unavailable");
-    const present = multi ? readdirSync(join(base, "surfaces")).filter((id) => readFileSync(join(base, "surfaces", id, "surface"), "utf8") === "open")
+    const present = multi ? surfacesIn(base).filter((directory) => readFileSync(join(directory, "surface"), "utf8") === "open").map((directory) => basename(directory))
       : existsSync(path("surface")) && readFileSync(path("surface"), "utf8") === "open" ? [surface] : [];
     if (orca) json({ terminals: present.map((handle) => ({ handle, tabId: "shared" })) });
     else if (present.length) console.log(present.join("\n"));

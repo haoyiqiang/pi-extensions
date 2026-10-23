@@ -4,7 +4,7 @@ import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
 
 export const BUILTIN_TOOLS = new Set(["read", "write", "edit", "bash", "grep", "find", "ls"]);
-export const SPAWNING_TOOLS = ["subagent", "subagent_message", "subagents_list", "subagent_status"] as const;
+export const SPAWNING_TOOLS = ["subagent", "subagent_message", "subagents_list", "subagent_status", "subagent_stop"] as const;
 const strings = Type.Array(Type.String({ minLength: 1 }));
 const nullableText = Type.Union([Type.String(), Type.Null()]);
 export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
@@ -50,7 +50,7 @@ export function validateLoadout(value: unknown): SubagentLoadout {
   if (loadout.spawnable.some((name) => !name.trim() || name === loadout.agent)) throw new Error("Invalid delegation policy");
   for (const tool of SPAWNING_TOOLS) {
     // Old validated snapshots remain pinned; do not silently add a new capability.
-    if (tool === "subagent_status" && !tools.includes(tool)) continue;
+    if ((tool === "subagent_status" || tool === "subagent_stop") && !tools.includes(tool)) continue;
     if (tools.includes(tool) !== (loadout.spawnable.length > 0)) throw new Error("Loadout delegation grant does not match its tools");
   }
   for (const tool of tools) {

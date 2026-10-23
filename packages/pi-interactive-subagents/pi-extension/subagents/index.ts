@@ -32,7 +32,7 @@ import {
   type SurfaceState,
 } from "@kevinhao/pi-terminal-mux";
 
-import { SubagentRuns, normalizeSubagentName, projectRun, writerExited, type SubagentRun } from "./runs.ts";
+import { SubagentRuns, normalizeSubagentName, projectRun, writerExited, readCheckpoint, readControl, type SubagentRun } from "./runs.ts";
 import { SubagentInbox } from "./inbox.ts";
 import { SubagentNotifications } from "./notifications.ts";
 import {
@@ -96,6 +96,8 @@ interface ParentRuntime {
   abort: AbortController;
   notifications: SubagentNotifications;
   observed: Set<string>;
+  restoring: Set<string>;
+  leaving: boolean;
 }
 let runtime: ParentRuntime | null = null;
 function assertRuntime(owner: ParentRuntime | null): asserts owner is ParentRuntime {
@@ -547,7 +549,7 @@ function registerManagementTool<TParams extends TSchema, TDetails>(
   pi.registerTool<TParams, TDetails>({
     ...tool,
     async execute(...args) {
-      if ((tool.name === "subagent" || tool.name === "subagent_message") && runtime && runtime.pi !== pi) {
+      if ((tool.name === "subagent" || tool.name === "subagent_message" || tool.name === "subagent_stop") && runtime && runtime.pi !== pi) {
         throw new Error("Stale parent tool runtime; no mutation accepted");
       }
       const result = await tool.execute(...args);
@@ -683,7 +685,7 @@ interface RunningSubagent {
   interactive: boolean;
   /** Settled resident surfaces are live, but have no outstanding delegated work. */
   settled?: boolean;
-  lifecycle?: SubagentRun["state"];
+  lifecycle?: SubagentRun["state"] | "paused-uncertain";
   lastResultSequence?: number;
   terminalState?: SurfaceState;
   lastInventoryAt?: number;
@@ -702,7 +704,8 @@ function fencedCommand(command: string, run: SubagentRun): string {
 }
 function isCurrent(running: RunningSubagent): boolean {
   return (!running.owner || (runtime === running.owner && !running.owner.abort.signal.aborted && (!running.observing || running.owner.notifications.owns()))) &&
-    (!running.runs || running.runs.current(running.subagentId!, running.generation!));
+    (!running.runs || (running.runs.current(running.subagentId!, running.generation!) &&
+      !running.runs.resolve({ id: running.subagentId }).control));
 }
 function forgetRunning(running: RunningSubagent): void {
   if (runningSubagents.get(running.id) === running) runningSubagents.delete(running.id);
@@ -730,7 +733,7 @@ function recordTerminal(running: RunningSubagent, phase: string, diagnostic?: st
 }
 
 async function closeOwnedSurface(running: RunningSubagent): Promise<void> {
-  if (!isCurrent(running)) return;
+  if (!isCurrent(running) || running.closure === "confirmed") return;
   running.closing = true;
   // Let the gate observe autonomous Pi exit before closing its shell surface.
   if (running.settled) {
@@ -912,7 +915,7 @@ function renderSubagentWidgetLines(agents: RunningSubagent[], width: number): st
 function widgetAgents(): RunningSubagent[] {
   if (!latestCtx?.sessionManager.getSessionFile()) return [];
   const runs = runsFor(latestCtx);
-  return runs.list().map(projectRun).filter((run) => run.closure !== "confirmed" || run.state === "running" || run.state === "starting").map((run) => {
+  return runs.list().map(projectRun).filter((run) => run.control || run.closure !== "confirmed" || run.state === "running" || run.state === "starting").map((run) => {
     const local = [...runningSubagents.values()].find((child) => child.subagentId === run.id && child.generation === run.generation);
     const child: RunningSubagent = local ? { ...local } : {
       id: run.executionId, subagentId: run.id, generation: run.generation, runs,
@@ -924,7 +927,7 @@ function widgetAgents(): RunningSubagent[] {
       terminalState: "unknown",
     };
     child.settled = !["starting", "running"].includes(run.state);
-    child.lifecycle = run.state;
+    child.lifecycle = run.control?.kind !== "stop" && new SubagentInbox(run.sessionFile).snapshot(run).paused ? "paused-uncertain" : run.state;
     if (!local) observeRunningSubagent(child);
     return child;
   });
@@ -1716,10 +1719,167 @@ function startSubagentWatch(
   });
 }
 
+async function launchRecorded(owner: ParentRuntime, runs: SubagentRuns, record: SubagentRun, task: string) {
+  assertRuntime(owner);
+  if (owner.leaving) throw new Error("Parent is leaving; replacement writer retained for later recovery, not started");
+  const loadout = record.loadout!;
+  const id = record.executionId;
+  const artifactDir = runs.directory;
+  const activityFile = getSubagentActivityFile(artifactDir, id);
+  mkdirSync(dirname(activityFile), { recursive: true });
+  const parts = ["pi", "--session", shellEscape(record.sessionFile)];
+  applySandboxToParts(parts, loadout, { artifactDir, name: `${record.id}-${id}` });
+  const env = {
+    PI_CODING_AGENT_DIR: loadout.agentDir, PI_SUBAGENT_ALLOWED: loadout.spawnable.join(","),
+    PI_SUBAGENT_AGENT: loadout.agent, PI_SUBAGENT_NAME: record.name,
+    PI_SUBAGENT_SESSION: record.sessionFile, PI_SUBAGENT_ID: id, PI_SUBAGENT_INBOX_ONLY: "1",
+    PI_SUBAGENT_RUN_ID: record.id, PI_SUBAGENT_GENERATION: String(record.generation),
+    PI_SUBAGENT_ACTIVITY_FILE: activityFile, PI_SUBAGENT_AUTO_EXIT: loadout.autoExit ? "1" : "0",
+  };
+  const command = fencedCommand(`cd ${shellEscape(loadout.cwd)} && ${Object.entries(env).map(([key, value]) => `${key}=${shellEscape(value)}`).join(" ")} ${parts.join(" ")}`, record);
+  const launchScriptFile = join(artifactDir, "subagent-scripts", `${record.id}-resume-${id}.sh`);
+  let surface: string;
+  try { surface = createSubagentSurface(record.name, command, launchScriptFile, record.sessionFile, id); }
+  catch (cause) {
+    runs.update(record.id, record.generation, { state: "failed", diagnostic: String(cause) });
+    throw cause;
+  }
+  const running: RunningSubagent = {
+    owner, backend: record.backend, id, subagentId: record.id, generation: record.generation, runs,
+    name: record.name, task, surface, startTime: record.startTime, sessionFile: record.sessionFile,
+    agent: loadout.agent, launchScriptFile, activityFile, interactive: loadout.interactive,
+    statusState: createStatusState({ source: "pi", startTimeMs: record.startTime }),
+  };
+  runningSubagents.set(id, running);
+  runs.update(record.id, record.generation, { surface });
+  try { await confirmSubagentReady(running); }
+  catch (cause) {
+    if (runtime === owner && !owner.abort.signal.aborted) runs.update(record.id, record.generation, { state: "failed", diagnostic: String(cause) });
+    throw cause;
+  }
+  assertRuntime(owner);
+  runs.update(record.id, record.generation, { state: "running" });
+  startSubagentWatch(owner.pi, running);
+  return { id: record.id, generation: record.generation, name: record.name,
+    sessionId: record.sessionId ?? getSessionId(record.sessionFile), sessionFile: record.sessionFile,
+    launchScriptFile, terminalRecordFile: terminalRecordFile(running), surface, readiness: "ready" };
+}
+
+/** Follow persisted ownership, not an ambient list of terminals or friendly names. */
+function ownedTree(runs: SubagentRuns, target?: SubagentRun): Array<{ runs: SubagentRuns; run: SubagentRun }> {
+  const tree: Array<{ runs: SubagentRuns; run: SubagentRun }> = [];
+  for (const run of target ? [target] : runs.list()) {
+    if (!run.loadout || !run.writerToken) continue;
+    tree.push({ runs, run });
+    const sessionId = getSessionId(run.sessionFile);
+    if (sessionId) tree.push(...ownedTree(new SubagentRuns(sessionId, run.sessionFile, dirname(run.sessionFile))));
+  }
+  return tree;
+}
+
+async function finishControl(owner: ParentRuntime, runs: SubagentRuns, record: SubagentRun): Promise<SubagentRun> {
+  if (runs.resolve({ id: record.id }).control?.id !== record.control?.id) return runs.resolve({ id: record.id });
+  if (["suspended", "stopped"].includes(record.state) && record.closure === "confirmed") return record;
+  const deadline = Date.now() + CLOSE_TIMEOUT_MS;
+  while (!writerExited(record) && Date.now() < deadline) {
+    await delay(25);
+    assertRuntime(owner);
+    if (!runs.current(record.id, record.generation) || runs.resolve({ id: record.id }).control?.id !== record.control?.id) return runs.resolve({ id: record.id });
+  }
+  assertRuntime(owner);
+  if (!writerExited(record)) {
+    runs.update(record.id, record.generation, { closure: "unconfirmed", diagnostic: "Cooperative shutdown handshake timed out; writer exit is unproven. History and owner retained; inspect child, then retry subagent_stop or restore after positive exit." }, record.control?.id);
+    return runs.resolve({ id: record.id });
+  }
+  if (runs.resolve({ id: record.id }).control?.id !== record.control?.id) return runs.resolve({ id: record.id });
+  let inventory: SurfaceState = record.closure === "confirmed" ? "absent" : record.backend === getMuxBackend() && record.surface ? surfaceState(record.surface) : "unknown";
+  let diagnostic = "";
+  if (inventory === "present") {
+    try { closeSurface(record.surface!); } catch (error) { diagnostic = String(error); }
+    const closeDeadline = Date.now() + CLOSE_TIMEOUT_MS;
+    while ((inventory = surfaceState(record.surface!)) === "present" && Date.now() < closeDeadline) { await delay(100); assertRuntime(owner); }
+  }
+  const closed = inventory === "absent";
+  const projected = projectRun(runs.resolve({ id: record.id }));
+  const terminal = record.control?.kind === "suspend" && !!projected.latestResult && projected.latestResult.generation === record.generation;
+  runs.update(record.id, record.generation, {
+    state: terminal ? projected.state : record.control?.kind === "stop" ? closed ? "stopped" : "stopping" : closed ? "suspended" : "suspending",
+    ...(terminal ? { control: undefined } : {}),
+    closure: closed ? "confirmed" : "unconfirmed",
+    diagnostic: closed ? !terminal && record.control?.kind === "suspend" && !readCheckpoint(record)
+      ? "Writer exited without a verified interruption checkpoint; consumption/effects remain uncertain. Inspect retained history and subagent_status for exact-action reconciliation; no automatic continuation."
+      : undefined : `${diagnostic || `Terminal inventory ${inventory}; closure not confirmed`}. Owner/history retained; retry subagent_stop or restore when closure is known.`,
+    ...(projected.latestResult ? { latestResult: projected.latestResult } : {}),
+  }, record.control?.id);
+  return runs.resolve({ id: record.id });
+}
+
+async function controlOwnedTree(owner: ParentRuntime, kind: "suspend" | "stop", target?: SubagentRun) {
+  assertRuntime(owner);
+  const tree = ownedTree(runsFor(owner.ctx), target);
+  // Fence every writer before awaiting any one of them. Descendants cannot
+  // acquire another business action while their ancestor is shutting down.
+  for (const item of tree) {
+    const projected = projectRun(item.run);
+    if (kind === "suspend" && (projected.state === "stopped" || (writerExited(projected) && !["suspending", "suspended"].includes(projected.state)))) continue;
+    item.run = item.runs.control(item.run.id, kind);
+    const local = runningSubagents.get(item.run.executionId);
+    local?.abortController?.abort();
+    if (local) forgetRunning(local);
+  }
+  const results = [];
+  for (const item of tree.reverse()) {
+    if (!item.run.control) { results.push(projectRun(item.run)); continue; }
+    results.push(await finishControl(owner, item.runs, item.run));
+  }
+  return results;
+}
+
+function restoreSuspended(owner: ParentRuntime, runs: SubagentRuns, record: SubagentRun): void {
+  if (record.control?.kind !== "suspend" || owner.restoring.has(record.id)) return;
+  owner.restoring.add(record.id);
+  void (async () => {
+    const run = await finishControl(owner, runs, record);
+    if (owner.leaving || !run.control || run.control.kind !== "suspend" || run.state !== "suspended") return;
+    const checkpoint = readCheckpoint(run);
+    const inbox = new SubagentInbox(run.sessionFile);
+    const snapshot = inbox.snapshot(run);
+    if (!checkpoint || snapshot.paused) {
+      const uncertainty = snapshot.uncertainty ?? snapshot.messages.find((message) => message.uncertainty)?.uncertainty;
+      const line = `${run.name}: suspension paused. ${uncertainty?.reason ?? "No verified interruption checkpoint."} ${uncertainty ? `Use subagent_message authorization with exact actionId ${uncertainty.actionId}; normal restore is not permission to repeat it.` : "Inspect retained diagnostic/history; no automatic writer started."}`;
+      owner.notifications.publish({ customType: "subagent_status", content: line, display: true,
+        details: { id: run.id, name: run.name, eventId: `subagent-suspension:${run.control.id}`, uncertainty, lines: [line], overflow: 0 } });
+      owner.notifications.deliver(owner.pi);
+      return;
+    }
+    const loadout = readSubagentLoadout(run.sessionFile);
+    if (!loadout) throw new Error("Suspended loadout is unavailable/invalid; no automatic restart");
+    const policyError = delegationError(loadout.agent);
+    if (policyError) throw new Error(policyError);
+    if (!owner.ctx.modelRegistry.getAll().some((model) => `${model.provider}/${model.id}` === loadout.model)) throw new Error(`Recorded model ${loadout.model} unavailable; no automatic restart`);
+    if (!hasSupportedParentTerminal() || run.backend !== getMuxBackend()) throw new Error("Recorded terminal backend unavailable; no automatic restart");
+    const childSessionId = getSessionId(run.sessionFile);
+    const children = childSessionId ? new SubagentRuns(childSessionId, run.sessionFile, dirname(run.sessionFile)) : undefined;
+    const arrivedResult = children && new SubagentNotifications(children).list().some((event) => event.state === "persisted" && event.message.customType === "subagent_result" &&
+      children.list().some((child) => child.id === event.message.details.id && child.generation === event.message.details.generation));
+    const continuation = (checkpoint.wait === "continue" || (checkpoint.wait === "descendants" && arrivedResult))
+      ? `Continue the suspended delegated work from the recorded active history (interruption leaf ${checkpoint.leafId ?? "root"}). This is a new continuation, not a replay of the original task or a checkpoint of shell/network activity. Honor completed effects, pending questions and descendant results; never repeat an uncertain action without its exact authorization.${snapshot.resolution ? ` Explicit affected-action resolution: ${JSON.stringify(snapshot.resolution)}. Apply only this decision; confirm-completed means do not repeat that action.` : ""}` : undefined;
+    const queued = inbox.enqueue(run, { ...(continuation ? { message: continuation, messageId: `subagent-continuation:${run.control.id}` } : {}) },
+      () => ({ run: runs.resume(run.id, run.generation, loadout), launch: true }), true);
+    if (queued.launch) await launchRecorded(owner, runs, queued.run, continuation ?? "Preserved wait; awaiting its correlated event");
+  })().catch((error) => {
+    if (runtime === owner && !owner.abort.signal.aborted) {
+      runs.update(record.id, record.generation, { diagnostic: `Automatic continuation refused: ${String(error)}. History retained; inspect subagent_status.` }, record.control?.id);
+      console.error("Subagent continuation failed:", error);
+    }
+  }).finally(() => owner.restoring.delete(record.id));
+}
+
 function reconnectObservers(owner: ParentRuntime): void {
-  if (runtime !== owner || owner.abort.signal.aborted || !owner.notifications.acquire()) return;
+  if (runtime !== owner || owner.leaving || owner.abort.signal.aborted || !owner.notifications.acquire()) return;
   const runs = runsFor(owner.ctx);
   for (const record of runs.list()) {
+    if (record.control) { restoreSuspended(owner, runs, record); continue; }
     if (!record.loadout || !record.writerToken || !record.surface || owner.observed.has(`${record.executionId}:${record.generation}`)) continue;
     const previous = runningSubagents.get(record.executionId);
     // A local launch owns readiness until it returns; don't create a parallel
@@ -1731,7 +1891,7 @@ function reconnectObservers(owner: ParentRuntime): void {
       id: record.executionId, subagentId: record.id, generation: record.generation, runs,
       name: record.name, task: "", agent: record.loadout.agent, surface: record.surface,
       sessionFile: record.sessionFile, startTime: record.startTime,
-      interactive: record.loadout.interactive, lastResultSequence: record.resultAfterSequence,
+      interactive: record.loadout.interactive, lastResultSequence: record.resultAfterSequence, closure: record.closure,
       settled: !["starting", "running"].includes(projectRun(record).state),
       activityFile: getSubagentActivityFile(runs.directory, record.executionId),
       statusState: createStatusState({ source: "pi", startTimeMs: record.startTime }),
@@ -1766,7 +1926,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
     const runs = runsFor(ctx);
     const abort = new AbortController();
     (globalThis as any)[POLL_ABORT_KEY] = abort;
-    runtime = boundRuntime = { pi, ctx, abort, notifications: new SubagentNotifications(runs), observed: new Set() };
+    runtime = boundRuntime = { pi, ctx, abort, notifications: new SubagentNotifications(runs), observed: new Set(), restoring: new Set(), leaving: false };
     runningSubagents.clear();
     // Reattach observation only. Even confirmed-dead work never starts Pi here.
     reconnectObservers(runtime);
@@ -1776,8 +1936,21 @@ export default function subagentsExtension(pi: ExtensionAPI) {
   });
 
   // Clean up on session shutdown
-  pi.on("session_shutdown", (event) => {
-    if (boundRuntime === runtime && boundRuntime) detachRuntime(boundRuntime, event.reason === "reload");
+  pi.on("session_shutdown", async (event) => {
+    const owner = boundRuntime;
+    if (owner !== runtime || !owner) return;
+    owner.leaving = true;
+    try {
+      if (event.reason !== "reload" && owner.notifications.acquire()) {
+        const ownControl = process.env.PI_SUBAGENT_SESSION && process.env.PI_SUBAGENT_ID
+          ? readControl(process.env.PI_SUBAGENT_SESSION, process.env.PI_SUBAGENT_ID) : undefined;
+        await controlOwnedTree(owner, ownControl?.kind === "stop" ? "stop" : "suspend");
+      }
+    } catch (error) {
+      // Shutdown handlers cannot veto Pi teardown. Keep the durable owner and
+      // records untouched on a storage/handshake failure; never claim success.
+      console.error("Owned subagent suspension incomplete; inspect retained records:", error);
+    } finally { detachRuntime(owner, event.reason === "reload"); }
   });
 
   // Pi 0.87 has an idle preparation window before agent_start. Notifications
@@ -2010,7 +2183,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         const inbox = new SubagentInbox(run.sessionFile).snapshot(run);
         const notifications = new SubagentNotifications(runs).list().filter((event) => event.message.details.id === run.id)
           .map((event) => ({ eventId: event.message.details.eventId, type: event.message.customType, state: event.state }));
-        return { ...run, ...inbox, questions: new SubagentInbox(run.sessionFile).questions(), notifications, ...(inbox.paused ? { state: "paused-uncertain" } : {}), liveness: { surface: inventory, writer: writerExited(run) ? "exited" : "claimed-or-unknown", heartbeatAt: heartbeat,
+        return { ...run, checkpoint: readCheckpoint(run), recovery: run.control?.kind === "stop" ? "Explicit stop retained; no automatic restart. Retry subagent_stop if closure is unconfirmed."
+          : run.control ? "Automatic continuation requires a safe checkpoint, positive writer exit and confirmed closure; use exact-action authorization for uncertainty, or inspect the retained diagnostic."
+          : undefined, ...inbox, questions: new SubagentInbox(run.sessionFile).questions(), notifications, ...(inbox.paused && run.control?.kind !== "stop" ? { state: "paused-uncertain" } : {}), liveness: { surface: inventory, writer: writerExited(run) ? "exited" : "claimed-or-unknown", heartbeatAt: heartbeat,
           responsive: heartbeat === null ? "unknown" : Date.now() - heartbeat < 20_000 ? "responsive" : "unresponsive" } };
       };
       if (params.id || params.name !== undefined) {
@@ -2019,6 +2194,27 @@ export default function subagentsExtension(pi: ExtensionAPI) {
       }
       const subagents = runs.list().map(status);
       return { content: [{ type: "text", text: JSON.stringify(subagents) }], details: { subagents } };
+    },
+  });
+
+  registerManagementTool(pi, {
+    name: "subagent_stop", label: "Stop Subagent",
+    description: "Explicitly stop a collaborator owned by the current parent (id or unique name), including its owned descendants. Retains transcripts, results, questions and diagnostics; no purge. Only confirmed writer exit and terminal closure report stopped. Repeat to reconcile unconfirmed closure; explicitly stopped work never automatically restarts.",
+    parameters: Type.Object({ id: Type.Optional(Type.String()), name: Type.Optional(Type.String()) }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const owner = runtime;
+      assertRuntime(owner);
+      const target = runsFor(ctx).resolve(params);
+      if (!target.loadout || !target.writerToken) throw new Error("Stop requires managed Pi ownership; legacy/Claude writer state is unknown, history retained");
+      const policyError = delegationError(target.loadout.agent);
+      if (policyError) throw new Error(policyError);
+      if (!owner.notifications.acquire()) throw new Error("Another live parent observer owns cleanup; stop there or retry after its positive exit");
+      const subagents = await controlOwnedTree(owner, "stop", target);
+      updateWidget();
+      const confirmed = subagents.every((run) => run.state === "stopped");
+      const details = { status: confirmed ? "stopped" : "stop-unconfirmed", id: target.id, name: target.name, subagents };
+      if (!confirmed) throw new Error(`Stop unconfirmed; ownership/history retained. Inspect subagent_status and retry subagent_stop: ${subagents.filter((run) => run.state !== "stopped").map((run) => `${run.name}: ${run.diagnostic}`).join("; ")}`);
+      return { content: [{ type: "text", text: "Owned work and descendants confirmed stopped; all history/results retained. Normal restore will not restart them." }], details };
     },
   });
 
@@ -2167,7 +2363,6 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         if (!entry.writerToken) throw new Error("Legacy writer ownership is uncertain; request not accepted");
         const message = params.message ?? "Explicitly reconciled uncertain action";
         const name = requestedName;
-        const startTime = Date.now();
         const sessionPath = entry.sessionFile;
         if (!sessionPath || (writerExited(entry) && !existsSync(sessionPath))) {
           const err =
@@ -2239,105 +2434,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
           updateWidget();
           return acknowledgement;
         }
-        const { autoExit, interactive } = loadout;
-        const resumedSessionId = entry.sessionId ?? getSessionId(sessionPath) ?? requestedName;
-        const record = queued.run;
-        const id = record.executionId;
-
-        // Build pi resume command
-        const parts = ["pi", "--session", shellEscape(sessionPath)];
-
-        const sessionId = ctx.sessionManager.getSessionId();
-        const artifactDir = getArtifactDir(ctx.sessionManager.getSessionDir(), sessionId);
-        const activityFile = getSubagentActivityFile(artifactDir, id);
-        mkdirSync(dirname(activityFile), { recursive: true });
-
-        // Replay the model, identity, and pinned tool/extension restrictions.
-        applySandboxToParts(parts, loadout, { artifactDir, name: `${record.id}-${id}` });
-
-        // Resume opens the pinned session idle. Only the durable ID-bearing inbox
-        // starts its next prompt; no second positional copy may bypass deduplication.
-
-        // Build env prefix — replay the snapshot's config dir + spawn whitelist
-        // so the resumed process resolves the same agents/extensions and keeps
-        // the same nested-spawn restriction it originally ran with.
-        const resumeEnvParts: string[] = [];
-        resumeEnvParts.push(`PI_CODING_AGENT_DIR=${shellEscape(loadout.agentDir)}`);
-        resumeEnvParts.push(`PI_SUBAGENT_ALLOWED=${shellEscape(loadout.spawnable.join(","))}`);
-        resumeEnvParts.push(`PI_SUBAGENT_AGENT=${shellEscape(loadout.agent)}`);
-        resumeEnvParts.push(`PI_SUBAGENT_NAME=${shellEscape(name)}`);
-        resumeEnvParts.push(`PI_SUBAGENT_SESSION=${shellEscape(sessionPath)}`);
-        resumeEnvParts.push(`PI_SUBAGENT_ID=${shellEscape(id)}`);
-        resumeEnvParts.push("PI_SUBAGENT_INBOX_ONLY=1");
-        resumeEnvParts.push(`PI_SUBAGENT_RUN_ID=${shellEscape(record.id)}`);
-        resumeEnvParts.push(`PI_SUBAGENT_GENERATION=${record.generation}`);
-        resumeEnvParts.push(`PI_SUBAGENT_ACTIVITY_FILE=${shellEscape(activityFile)}`);
-        resumeEnvParts.push(`PI_SUBAGENT_AUTO_EXIT=${autoExit ? "1" : "0"}`);
-        const resumeEnvPrefix = resumeEnvParts.join(" ") + " ";
-
-        // Resume in the subagent's original cwd so its tools (safe_bash, edits)
-        // operate where they did before.
-        const resumeCdPrefix = `cd ${shellEscape(loadout.cwd)} && `;
-
-        const command = fencedCommand(`${resumeCdPrefix}${resumeEnvPrefix}${parts.join(" ")}`, record);
-        const launchScriptFile = join(
-          artifactDir,
-          "subagent-scripts",
-          `${record.id}-resume-${id}.sh`,
-        );
-        let surface: string;
-        try { surface = createSubagentSurface(name, command, launchScriptFile, sessionPath, id); }
-        catch (cause) {
-          runs.update(record.id, record.generation, { state: "failed", diagnostic: cause instanceof Error ? cause.message : String(cause) });
-          throw cause;
-        }
-
-        // Register as a running subagent for widget tracking
-        const running: RunningSubagent = {
-          owner, backend: record.backend,
-          id,
-          subagentId: record.id, generation: record.generation, runs,
-          name,
-          task: message,
-          surface,
-          startTime,
-          sessionFile: sessionPath,
-          agent: loadout.agent,
-          launchScriptFile,
-          activityFile,
-          interactive,
-          statusState: createStatusState({
-            source: "pi",
-            startTimeMs: startTime,
-          }),
-        };
-        runningSubagents.set(id, running);
-        runs.update(record.id, record.generation, { surface });
-        try { await confirmSubagentReady(running); }
-        catch (cause) {
-          const error = cause instanceof Error ? cause.message : String(cause);
-          if (runtime === owner && !owner.abort.signal.aborted) runs.update(record.id, record.generation, { state: "failed", diagnostic: error });
-          return { isError: true, content: [{ type: "text", text: error }], details: { error, ...(cause as any)?.details } };
-        }
-        assertRuntime(owner);
-        runs.update(record.id, record.generation, { state: "running" });
-        startSubagentWatch(pi, running);
-
-        return {
-          content: acknowledgement.content,
-          details: {
-            ...acknowledgement.details,
-            id: record.id,
-            generation: record.generation,
-            name,
-            sessionId: resumedSessionId,
-            sessionFile: sessionPath,
-            launchScriptFile,
-            terminalRecordFile: terminalRecordFile(running),
-            surface,
-            readiness: "ready",
-          },
-        };
+        const details = await launchRecorded(owner, runs, queued.run, message);
+        return { content: acknowledgement.content, details: { ...acknowledgement.details, ...details } };
       },
     });
 

@@ -35,7 +35,8 @@ Persistent run facts back identity, status and the widget. Parent startup/reload
 | --- | --- |
 | `subagent` | Spawn a sub-agent in a dedicated tmux/Orca surface (async) |
 | `subagent_message` | Address an owned collaborator by stable ID or unique name — steer active work or start the next generation |
-| `subagent_status` | List this parent's recorded collaborators, or inspect an ID/name, lifecycle, liveness and latest result reference |
+| `subagent_status` | List this parent's recorded collaborators, or inspect an ID/name, lifecycle, liveness, checkpoint, pending questions/messages and latest result reference |
+| `subagent_stop` | Stop an owned collaborator and its descendants, confirming writer exit and surface closure while retaining all history |
 | `subagents_list` | List available agent definitions |
 | `ask_question` | *(sub-agent sessions only)* Ask the orchestrator a question and wait for the reply |
 
@@ -79,6 +80,7 @@ Tool acknowledgements and `subagent_status.messages` separate evidence:
 - `queued`: the full instruction is durably retained; the child has not acknowledged reading it.
 - `accepted`: the child durably acknowledged it, possibly only queued in Pi memory. A void `sendMessage()` return is **not** consumption.
 - `consumed`: its exact attempt ID is present in the persisted child transcript; `contextObserved` separately records exposure to a model request. This does **not** prove requested external effects or task completion.
+- `suspended`: this input was persisted and observed before an orderly interruption. It remains in history rather than being re-injected; a distinct continuation resumes the unfinished work.
 - `settled`: Pi reached final settlement for that input, or an explicit reconciliation resolved it. `evidence.settled` distinguishes actual Pi settlement from a recorded `resolution`.
 - `uncertain` / `paused-uncertain`: dispatch may have reached Pi or tools without a trustworthy final settlement. The full instruction, transcript association and affected `actionId` remain available; ordinary messages remain queued, not permission to repeat it.
 
@@ -157,7 +159,7 @@ You are a specialized agent that does X...
 | `model` | string | Exact role model; precedence is call override > role > current parent model |
 | `thinking` | string | `minimal`, `low`, `medium`, or `high` |
 | `tools` | string | **Required.** Omission is a configuration error; an empty `tools:` grants only conversation and required control capabilities (`ask_question`). Strict tool allowlist. Built-ins: `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`. Extension-backed: `web_search`, `web_fetch`, `safe_bash`, `video_extract`, `youtube_search`, `google_image_search`. Only the extensions backing the listed tools are loaded into the child |
-| `subagent_agents` | string | Comma-separated agent names this agent may spawn. **Presence of this field grants the spawning toolset** (`subagent`, `subagent_message`, `subagents_list`, `subagent_status`) and restricts spawn targets to the list. Omit it and the agent cannot spawn at all |
+| `subagent_agents` | string | Comma-separated agent names this agent may spawn. **Presence of this field grants the spawning toolset** (`subagent`, `subagent_message`, `subagents_list`, `subagent_status`, `subagent_stop`) and restricts spawn targets to the list. Omit it and the agent cannot spawn at all |
 | `skills` | string | Comma-separated skill names to auto-load |
 | `session-mode` | string | `standalone` (default), `lineage-only`, or `fork` — see below |
 | `system-prompt` | string | `append` or `replace`: pass the body as the child's `--append-system-prompt` / `--system-prompt`. Omit and the body is prepended to the task prompt instead |
@@ -205,7 +207,27 @@ A crash before notification is repaired from the retained outcome/event. A crash
 
 Only one parent observer publishes notifications and performs terminal cleanup. Its claim is released on orderly detach or reclaimed after **positive process absence**. A live/reused PID, permission ambiguity, unknown terminal/backend or an orphaned short mutation lock is not takeover/relaunch authority. A replacement parent reconnects live children and delivers retained terminal outcomes without a UI. Confirmed-dead work with no settled result is reported as interrupted/failed with history retained; it is **not automatically rerun**. Inbox consumption/effect uncertainty remains paused under ADR-0001, and reload is not user authorization.
 
-Normal quit/session-switch suspension, automatic continuation of safely suspended work and explicit stop remain later lifecycle slices. Multiple independent questions, correlated replies and durable descendant-result incorporation are supported through the same inbox/outbox path. The optional Claude Code path retains its legacy completion handling and is outside managed-Pi recovery guarantees.
+### Suspension, continuation and retained stop
+
+Normal parent **quit, new, resume/switch or fork** requests suspension of its owned live work and descendant tree. Reload remains observer detachment only. The controller fences new actions, requests cooperative abort/shutdown and retains an execution-scoped checkpoint containing the actual active leaf, wait condition and any uncertain action. The child appends and verifies a branch marker in the real transcript before acknowledging interruption. A previously durable terminal outcome wins a suspension race and is never continued again.
+
+A cooperative abort or shutdown call is **not exit/closure proof**. The writer gate must positively observe Pi exiting, and the recorded backend must confirm surface absence. The cooperative handshake and closure each have a 3-second budget (in addition to finite backend timeouts). Failed/unknown closure remains `suspending` or `stopping`, with ownership and actionable `subagent_status.diagnostic` retained; missing checkpoints do not become safe work. Nothing steals a writer claim by age, heartbeat loss or terminal disappearance.
+
+Restoring the same parent reconnects surviving writers. Only explicitly suspended work with a verified safe checkpoint, positive old-writer exit, confirmed closure, available pinned loadout/model and permitted role starts another writer automatically. It receives a **new explicit continuation from recorded history**, not the original task again. The active-branch marker prevents reopening a physically later abandoned branch. The original model, tools, cwd, identity, isolation, nested permissions and auto-exit/resident policy are replayed; older snapshots do not silently gain new tools. Never-dispatched queued instructions retain their IDs/order; `followUp` stays behind continuation of the interrupted current work.
+
+Question waiters remain idle until their exact correlated reply arrives. Descendant waiters reconnect their owned children and remain parked until a result is available for incorporation. An already-arrived retained result can wake its waiting parent; opening idle history without either a legitimate wait or useful continuation is not called resumed execution.
+
+**Restoring a parent can automatically consume model credits and modify files** for known-safe suspended work. Suspension is not a checkpoint of a shell process, tool transaction or network request. A tool active at interruption, unconfirmed input consumption, missing durable branch evidence or unknown effects leaves that collaborator `paused-uncertain`; unrelated parent work can proceed. Normal restore and ordinary follow-ups never authorize replay. Inspect `uncertainty.actionId` (or the affected message uncertainty) and use the existing exact-action `subagent_message.authorization` only after reliable reconciliation or explicit user permission. `confirm-completed` means do not repeat that action. With no verified checkpoint, include an explicit next instruction after reconciling rather than expecting automatic continuation.
+
+```typescript
+subagent_stop({ id });             // name also works; both must identify one child
+subagent_status({ id });           // inspect retained lifecycle, evidence and diagnostics
+subagent_stop({ name: "scout" });  // repeat safely to reconcile unconfirmed closure
+```
+
+Stop is current-parent scoped and recursively follows recorded ownership, not arbitrary terminal names. `stopped` is returned only after every targeted Pi writer has exited and every owned surface is confirmed closed. Failed/unknown closure throws a real tool error and retains `stopping` plus diagnostics; retry stop after resolving the terminal/process issue. Repeated confirmed stops are idempotent. Transcripts, loadouts, queued messages, questions and existing result artifacts are **never purged**. Effect uncertainty remains inspectable even after confirmed stop; it never disguises the primary `stopped` lifecycle or authorizes a restart. Explicitly stopped work cannot restart on parent restore or ordinary messaging; delegate a fresh named role for new work. Stale observers and generations cannot reverse stop or close a replacement writer.
+
+Abnormal parent exit still only reconnects live children and reports confirmed-dead, uncheckpointed work as interrupted/failed; it is not blanket authorization to rerun crashed work. The optional Claude Code path retains its legacy behavior and is outside managed-Pi suspension/continuation/stop guarantees.
 
 ### interactive
 
@@ -240,7 +262,7 @@ Set a per-agent default with `cwd:` in frontmatter. Relative role cwd resolves a
 
 ## Status widget & configuration
 
-The widget combines the child's business-activity snapshot with independent heartbeat freshness and terminal inventory: `starting`, `active` (turn/provider/tool work), `waiting` (open for input or another stage), `stalled` (uncertain/unresponsive), or `running` (legacy CLI fallback). A frozen activity snapshot is not proof that the child is still responsive. Sub-agent sessions also show their own tools widget — toggle it with `Ctrl+Alt+O`. Completion messages expand with `Ctrl+O`.
+Retained lifecycle labels distinguish `completed`, `suspending`/`suspended`, `stopping`/`stopped`, failures/interruptions and `paused-uncertain`; status includes actionable recovery/confirmation guidance. The widget combines the child's business-activity snapshot with independent heartbeat freshness and terminal inventory: `starting`, `active` (turn/provider/tool work), `waiting` (open for input or another stage), `stalled` (uncertain/unresponsive), or `running` (legacy CLI fallback). A frozen activity snapshot is not proof that the child is still responsive. Sub-agent sessions also show their own tools widget — toggle it with `Ctrl+Alt+O`. Completion messages expand with `Ctrl+O`.
 
 Status display is configured via `config.json` in the extension directory (copy `config.json.example`; it's gitignored):
 
@@ -278,7 +300,7 @@ normally, for example `pi -e ./packages/pi-interactive-subagents`.
 The default suite uses the shared registered-tool/lifecycle harness, real temporary
 sessions, a deterministic child runtime process, and executable terminal stand-ins.
 It verifies native asynchronous launch and follow-up acknowledgements, child task
-receipt, automatic parent results, and visible widgets/rendering. It makes no model
+receipt, automatic parent results, and visible widgets/rendering. It makes no external model
 requests and does not use an existing tmux server or user terminal. A separate loader
 check exercises Pi's normal package-manifest and control-extension loading.
 
@@ -298,7 +320,9 @@ This includes the [#3 native-tool prefactor](https://github.com/haoyiqiang/pi-ex
 [#7 persistent identity/single-writer status](https://github.com/haoyiqiang/pi-extensions/issues/7) and
 [#8 durable inbox/uncertainty](https://github.com/haoyiqiang/pi-extensions/issues/8),
 [#9 branch-aware context/results](https://github.com/haoyiqiang/pi-extensions/issues/9) and
-[#10 reload/parent recovery](https://github.com/haoyiqiang/pi-extensions/issues/10), not
+[#10 reload/parent recovery](https://github.com/haoyiqiang/pi-extensions/issues/10),
+[#11 correlated questions/descendant waits](https://github.com/haoyiqiang/pi-extensions/issues/11) and
+[#12 suspension/continuation/retained stop](https://github.com/haoyiqiang/pi-extensions/issues/12), not
 all of [Spec #2](https://github.com/haoyiqiang/pi-extensions/issues/2). Public-tool tests
 cover role aliases/precedence/visibility, missing versus empty tools, invalid resources
 and snapshots, model/cwd/identity/skill/isolation replay, lifetime policy, nested refusals
@@ -318,8 +342,13 @@ still requiring the real bridge-ready signal. Production readiness bounds are un
 and tested separately by the terminal lifecycle suite. Real parent-controller exits and
 replacement processes exercise both notification crash windows, live observation takeover,
 question recovery and one-writer preservation; a supported-Pi parent reload additionally
-checks deduplication against real history on an abandoned/context-edited branch. Normal
-suspension/continuation and explicit stop remain separate slices.
+checks deduplication against real history on an abandoned/context-edited branch. Real Pi
+AgentSessionRuntime new/switch/quit events verify suspension, automatic continuation and
+native stop error semantics. Controlled local providers and actual subprocesses cover a
+full three-level owned tree, pinned-loadout continuation, preserved correlated waits and
+active ancestry, retained stop with no relaunch, uncertain tools/consumption, queued followUp,
+bounded abort/close failures, a durable completion race and double-controller automatic
+recovery. No paid provider or user terminal is used for these checks.
 See the repository `GLOSSARY.md` and `docs/adr/0001-pause-uncertain-delegated-actions.md`
 for the reviewed domain language and recovery policy.
 

@@ -5,6 +5,26 @@ import type { SubagentLoadout } from "./loadout.ts";
 import { readSubagentLoadout } from "./session.ts";
 import { processExitFile, readSubagentOutcomes, type SubagentOutcome } from "./outcome.ts";
 
+export interface SubagentControl { id: string; kind: "suspend" | "stop" }
+export interface SubagentCheckpoint {
+  requestId: string;
+  executionId: string;
+  leafId: string | null;
+  wait: "continue" | "question" | "descendants";
+  uncertainty?: { actionId: string; reason: string; activeTools: string[] };
+}
+export function controlFile(sessionFile: string, executionId: string): string { return `${sessionFile}.control-${executionId}.json`; }
+export function checkpointFile(sessionFile: string, executionId: string): string { return `${sessionFile}.checkpoint-${executionId}.json`; }
+export function readControl(sessionFile: string, executionId: string): SubagentControl | undefined {
+  const file = controlFile(sessionFile, executionId);
+  return existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : undefined;
+}
+export function readCheckpoint(run: Pick<SubagentRun, "sessionFile" | "executionId" | "control">): SubagentCheckpoint | undefined {
+  const file = checkpointFile(run.sessionFile, run.executionId);
+  const checkpoint: SubagentCheckpoint | undefined = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : undefined;
+  return checkpoint?.executionId === run.executionId && checkpoint.requestId === run.control?.id ? checkpoint : undefined;
+}
+
 /** Parent-owned facts. Child outcomes remain immutable, separate writer-owned evidence. */
 export interface SubagentRun {
   id: string;
@@ -17,7 +37,8 @@ export interface SubagentRun {
   executionId: string;
   writerToken: string;
   resultAfterSequence: number;
-  state: "starting" | "running" | "completed" | "failed" | "aborted" | "interrupted";
+  state: "starting" | "running" | "completed" | "failed" | "aborted" | "interrupted" | "suspending" | "suspended" | "stopping" | "stopped";
+  control?: SubagentControl;
   backend: string;
   surface?: string;
   loadout: SubagentLoadout | null;
@@ -122,12 +143,28 @@ export class SubagentRuns {
       return run;
     });
   }
+  /** Publish intent before any await; repeated stop/suspend never grants a new writer. */
+  control(id: string, kind: SubagentControl["kind"]): SubagentRun {
+    return transaction(this.directory, () => {
+      const runs = this.read();
+      const run = runs.find((entry) => entry.id === id);
+      if (!run) throw new Error("Subagent is not owned by this parent");
+      if (run.control?.kind === "stop" || run.control?.kind === kind) return run;
+      run.control = { id: randomUUID(), kind };
+      replace(controlFile(run.sessionFile, run.executionId), run.control);
+      run.state = kind === "stop" ? "stopping" : "suspending";
+      replace(this.file, { version: 1, runs });
+      return run;
+    });
+  }
   /** Called under the inbox publication lock: concurrent instructions share one reservation. */
   messageTarget(id: string): { run: SubagentRun; launch: boolean; waitingForExit?: boolean } {
     return transaction(this.directory, () => {
       const runs = this.read();
       const run = runs.find((entry) => entry.id === id);
       if (!run) throw new Error("Subagent is not owned by this parent");
+      if (run.control?.kind === "stop") throw new Error("Subagent explicitly stopped or stopping; history retained, no automatic or message restart. Delegate a fresh named role.");
+      if (run.control && !writerExited(run)) throw new Error("Subagent suspension is not confirmed; inspect status before sending more work");
       if (!writerExited(run)) {
         if (!run.writerToken) throw new Error("Legacy writer ownership is uncertain; no request accepted");
         if (existsSync(writerClosingFile(run.sessionFile, run.executionId))) return { run, launch: false, waitingForExit: true };
@@ -148,6 +185,7 @@ export class SubagentRuns {
     return transaction(this.directory, () => {
       const runs = this.read();
       const run = runs.find((entry) => entry.id === id);
+      if (run?.control?.kind === "stop") throw new Error("Explicit stop forbids replacement writer; history retained");
       if (!run || run.generation !== generation || run.state === "starting") throw new Error("Subagent busy; this request was not accepted");
       if (run.closure === "unconfirmed") throw new Error("Prior closure remains uncertain; no replacement writer started");
       if (!writerExited(run)) throw new Error("Prior writer is active or uncertain; no replacement started and this request was not accepted");
@@ -160,6 +198,7 @@ export class SubagentRuns {
       run.state = "starting";
       run.startTime = Date.now();
       delete run.surface;
+      delete run.control;
       delete run.closure;
       delete run.diagnostic;
       claimWriter(run);
@@ -168,11 +207,11 @@ export class SubagentRuns {
     });
   }
   /** Every callback carries the generation it observed, never just a friendly name. */
-  update(id: string, generation: number, patch: Partial<SubagentRun>): boolean {
+  update(id: string, generation: number, patch: Partial<SubagentRun>, controlId?: string): boolean {
     return transaction(this.directory, () => {
       const runs = this.read();
       const run = runs.find((entry) => entry.id === id);
-      if (!run || run.generation !== generation) return false;
+      if (!run || run.generation !== generation || (run.control && run.control.id !== controlId)) return false;
       Object.assign(run, patch);
       replace(this.file, { version: 1, runs });
       return true;
@@ -213,6 +252,6 @@ export function projectRun(run: SubagentRun): SubagentRun {
       : run;
   }
   if (run.latestResult?.generation === run.generation && published.result.sequence < run.latestResult.sequence) return run;
-  return { ...run, sessionId: published.result.source.sessionId, state: published.result.outcome === "succeeded" ? "completed" : published.result.outcome === "aborted" ? "aborted" : "failed",
+  return { ...run, sessionId: published.result.source.sessionId, state: run.control?.kind === "stop" ? run.state : published.result.outcome === "succeeded" ? "completed" : published.result.outcome === "aborted" ? "aborted" : "failed",
     latestResult: { resultFile: published.resultFile, outcome: published.result.outcome, sequence: published.result.sequence, generation: run.generation } };
 }

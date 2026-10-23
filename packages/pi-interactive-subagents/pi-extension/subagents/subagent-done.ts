@@ -13,11 +13,11 @@
 import type { ExtensionAPI, ExtensionContext, SessionMessageEntry } from "@earendil-works/pi-coding-agent";
 import { Box, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createSubagentActivityRecorder, LIVENESS_INTERVAL_MS, writeSubagentLiveness } from "./activity.ts";
 import { readSubagentOutcomes, writeSubagentOutcome } from "./outcome.ts";
 import { createInboxReceiver, SubagentInbox } from "./inbox.ts";
-import { SubagentRuns, writerFile } from "./runs.ts";
+import { SubagentRuns, writerFile, readControl, replace, checkpointFile, type SubagentControl, type SubagentCheckpoint } from "./runs.ts";
 import { SubagentNotifications } from "./notifications.ts";
 import { summarizeEntryUsage } from "./session.ts";
 
@@ -41,6 +41,13 @@ export default function (pi: ExtensionAPI) {
   const sessionFile = process.env.PI_SUBAGENT_SESSION;
   const executionId = process.env.PI_SUBAGENT_ID;
   let heartbeat: ReturnType<typeof setInterval> | undefined;
+  let controlTimer: ReturnType<typeof setInterval> | undefined;
+  let controlling: SubagentControl | undefined;
+  let controlFinished = false;
+  let active = false;
+  let preparing = false;
+  const activeTools = new Set<string>();
+  let interruptedTools: string[] = [];
   let sequence = 0;
   let descendants: SubagentNotifications | undefined;
   const mailbox = sessionFile ? new SubagentInbox(sessionFile) : undefined;
@@ -106,10 +113,53 @@ export default function (pi: ExtensionAPI) {
     );
   }
 
+  function control(): SubagentControl | undefined { return sessionFile && executionId ? readControl(sessionFile, executionId) : undefined; }
+  function quiesce(ctx: ExtensionContext) {
+    const request = control();
+    if (!request || controlFinished || !sessionFile || !executionId) return;
+    if (!controlling || controlling.id !== request.id) {
+      controlling = request;
+      interruptedTools = [...new Set([...interruptedTools, ...activeTools])];
+      // Cooperative cancellation is only a request. Parent separately requires
+      // the wrapper's exit receipt AND confirmed terminal closure.
+      if (active || preparing || !ctx.isIdle()) { ctx.abort(); return; }
+    }
+    if (active || preparing || !ctx.isIdle()) return;
+    inbox?.suspend();
+    const pending = mailbox?.snapshot();
+    const unknown = pending?.messages.find((message) => message.uncertainty)?.uncertainty;
+    const checkpoint: SubagentCheckpoint = {
+      requestId: request.id, executionId, leafId: ctx.sessionManager.getLeafId(),
+      wait: mailbox?.questions().some((question) => question.state !== "answered") ? "question"
+        : descendants?.pendingResults(ctx, executionId) ? "descendants" : "continue",
+      ...(interruptedTools.length ? { uncertainty: { actionId: unknown?.actionId ?? `subagent-action:${request.id}`, reason: "A tool was active at interruption; abort/shutdown does not prove its external effects. Reconcile or explicitly authorize this exact action before continuation.", activeTools: interruptedTools } }
+        : unknown ? { uncertainty: { actionId: unknown.actionId, reason: unknown.reason, activeTools: unknown.activeTools } } : {}),
+    };
+    // Pin the actual active ancestry before closing. appendEntry's void return
+    // is not a receipt: verify the marker in real JSONL bytes before claiming it.
+    pi.appendEntry("subagent_suspension", checkpoint);
+    const markerId = ctx.sessionManager.getLeafId();
+    const diskEntries = new Map<string, any>();
+    if (existsSync(sessionFile)) for (const line of readFileSync(sessionFile, "utf8").split("\n")) {
+      try { const entry = JSON.parse(line); if (entry.id) diskEntries.set(entry.id, entry); } catch { /* An unfinished trailing record is not a receipt. */ }
+    }
+    const marker = markerId && diskEntries.get(markerId);
+    const persisted = marker?.type === "custom" && marker.customType === "subagent_suspension" && marker.data?.requestId === request.id &&
+      marker.parentId === checkpoint.leafId && ctx.sessionManager.getBranch().every((entry) => diskEntries.has(entry.id));
+    if (!persisted) checkpoint.uncertainty = { actionId: `subagent-action:${request.id}`, reason: "Interrupted branch marker is not persisted; inspect retained history before authorizing continuation.", activeTools: interruptedTools };
+    replace(checkpointFile(sessionFile, executionId), checkpoint);
+    controlFinished = true;
+    inbox?.closing();
+    ctx.shutdown();
+  }
+
   // Show widget + status bar on session start
   pi.on("session_start", (event, ctx) => {
     recorder.sessionStart();
     inbox?.start(ctx, event.reason === "reload");
+    if (controlTimer) clearInterval(controlTimer);
+    controlTimer = setInterval(() => { try { quiesce(ctx); } catch (error) { console.error("Subagent suspension handshake failed:", error); } }, 50);
+    controlTimer.unref?.();
     if (heartbeat) clearInterval(heartbeat);
     if (sessionFile && executionId) {
       writeSubagentLiveness(sessionFile, executionId);
@@ -133,7 +183,8 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("input", (_event, ctx) => {
-    if (inbox?.paused()) return { action: "handled" };
+    if (control() || inbox?.paused()) return { action: "handled" };
+    if (ctx.isIdle()) preparing = true;
     inbox?.input(ctx.isIdle());
     recorder.input();
   });
@@ -146,11 +197,14 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("before_agent_start", () => {
+    preparing = true;
     recorder.beforeAgentStart();
   });
 
   pi.on("agent_start", () => {
     // Retries/recovery can start another run without any parent reply.
+    active = true;
+    preparing = false;
     inbox?.agentStart();
     recorder.agentStart();
   });
@@ -261,6 +315,9 @@ export default function (pi: ExtensionAPI) {
     recorder.agentEndWaiting();
   }
   pi.on("agent_settled", (_event, ctx) => {
+    active = false;
+    preparing = false;
+    if (control() && (controlling || activityOutcome === "aborted")) return;
     // Publication and the close decision share the sender's short lock. A
     // message either prevents auto-exit or sees a closing writer and waits for
     // positive exit before a single replacement is reserved.
@@ -288,11 +345,14 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("tool_execution_start", (event) => {
+    activeTools.add(event.toolCallId);
+    if (controlling || control()) interruptedTools = [...new Set([...interruptedTools, event.toolCallId])];
     inbox?.toolStart(event.toolCallId);
     recorder.toolExecutionStart((event as any).toolCallId, (event as any).toolName);
   });
 
   pi.on("tool_call", (event) => {
+    if (control()) return { block: true, reason: "Owned work is suspending/stopping; no new tool action permitted." };
     if (inbox?.paused()) return { block: true, reason: "This collaborator has an uncertain action; only explicit affected-action authorization/reconciliation releases it." };
     recorder.toolCall((event as any).toolCallId, (event as any).toolName);
   });
@@ -306,12 +366,15 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("tool_execution_end", (event) => {
+    activeTools.delete(event.toolCallId);
     inbox?.toolEnd(event.toolCallId);
     recorder.toolExecutionEnd((event as any).toolCallId, (event as any).toolName);
   });
 
   pi.on("session_shutdown", (event) => {
     inbox?.stop();
+    if (controlTimer) clearInterval(controlTimer);
+    controlTimer = undefined;
     if (heartbeat) clearInterval(heartbeat);
     heartbeat = undefined;
     recorder.sessionShutdown((event as any).reason);
