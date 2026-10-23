@@ -115,7 +115,8 @@ export class SubagentNotifications {
     const projected = ctx.sessionManager.buildSessionProjection().entries;
     return this.runs.list().some((record) => {
       const run = projectRun(record);
-      if (["starting", "running"].includes(run.state) || !run.latestResult) return true;
+      if (run.state === "stopped") return false;
+      if (["starting", "running", "suspending", "suspended", "stopping"].includes(run.state) || !run.latestResult) return true;
       const event = events.find(({ message }) => message.customType === "subagent_result" && message.details.id === run.id && message.details.generation === run.generation && message.details.resultFile === run.latestResult!.resultFile);
       if (!event || event.state !== "persisted") return true;
       const file = this.incorporationFile(event.message.details.eventId);

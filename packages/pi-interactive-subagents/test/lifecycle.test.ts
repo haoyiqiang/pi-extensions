@@ -39,6 +39,7 @@ test("retry, queued and recovery runs cannot terminate delegated work before fin
   const ctx = {
     hasUI: false, ui: { setWidget() {} },
     sessionManager: lifecycleSession(branch, "child-session"),
+    isIdle: () => true,
     shutdown() { shutdown = true; },
   };
   try {
@@ -86,6 +87,7 @@ test("independent durable questions survive ordinary input, retries and child ru
   const ctx = {
     hasUI: false, ui: { setWidget() {} },
     sessionManager: lifecycleSession(branch, "question-session"),
+    isIdle: () => true,
     shutdown() { shutdown = true; },
   };
   try {

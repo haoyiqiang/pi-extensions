@@ -2,7 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { replace, transaction, writerClosingFile, writerExited, writerFile, type SubagentRun } from "./runs.ts";
+import { replace, transaction, readControl, readCheckpoint, writerClosingFile, writerExited, writerFile, type SubagentRun } from "./runs.ts";
 
 export const INSTRUCTION_TYPE = "subagent_instruction";
 export type DeliveryMode = "auto" | "steer" | "followUp";
@@ -15,6 +15,7 @@ interface Instruction {
   executionId: string;
   generation: number;
   replyTo?: string;
+  continuation?: boolean;
 }
 interface Question {
   questionId: string;
@@ -34,7 +35,7 @@ interface Receipt {
   attemptId: string;
   executionId: string;
   receiverId: string;
-  phase: "accepted" | "dispatching" | "settled";
+  phase: "accepted" | "dispatching" | "settled" | "suspended";
   contextSeen?: boolean;
   uncertain?: string;
   activeTools?: string[];
@@ -101,15 +102,21 @@ export class SubagentInbox {
           : exited && active?.executionId === run?.executionId ? "Writer exited before final settlement; consumption or external effects may be incomplete." : undefined);
       const uncertainty = active && !authorization && (mismatched || (active.phase === "dispatching" && uncertainReason))
         ? { actionId: active.attemptId, messageId: message.id, reason: uncertainReason!, entryId: entryId ?? null, activeTools: active.activeTools ?? [] } : undefined;
-      const state = uncertainty ? "uncertain" : active?.phase === "settled" || authorization?.decision === "confirm-completed" ? "settled" : delivery;
+      const state = uncertainty ? "uncertain" : active?.phase === "suspended" ? "suspended" : active?.phase === "settled" || authorization?.decision === "confirm-completed" ? "settled" : delivery;
       return { ...message, state, delivery, evidence: { durableEnqueue: true, childAccepted: !!active, dispatchIntent: !!active && active.phase !== "accepted", transcriptEntryId: entryId ?? null, contextObserved: !!active?.contextSeen, settled: active?.phase === "settled" },
         ...(authorization ? { resolution: authorization } : {}), ...(uncertainty ? { uncertainty } : {}), attemptId: active?.attemptId, retry: authorization?.decision === "retry" };
     });
-    return { messages, paused: messages.some((message) => !!message.uncertainty) };
+    const checkpoint = run && readCheckpoint(run);
+    const interruption = checkpoint?.uncertainty ?? (run?.control?.kind === "suspend" && exited && !checkpoint
+      ? { actionId: `subagent-action:${run.control.id}`, reason: "Writer exited without a verified suspension checkpoint; consumption/effects and active branch must be reconciled before continuation.", activeTools: [] } : undefined);
+    const resolution = interruption && mailbox.authorizations.find((authorization) => authorization.actionId === interruption.actionId);
+    const uncertainty = interruption && !resolution ? interruption : undefined;
+    return { messages, ...(resolution ? { resolution } : {}), ...(uncertainty ? { uncertainty } : {}), paused: !!uncertainty || messages.some((message) => !!message.uncertainty) };
   }
   /** The same short cross-process lock allocates order, deduplicates, and reserves a writer before launch. */
-  enqueue(run: SubagentRun, input: { message?: string; messageId?: string; deliverAs?: DeliveryMode; replyTo?: string; authorization?: Authorization }, prepare: () => { run: SubagentRun; launch: boolean; waitingForExit?: boolean }) {
+  enqueue(run: SubagentRun, input: { message?: string; messageId?: string; deliverAs?: DeliveryMode; replyTo?: string; authorization?: Authorization }, prepare: () => { run: SubagentRun; launch: boolean; waitingForExit?: boolean }, restore = false) {
     return transaction(this.directory, () => {
+      if (run.control?.kind === "stop") throw new Error("Subagent explicitly stopped or stopping; no message restart permitted. History retained; delegate a fresh named role.");
       const mailbox = this.read();
       const id = input.messageId ?? randomUUID();
       const existing = input.message === undefined ? undefined : mailbox.messages.find((message) => message.id === id);
@@ -121,7 +128,9 @@ export class SubagentInbox {
         if (question.replyMessageId && question.replyMessageId !== existing?.id) throw new Error("Question already has a queued or answered reply; use the same messageId for a retry");
       }
       if (input.authorization) {
-        const uncertainty = this.snapshot(run).messages.find((message) => message.uncertainty?.actionId === input.authorization!.actionId)?.uncertainty;
+        const state = this.snapshot(run);
+        const uncertainty = state.messages.find((message) => message.uncertainty?.actionId === input.authorization!.actionId)?.uncertainty
+          ?? (state.uncertainty?.actionId === input.authorization.actionId ? state.uncertainty : undefined);
         if (!uncertainty) throw new Error("Authorization must name the exact current uncertain actionId; no uncertainty cleared");
         if (!input.authorization.reason.trim()) throw new Error("Explicit user authorization/reconciliation requires a reason");
         mailbox.authorizations.push(input.authorization);
@@ -130,7 +139,7 @@ export class SubagentInbox {
       const snapshot = this.snapshot(run);
       const paused = snapshot.paused;
       const safePending = snapshot.messages.some((m) => m.state === "queued" || m.retry || (m.state === "accepted" && !m.evidence.dispatchIntent));
-      const target = paused || (existing && !safePending) || (input.message === undefined && !safePending) ? { run, launch: false } : prepare();
+      const target = paused || (existing && !safePending) || (input.message === undefined && !safePending && !restore) ? { run, launch: false } : prepare();
       // Rebind only never-dispatched input or an explicitly authorized retry.
       if (target.launch) for (const message of mailbox.messages) {
         const status = snapshot.messages.find((m) => m.id === message.id);
@@ -140,7 +149,7 @@ export class SubagentInbox {
         }
       }
       if (input.message !== undefined && !existing) mailbox.messages.push({ id, sequence: (mailbox.messages.at(-1)?.sequence ?? 0) + 1, content: input.message, deliverAs: input.deliverAs ?? "auto",
-        subagentId: target.run.id, executionId: target.run.executionId, generation: target.run.generation, ...(input.replyTo ? { replyTo: input.replyTo } : {}) });
+        subagentId: target.run.id, executionId: target.run.executionId, generation: target.run.generation, ...(restore ? { continuation: true } : {}), ...(input.replyTo ? { replyTo: input.replyTo } : {}) });
       replace(join(this.directory, "messages.json"), mailbox);
       return { ...target, message: this.snapshot(target.run).messages.find((m) => m.id === id), paused };
     });
@@ -166,7 +175,10 @@ export class SubagentInbox {
     });
   }
   pending() {
-    return this.snapshot().messages.filter((message) => message.state === "queued" || message.retry || (message.state === "accepted" && !message.evidence.dispatchIntent));
+    // A lifecycle continuation restores current work before queued followUp;
+    // caller instructions retain their own publication order and stable IDs.
+    return this.snapshot().messages.filter((message) => message.state === "queued" || message.retry || (message.state === "accepted" && !message.evidence.dispatchIntent))
+      .sort((a, b) => Number(!!b.continuation) - Number(!!a.continuation) || a.sequence - b.sequence);
   }
 }
 
@@ -187,7 +199,7 @@ export function createInboxReceiver(pi: ExtensionAPI, sessionFile: string, execu
   }
   function paused() { return inbox.snapshot().paused; }
   function pump() {
-    if (stopped || pumping || preparing || awaitingInitialRun || !context || !fenced()) return;
+    if (stopped || pumping || preparing || awaitingInitialRun || !context || !fenced() || readControl(sessionFile, executionId)) return;
     pumping = true;
     try {
       if (paused()) return;
@@ -240,6 +252,16 @@ export function createInboxReceiver(pi: ExtensionAPI, sessionFile: string, execu
         if (!receipt.contextSeen || !snapshot.messages.find((m) => m.attemptId === receipt.attemptId)?.evidence.transcriptEntryId) continue;
         if (!receipt.activeTools?.length) receipt.phase = "settled";
         else receipt.uncertain = `Pi settled with ${outcome} without observing the active tool outcomes; reconcile effects before continuing this action.`;
+        inbox.save(receipt);
+      }
+    },
+    suspend() {
+      const snapshot = inbox.snapshot();
+      for (const receipt of owned.values()) {
+        if (receipt.phase === "settled" || receipt.uncertain) continue;
+        const message = snapshot.messages.find((message) => message.attemptId === receipt.attemptId);
+        if (receipt.contextSeen && message?.evidence.transcriptEntryId && !receipt.activeTools?.length) receipt.phase = "suspended";
+        else receipt.uncertain = "Suspension cannot establish consumption or tool effects; explicitly reconcile this action before continuation.";
         inbox.save(receipt);
       }
     },

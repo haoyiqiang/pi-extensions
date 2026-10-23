@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createAssistantMessageEventStream, type AssistantMessage, type ToolCall } from "@earendil-works/pi-ai";
-import { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager, type AgentSession } from "@earendil-works/pi-coding-agent";
+import { createAgentSession, AgentSessionRuntime, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager, type AgentSession } from "@earendil-works/pi-coding-agent";
 import subagents from "../pi-extension/subagents/index.ts";
 import { closeSurface, shellEscape } from "../pi-extension/subagents/tmux.ts";
 import { plainTheme, waitFor } from "./harness.ts";
@@ -82,10 +82,10 @@ test("supported Pi reports management refusals as tool failures without launchin
     assert.ok(model, "the deterministic local provider must be available");
     ({ session } = await createAgentSession({
       cwd: project, agentDir, modelRuntime, model,
-      thinkingLevel: "off", tools: ["subagent", "subagent_message", "subagents_list", "subagent_status"],
+      thinkingLevel: "off", tools: ["subagent", "subagent_message", "subagents_list", "subagent_status", "subagent_stop"],
       sessionManager: SessionManager.create(project, join(root, "sessions")), settingsManager, resourceLoader,
     }));
-    await session.bindExtensions({});
+    await session.bindExtensions({ shutdownHandler: () => session?.dispose() });
     const executionErrors: boolean[] = [];
     session.subscribe((event) => { if (event.type === "tool_execution_end") executionErrors.push(event.isError); });
     const call = async (name: string, args: ToolCall["arguments"], siblings: ToolCall[] = []) => {
@@ -230,6 +230,48 @@ test("supported Pi reports management refusals as tool failures without launchin
     const statusTool = session.extensionRunner!.getToolDefinition("subagent_status")!;
     const recovered = await statusTool.execute("history-proof", { id: (launched.details as any).id }, undefined, undefined, session.extensionRunner!.createContext());
     assert.ok((recovered.details as any).subagent.notifications.some((event: any) => event.eventId === eventId && event.state === "persisted"));
+    const refusedStop = await call("subagent_stop", { id: "foreign-child" });
+    assert.equal(refusedStop.isError, true, "native stop ownership errors use supported Pi's real failed-tool contract");
+    const stopped = await call("subagent_stop", { id: (launched.details as any).id });
+    assert.equal(stopped.isError, false, JSON.stringify(stopped.content) + "\n" + readFileSync(join(terminal, "screen"), "utf8"));
+    assert.equal((stopped.details as any).status, "stopped");
+
+    // Actual public runtime replacement (abort -> shutdown(new) -> dispose ->
+    // startup(resume)), not a synthetic callback order from the shallow harness.
+    const suspendedChild = await call("subagent", { agent: "safe", task: "Return the exact phrase: runtime continuation retained." });
+    const childId = (suspendedChild.details as any).id;
+    const outgoingFile = session.sessionFile!;
+    const host = new AgentSessionRuntime(session, { cwd: project, agentDir, modelRuntime, settingsManager, resourceLoader, diagnostics: [] }, async (options) => {
+      const loader = new DefaultResourceLoader({ cwd: options.cwd, agentDir, settingsManager, extensionFactories: [subagents],
+        noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true });
+      await loader.reload();
+      const created = await createAgentSession({ cwd: options.cwd, agentDir, modelRuntime, model, thinkingLevel: "off",
+        tools: ["subagent", "subagent_message", "subagents_list", "subagent_status", "subagent_stop"],
+        sessionManager: options.sessionManager, sessionStartEvent: options.sessionStartEvent, settingsManager, resourceLoader: loader });
+      return { ...created, services: { cwd: options.cwd, agentDir, modelRuntime, settingsManager, resourceLoader: loader, diagnostics: [] }, diagnostics: [] };
+    });
+    host.setRebindSession(async (fresh) => { session = fresh; await fresh.bindExtensions({ shutdownHandler: () => { void host.dispose(); } }); });
+    await host.newSession();
+    assert.notEqual(session.sessionFile, outgoingFile);
+    const foreignStatus = await session.extensionRunner!.getToolDefinition("subagent_status")!.execute("new-parent", {}, undefined, undefined, session.extensionRunner!.createContext());
+    assert.deepEqual((foreignStatus.details as any).subagents, [], "a replacement parent cannot adopt outgoing work by name");
+    assert.equal(readFileSync(join(terminal, "surface"), "utf8"), "closed", "newSession waits for actual child shutdown and terminal closure");
+    await host.switchSession(outgoingFile);
+    const continuation = await waitFor(() => {
+      const receipt = JSON.parse(readFileSync(join(terminal, "received.json"), "utf8"));
+      return receipt.env.PI_SUBAGENT_GENERATION === "2" ? receipt : undefined;
+    }, "actual parent runtime automatically continues its owned child", 30_000);
+    assert.match(continuation.task, /new continuation/);
+    assert.equal(continuation.args[continuation.args.indexOf("--tools") + 1], "ask_question", "restoration keeps the exact pinned tool restrictions");
+    writeFileSync(join(terminal, "finish"), "continue known work");
+    const resumedResult = await waitFor(() => session!.messages.find((message) => message.role === "custom" && message.customType === "subagent_result" && (message.details as any)?.id === childId), "actual parent receives continued result");
+    assert.equal((resumedResult as any).details.outcome, "succeeded");
+    await session.waitForIdle();
+    const quitChild = await call("subagent", { agent: "safe", task: "Return the exact phrase: actual quit suspends active work." });
+    assert.equal(quitChild.isError, false);
+    await host.dispose();
+    assert.equal(readFileSync(join(terminal, "surface"), "utf8"), "closed", "actual public runtime quit also suspends the active owned writer");
+    assert.throws(() => process.kill(Number(readFileSync(join(terminal, "control-pid"), "utf8")), 0), (error: any) => error.code === "ESRCH");
   } finally {
     await session?.extensionRunner?.emit({ type: "session_shutdown", reason: "quit" });
     session?.dispose();

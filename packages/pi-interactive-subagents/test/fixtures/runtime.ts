@@ -37,9 +37,11 @@ runtime.api.sendMessage = (message: any, options: any) => {
 };
 const widgets: string[] = [];
 let shutdown = false;
+let aborted = false;
 mkdirSync(dirname(sessionFile), { recursive: true });
 if (!existsSync(sessionFile)) writeFileSync(sessionFile, JSON.stringify({ type: "session", version: 3, id: "fixture-child", cwd: process.cwd() }) + "\n");
 let session = SessionManager.open(sessionFile); // This fenced process owns the writer.
+runtime.api.appendEntry = (type: string, data: unknown) => { session.appendCustomEntry(type, data); };
 let assistantCount = session.getEntries().filter((entry) => entry.type === "message" && entry.message.role === "assistant").length;
 let abandonedLeaf: string | undefined;
 function abandonOldBranch() {
@@ -61,6 +63,7 @@ const ctx = {
   isIdle: () => true,
   hasUI: true,
   ui: { setWidget(_name: string, factory: any) { widgets.push(factory({}, plainTheme).render(100).join("\n")); } },
+  abort() { writeFileSync(join(root, "abort-requested"), "cooperative request, not exit"); if (!existsSync(join(root, "ignore-abort"))) aborted = true; },
   shutdown() { shutdown = true; },
 };
 subagentDone(runtime.api);
@@ -79,7 +82,8 @@ async function consume(message: any) {
 }
 for (;;) {
   if (task === undefined) {
-    await waitFor(() => pending.length ? true : undefined, "durable next input", 120_000);
+    await waitFor(() => shutdown || pending.length ? true : undefined, "durable next input", 120_000);
+    if (shutdown) break;
     task = await consume(pending.shift());
   } else {
     await runtime.emit("input", { text: task, source: "interactive" }, ctx);
@@ -91,7 +95,13 @@ for (;;) {
   if (task.includes("LONG_TOOL")) await runtime.emit("tool_execution_start", { toolCallId: "long-tool", toolName: "bash" }, ctx);
   writeFileSync(join(root, "received.tmp"), JSON.stringify({ context: session.buildSessionContext().messages, header: session.getHeader(), task, widgets, tools: runtime.registeredTools.map((tool) => tool.name), args, autoExit: process.env.PI_SUBAGENT_AUTO_EXIT, cwd: process.cwd(), env: Object.fromEntries(Object.entries(process.env).filter(([key]) => key.startsWith("PI_SUBAGENT_") || key === "PI_CODING_AGENT_DIR" || key === "PI_TERMINAL_RENAME_CONTEXT")) }));
   renameSync(join(root, "received.tmp"), join(root, "received.json"));
-  await waitFor(() => existsSync(join(root, "finish")) ? true : undefined, "permission to complete delegated task", 120_000);
+  await waitFor(() => aborted || existsSync(join(root, "finish")) ? true : undefined, "permission to complete delegated task", 120_000);
+  if (aborted) {
+    await runtime.emit("agent_before_settle", { outcome: "aborted" }, ctx);
+    await runtime.emit("agent_settled", {}, ctx);
+    await waitFor(() => shutdown ? true : undefined, "cooperative shutdown", 120_000);
+    break;
+  }
   for (let index = pending.findIndex((m) => m.options.deliverAs !== "followUp"); index >= 0; index = pending.findIndex((m) => m.options.deliverAs !== "followUp")) {
     const steering = await consume(pending.splice(index, 1)[0]);
     if (steering.includes("Return the exact phrase:")) task = steering;
@@ -107,7 +117,9 @@ for (;;) {
     process.exitCode = 2;
     break;
   }
-  const answer = task.match(/Return the exact phrase: ([^\n]+)/)?.[1];
+  const history = task.includes("new continuation") ? session.buildSessionContext().messages
+    .filter((message) => message.role === "user").map((message) => typeof message.content === "string" ? message.content : "").join("\n") : "";
+  const answer = task.match(/Return the exact phrase: ([^\n]+)/)?.[1] ?? history.match(/Return the exact phrase: ([^\n]+)/)?.[1];
   if (!answer) throw new Error(`Fixture cannot process task: ${task}`);
   if (task.includes("FINAL_ERROR") || task.includes("OMITTED_FINAL")) {
     const partial = { type: "message", id: `fixture-partial-${assistantCount++}`, parentId: session.getLeafId(),
@@ -154,8 +166,8 @@ for (;;) {
   }
   if (shutdown) break;
   writeFileSync(join(root, "parked"), "waiting");
-  await waitFor(() => pending.length || existsSync(join(root, "next-task")) || existsSync(join(root, "close-resident")) ? true : undefined, "resident/manual next input or closure", 120_000);
-  if (existsSync(join(root, "close-resident"))) break;
+  await waitFor(() => shutdown || pending.length || existsSync(join(root, "next-task")) || existsSync(join(root, "close-resident")) ? true : undefined, "resident/manual next input or closure", 120_000);
+  if (shutdown || existsSync(join(root, "close-resident"))) break;
   if (pending.length) task = undefined;
   else { task = readFileSync(join(root, "next-task"), "utf8"); rmSync(join(root, "next-task")); }
 }

@@ -23,7 +23,7 @@ async function withIdentity(run: (h: any) => Promise<void>, fixture = "runtime.t
   const command = [process.execPath, "--import", fileURLToPath(import.meta.resolve("tsx")), join(testDir, "fixtures", fixture)].map(shellEscape).join(" ");
   writeFileSync(join(bin, "pi"), `#!/bin/sh\nexec ${command} "$@"\n`, { mode: 0o755 });
   for (const key of Object.keys(process.env)) if (key.startsWith("PI_SUBAGENT_")) delete process.env[key];
-  Object.assign(process.env, { PATH: `${bin}:${env.PATH}`, PI_TERMINAL_MUX: "tmux", TMUX: "fixture", TMUX_PANE: "%fixture-parent", PI_CODING_AGENT_DIR: join(root, "config"), SUBAGENT_TEST_TERMINAL: terminal });
+  Object.assign(process.env, { PATH: `${bin}:${env.PATH}`, PI_TERMINAL_MUX: "tmux", TMUX: "fixture", TMUX_PANE: "%fixture-parent", PI_CODING_AGENT_DIR: join(root, "config"), SUBAGENT_TEST_TERMINAL: terminal, SUBAGENT_TEST_TERMINAL_BASE: terminal });
   writeFileSync(join(project, ".pi/agents/echo.md"), "---\nname: echo\ntools: read\n---\nEcho identity\n");
   const parentFile = join(sessions, "parent.jsonl");
   writeFileSync(parentFile, JSON.stringify({ type: "session", version: 3, id: "identity-parent", cwd: project }) + "\n");
@@ -60,6 +60,243 @@ async function withIdentity(run: (h: any) => Promise<void>, fixture = "runtime.t
     rmSync(root, { recursive: true, force: true });
   }
 }
+
+test("normal parent quit suspends and restores known work with an explicit continuation, not the original task", { timeout: 90_000 }, async () => {
+  await withIdentity(async ({ boot, call, terminal, parent, ctx, project }) => {
+    const launched = await boot("subagent", { agent: "echo", task: "Continue a known task after suspension" });
+    const requests = () => existsSync(join(terminal, "provider-input.jsonl")) ? readFileSync(join(terminal, "provider-input.jsonl"), "utf8").trim().split("\n").map((line: string) => JSON.parse(line)) : [];
+    await waitFor(() => requests()[0], "initial provider request");
+    const original = (await call("subagent_status", { id: launched.details.id })).details.subagent;
+    await parent.emit("session_shutdown", { reason: "quit" }, ctx);
+    const suspended = (await call("subagent_status", { id: launched.details.id })).details.subagent;
+    assert.equal(suspended.state, "suspended");
+    assert.equal(suspended.liveness.writer, "exited");
+    assert.equal(suspended.closure, "confirmed");
+    assert.equal(suspended.checkpoint.wait, "continue");
+    writeFileSync(join(project, ".pi/agents/echo.md"), "---\nname: echo\ntools: bash\nauto-exit: false\n---\nChanged role must not affect restoration\n");
+    await parent.emit("session_start", { reason: "resume" }, ctx);
+    const resumed = await waitFor(() => requests().find((request: any) => request.executionId !== original.executionId), "useful automatic provider continuation", 30_000);
+    assert.match(resumed.inputs.at(-1), /continu(e|ation).*recorded|recorded.*continu(e|ation)/i);
+    assert.notEqual(resumed.inputs.at(-1), requests()[0].inputs.at(-1));
+    const running = (await call("subagent_status", { id: launched.details.id })).details.subagent;
+    assert.deepEqual(running.loadout, original.loadout);
+    assert.equal(running.generation, 2);
+    writeFileSync(join(terminal, `release-${resumed.call}`), "complete");
+    const result = await waitFor(() => parent.sentMessages.find((e: any) => e.message.customType === "subagent_result" && e.message.details.generation === 2), "continued settlement");
+    assert.equal(result.message.details.outcome, "succeeded");
+  }, "pi-runtime.ts");
+});
+
+test("an old resident result cannot complete newer human work during suspension", { timeout: 90_000 }, async () => {
+  await withIdentity(async ({ boot, call, terminal, project, parent, ctx }) => {
+    writeFileSync(join(project, ".pi/agents/resident.md"), "---\nname: resident\ntools:\nauto-exit: false\n---\nStay available\n");
+    const launched = await boot("subagent", { agent: "resident", task: "First known task" });
+    const requests = () => existsSync(join(terminal, "provider-input.jsonl")) ? readFileSync(join(terminal, "provider-input.jsonl"), "utf8").trim().split("\n").map((line: string) => JSON.parse(line)) : [];
+    const release = (request: any) => writeFileSync(join(terminal, `release-${request.call}`), "complete");
+    release(await waitFor(() => requests()[0], "resident initial task"));
+    await waitFor(() => parent.sentMessages.find((event: any) => event.message.customType === "subagent_result"), "first durable resident result");
+    writeFileSync(join(terminal, "runtime-command.json"), JSON.stringify({ id: "manual-work", action: "input", text: "New human task remains unfinished" }));
+    await waitFor(() => requests()[1], "manual work after resident settlement");
+    rmSync(join(terminal, "runtime-command.json")); // The fixture driver must not resend human input to a replacement process.
+    await parent.emit("session_shutdown", { reason: "quit" }, ctx);
+    const suspended = (await call("subagent_status", { id: launched.details.id })).details.subagent;
+    assert.equal(suspended.state, "suspended", "a previous durable outcome is not a terminal result for newer human work");
+    assert.ok(existsSync(suspended.latestResult.resultFile), "the previous result is still retained");
+    await parent.emit("session_start", { reason: "resume" }, ctx);
+    const continuation = await waitFor(() => requests()[2], "useful continuation of newer human work", 30_000);
+    assert.ok(continuation.inputs.includes("New human task remains unfinished"));
+    assert.match(continuation.inputs.at(-1), /new continuation/);
+    release(continuation);
+    await waitFor(() => parent.sentMessages.find((event: any) => event.message.customType === "subagent_result" && event.message.details.generation === 2), "new resident work settles");
+    const completed = (await call("subagent_status", { id: launched.details.id })).details.subagent;
+    assert.equal(completed.loadout.autoExit, false);
+    assert.equal(completed.liveness.surface, "present");
+    await call("subagent_stop", { id: launched.details.id });
+  }, "pi-runtime.ts");
+});
+
+test("safe suspension preserves never-dispatched followUp behind useful continuation of the current task", { timeout: 90_000 }, async () => {
+  await withIdentity(async ({ boot, call, terminal, parent, ctx }) => {
+    const launched = await boot("subagent", { agent: "echo", task: "Known current work" });
+    const requests = () => existsSync(join(terminal, "provider-input.jsonl")) ? readFileSync(join(terminal, "provider-input.jsonl"), "utf8").trim().split("\n").map((line: string) => JSON.parse(line)) : [];
+    await waitFor(() => requests()[0], "initial active task");
+    const pid = Number(readFileSync(join(terminal, "control-pid"), "utf8"));
+    process.kill(pid, "SIGSTOP");
+    let quitting: Promise<void>;
+    try {
+      await call("subagent_message", { id: launched.details.id, message: "Distinct queued follow-up", messageId: "safe-followup", deliverAs: "followUp" });
+      quitting = parent.emit("session_shutdown", { reason: "quit" }, ctx);
+    } finally { process.kill(pid, "SIGCONT"); }
+    await quitting!;
+    const suspended = (await call("subagent_status", { id: launched.details.id })).details.subagent;
+    assert.equal(suspended.messages.find((message: any) => message.id === "safe-followup").state, "queued");
+    assert.equal(suspended.paused, false);
+    await parent.emit("session_start", { reason: "resume" }, ctx);
+    const continuation = await waitFor(() => requests()[1], "original task continuation first", 30_000);
+    assert.match(continuation.inputs.at(-1), /new continuation/);
+    assert.equal(continuation.inputs.includes("Distinct queued follow-up"), false);
+    writeFileSync(join(terminal, `release-${continuation.call}`), "continue current work");
+    const followup = await waitFor(() => requests()[2], "preserved followUp after continuation");
+    assert.equal(followup.inputs.at(-1), "Distinct queued follow-up");
+    writeFileSync(join(terminal, `release-${followup.call}`), "finish followUp");
+    await waitFor(() => parent.sentMessages.find((event: any) => event.message.customType === "subagent_result" && event.message.details.generation === 2), "final settlement after queued followup");
+  }, "pi-runtime.ts");
+});
+
+test("a suspended question keeps its exact wait and only the correlated event starts continuation", { timeout: 90_000 }, async () => {
+  await withIdentity(async ({ call, boot, terminal, parent, ctx }) => {
+    const launched = await boot("subagent", { agent: "echo", task: "ASK_TWO" });
+    const requests = () => existsSync(join(terminal, "provider-input.jsonl")) ? readFileSync(join(terminal, "provider-input.jsonl"), "utf8").trim().split("\n").map((line: string) => JSON.parse(line)) : [];
+    const release = (request: any) => writeFileSync(join(terminal, `release-${request.call}`), "complete");
+    const status = async () => (await call("subagent_status", { id: launched.details.id })).details.subagent;
+    release(await waitFor(() => requests()[0], "ask two questions"));
+    release(await waitFor(() => requests()[1], "question waiting response"));
+    await waitFor(() => existsSync(join(terminal, "settlements")) ? true : undefined, "question wait");
+    const questions = (await status()).questions;
+    assert.equal(questions.length, 2);
+    writeFileSync(join(terminal, "runtime-command.json"), JSON.stringify({ id: "abandoned-tail", action: "abandon-tail" }));
+    await waitFor(() => existsSync(join(terminal, "command-abandoned-tail-done")) ? true : undefined, "active branch differs from physical tail");
+    rmSync(join(terminal, "runtime-command.json"));
+    await parent.emit("session_shutdown", { reason: "new" }, ctx);
+    assert.equal((await status()).checkpoint.wait, "question");
+    await parent.emit("session_start", { reason: "resume" }, ctx);
+    await waitFor(async () => (await status()).generation === 2 ? true : undefined, "restored question waiter");
+    assert.equal(requests().length, 2, "history reopening is a preserved wait, not permission for a new model call");
+    assert.deepEqual((await status()).questions.map((q: any) => q.questionId), questions.map((q: any) => q.questionId));
+    for (const [index, question] of questions.entries()) {
+      await call("subagent_message", { id: launched.details.id, message: `Answer ${index + 1}`, replyTo: question.questionId });
+      const replyRequest = await waitFor(() => requests()[2 + index], "correlated answer provider request");
+      assert.doesNotMatch(JSON.stringify(replyRequest.inputs), /Abandoned physical tail/);
+      release(replyRequest);
+    }
+    const result = await waitFor(() => parent.sentMessages.find((e: any) => e.message.customType === "subagent_result" && e.message.details.generation === 2), "completion after exact answers");
+    assert.equal(result.message.details.outcome, "succeeded");
+  }, "pi-runtime.ts");
+});
+
+test("native stop retains history, enforces ownership and never restarts stopped work on normal restore", { timeout: 60_000 }, async () => {
+  await withIdentity(async ({ call, terminal, parent, ctx }) => {
+    const launched = await call("subagent", { agent: "echo", task: `${task}\nLONG_TOOL` });
+    const status = async () => (await call("subagent_status", { id: launched.details.id })).details.subagent;
+    const foreign = { ...ctx, sessionManager: { ...ctx.sessionManager, getSessionId: () => "different-parent" } };
+    await assert.rejects(call("subagent_stop", { id: launched.details.id }, foreign), /owned by this parent/);
+    await assert.rejects(call("subagent_stop", { id: launched.details.id, name: "different-name" }), /named|mismatch/);
+    const stopped = await call("subagent_stop", { id: launched.details.id, name: launched.details.name });
+    assert.equal(stopped.details.status, "stopped");
+    const retained = await status();
+    assert.equal(retained.state, "stopped");
+    assert.deepEqual(retained.uncertainty.activeTools, ["long-tool"], "honest effect uncertainty is retained without disguising confirmed stop");
+    assert.equal(retained.liveness.writer, "exited");
+    assert.equal(retained.closure, "confirmed");
+    assert.ok(existsSync(retained.sessionFile));
+    const history = readFileSync(retained.sessionFile, "utf8");
+    assert.match(history, /identity retained/);
+    const commands = readFileSync(join(terminal, "commands.jsonl"), "utf8").split("\n").filter((line: string) => line.includes("split-window")).length;
+    assert.equal((await call("subagent_stop", { name: retained.name })).details.status, "stopped");
+    await parent.emit("session_shutdown", { reason: "new" }, ctx);
+    await parent.emit("session_start", { reason: "resume" }, ctx);
+    assert.equal((await status()).state, "stopped");
+    assert.equal(readFileSync(retained.sessionFile, "utf8"), history);
+    assert.equal(readFileSync(join(terminal, "commands.jsonl"), "utf8").split("\n").filter((line: string) => line.includes("split-window")).length, commands);
+    await assert.rejects(call("subagent_message", { id: retained.id, message: task }), /explicitly stopped|explicit stop/i);
+  });
+});
+
+test("an interrupted initial tool stays paused across normal restore until exact-action authorization", { timeout: 60_000 }, async () => {
+  await withIdentity(async ({ call, terminal, parent, ctx }) => {
+    const launched = await call("subagent", { agent: "echo", task: `${task}\nLONG_TOOL` });
+    await parent.emit("session_shutdown", { reason: "resume" }, ctx);
+    const status = async () => (await call("subagent_status", { id: launched.details.id })).details.subagent;
+    const suspended = await status();
+    assert.equal(suspended.state, "paused-uncertain");
+    assert.deepEqual(suspended.uncertainty.activeTools, ["long-tool"]);
+    await parent.emit("session_start", { reason: "resume" }, ctx);
+    assert.equal((await status()).executionId, launched.details.executionId ?? suspended.executionId);
+    const queued = await call("subagent_message", { id: launched.details.id, message: "Unrelated independent follow-up" });
+    assert.equal(queued.details.status, "paused-uncertain");
+    assert.equal((await status()).generation, 1);
+    await assert.rejects(call("subagent_message", { id: launched.details.id, authorization: { actionId: "wrong-action", decision: "retry", reason: "not specific" } }), /exact current uncertain/);
+    // Reconcile only this affected tool; an ordinary restored parent never does so.
+    writeFileSync(join(terminal, "finish"), "permit fixture completion");
+    await call("subagent_message", { id: launched.details.id, message: "Return the exact phrase: authorized continuation.", authorization: { actionId: suspended.uncertainty.actionId, decision: "confirm-completed", reason: "Verified the affected external change; it must not be repeated" } });
+    const resumed = await waitFor(async () => { const current = await status(); return current.generation === 2 ? current : undefined; }, "authorized replacement writer");
+    assert.equal(resumed.paused, false);
+  });
+});
+
+test("unknown closure and failed close retain ownership instead of reporting stopped or automatically relaunching", { timeout: 60_000 }, async () => {
+  await withIdentity(async ({ call, terminal, parent, ctx }) => {
+    const launched = await call("subagent", { agent: "echo", task });
+    writeFileSync(join(terminal, "inventory-unknown"), "fault");
+    await assert.rejects(call("subagent_stop", { id: launched.details.id }), /unconfirmed/);
+    let status = (await call("subagent_status", { id: launched.details.id })).details.subagent;
+    assert.equal(status.state, "stopping");
+    assert.equal(status.closure, "unconfirmed");
+    assert.equal(status.liveness.writer, "exited");
+    await parent.emit("session_shutdown", { reason: "new" }, ctx);
+    await parent.emit("session_start", { reason: "resume" }, ctx);
+    assert.equal((await call("subagent_status", { id: launched.details.id })).details.subagent.generation, 1);
+    rmSync(join(terminal, "inventory-unknown"));
+    writeFileSync(join(terminal, "close-fails"), "fault");
+    // Deterministic clock advances the bounded close handshake, not a long sleep.
+    mock.timers.enable({ apis: ["Date"], now: Date.now() });
+    const stopping = call("subagent_stop", { id: launched.details.id });
+    mock.timers.tick(4_000);
+    await assert.rejects(stopping, /unconfirmed/);
+    mock.timers.reset();
+    status = (await call("subagent_status", { id: launched.details.id })).details.subagent;
+    assert.equal(status.state, "stopping");
+    assert.match(status.diagnostic, /closure|Fixture closure failed/i);
+    rmSync(join(terminal, "close-fails"));
+    assert.equal((await call("subagent_stop", { id: launched.details.id })).details.status, "stopped");
+  });
+});
+
+test("a bounded cooperative abort timeout is not a stopped writer or permission to restart", { timeout: 60_000 }, async () => {
+  await withIdentity(async ({ call, terminal, parent, ctx }) => {
+    writeFileSync(join(terminal, "ignore-abort"), "fault: child does not honor cancellation");
+    const launched = await call("subagent", { agent: "echo", task });
+    mock.timers.enable({ apis: ["Date"], now: Date.now() });
+    try {
+      const stopping = call("subagent_stop", { id: launched.details.id });
+      await waitFor(() => existsSync(join(terminal, "abort-requested")) ? true : undefined, "cooperative abort request reached real child");
+      mock.timers.tick(4_000);
+      await assert.rejects(stopping, /unconfirmed.*handshake|handshake.*timed out/i);
+    } finally { mock.timers.reset(); }
+    const status = (await call("subagent_status", { id: launched.details.id })).details.subagent;
+    assert.equal(status.state, "stopping");
+    assert.equal(status.liveness.writer, "claimed-or-unknown");
+    assert.equal(status.closure, "unconfirmed");
+    assert.doesNotThrow(() => process.kill(Number(readFileSync(join(terminal, "control-pid"), "utf8")), 0));
+    await parent.emit("session_shutdown", { reason: "reload" }, ctx);
+    await parent.emit("session_start", { reason: "resume" }, ctx);
+    assert.equal((await call("subagent_status", { id: launched.details.id })).details.subagent.generation, 1);
+    writeFileSync(join(terminal, "finish"), "child reaches its real settlement/exit boundary");
+    await waitFor(() => { try { process.kill(Number(readFileSync(join(terminal, "control-pid"), "utf8")), 0); return undefined; } catch (error: any) { return error.code === "ESRCH" ? true : undefined; } }, "positive Pi process exit");
+    assert.equal((await call("subagent_stop", { id: launched.details.id })).details.status, "stopped");
+  });
+});
+
+test("a durable completion racing parent suspension wins and is never continued again", { timeout: 60_000 }, async () => {
+  await withIdentity(async ({ call, terminal, parent, ctx }) => {
+    const launched = await call("subagent", { agent: "echo", task });
+    await parent.emit("session_shutdown", { reason: "reload" }, ctx);
+    writeFileSync(join(terminal, "hold-exit"), "retain writer while outcome becomes durable");
+    writeFileSync(join(terminal, "finish"), "complete");
+    await waitFor(() => existsSync(join(terminal, "waiting-exit")) ? true : undefined, "durable outcome before writer exit");
+    const starting = parent.emit("session_start", { reason: "reload" }, ctx);
+    const quitting = parent.emit("session_shutdown", { reason: "quit" }, ctx);
+    writeFileSync(join(terminal, "release-exit"), "positive writer exit");
+    await starting;
+    await quitting;
+    const status = (await call("subagent_status", { id: launched.details.id })).details.subagent;
+    assert.equal(status.state, "completed");
+    assert.equal(status.latestResult.outcome, "succeeded");
+    assert.ok(existsSync(status.latestResult.resultFile));
+    await parent.emit("session_start", { reason: "resume" }, ctx);
+    assert.equal((await call("subagent_status", { id: launched.details.id })).details.subagent.generation, 1);
+  });
+});
 
 test("launch allocates normalized unique explicit names and status retains identities", { timeout: 30_000 }, async () => {
   await withIdentity(async ({ call, terminal, parent }) => {
@@ -251,6 +488,75 @@ test("supported Pi retains independent questions across reload and resolves only
     assert.equal(result.message.details.id, launched.details.id);
     assert.equal(result.message.details.outcome, "succeeded");
     assert.ok((await status()).questions.every((q: any) => q.state === "answered"));
+  }, "pi-runtime.ts");
+});
+
+for (const operation of ["suspend", "stop"] as const) test(`native ${operation} owns the full work tree and retains descendant waits across restoration`, { timeout: 180_000 }, async () => {
+  await withIdentity(async ({ call, boot, terminal, project, parent, ctx }) => {
+    process.env.SUBAGENT_TEST_MULTI = "1";
+    writeFileSync(join(project, ".pi/agents/trunk.md"), "---\nname: trunk\ntools:\nsubagent_agents: branch\n---\nDelegate to branch\n");
+    writeFileSync(join(project, ".pi/agents/branch.md"), "---\nname: branch\ntools:\nsubagent_agents: leaf\n---\nDelegate to leaf\n");
+    writeFileSync(join(project, ".pi/agents/leaf.md"), "---\nname: leaf\ntools:\n---\nFinish leaf\n");
+    const launched = await boot("subagent", { agent: "trunk", task: "NEST_PARENT" });
+    const trunk = join(terminal, "surfaces", launched.details.surface);
+    const requests = (root: string) => existsSync(join(root, "provider-input.jsonl")) ? readFileSync(join(root, "provider-input.jsonl"), "utf8").trim().split("\n").map((line: string) => JSON.parse(line)) : [];
+    const release = (root: string, request: any) => writeFileSync(join(root, `release-${request.call}`), "complete");
+    const descendant = async (root: string) => waitFor(() => {
+      const surfaces = join(root, "surfaces");
+      const id = existsSync(surfaces) ? readdirSync(surfaces)[0] : undefined;
+      return id ? join(surfaces, id) : undefined;
+    }, "owned descendant surface", 45_000);
+    release(trunk, await waitFor(() => requests(trunk)[0], "root delegation"));
+    const branch = await descendant(trunk);
+    release(trunk, await waitFor(() => requests(trunk)[1], "root waiting response", 45_000));
+    release(branch, await waitFor(() => requests(branch)[0], "child delegation", 45_000));
+    const leaf = await descendant(branch);
+    release(branch, await waitFor(() => requests(branch)[1], "child waiting response", 45_000));
+    await waitFor(() => requests(leaf)[0], "leaf active work", 45_000);
+    await waitFor(() => existsSync(join(branch, "settlements")) && existsSync(join(trunk, "settlements")) ? true : undefined, "both descendant waiters settled");
+    if (operation === "stop") {
+      const result = await call("subagent_stop", { id: launched.details.id });
+      assert.equal(result.details.status, "stopped");
+      assert.equal(result.details.subagents.length, 3);
+      assert.ok(result.details.subagents.every((run: any) => run.state === "stopped" && existsSync(run.sessionFile)));
+    } else {
+      await parent.emit("session_shutdown", { reason: "quit" }, ctx);
+      const status = (await call("subagent_status", { id: launched.details.id })).details.subagent;
+      assert.equal(status.state, "suspended");
+      assert.equal(status.checkpoint.wait, "descendants");
+    }
+    for (const root of [trunk, branch, leaf]) {
+      assert.equal(readFileSync(join(root, "surface"), "utf8"), "closed");
+      const pid = Number(readFileSync(join(root, "control-pid"), "utf8"));
+      assert.throws(() => process.kill(pid, 0), (error: any) => error.code === "ESRCH", "all real Pi writers exited");
+    }
+    if (operation === "stop") await parent.emit("session_shutdown", { reason: "new" }, ctx);
+    await parent.emit("session_start", { reason: "resume" }, ctx);
+    if (operation === "stop") {
+      assert.equal((await call("subagent_status", { id: launched.details.id })).details.subagent.state, "stopped");
+      assert.equal(readdirSync(join(terminal, "surfaces")).length, 1, "stopped descendants must never relaunch");
+      return;
+    }
+    const restored = await waitFor(async () => {
+      const current = (await call("subagent_status", { id: launched.details.id })).details.subagent;
+      return current.generation === 2 && current.state === "running" ? current : undefined;
+    }, "root waiting writer restored", 45_000);
+    const newTrunk = join(terminal, "surfaces", restored.surface);
+    const newBranch = await descendant(newTrunk);
+    const newLeaf = await descendant(newBranch);
+    assert.equal(requests(newTrunk).length, 0, "descendant wait remains parked");
+    assert.equal(requests(newBranch).length, 0, "grandchild wait remains parked");
+    const leafContinuation = await waitFor(() => requests(newLeaf)[0], "leaf useful continuation", 45_000);
+    assert.match(leafContinuation.inputs.at(-1), /continuation/);
+    release(newLeaf, leafContinuation);
+    const childIncorporation = await waitFor(() => requests(newBranch)[0], "resumed child incorporates leaf", 45_000);
+    assert.match(childIncorporation.inputs.at(-1), /Leaf incorporated/);
+    release(newBranch, childIncorporation);
+    const rootIncorporation = await waitFor(() => requests(newTrunk)[0], "resumed root incorporates child", 45_000);
+    assert.match(rootIncorporation.inputs.at(-1), /Child incorporated[\s\S]*Leaf incorporated/);
+    release(newTrunk, rootIncorporation);
+    const final = await waitFor(() => parent.sentMessages.find((event: any) => event.message.customType === "subagent_result" && event.message.details.generation === 2), "complete restored tree", 45_000);
+    assert.match(final.message.content, /Parent incorporated[\s\S]*Child incorporated[\s\S]*Leaf incorporated/);
   }, "pi-runtime.ts");
 });
 
@@ -620,6 +926,33 @@ async function controller(root: string, parentId?: string) {
     });
   } };
 }
+
+test("two real recovering parents automatically continue suspended work behind exactly one new writer", { timeout: 90_000 }, async () => {
+  await withIdentity(async ({ root, call, terminal, parent, ctx }) => {
+    const first = await call("subagent", { agent: "echo", task });
+    await parent.emit("session_shutdown", { reason: "quit" }, ctx);
+    assert.equal((await call("subagent_status", { id: first.details.id })).details.subagent.state, "suspended");
+    const [a, b] = await Promise.all([controller(root), controller(root)]);
+    try {
+      const recovered = await waitFor(async () => {
+        const status = (await b.call("subagent_status", { id: first.details.id })).details.subagent;
+        return status.generation === 2 && status.state === "running" ? status : undefined;
+      }, "one automatic recovery writer", 30_000);
+      const other = (await a.call("subagent_status", { id: first.details.id })).details.subagent;
+      assert.equal(other.executionId, recovered.executionId);
+      const commands = readFileSync(join(terminal, "commands.jsonl"), "utf8").trim().split("\n").map((line: string) => JSON.parse(line));
+      assert.equal(commands.filter((event: any) => event.args[0] === "split-window").length, 2, "one initial writer plus one automatic continuation");
+      const receipt = await waitFor(() => { const current = JSON.parse(readFileSync(join(terminal, "received.json"), "utf8")); return current.env.PI_SUBAGENT_GENERATION === "2" ? current : undefined; }, "continuation actually starts work");
+      assert.match(receipt.task, /new continuation/);
+      assert.notEqual(receipt.task, task);
+      writeFileSync(join(terminal, "finish"), "complete");
+      await waitFor(async () => (await a.call("subagent_status", { id: first.details.id })).details.subagent.state === "completed" ? true : undefined, "continued completion");
+    } finally {
+      await Promise.all([a.lifecycle("session_shutdown", { reason: "reload" }), b.lifecycle("session_shutdown", { reason: "reload" })]);
+      a.child.kill("SIGKILL"); b.child.kill("SIGKILL");
+    }
+  });
+});
 
 test("cross-process concurrent resume queues both instructions behind one writer and reconstructs scoped status", { timeout: 60_000 }, async () => {
   await withIdentity(async ({ root, call, terminal, parent, ctx }) => {
