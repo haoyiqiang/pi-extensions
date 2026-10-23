@@ -6,10 +6,24 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import subagents, { registerToolExtension } from "../pi-extension/subagents/index.ts";
 import subagentDone from "../pi-extension/subagents/subagent-done.ts";
+import { buildSessionProjection } from "@earendil-works/pi-coding-agent";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import { createMockExtensionApi, plainTheme, waitFor } from "./harness.ts";
 import { closeSurface, shellEscape } from "../pi-extension/subagents/tmux.ts";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
+
+// Older synthetic event cases use a linear entry stream; interpret that stream
+// with Pi rather than replacing the projection/context-edit behavior in mocks.
+function lifecycleSession(branch: any[], id: string) {
+  return {
+    getBranch: () => branch,
+    getEntries: () => branch,
+    getSessionId: () => id,
+    getLeafId: () => branch.at(-1)?.id ?? null,
+    buildSessionProjection: () => buildSessionProjection(branch.map((entry, index) => ({ ...entry, parentId: branch[index - 1]?.id ?? null }))),
+  };
+}
 
 // Confirmed seam: registered child control tools and Pi lifecycle events.
 test("retry, queued and recovery runs cannot terminate delegated work before final settlement", async () => {
@@ -23,7 +37,7 @@ test("retry, queued and recovery runs cannot terminate delegated work before fin
   const branch: any[] = [];
   const ctx = {
     hasUI: false, ui: { setWidget() {} },
-    sessionManager: { getBranch: () => branch, getSessionId: () => "child-session", getLeafId: () => branch.at(-1)?.id },
+    sessionManager: lifecycleSession(branch, "child-session"),
     shutdown() { shutdown = true; },
   };
   try {
@@ -70,7 +84,7 @@ test("pending questions survive automatic restarts until actual reply input arri
   const branch: any[] = [];
   const ctx = {
     hasUI: false, ui: { setWidget() {} },
-    sessionManager: { getBranch: () => branch, getSessionId: () => "question-session", getLeafId: () => branch.at(-1)?.id ?? null },
+    sessionManager: lifecycleSession(branch, "question-session"),
     shutdown() { shutdown = true; },
   };
   try {
@@ -111,7 +125,7 @@ test("result persistence failure prevents autonomous exit", async () => {
   let shutdown = false;
   const ctx = {
     hasUI: false, ui: { setWidget() {} },
-    sessionManager: { getBranch: () => branch, getSessionId: () => "persistence-session", getLeafId: () => "answer" },
+    sessionManager: lifecycleSession(branch, "persistence-session"),
     shutdown() { shutdown = true; },
   };
   try {
@@ -130,7 +144,7 @@ test("result persistence failure prevents autonomous exit", async () => {
   }
 });
 
-test("native delegation acknowledges launch before child completion and automatically returns its result", { timeout: 60_000 }, async () => {
+test("native delegation acknowledges launch before child completion and automatically returns its result", { timeout: 120_000 }, async () => {
   const root = mkdtempSync(join(tmpdir(), "subagents-lifecycle-"));
   const previousEnv = { ...process.env };
   const previousCwd = process.cwd();
@@ -203,7 +217,7 @@ test("native delegation acknowledges launch before child completion and automati
     const delegatorBranch: any[] = [];
     const delegatorCtx = {
       hasUI: false, ui: { setWidget() {} },
-      sessionManager: { getBranch: () => delegatorBranch, getSessionId: () => "fixture-parent", getLeafId: () => delegatorBranch.at(-1)?.id ?? null },
+      sessionManager: lifecycleSession(delegatorBranch, "fixture-parent"),
       shutdown() { delegatorShutdown = true; },
     };
     await bridge.emit("session_start", {}, delegatorCtx);
@@ -250,9 +264,15 @@ test("native delegation acknowledges launch before child completion and automati
     assert.equal(delivered.message.details.name, "Echo");
     assert.equal(delivered.message.details.exitCode, 0);
     assert.equal(delivered.message.details.outcome, "succeeded");
+    assert.equal(delivered.message.details.usage.generation.inputTokens, 10);
+    assert.equal(delivered.message.details.usage.generation.contextWindow, 64_000);
+    assert.equal(delivered.message.details.usage.session.inputTokens, 10);
     const durable = JSON.parse(readFileSync(delivered.message.details.resultFile, "utf8"));
     assert.equal(durable.output, "deterministic task complete.");
     assert.equal(durable.outcome, "succeeded");
+    assert.equal(durable.generation, delivered.message.details.generation);
+    assert.equal(durable.subagentId, launched.details.id);
+    assert.equal(durable.source.startLeafId, null);
     assert.equal(durable.source.entryId, "fixture-answer-0");
     assert.equal(durable.source.stopReason, "stop");
     assert.equal(delivered.message.display, true);
@@ -299,8 +319,8 @@ test("native delegation acknowledges launch before child completion and automati
     assert.match(failed.message.content, /529 overloaded/);
     assert.doesNotMatch(failed.message.content, /did not produce a result/);
     const failureEvidence = JSON.parse(readFileSync(failed.message.details.resultFile, "utf8"));
-    assert.equal(failureEvidence.source.entryId, "fixture-answer-5");
-    assert.deepEqual(failureEvidence.source.outputEntryIds, ["fixture-partial-4"]);
+    assert.equal(failureEvidence.source.entryId, "fixture-answer-3");
+    assert.deepEqual(failureEvidence.source.outputEntryIds, ["fixture-partial-2"]);
     const failureView = renderer.renderer(failed.message, { expanded: true }, plainTheme).render(100).join("\n");
     assert.match(failureView, /✗/);
     assert.doesNotMatch(failureView, /✓/);
@@ -308,6 +328,9 @@ test("native delegation acknowledges launch before child completion and automati
     for (const [marker, outcome, partial] of [
       ["TRUNCATED", "truncated", "useful but unfinished"],
       ["NO_OUTPUT", "no-output", "must not reuse earlier answers"],
+      ["ABANDONED_BRANCH_NO_OUTPUT", "no-output", "must not resurrect an abandoned answer"],
+      ["OMITTED_FINAL", "no-output", "must not substitute an intermediate response"],
+      ["FOLLOWUP_WITHOUT_ANSWER", "no-output", "must not complete an unanswered instruction"],
       ["EXIT_WITHOUT_RESULT", "failed", "must not turn process exit into success"],
     ]) {
       rmSync(join(terminal, "received.json"));
@@ -322,7 +345,7 @@ test("native delegation acknowledges launch before child completion and automati
       assert.equal(event.message.details.outcome, outcome);
       assert.equal(event.message.details.exitCode, 1);
       const evidence = JSON.parse(readFileSync(event.message.details.resultFile, "utf8"));
-      assert.equal(evidence.output, marker === "NO_OUTPUT" || marker === "EXIT_WITHOUT_RESULT" ? "" : partial);
+      assert.equal(evidence.output, marker.includes("NO_OUTPUT") || marker === "EXIT_WITHOUT_RESULT" || marker === "OMITTED_FINAL" || marker === "FOLLOWUP_WITHOUT_ANSWER" ? "" : partial);
       assert.doesNotMatch(event.message.content, /completed \(/);
       const view = renderer.renderer(event.message, { expanded: true }, plainTheme).render(100).join("\n");
       assert.match(view, /✗/);
@@ -425,6 +448,36 @@ test("native delegation acknowledges launch before child completion and automati
     assert.equal(restoredResult.message.details.outcome, "succeeded");
     assert.match(restoredResult.message.content, /snapshot policy restored/);
     assert.equal(readFileSync(join(terminal, "surface"), "utf8"), "open");
+
+    rmSync(join(terminal, "received.json"));
+    rmSync(join(terminal, "finish"));
+    const beforeEdited = parent.sentMessages.length;
+    await parent.tool("subagent_message").execute("effective-result", {
+      name: "Resident", message: "Return the exact phrase: obsolete raw answer.\nCONTEXT_EDIT\nPARTIAL_TAIL\nUNKNOWN_CAPACITY\nUSAGE_EVENTS",
+    }, undefined, undefined, ctx);
+    await waitFor(() => existsSync(join(terminal, "received.json")) ? true : undefined, "effective-context result receipt");
+    writeFileSync(join(terminal, "finish"), "release");
+    const edited = await waitFor(() => parent.sentMessages[beforeEdited], "result despite unfinished trailing record");
+    assert.equal(edited.message.details.outcome, "succeeded");
+    assert.match(edited.message.content, /The effective revised answer\./);
+    assert.doesNotMatch(edited.message.content, /obsolete raw answer\./);
+    const editedEvidence = JSON.parse(readFileSync(edited.message.details.resultFile, "utf8"));
+    assert.equal(editedEvidence.output, "The effective revised answer.");
+    assert.equal(editedEvidence.source.outputEntryIds.length, 1);
+    assert.equal(editedEvidence.usage.generation.inputTokens, 20, "this work includes assistant, compaction and standalone usage entries");
+    assert.equal(editedEvidence.usage.generation.outputTokens, 10);
+    assert.ok(Math.abs(editedEvidence.usage.generation.cost - 0.06) < 1e-9);
+    assert.ok(editedEvidence.usage.session.inputTokens > 20, "whole-session usage retains prior work separately");
+    assert.equal(edited.message.details.usage.generation.contextWindow, undefined);
+    const usageView = renderer.renderer(edited.message, { expanded: true }, plainTheme).render(100).join("\n");
+    assert.match(usageView, /generation/);
+    assert.match(usageView, /session/);
+    assert.match(usageView, /capacity unknown/);
+    assert.doesNotMatch(usageView, /%/);
+    for (const width of [12, 28]) {
+      const lines = renderer.renderer(edited.message, { expanded: true }, plainTheme).render(width);
+      assert.ok(lines.every((line: string) => visibleWidth(line) <= width), `usage/result rendering respects width ${width}`);
+    }
   } finally {
     await parent.emit("session_shutdown", { reason: "quit" }, ctx);
     if (existsSync(join(terminal, "pid"))) {

@@ -17,9 +17,10 @@ import { Box, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { existsSync, writeFileSync } from "node:fs";
 import { createSubagentActivityRecorder, LIVENESS_INTERVAL_MS, writeSubagentLiveness } from "./activity.ts";
-import { writeSubagentOutcome } from "./outcome.ts";
+import { readSubagentOutcomes, writeSubagentOutcome } from "./outcome.ts";
 import { createInboxReceiver } from "./inbox.ts";
 import { writerFile } from "./runs.ts";
+import { summarizeEntryUsage } from "./session.ts";
 
 /**
  * Number of child subagents this session itself still has in flight.
@@ -70,6 +71,9 @@ export default function (pi: ExtensionAPI) {
   let sequence = 0;
   const inbox = sessionFile && executionId && existsSync(writerFile(sessionFile)) ? createInboxReceiver(pi, sessionFile, executionId) : undefined;
   let seenEntries = new Set<string>();
+  let startLeafId: string | null = null;
+  const subagentId = process.env.PI_SUBAGENT_RUN_ID;
+  const initialGeneration = Number(process.env.PI_SUBAGENT_GENERATION) || undefined;
   let activityOutcome: "completed" | "aborted" | "error" = "completed";
   const recorder = createSubagentActivityRecorder({
     runningChildId: process.env.PI_SUBAGENT_ID,
@@ -146,7 +150,9 @@ export default function (pi: ExtensionAPI) {
       }, LIVENESS_INTERVAL_MS);
       heartbeat.unref?.();
     }
-    seenEntries = new Set(ctx.sessionManager.getBranch().map((entry) => entry.id));
+    seenEntries = new Set(ctx.sessionManager.getEntries().map((entry) => entry.id));
+    startLeafId = ctx.sessionManager.getLeafId();
+    if (sessionFile && executionId) sequence = readSubagentOutcomes(sessionFile, executionId).at(-1)?.result.sequence ?? 0;
     const tools = pi.getAllTools();
     toolNames = tools.map((t) => t.name).sort();
     denied = parseDeniedTools(deniedToolsValue);
@@ -204,10 +210,30 @@ export default function (pi: ExtensionAPI) {
       recorder.agentEndWaiting();
       return;
     }
+    // Pi owns branch selection, compaction and context edits. Raw history is
+    // still used for accounting/baselines, never for choosing an answer.
+    const allEntries = ctx.sessionManager.getEntries();
+    const fresh = allEntries.filter((entry) => !seenEntries.has(entry.id));
     const branch = ctx.sessionManager.getBranch();
-    const fresh = branch.filter((entry) => !seenEntries.has(entry.id));
-    const instruction = fresh.findLastIndex((entry) => entry.type === "custom_message" || (entry.type === "message" && entry.message.role === "user"));
-    const entries = fresh.slice(instruction + 1).filter((entry) => entry.type === "message");
+    const activeWork = branch.filter((entry) => !seenEntries.has(entry.id));
+    const instruction = activeWork.findLast((entry) => entry.type === "custom_message" || (entry.type === "message" && entry.message.role === "user"));
+    const managedInstruction = fresh.findLast((entry) => entry.type === "custom_message" && entry.customType === "subagent_instruction" &&
+      (entry.details as { executionId?: string })?.executionId === executionId);
+    // A consumed instruction abandoned by navigation cannot borrow an answer
+    // from another branch. A later active human instruction can start new work.
+    const belongsToWork = !managedInstruction || activeWork.some((entry) => entry.id === managedInstruction.id) ||
+      (instruction && fresh.findIndex((entry) => entry.id === instruction.id) > fresh.findIndex((entry) => entry.id === managedInstruction.id));
+    const responseEntries = belongsToWork ? activeWork.slice(instruction ? activeWork.indexOf(instruction) + 1 : 0) : [];
+    const responseIds = new Set(responseEntries.map((entry) => entry.id));
+    const association = managedInstruction?.type === "custom_message" ? managedInstruction.details as { generation?: number; subagentId?: string } : undefined;
+    // Initial CLI work is bound at launch. Subsequent managed work is bound
+    // to the instruction actually consumed, never the latest mutable run row.
+    const generation = association?.generation ?? (sequence === 0 ? initialGeneration : undefined);
+    const entries = ctx.sessionManager.buildSessionProjection().entries
+      .filter(({ sourceEntry }) => responseIds.has(sourceEntry.id))
+      .flatMap(({ sourceEntry, messages }) => messages
+        .filter((message) => message.role === "assistant")
+        .map((message) => ({ ...sourceEntry, type: "message" as const, message }) as SessionMessageEntry));
     // Never shut down while this session still has work in flight:
     //  - awaitingAnswer: an ask_question is pending the orchestrator's reply.
     //  - runningChildrenCount(): this subagent spawned its own children and is
@@ -221,8 +247,11 @@ export default function (pi: ExtensionAPI) {
       return;
     }
     if (!sessionFile || !executionId) throw new Error("Missing managed subagent session or execution ID");
-    const source = entries.findLast((entry) => entry.message.role === "assistant");
-    const message = source?.message.role === "assistant" ? source.message : undefined;
+    const rawSource = responseEntries.findLast((entry) => entry.type === "message" && entry.message.role === "assistant");
+    const source = entries.find((entry) => entry.id === rawSource?.id);
+    // Terminal metadata belongs to the actual final response even when an edit
+    // omits its context contribution. Never substitute an intermediate answer.
+    const message = rawSource?.type === "message" && rawSource.message.role === "assistant" ? rawSource.message : undefined;
     const text = (entry?: SessionMessageEntry): string => entry?.message.role === "assistant"
       ? entry.message.content.filter((block) => block.type === "text").map((block) => block.text).join("\n") : "";
     const finalOutput = text(source);
@@ -237,6 +266,10 @@ export default function (pi: ExtensionAPI) {
       : outcome === "failed" || outcome === "aborted" || outcome === "truncated"
         ? entries.filter((entry) => entry.message.role === "assistant" && text(entry).trim()) : [];
     const output = outputEntries.map(text).join("\n\n");
+    const model = message?.model && message.provider
+      ? ctx.model?.id === message.model && ctx.model.provider === message.provider ? ctx.model
+        : ctx.modelRegistry.getAll().find((model) => model.id === message.model && model.provider === message.provider)
+      : ctx.model;
     const errorMessage = outcome === "failed" ? message?.errorMessage || "Final provider/agent error (no errorMessage supplied)."
       : outcome === "aborted" ? "Task was manually aborted."
       : outcome === "truncated" ? "Assistant output was truncated (stopReason=length)."
@@ -244,16 +277,21 @@ export default function (pi: ExtensionAPI) {
     writeSubagentOutcome({
       version: 1, executionId, sequence: sequence + 1,
       outcome, output, autoExit,
+      ...(subagentId || association?.subagentId ? { subagentId: subagentId ?? association?.subagentId } : {}),
+      ...(generation === undefined ? {} : { generation }),
+      usage: { generation: summarizeEntryUsage(fresh, model, message), session: summarizeEntryUsage(allEntries, model, message) },
       ...(errorMessage ? { errorMessage } : {}),
       source: {
         kind: "agent_settled", sessionFile, sessionId: ctx.sessionManager.getSessionId(),
-        entryId: source?.id ?? null, leafId: ctx.sessionManager.getLeafId(),
+        entryId: rawSource?.id ?? null, leafId: ctx.sessionManager.getLeafId(),
         stopReason: message?.stopReason ?? null,
         outputEntryIds: outputEntries.map((entry) => entry.id),
+        startLeafId, instructionEntryId: instruction?.id ?? managedInstruction?.id ?? null,
       },
     });
     sequence++;
-    seenEntries = new Set(branch.map((entry) => entry.id));
+    seenEntries = new Set(allEntries.map((entry) => entry.id));
+    startLeafId = ctx.sessionManager.getLeafId();
 
     if (autoExit && outcome !== "aborted") {
       recorder.agentEndDone();
