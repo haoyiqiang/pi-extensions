@@ -197,7 +197,7 @@ function claimWriter(run: SubagentRun): void {
 
 /** The same durable settlement projection drives status and the parent widget. */
 export function projectRun(run: SubagentRun): SubagentRun {
-  const published = readSubagentOutcomes(run.sessionFile, run.executionId, run.resultAfterSequence).at(-1);
+  const published = readSubagentOutcomes(run.sessionFile, run.executionId, run.resultAfterSequence, run.generation).at(-1);
   if (!published) {
     return writerExited(run) && ["starting", "running"].includes(run.state)
       ? { ...run, state: "interrupted", diagnostic: "Writer exited without a settled result; history retained, no automatic restart." }

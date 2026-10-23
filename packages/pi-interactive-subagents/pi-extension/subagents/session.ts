@@ -15,6 +15,8 @@ import {
 import { randomBytes, randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { SessionEntry as PiSessionEntry } from "@earendil-works/pi-coding-agent";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { readCompatibleLoadout, validateLoadout, type SubagentLoadout } from "./loadout.ts";
 export type { SubagentLoadout } from "./loadout.ts";
 
@@ -35,30 +37,26 @@ export interface MessageEntry extends SessionEntry {
 
 export type SeededSubagentSessionMode = "lineage-only" | "fork";
 
-function getForkContentLines(parentSessionFile: string): string[] {
-  const raw = readFileSync(parentSessionFile, "utf8");
-  const lines = raw.split("\n").filter((line) => line.trim());
-
-  let truncateAt = lines.length;
-  for (let i = lines.length - 1; i >= 0; i--) {
-    try {
-      const entry = JSON.parse(lines[i]);
-      if (entry.type === "message" && entry.message?.role === "user") {
-        truncateAt = i;
-        break;
+/** Snapshot the live active path, never open/migrate a parent's writable JSONL.
+ * Preserve compaction/context-edit entries for Pi to interpret in the child.
+ * A batch is atomic for inheritance: even already-finished sibling results are
+ * excluded while any call from the assistant message is still unresolved.
+ */
+function completeForkBranch(branch: PiSessionEntry[]): PiSessionEntry[] {
+  const pending = new Set<string>();
+  let complete = 0;
+  for (let index = 0; index < branch.length; index++) {
+    const entry = branch[index];
+    if (entry.type === "message") {
+      if (entry.message.role === "assistant") {
+        for (const block of entry.message.content) if (block.type === "toolCall") pending.add(block.id);
+      } else if (entry.message.role === "toolResult") {
+        if (!pending.delete(entry.message.toolCallId)) break;
       }
-    } catch {
-      // ignore malformed lines
     }
+    if (pending.size === 0) complete = index + 1;
   }
-
-  return lines.slice(0, truncateAt).filter((line) => {
-    try {
-      return JSON.parse(line).type !== "session";
-    } catch {
-      return true;
-    }
-  });
+  return branch.slice(0, complete);
 }
 
 export function seedSubagentSessionFile(params: {
@@ -66,6 +64,7 @@ export function seedSubagentSessionFile(params: {
   parentSessionFile: string;
   childSessionFile: string;
   childCwd: string;
+  parentBranch?: PiSessionEntry[];
 }): void {
   const header = {
     type: "session",
@@ -75,8 +74,8 @@ export function seedSubagentSessionFile(params: {
     cwd: params.childCwd,
     parentSession: params.parentSessionFile,
   };
-  const contentLines =
-    params.mode === "fork" ? getForkContentLines(params.parentSessionFile) : [];
+  if (params.mode === "fork" && !params.parentBranch) throw new Error("Fork requires the live parent session branch");
+  const contentLines = params.mode === "fork" ? completeForkBranch(params.parentBranch!).map((entry) => JSON.stringify(entry)) : [];
   const lines = [JSON.stringify(header), ...contentLines];
 
   mkdirSync(dirname(params.childSessionFile), { recursive: true });
@@ -449,74 +448,59 @@ export function mergeNewEntries(
 
 export interface SessionStats {
   model: string | null;
+  provider?: string;
+  /** Exact model metadata, absent when capacity is unknown. */
+  contextWindow?: number;
   toolCount: number;
-  /** Cumulative token usage across all assistant turns. */
+  /** Recorded assistant/tool/compaction/standalone usage in the chosen scope. */
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;
   cacheWriteTokens: number;
-  /** Current context size: the last assistant turn's totalTokens. */
+  /** Last response's request occupancy, not a cumulative token total. */
   contextTokens: number;
-  /** Cumulative cost in USD across all assistant turns. */
+  /** Recorded cost in USD in the chosen scope. */
   cost: number;
 }
 
 /**
- * Parse a completed subagent session JSONL into aggregate stats for display:
- * model, tool-call count, cumulative token usage + cost, and current context
- * size. Cumulative usage fields are summed across every assistant turn; the
- * context size is taken from the last assistant turn's `totalTokens` (the live
- * context window occupancy). Returns null if the file can't be read.
+ * Account for the supplied scope without applying context edits/compaction:
+ * removing context does not refund usage. Callers choose generation or whole
+ * session entries explicitly. Context occupancy is the latest request usage,
+ * not a sum, and capacity comes only from matching model metadata.
  */
-export function summarizeSessionStats(sessionFile: string): SessionStats | null {
-  let entries: SessionEntry[];
-  try {
-    entries = readEntries(sessionFile);
-  } catch {
-    return null;
-  }
-
+export function summarizeEntryUsage(entries: readonly PiSessionEntry[], model: { provider: string; id: string; contextWindow?: number } | undefined, source: AssistantMessage | undefined): SessionStats {
   const stats: SessionStats = {
-    model: null,
+    model: source?.model ?? model?.id ?? null,
+    provider: source?.provider ?? model?.provider,
     toolCount: 0,
     inputTokens: 0,
     outputTokens: 0,
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
-    contextTokens: 0,
+    contextTokens: source?.usage?.totalTokens ?? 0,
     cost: 0,
   };
 
   for (const entry of entries) {
-    if (entry.type === "model_change") {
-      const modelId = (entry as { modelId?: unknown }).modelId;
-      if (typeof modelId === "string" && modelId) stats.model = modelId;
-      continue;
+    const message = entry.type === "message" ? entry.message : undefined;
+    if (message?.role === "assistant") {
+      for (const block of message.content) if (block.type === "toolCall") stats.toolCount++;
     }
-    if (entry.type !== "message") continue;
-    const msg = (entry as MessageEntry).message;
-    if (msg.role !== "assistant") continue;
-
-    const model = (msg as { model?: unknown }).model;
-    if (typeof model === "string" && model) stats.model = model;
-
-    for (const block of msg.content) {
-      if (block.type === "toolCall") stats.toolCount++;
-    }
-
-    const usage = (msg as { usage?: Record<string, unknown> }).usage;
-    if (usage && typeof usage === "object") {
+    const usage = message?.role === "assistant" || message?.role === "toolResult" ? message.usage
+      : "usage" in entry ? entry.usage : undefined;
+    if (usage) {
       const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
       stats.inputTokens += num(usage.input);
       stats.outputTokens += num(usage.output);
       stats.cacheReadTokens += num(usage.cacheRead);
       stats.cacheWriteTokens += num(usage.cacheWrite);
-      const total = num(usage.totalTokens);
-      if (total > 0) stats.contextTokens = total;
       const cost = usage.cost;
-      if (cost && typeof cost === "object") stats.cost += num((cost as Record<string, unknown>).total);
+      if (cost) stats.cost += num(cost.total);
     }
   }
-
+  if (model && stats.model === model.id && stats.provider === model.provider && Number.isFinite(model.contextWindow) && model.contextWindow! > 0) {
+    stats.contextWindow = model.contextWindow;
+  }
   return stats;
 }

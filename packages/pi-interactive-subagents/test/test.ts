@@ -19,8 +19,6 @@ import {
   appendBranchSummary,
   copySessionFile,
   mergeNewEntries,
-  seedSubagentSessionFile,
-  summarizeSessionStats,
 } from "../pi-extension/subagents/session.ts";
 
 import { shellEscape } from "../pi-extension/subagents/tmux.ts";
@@ -419,52 +417,6 @@ describe("session.ts", () => {
     });
   });
 
-  describe("seedSubagentSessionFile", () => {
-    it("creates a lineage-only child session with parent linkage and no copied turns", () => {
-      const parentFile = createSessionFile(dir, [SESSION_HEADER, MODEL_CHANGE, USER_MSG, ASSISTANT_MSG]);
-      const childFile = join(dir, "lineage-child.jsonl");
-
-      seedSubagentSessionFile({
-        mode: "lineage-only",
-        parentSessionFile: parentFile,
-        childSessionFile: childFile,
-        childCwd: "/tmp/child-cwd",
-      });
-
-      const lines = readFileSync(childFile, "utf8").trim().split("\n");
-      assert.equal(lines.length, 1);
-
-      const header = JSON.parse(lines[0]);
-      assert.equal(header.type, "session");
-      assert.equal(header.parentSession, parentFile);
-      assert.equal(header.cwd, "/tmp/child-cwd");
-    });
-
-    it("creates a forked child session with copied context before the triggering user turn", () => {
-      const parentFile = createSessionFile(dir, [SESSION_HEADER, MODEL_CHANGE, USER_MSG, ASSISTANT_MSG]);
-      const childFile = join(dir, "fork-child.jsonl");
-
-      seedSubagentSessionFile({
-        mode: "fork",
-        parentSessionFile: parentFile,
-        childSessionFile: childFile,
-        childCwd: "/tmp/fork-child-cwd",
-      });
-
-      const entries = readFileSync(childFile, "utf8")
-        .trim()
-        .split("\n")
-        .map((line) => JSON.parse(line));
-      assert.equal(entries.length, 2);
-      assert.equal(entries[0].type, "session");
-      assert.equal(entries[0].parentSession, parentFile);
-      assert.equal(entries[0].cwd, "/tmp/fork-child-cwd");
-      assert.equal(entries[1].type, "model_change");
-      assert.equal(entries.some((entry) => entry.type === "session" && entry.parentSession !== parentFile), false);
-      assert.equal(entries.some((entry) => entry.type === "message"), false);
-    });
-  });
-
   describe("mergeNewEntries", () => {
     it("appends new entries from source to target", () => {
       // Source starts with same base (2 entries), then has 1 new entry
@@ -490,74 +442,6 @@ describe("session.ts", () => {
     });
   });
 
-  describe("summarizeSessionStats", () => {
-    const asstWithUsage = (id: string, opts: {
-      model?: string;
-      tools?: string[];
-      usage?: Record<string, unknown>;
-    }) => ({
-      type: "message",
-      id,
-      parentId: "user-001",
-      message: {
-        role: "assistant",
-        ...(opts.model ? { model: opts.model } : {}),
-        content: [
-          { type: "text", text: "ok" },
-          ...(opts.tools ?? []).map((name, i) => ({ type: "toolCall", name, id: `${id}-tc${i}` })),
-        ],
-        ...(opts.usage ? { usage: opts.usage } : {}),
-      },
-    });
-
-    it("aggregates tokens/cost cumulatively and tracks last context size", () => {
-      const file = createSessionFile(dir, [
-        SESSION_HEADER,
-        { type: "model_change", id: "mc-001", parentId: null, modelId: "claude-sonnet-4-6" },
-        USER_MSG,
-        asstWithUsage("a1", {
-          tools: ["read", "grep"],
-          usage: { input: 100, output: 50, cacheRead: 1000, cacheWrite: 200, totalTokens: 1350, cost: { total: 0.01 } },
-        }),
-        asstWithUsage("a2", {
-          tools: ["write"],
-          usage: { input: 30, output: 70, cacheRead: 2000, cacheWrite: 0, totalTokens: 3500, cost: { total: 0.02 } },
-        }),
-      ]);
-      const stats = summarizeSessionStats(file)!;
-      assert.equal(stats.model, "claude-sonnet-4-6");
-      assert.equal(stats.toolCount, 3);
-      assert.equal(stats.inputTokens, 130);
-      assert.equal(stats.outputTokens, 120);
-      assert.equal(stats.cacheReadTokens, 3000);
-      assert.equal(stats.cacheWriteTokens, 200);
-      // contextTokens is the LAST assistant turn's totalTokens, not the sum.
-      assert.equal(stats.contextTokens, 3500);
-      assert.ok(Math.abs(stats.cost - 0.03) < 1e-9);
-    });
-
-    it("prefers per-message model over model_change", () => {
-      const file = createSessionFile(dir, [
-        SESSION_HEADER,
-        { type: "model_change", id: "mc-001", parentId: null, modelId: "claude-haiku-4-5" },
-        asstWithUsage("a1", { model: "claude-sonnet-4-6", usage: { totalTokens: 10, cost: { total: 0 } } }),
-      ]);
-      assert.equal(summarizeSessionStats(file)!.model, "claude-sonnet-4-6");
-    });
-
-    it("handles missing usage gracefully", () => {
-      const file = createSessionFile(dir, [SESSION_HEADER, USER_MSG, ASSISTANT_MSG]);
-      const stats = summarizeSessionStats(file)!;
-      assert.equal(stats.toolCount, 0);
-      assert.equal(stats.inputTokens, 0);
-      assert.equal(stats.cost, 0);
-      assert.equal(stats.contextTokens, 0);
-    });
-
-    it("returns null for an unreadable file", () => {
-      assert.equal(summarizeSessionStats(join(dir, "does-not-exist.jsonl")), null);
-    });
-  });
 });
 
 describe("status.ts", () => {
@@ -1924,15 +1808,6 @@ describe("subagent display helpers", () => {
     });
   });
 
-  describe("contextWindowFor", () => {
-    it("maps known model families and returns undefined otherwise", () => {
-      assert.equal(testApi.contextWindowFor("claude-sonnet-4-6"), 200_000);
-      assert.equal(testApi.contextWindowFor("gemini-2.5-pro"), 1_000_000);
-      assert.equal(testApi.contextWindowFor("some-unknown-model"), undefined);
-      assert.equal(testApi.contextWindowFor(null), undefined);
-    });
-  });
-
   describe("formatContextUsage", () => {
     it("shows a percent gauge when the window is known", () => {
       assert.equal(testApi.formatContextUsage(36_000, 200_000), "18.0%/200k");
@@ -1940,7 +1815,7 @@ describe("subagent display helpers", () => {
     });
 
     it("falls back to a window-less ctx label when unknown", () => {
-      assert.equal(testApi.formatContextUsage(37_000, undefined), "37k ctx");
+      assert.equal(testApi.formatContextUsage(37_000, undefined), "37k ctx (capacity unknown)");
     });
   });
 

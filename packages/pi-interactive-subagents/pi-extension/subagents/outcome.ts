@@ -1,5 +1,6 @@
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import type { SessionStats } from "./session.ts";
 
 /** Retained settlement evidence, independent of the process and terminal surface. */
 export interface SubagentOutcome {
@@ -10,6 +11,10 @@ export interface SubagentOutcome {
   output: string;
   errorMessage?: string;
   autoExit: boolean;
+  /** Both scopes include real usage, even for entries later compacted/edited. */
+  usage?: { generation: SessionStats; session: SessionStats };
+  subagentId?: string;
+  generation?: number;
   source: {
     kind: "agent_settled" | "process_exit" | "surface_absent";
     sessionFile: string;
@@ -18,6 +23,9 @@ export interface SubagentOutcome {
     leafId: string | null;
     stopReason: string | null;
     outputEntryIds: string[];
+    /** Active leaf at the start of this work; null for a blank child. */
+    startLeafId?: string | null;
+    instructionEntryId?: string | null;
   };
 }
 
@@ -42,13 +50,14 @@ export function writeSubagentOutcome(result: SubagentOutcome): string {
 }
 
 /** Do not consume/delete evidence when a parent runtime observes it. */
-export function readSubagentOutcomes(sessionFile: string, executionId: string, afterSequence = 0): Array<{ result: SubagentOutcome; resultFile: string }> {
+export function readSubagentOutcomes(sessionFile: string, executionId: string, afterSequence = 0, generation?: number): Array<{ result: SubagentOutcome; resultFile: string }> {
   const directory = outcomeDirectory(sessionFile, executionId);
   if (!existsSync(directory)) return [];
   return readdirSync(directory).filter((name) => name.endsWith(".json") && Number.parseInt(name, 10) > afterSequence).sort().map((name) => {
     const resultFile = join(directory, name);
     const result = JSON.parse(readFileSync(resultFile, "utf8")) as SubagentOutcome;
     if (result.version !== 1 || result.executionId !== executionId || typeof result.output !== "string" ||
+      (result.generation !== undefined && (!Number.isInteger(result.generation) || result.generation < 1)) ||
       !Number.isInteger(result.sequence) || result.sequence < 1 || typeof result.autoExit !== "boolean" ||
       !["succeeded", "failed", "aborted", "truncated", "no-output"].includes(result.outcome) ||
       result.source?.sessionFile !== sessionFile || typeof result.source.sessionId !== "string" ||
@@ -56,7 +65,7 @@ export function readSubagentOutcomes(sessionFile: string, executionId: string, a
       throw new Error(`Invalid subagent outcome: ${resultFile}`);
     }
     return { result, resultFile };
-  });
+  }).filter(({ result }) => generation === undefined || result.generation === undefined || result.generation === generation);
 }
 
 /** Shell-level process termination is fallback evidence, not task success. */
