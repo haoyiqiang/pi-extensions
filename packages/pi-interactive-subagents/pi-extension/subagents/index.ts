@@ -1,5 +1,5 @@
-import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { keyHint, loadSkills } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, ToolDefinition, Theme } from "@earendil-works/pi-coding-agent";
+import { keyText, loadSkills } from "@earendil-works/pi-coding-agent";
 import { BUILTIN_TOOLS, SPAWNING_TOOLS, THINKING_LEVELS, validateLoadout } from "./loadout.ts";
 import { Type, type Static, type TSchema } from "typebox";
 import { Box, Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
@@ -220,21 +220,22 @@ function getToolExtensionPath(tool: string): string | undefined {
   if ((SPAWNING_TOOLS as readonly string[]).includes(tool)) {
     return fileURLToPath(import.meta.url);
   }
+  const registered = EXTRA_TOOL_EXTENSIONS.get(tool);
+  if (registered) return registered;
+  // Resolve declared runtime resources from this installation, never from an
+  // author's personal extension directory. Both tools belong to one extension.
+  if (tool === "web_search" || tool === "web_fetch") {
+    return fileURLToPath(import.meta.resolve("@kevinhao/pi-web-search"));
+  }
   const extBase = join(getAgentConfigDir(), "extensions");
   const map: Record<string, string> = {
-    web_search: join(extBase, "web-search", "index.ts"),
-    web_fetch: join(extBase, "web-fetch", "index.ts"),
     video_extract: join(extBase, "video-extract", "index.ts"),
     youtube_search: join(extBase, "youtube-search", "index.ts"),
     google_image_search: join(extBase, "google-image-search", "index.ts"),
     safe_bash: join(SUBAGENTS_DIR, "tools", "safe-bash.ts"),
   };
-  // Prefer the built-in path, but fall back to a runtime-registered extension
-  // when that path no longer exists on disk (e.g. a built-in tool extension
-  // was disabled/removed but a project-local extension re-registered it).
   const builtin = Object.hasOwn(map, tool) ? map[tool] : undefined;
-  if (builtin && existsSync(builtin)) return builtin;
-  return EXTRA_TOOL_EXTENSIONS.get(tool);
+  return builtin && existsSync(builtin) ? builtin : undefined;
 }
 
 /** Managed callers derive authority from their validated snapshot, never ambient grants. */
@@ -462,25 +463,11 @@ function formatUsageSegments(stats: SessionStats): string[] {
   return segs;
 }
 
-/** ANSI colors for widget status icons (raw, since the widget bypasses theme). */
-const ICON_GREEN = "\x1b[38;2;126;186;103m";
-const ICON_YELLOW = "\x1b[38;2;214;181;94m";
-const ICON_RED = "\x1b[38;2;224;108;117m";
-const ICON_DIM = "\x1b[38;2;128;128;128m";
-
-/** Map a live status kind to a colored single-char icon for the widget. */
-function widgetIcon(kind: StatusSnapshot["kind"]): string {
-  switch (kind) {
-    case "active":
-    case "running":
-      return `${ICON_YELLOW}⟳${RST}`;
-    case "stalled":
-      return `${ICON_RED}⟳${RST}`;
-    case "waiting":
-    case "starting":
-    default:
-      return `${ICON_DIM}○${RST}`;
-  }
+/** Render with the host theme on every pass; never retain a fixed ANSI palette. */
+function widgetIcon(kind: StatusSnapshot["kind"], theme?: Pick<Theme, "fg">): string {
+  const active = kind === "active" || kind === "running" || kind === "stalled";
+  const icon = active ? "⟳" : "○";
+  return theme?.fg(kind === "stalled" ? "error" : active ? "warning" : "dim", icon) ?? icon;
 }
 
 /** Prepare the entire launch before asking mux to create an owned surface. */
@@ -825,16 +812,13 @@ function formatElapsedMMSS(startTime: number): string {
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
-const ACCENT = "\x1b[38;2;77;163;255m";
-const RST = "\x1b[0m";
-
 /**
  * Build a bordered content line: │left          right│
  * Left content is truncated if needed, right is preserved, padded to fill width.
  */
 function borderLine(left: string, right: string, width: number): string {
   if (width <= 0) return "";
-  if (width === 1) return `${ACCENT}│${RST}`;
+  if (width === 1) return "│";
 
   // width = total visible chars for the whole line including │ and │
   const contentWidth = Math.max(0, width - 2); // space inside the two │ chars
@@ -845,14 +829,14 @@ function borderLine(left: string, right: string, width: number): string {
   if (rightVis >= contentWidth) {
     const truncRight = truncateToWidth(right, contentWidth);
     const rightPad = Math.max(0, contentWidth - visibleWidth(truncRight));
-    return `${ACCENT}│${RST}${truncRight}${" ".repeat(rightPad)}${ACCENT}│${RST}`;
+    return `│${truncRight}${" ".repeat(rightPad)}│`;
   }
 
   const maxLeft = Math.max(0, contentWidth - rightVis);
   const truncLeft = truncateToWidth(left, maxLeft);
   const leftVis = visibleWidth(truncLeft);
   const pad = Math.max(0, contentWidth - leftVis - rightVis);
-  return `${ACCENT}│${RST}${truncLeft}${" ".repeat(pad)}${right}${ACCENT}│${RST}`;
+  return `│${truncLeft}${" ".repeat(pad)}${right}│`;
 }
 
 /**
@@ -861,7 +845,7 @@ function borderLine(left: string, right: string, width: number): string {
  */
 function borderTop(title: string, info: string, width: number): string {
   if (width <= 0) return "";
-  if (width === 1) return `${ACCENT}╭${RST}`;
+  if (width === 1) return "╭";
 
   // ╭─ Title ───...─── info ─╮
   // overhead: ╭─ (2) + space around title (2) + space around info (2) + ─╮ (2) = but we simplify
@@ -871,7 +855,7 @@ function borderTop(title: string, info: string, width: number): string {
   const fillLen = Math.max(0, inner - titlePart.length - infoPart.length);
   const fill = "─".repeat(fillLen);
   const content = `${titlePart}${fill}${infoPart}`.slice(0, inner).padEnd(inner, "─");
-  return `${ACCENT}╭${content}╮${RST}`;
+  return `╭${content}╮`;
 }
 
 /**
@@ -879,23 +863,23 @@ function borderTop(title: string, info: string, width: number): string {
  */
 function borderBottom(width: number): string {
   if (width <= 0) return "";
-  if (width === 1) return `${ACCENT}╰${RST}`;
+  if (width === 1) return "╰";
 
   const inner = Math.max(0, width - 2);
-  return `${ACCENT}╰${"─".repeat(inner)}╯${RST}`;
+  return `╰${"─".repeat(inner)}╯`;
 }
 
-function renderSubagentWidgetLines(agents: RunningSubagent[], width: number): string[] {
+function renderSubagentWidgetLines(agents: RunningSubagent[], width: number, theme?: Pick<Theme, "fg">): string[] {
   const title = "Subagents";
   const info = `${agents.filter((agent) => !agent.settled).length} running`;
 
-  const lines: string[] = [borderTop(title, info, width)];
+  const lines: string[] = [theme?.fg("accent", borderTop(title, info, width)) ?? borderTop(title, info, width)];
 
   for (const agent of agents) {
     const elapsed = formatElapsedMMSS(agent.startTime);
     const agentTag = agent.agent ? ` (${agent.agent})` : "";
     const snapshot = classifyStatus(agent.statusState, Date.now());
-    const icon = widgetIcon(snapshot.kind);
+    const icon = widgetIcon(snapshot.kind, theme);
     const left = ` ${icon} ${elapsed}  ${agent.name}${agentTag} `;
     const right = agent.settled ? ` ${agent.lifecycle ?? "completed"} ` : agent.closure === "unconfirmed"
       ? " closure unconfirmed "
@@ -908,7 +892,7 @@ function renderSubagentWidgetLines(agents: RunningSubagent[], width: number): st
     lines.push(borderLine(left, right, width));
   }
 
-  lines.push(borderBottom(width));
+  lines.push(theme?.fg("accent", borderBottom(width)) ?? borderBottom(width));
   return lines;
 }
 
@@ -948,11 +932,11 @@ function updateWidget() {
 
   latestCtx.ui.setWidget(
     "subagent-status",
-    (_tui: any, _theme: any) => {
+    (_tui: any, theme: Theme) => {
       return {
         invalidate() {},
         render(width: number) {
-          return renderSubagentWidgetLines(agents, width);
+          return renderSubagentWidgetLines(agents, width, theme);
         },
       };
     },
@@ -2542,7 +2526,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
           // Full view: complete summary + session info
           if (summary) {
             for (const line of summary.split("\n")) {
-              contentLines.push(line.slice(0, width - 6));
+              contentLines.push(truncateToWidth(line, Math.max(0, width - 2)));
             }
           }
           if (details.name || details.sessionFile) {
@@ -2567,20 +2551,21 @@ export default function subagentsExtension(pi: ExtensionAPI) {
           if (summary) {
             const previewLines = summary.split("\n").slice(0, 5);
             for (const line of previewLines) {
-              contentLines.push(theme.fg("dim", line.slice(0, width - 6)));
+              contentLines.push(theme.fg("dim", truncateToWidth(line, Math.max(0, width - 2))));
             }
             const totalLines = summary.split("\n").length;
             if (totalLines > 5) {
               contentLines.push(theme.fg("muted", `… ${totalLines - 5} more lines`));
             }
           }
-          contentLines.push(theme.fg("muted", keyHint("app.tools.expand", "to expand")));
+          if (details.resultFile) contentLines.push(theme.fg("muted", `Full result: ${details.resultFile}`));
+          contentLines.push(theme.fg("muted", `${keyText("app.tools.expand")} to expand`));
         }
 
         // Render via Box for background + padding, with blank line above for separation
         const box = new Box(1, 1, bgFn);
         box.addChild(new Text(contentLines.join("\n"), 0, 0));
-        return ["", ...box.render(width)];
+        return ["", ...box.render(Math.max(1, width))].map((line) => truncateToWidth(line, Math.max(0, width)));
       },
     };
   });
@@ -2605,12 +2590,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
           contentLines.push(theme.fg("muted", `+${overflow} more running.`));
         }
         if (!options.expanded) {
-          contentLines.push(theme.fg("muted", keyHint("app.tools.expand", "to expand")));
+          contentLines.push(theme.fg("muted", `${keyText("app.tools.expand")} to expand`));
         }
 
         const box = new Box(1, 1, (text: string) => theme.bg("customMessageBg", text));
         box.addChild(new Text(contentLines.join("\n"), 0, 0));
-        return ["", ...box.render(width)];
+        return ["", ...box.render(Math.max(1, width))].map((line) => truncateToWidth(line, Math.max(0, width)));
       },
     };
   });
@@ -2640,14 +2625,14 @@ export default function subagentsExtension(pi: ExtensionAPI) {
             theme.fg("dim", `Reply: subagent_message(${JSON.stringify({ id: details.id, replyTo: details.questionId, message: "…" })})`),
           );
         } else {
-          const preview = (details.question ?? "").split("\n")[0].slice(0, width - 10);
+          const preview = truncateToWidth((details.question ?? "").split("\n")[0], Math.max(0, width - 2));
           contentLines.push(theme.fg("dim", preview));
-          contentLines.push(theme.fg("muted", keyHint("app.tools.expand", "to expand")));
+          contentLines.push(theme.fg("muted", `${keyText("app.tools.expand")} to expand`));
         }
 
         const box = new Box(1, 1, bgFn);
         box.addChild(new Text(contentLines.join("\n"), 0, 0));
-        return ["", ...box.render(width)];
+        return ["", ...box.render(Math.max(1, width))].map((line) => truncateToWidth(line, Math.max(0, width)));
       },
     };
   });

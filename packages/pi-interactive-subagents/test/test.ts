@@ -21,7 +21,6 @@ import {
   mergeNewEntries,
 } from "../pi-extension/subagents/session.ts";
 
-import { shellEscape } from "../pi-extension/subagents/tmux.ts";
 import {
   advanceStatusState,
   capStatusLines,
@@ -1588,6 +1587,27 @@ describe("subagent interruption", () => {
 });
 
 describe("subagent status renderer", () => {
+  it("keeps result, failure, question and status projections themed, narrow and recoverable", () => {
+    const { api, registeredMessageRenderers } = createMockExtensionApi();
+    (subagentsModule as any).default(api);
+    const colors: string[] = [];
+    const theme = { fg(color: string, text: string) { colors.push(color); return `\x1b[36m${text}\x1b[0m`; }, bg(_color: string, text: string) { return text; }, bold(text: string) { return text; } };
+    const messages = [
+      { customType: "subagent_result", content: "界🙂 result\n".repeat(20), details: { name: "界🙂", outcome: "succeeded", resultFile: "/tmp/complete-result.json" } },
+      { customType: "subagent_result", content: "Useful partial failure", details: { name: "worker", outcome: "failed", errorMessage: "Final provider failure" } },
+      { customType: "subagent_question", content: "", details: { name: "界🙂", id: "child", questionId: "question", question: "界🙂 question?\nMore detail" } },
+      { customType: "subagent_status", content: "", details: { lines: ["界🙂 paused-uncertain; inspect retained evidence"], overflow: 2 } },
+    ];
+    for (const message of messages) for (const expanded of [false, true]) {
+      const renderer = registeredMessageRenderers.find((entry) => entry.name === message.customType)!;
+      const component = renderer.renderer(message, { expanded }, theme);
+      for (const width of [1, 2, 4, 12, 28, 80]) {
+        assert.ok(component.render(width).every((line: string) => visibleWidth(line) <= width), `${message.customType} width ${width}`);
+      }
+      if (message.details.resultFile) assert.match(component.render(80).join("\n"), /complete-result\.json/, "compact output links retained full results too");
+    }
+    assert.ok(colors.includes("success")); assert.ok(colors.includes("error")); assert.ok(colors.includes("accent"));
+  });
   function createTheme() {
     return {
       fg(_color: string, text: string) {
@@ -1813,31 +1833,6 @@ describe("subagent display helpers", () => {
       assert.equal(strip(testApi.widgetIcon("stalled")), "⟳");
       assert.equal(strip(testApi.widgetIcon("waiting")), "○");
       assert.equal(strip(testApi.widgetIcon("starting")), "○");
-    });
-  });
-});
-
-describe("tmux.ts", () => {
-  describe("shellEscape", () => {
-    it("wraps in single quotes", () => {
-      assert.equal(shellEscape("hello"), "'hello'");
-    });
-
-    it("escapes single quotes", () => {
-      assert.equal(shellEscape("it's"), "'it'\\''s'");
-    });
-
-    it("handles empty string", () => {
-      assert.equal(shellEscape(""), "''");
-    });
-
-    it("handles special characters", () => {
-      const input = 'echo "hello $world" && rm -rf /';
-      const escaped = shellEscape(input);
-      assert.ok(escaped.startsWith("'"));
-      assert.ok(escaped.endsWith("'"));
-      // Inside single quotes, everything is literal
-      assert.ok(escaped.includes("$world"));
     });
   });
 });

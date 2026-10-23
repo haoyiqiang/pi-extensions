@@ -3,8 +3,6 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { dirname, join } from "node:path";
 import { createAssistantMessageEventStream, type AssistantMessage } from "@earendil-works/pi-ai";
 import { createAgentSession, AgentSessionRuntime, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
-import childBridge from "../../pi-extension/subagents/subagent-done.ts";
-import subagents from "../../pi-extension/subagents/index.ts";
 import { waitFor } from "../harness.ts";
 
 const root = process.env.SUBAGENT_TEST_TERMINAL!;
@@ -63,7 +61,8 @@ modelRuntime.registerProvider("fixture", {
 const settingsManager = SettingsManager.inMemory({ compaction: { enabled: false }, retry: { enabled: false } });
 const agentDir = process.env.PI_CODING_AGENT_DIR!;
 const tools = args[args.indexOf("--tools") + 1].split(",");
-const loader = new DefaultResourceLoader({ cwd: process.cwd(), agentDir, settingsManager, extensionFactories: [childBridge, ...(tools.includes("subagent") ? [subagents] : []), (pi) => {
+const extensionPaths = args.flatMap((arg, index) => arg === "-e" || arg === "--extension" ? [args[index + 1]] : []);
+const loader = new DefaultResourceLoader({ cwd: process.cwd(), agentDir, settingsManager, additionalExtensionPaths: extensionPaths, extensionFactories: [(pi) => {
   pi.on("before_agent_start", async () => {
     if (!existsSync(join(root, "gate-preparation"))) return;
     writeFileSync(join(root, "preparing"), "waiting before agent_start");

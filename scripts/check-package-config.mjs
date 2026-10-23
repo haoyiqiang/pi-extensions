@@ -7,11 +7,11 @@
  * Checks:
  * 1. release-please-config.json paths exist on disk
  * 2. release.yml publish jobs cover all release-please packages
- * 3. Each package has required files (package.json, index.ts, README.md, README.zh-CN.md, tsconfig.json)
+ * 3. Each public package has required files; root-only imports validate their owned main
  * 4. package.json has required fields (name, version, description, main, exports, files, license)
  * 5. i18n catalogs have both zh-CN and en-US for every key
  * 6. package.json "files" includes README.md and README.zh-CN.md
- * 7. The root Pi distribution profile explicitly lists every extension and theme
+ * 7. The root profile lists its explicit owners, excluding the standalone CLI controller
  * 8. Pi development dependency pins use one exact version across all workspaces
  */
 
@@ -127,7 +127,14 @@ for (const entry of [...rootExtensionEntries, ...rootThemeEntries]) {
     error(`Root Pi manifest must use an explicit resource allowlist, found "${entry}"`);
   }
 }
-const REQUIRED_FILES = ["package.json", "index.ts", "README.md", "README.zh-CN.md", "tsconfig.json"];
+// This imported upstream implementation is distributed only through the root
+// Git/local profile. Its name/ownership is not ours to publish. Other private
+// workspaces remain non-deployable; this is an explicit resource owner, not a skip.
+const ROOT_ONLY_DEPLOYMENTS = new Set(["packages/pi-interactive-subagents"]);
+// The separately published CLI controller remains available, but is never loaded
+// alongside the default interactive controller.
+const STANDALONE_ONLY = new Set(["packages/pi-subagent"]);
+const REQUIRED_FILES = ["package.json", "README.md", "README.zh-CN.md", "tsconfig.json"];
 const REQUIRED_PKG_FIELDS = ["name", "version", "description", "main", "exports", "files", "license"];
 const PI_DEV_DEPENDENCIES = new Set([
   "@earendil-works/pi-agent-core",
@@ -152,10 +159,13 @@ for (const dir of packageDirs) {
     piDevPins.set(version, users);
   }
 
-  // Private test/incubation/retired workspaces cannot claim Pi resources or
-  // enter the root Git/local distribution profile. Private status also excludes
-  // them from npm releases regardless of the resource rules below.
-  if (pkgJson.private === true) {
+  // Private test/incubation/retired workspaces cannot claim resources. Only the
+  // named upstream root-deployment owner is eligible; all private workspaces
+  // remain excluded from npm releases.
+  const rootOnly = ROOT_ONLY_DEPLOYMENTS.has(packagePath);
+  const standaloneOnly = STANDALONE_ONLY.has(packagePath);
+  if (rootOnly && pkgJson.private !== true) error(`${label}: root-only imported workspace must remain private`);
+  if (pkgJson.private === true && !rootOnly) {
     for (const kind of ["extensions", "themes", "skills", "prompts"]) {
       if (pkgJson.pi?.[kind]?.length) error(`${label}: private workspaces must not declare Pi ${kind}`);
       for (const entry of rootPackageJson.pi?.[kind] ?? []) {
@@ -195,6 +205,10 @@ for (const dir of packageDirs) {
     }
     ownedExtensionEntries.push(extensionPath);
     const rootExtensionEntry = `${packagePath}/${ownedPath}`;
+    if (standaloneOnly) {
+      if (rootExtensionEntries.includes(rootExtensionEntry)) error(`${label}: standalone controller must not enter the default root profile`);
+      continue;
+    }
     expectedRootExtensionEntries.add(rootExtensionEntry);
     if (!rootExtensionEntries.includes(rootExtensionEntry)) {
       error(`${label}: root Pi manifest is missing extension entry "${rootExtensionEntry}"`);
@@ -210,10 +224,14 @@ for (const dir of packageDirs) {
   }
 
   // 3. Required files
-  for (const file of REQUIRED_FILES) {
+  for (const file of [...REQUIRED_FILES, ...(rootOnly ? [] : ["index.ts"])]) {
     if (!existsSync(join(pkgRoot, file))) {
       error(`${label}: missing required file "${file}"`);
     }
+  }
+
+  if (typeof pkgJson.main !== "string" || !pkgJson.main.startsWith("./") || pkgJson.main.split("/").includes("..") || !existsSync(join(pkgRoot, pkgJson.main))) {
+    error(`${label}: main must reference an existing owned runtime entry`);
   }
 
   // 4. Required package.json fields
@@ -257,6 +275,10 @@ for (const dir of packageDirs) {
   }
 }
 
+if (new Set(rootExtensionEntries).size !== rootExtensionEntries.length) error("Root Pi profile contains duplicate extension entries");
+for (const directory of [...ROOT_ONLY_DEPLOYMENTS, ...STANDALONE_ONLY]) {
+  if (!packageDirs.includes(directory.slice("packages/".length))) error(`Distribution policy references missing workspace ${directory}`);
+}
 for (const entry of rootExtensionEntries) {
   if (!expectedRootExtensionEntries.has(entry)) {
     error(`Root Pi manifest references unknown or non-extension entry "${entry}"`);

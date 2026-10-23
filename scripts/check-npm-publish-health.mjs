@@ -49,6 +49,7 @@ const manifest = existsSync(MANIFEST_PATH)
 for (const dir of packageDirs) {
   const pkgJson = JSON.parse(readFileSync(join(PACKAGES_DIR, dir, "package.json"), "utf8"));
   const name = pkgJson.name;
+  if (pkgJson.private === true) continue; // integration-only resources claim no npm release
 
   const result = await fetchNpmInfo(name);
   if (result.status === "timeout") {

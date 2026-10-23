@@ -53,6 +53,10 @@ function start(command) {
   child.unref();
 }
 switch (command) {
+  // Full root-profile smoke also loads Spark's terminal naming projection.
+  case "display-message": console.log("fixture"); break;
+  case "rename-window":
+  case "rename-session": break;
   case "split-window": {
     if (existsSync(path("create-fails"))) throw new Error("Fixture native creation failed");
     writeFileSync(path("surface"), "open");
