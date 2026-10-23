@@ -54,6 +54,7 @@ const ctx = {
     getBranch: () => session.getBranch(), getEntries: () => session.getEntries(),
     buildSessionProjection: () => session.buildSessionProjection(),
     getSessionId: () => session.getSessionId(), getLeafId: () => session.getLeafId(),
+    getSessionFile: () => session.getSessionFile(), getSessionDir: () => session.getSessionDir(),
   },
   // This fixture's raw user inputs happen only at startup/resident idle; its
   // mid-run inputs use Pi's managed custom-message path instead.
@@ -96,7 +97,9 @@ for (;;) {
     if (steering.includes("Return the exact phrase:")) task = steering;
   }
   if (task.includes("ASK_AFTER_INPUT")) {
-    await runtime.tool("ask_question").execute("fixture-question", { question: "Confirm the next step?" }, undefined, undefined, ctx);
+    for (const question of task.includes("ASK_TWICE") ? ["Confirm the next step?", "Which region?"] : ["Confirm the next step?"]) {
+      await runtime.tool("ask_question").execute("fixture-question", { question }, undefined, undefined, ctx);
+    }
     await runtime.emit("context", { messages: session.getBranch().filter((entry) => entry.type === "custom_message").map((entry) => ({ role: "custom", ...entry })) }, ctx);
   }
   if (task.includes("EXIT_WITHOUT_RESULT")) {

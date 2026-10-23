@@ -204,6 +204,9 @@ test("supported Pi reports management refusals as tool failures without launchin
     assert.equal((queued.details as any).status, "queued");
     const conflict = await call("subagent_message", { id: (launched.details as any).id, message: "Different bytes", messageId: "contract-id" });
     assert.equal(conflict.isError, true, "message ID conflicts must use the actual Pi execution-failure contract");
+    const invalidReply = await call("subagent_message", { id: (launched.details as any).id, message: "An invalid answer", replyTo: "not-this-childs-question" });
+    assert.equal(invalidReply.isError, true, "invalid question references fail through supported Pi, not an isError property on a resolved execute object");
+    assert.match(JSON.stringify(invalidReply.content), /question.*replyTo/);
     const unauthorized = await call("subagent_message", { id: (launched.details as any).id, authorization: { actionId: "not-an-uncertain-action", decision: "retry", reason: "Generic resume is insufficient" } });
     assert.equal(unauthorized.isError, true);
     assert.match(JSON.stringify(unauthorized.content), /exact.*actionId/);

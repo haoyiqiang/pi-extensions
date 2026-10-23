@@ -1203,7 +1203,7 @@ describe("subagent-done.ts", () => {
       }
     });
 
-    it("writes a .ask signal with name/agent/question and does NOT shut the session down", async () => {
+    it("returns a durable question identity without shutting the session down", async () => {
       const dir = createTestDir();
       const sessionFile = join(dir, "s.jsonl");
       const { mock, restore } = setupSubagentExtension(sessionFile);
@@ -1216,14 +1216,9 @@ describe("subagent-done.ts", () => {
         assert.equal(shutdownCalled, false, "ask_question must keep the session open");
         assert.match(out.content[0].text, /wait/i);
 
-        const askFile = `${sessionFile}.ask`;
-        assert.ok(existsSync(askFile), ".ask signal file should be written");
-        const payload = JSON.parse(readFileSync(askFile, "utf-8"));
-        assert.equal(payload.question, "Which API base URL?");
-        assert.equal(payload.name, "scout-2");
-        assert.equal(payload.agent, "scout");
-        // No .exit sidecar — the session is not exiting.
-        assert.ok(!existsSync(`${sessionFile}.exit`));
+        assert.equal(out.details.question, "Which API base URL?");
+        assert.equal(typeof out.details.questionId, "string");
+        assert.ok(out.content[0].text.includes(out.details.questionId));
       } finally {
         restore();
         rmSync(dir, { recursive: true, force: true });
@@ -1342,7 +1337,7 @@ describe("tool registration", () => {
     const props = messageTool.parameters.properties;
     assert.deepEqual(
       Object.keys(props).sort(),
-      ["authorization", "deliverAs", "id", "message", "messageId", "name"],
+      ["authorization", "deliverAs", "id", "message", "messageId", "name", "replyTo"],
       "address by stable id or scoped name (sessionId is not authority)",
     );
     assert.equal(props.message.type, "string");

@@ -50,11 +50,11 @@ async function withIdentity(run: (h: any) => Promise<void>, fixture = "runtime.t
     await parent.emit("session_start", {}, ctx);
     await run({ root, parent, ctx, call, boot, terminal, sessions, project, widgets });
   } catch (error) {
-    if (existsSync(join(terminal, "screen"))) console.error(readFileSync(join(terminal, "screen"), "utf8"));
+    for (const file of readdirSync(terminal, { recursive: true }).map(String).filter((file) => /(^|\/)(screen|provider-input.jsonl|settlements)$/.test(file))) console.error(file, readFileSync(join(terminal, file), "utf8"));
     throw error;
   } finally {
     await parent.emit("session_shutdown", { reason: "quit" }, ctx);
-    const terminals = [terminal, ...(existsSync(join(terminal, "surfaces")) ? readdirSync(join(terminal, "surfaces")).map((id) => join(terminal, "surfaces", id)) : [])];
+    const terminals = [terminal, ...readdirSync(terminal, { recursive: true }).map(String).filter((file) => file.endsWith("/pid")).map((file) => dirname(join(terminal, file)))];
     for (const directory of terminals) if (existsSync(join(directory, "pid"))) { try { process.kill(-Number(readFileSync(join(directory, "pid"), "utf8")), "SIGKILL"); } catch {} }
     process.env = env;
     rmSync(root, { recursive: true, force: true });
@@ -159,6 +159,148 @@ test("supported Pi consumes steering before followUp, preserves bytes, and start
     assert.equal(result.source.instructionEntryId, completed.messages.find((message: any) => message.id === "idle").evidence.transcriptEntryId);
     const commands = readFileSync(join(terminal, "commands.jsonl"), "utf8");
     assert.doesNotMatch(commands, /send-keys/, "native inbox must never type into the editor or shell");
+  }, "pi-runtime.ts");
+});
+
+test("parallel children retain distinct questions and reject replies belonging to another child", { timeout: 60_000 }, async () => {
+  await withIdentity(async ({ call, terminal, parent }) => {
+    process.env.SUBAGENT_TEST_MULTI = "1";
+    const launched = await Promise.all(["First", "Second"].map((name) => call("subagent", { agent: "echo", name, task: `${task}\nASK_AFTER_INPUT\nASK_TWICE` })));
+    for (const child of launched) writeFileSync(join(terminal, "surfaces", child.details.surface, "finish"), "reach questions");
+    const children = await waitFor(async () => {
+      const current = (await call("subagent_status", {})).details.subagents;
+      return current.length === 2 && current.every((child: any) => child.questions.length === 2) ? current : undefined;
+    }, "four independent questions");
+    assert.equal(new Set(children.flatMap((child: any) => child.questions.map((q: any) => q.questionId))).size, 4);
+    await waitFor(() => parent.sentMessages.filter((e: any) => e.message.customType === "subagent_question").length === 4 ? true : undefined, "all question notifications");
+    await assert.rejects(call("subagent_message", { id: children[1].id, message: "wrong child", replyTo: children[0].questions[0].questionId }), /question.*child|question.*replyTo/i);
+    assert.equal(parent.sentMessages.filter((e: any) => e.message.customType === "subagent_result").length, 0);
+    // Retrying a correlated logical message is safe, but cannot change its
+    // question association or allocate another answer for the same question.
+    const args = { id: children[0].id, message: "Use v2", messageId: "same-reply", replyTo: children[0].questions[0].questionId };
+    const first = await call("subagent_message", args);
+    const duplicate = await call("subagent_message", args);
+    assert.equal(duplicate.details.message.id, first.details.message.id);
+    assert.equal(duplicate.details.message.sequence, first.details.message.sequence);
+    await assert.rejects(call("subagent_message", { ...args, replyTo: children[0].questions[1].questionId }), /conflict/i);
+  });
+});
+
+test("supported Pi retains independent questions across reload and resolves only durably consumed correlated replies", { timeout: 90_000 }, async () => {
+  await withIdentity(async ({ call, boot, terminal, parent, ctx }) => {
+    const launched = await boot("subagent", { agent: "echo", task: "ASK_TWO" });
+    const requests = () => existsSync(join(terminal, "provider-input.jsonl")) ? readFileSync(join(terminal, "provider-input.jsonl"), "utf8").trim().split("\n").map((line: string) => JSON.parse(line)) : [];
+    const release = (request: any) => writeFileSync(join(terminal, `release-${request.call}`), "complete");
+    const status = async () => (await call("subagent_status", { id: launched.details.id })).details.subagent;
+    release(await waitFor(() => requests()[0], "question tool request"));
+    const questions = await waitFor(async () => {
+      const current = await status();
+      return current.questions?.length === 2 ? current.questions : undefined;
+    }, "two independently queryable questions");
+    assert.notEqual(questions[0].questionId, questions[1].questionId);
+    const notifications = await waitFor(() => {
+      const events = parent.sentMessages.filter((e: any) => e.message.customType === "subagent_question");
+      return events.length === 2 ? events : undefined;
+    }, "two question notifications");
+    for (const event of notifications) {
+      assert.equal(event.message.details.id, launched.details.id);
+      assert.match(event.message.content, new RegExp(event.message.details.questionId));
+      assert.match(event.message.content, /replyTo/);
+    }
+    release(await waitFor(() => requests()[1], "question followup"));
+    await waitFor(() => existsSync(join(terminal, "settlements")) ? true : undefined, "initial boundary");
+    // Real runtime replacement, not merely constructing another flag holder.
+    writeFileSync(join(terminal, "runtime-command.json"), JSON.stringify({ id: "reload", action: "reload" }));
+    await waitFor(() => existsSync(join(terminal, "command-reload-done")) ? true : undefined, "actual child reload");
+    await parent.emit("session_shutdown", { reason: "reload" }, ctx);
+    await parent.emit("session_start", { reason: "reload" }, ctx);
+    assert.deepEqual((await status()).questions.map((q: any) => q.questionId).sort(), questions.map((q: any) => q.questionId).sort());
+    await assert.rejects(call("subagent_message", { id: launched.details.id, message: "wrong", replyTo: "unknown-question" }), /question/i);
+    // Without replyTo this is a valid ordinary instruction, never an answer.
+    await call("subagent_message", { id: launched.details.id, message: "Ordinary additional requirements", messageId: "ordinary" });
+    const ordinary = await waitFor(() => requests()[2], "ordinary instruction");
+    assert.ok((await status()).questions.every((q: any) => q.state !== "answered"));
+    release(ordinary);
+    await waitFor(async () => (await status()).messages.find((m: any) => m.id === "ordinary")?.state === "settled" ? true : undefined, "ordinary settlement");
+    writeFileSync(join(terminal, "runtime-command.json"), JSON.stringify({ id: "human", action: "input", text: "Human clarification, not a reply" }));
+    release(await waitFor(() => requests()[3], "human instruction"));
+    await waitFor(() => existsSync(join(terminal, "command-human-done")) ? true : undefined, "human settlement");
+    assert.ok((await status()).questions.every((q: any) => q.state !== "answered"));
+    assert.equal(parent.sentMessages.filter((e: any) => e.message.customType === "subagent_result").length, 0);
+    // A correlated followUp accepted into a busy queue is not yet an answer.
+    await call("subagent_message", { id: launched.details.id, message: "Unrelated gated work", messageId: "busy" });
+    const busy = await waitFor(() => requests()[4], "busy run");
+    const reply = await call("subagent_message", { id: launched.details.id, message: "Use v2", messageId: "answer-version", replyTo: questions[0].questionId, deliverAs: "followUp" });
+    assert.equal(reply.details.id, launched.details.id);
+    await waitFor(async () => (await status()).messages.find((m: any) => m.id === "answer-version")?.state === "accepted" ? true : undefined, "reply accepted in Pi queue");
+    assert.equal((await status()).questions.find((q: any) => q.questionId === questions[0].questionId).state, "reply-queued");
+    release(busy);
+    const answer = await waitFor(() => requests()[5], "correlated reply consumption");
+    assert.equal(answer.inputs.at(-1), "Use v2");
+    assert.equal((await status()).questions.find((q: any) => q.questionId === questions[0].questionId).state, "answered");
+    release(answer);
+    await waitFor(async () => (await status()).messages.find((m: any) => m.id === "answer-version")?.state === "settled" ? true : undefined, "first answer settlement");
+    await assert.rejects(call("subagent_message", { id: launched.details.id, message: "Reuse answer", replyTo: questions[0].questionId }), /already|answered/i);
+    await call("subagent_message", { id: launched.details.id, message: "Still no implicit answer", messageId: "single-ordinary" });
+    release(await waitFor(() => requests()[6], "ordinary with single pending question"));
+    await waitFor(async () => (await status()).messages.find((m: any) => m.id === "single-ordinary")?.state === "settled" ? true : undefined, "single-question wait");
+    assert.equal((await status()).questions.filter((q: any) => q.state !== "answered").length, 1);
+    await call("subagent_message", { id: launched.details.id, message: "Use eu-west", replyTo: questions[1].questionId });
+    release(await waitFor(() => requests()[7], "last explicit answer"));
+    const result = await waitFor(() => parent.sentMessages.find((e: any) => e.message.customType === "subagent_result"), "final result after all replies");
+    assert.equal(result.message.details.id, launched.details.id);
+    assert.equal(result.message.details.outcome, "succeeded");
+    assert.ok((await status()).questions.every((q: any) => q.state === "answered"));
+  }, "pi-runtime.ts");
+});
+
+test("nested parent-child-grandchild results survive reload and the last-result busy-start race", { timeout: 150_000 }, async () => {
+  await withIdentity(async ({ call, boot, terminal, project, parent }) => {
+    process.env.SUBAGENT_TEST_MULTI = "1";
+    writeFileSync(join(project, ".pi/agents/trunk.md"), "---\nname: trunk\ntools:\nsubagent_agents: branch\n---\nDelegate to branch\n");
+    writeFileSync(join(project, ".pi/agents/branch.md"), "---\nname: branch\ntools:\nsubagent_agents: leaf\n---\nDelegate to leaf\n");
+    writeFileSync(join(project, ".pi/agents/leaf.md"), "---\nname: leaf\ntools:\n---\nFinish leaf\n");
+    const launched = await boot("subagent", { agent: "trunk", task: "NEST_PARENT" });
+    const trunk = join(terminal, "surfaces", launched.details.surface);
+    const requests = (root: string) => existsSync(join(root, "provider-input.jsonl")) ? readFileSync(join(root, "provider-input.jsonl"), "utf8").trim().split("\n").map((line: string) => JSON.parse(line)) : [];
+    const release = (root: string, request: any) => writeFileSync(join(root, `release-${request.call}`), "complete");
+    const descendant = async (root: string) => waitFor(() => {
+      const surfaces = join(root, "surfaces");
+      const id = existsSync(surfaces) ? readdirSync(surfaces)[0] : undefined;
+      return id ? join(surfaces, id) : undefined;
+    }, "nested owned surface", 30_000);
+    release(trunk, await waitFor(() => requests(trunk)[0], "parent spawn request"));
+    const branch = await descendant(trunk);
+    release(trunk, await waitFor(() => requests(trunk)[1], "parent waiting response", 30_000));
+    await waitFor(() => existsSync(join(trunk, "settlements")) ? true : undefined, "parent waits for child");
+    assert.equal(parent.sentMessages.filter((e: any) => e.message.customType === "subagent_result").length, 0);
+    writeFileSync(join(trunk, "runtime-command.json"), JSON.stringify({ id: "nested-reload", action: "reload" }));
+    await waitFor(() => existsSync(join(trunk, "command-nested-reload-done")) ? true : undefined, "reload while descendants outstanding");
+    release(branch, await waitFor(() => requests(branch)[0], "child spawn request", 30_000));
+    const leaf = await descendant(branch);
+    release(branch, await waitFor(() => requests(branch)[1], "child waiting response", 30_000));
+    await waitFor(() => existsSync(join(branch, "settlements")) ? true : undefined, "child waits for grandchild");
+    // Minimum Pi reports idle during before_agent_start. A result must not
+    // start a parallel run or let the autonomous parent exit in that window.
+    writeFileSync(join(trunk, "gate-preparation"), "hold human preparation");
+    writeFileSync(join(trunk, "runtime-command.json"), JSON.stringify({ id: "human-race", action: "input", text: "Human instruction during descendant completion" }));
+    await waitFor(() => existsSync(join(trunk, "preparing")) ? true : undefined, "parent busy-start preparation gate");
+    release(leaf, await waitFor(() => requests(leaf)[0], "grandchild work", 30_000));
+    const incorporatedLeaf = await waitFor(() => requests(branch)[2], "child receives grandchild result", 30_000);
+    assert.match(incorporatedLeaf.inputs.at(-1), /Leaf incorporated/);
+    release(branch, incorporatedLeaf);
+    await waitFor(() => existsSync(join(branch, "command")) && readFileSync(join(branch, "surface"), "utf8") !== "open" ? true : undefined, "child completed and surface cleaned", 30_000);
+    assert.equal(requests(trunk).length, 2, "void result send cannot enter minimum Pi's idle preparation gap");
+    assert.equal(parent.sentMessages.filter((e: any) => e.message.customType === "subagent_result").length, 0, "last descendant still owes incorporation");
+    writeFileSync(join(trunk, "release-preparation"), "continue prepared prompt");
+    const human = await waitFor(() => requests(trunk)[2], "human run resumes");
+    release(trunk, human);
+    const incorporatedChild = await waitFor(() => requests(trunk)[3], "parent receives child result", 30_000);
+    assert.match(incorporatedChild.inputs.at(-1), /Child incorporated[\s\S]*Leaf incorporated/);
+    release(trunk, incorporatedChild);
+    const final = await waitFor(() => parent.sentMessages.find((e: any) => e.message.customType === "subagent_result"), "root gets incorporated chain", 30_000);
+    assert.match(final.message.content, /Parent incorporated[\s\S]*Child incorporated[\s\S]*Leaf incorporated/);
+    assert.equal(parent.sentMessages.filter((e: any) => e.message.customType === "subagent_result").length, 1);
   }, "pi-runtime.ts");
 });
 

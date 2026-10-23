@@ -804,15 +804,6 @@ async function confirmSubagentReady(running: RunningSubagent): Promise<void> {
 /** All currently running subagents, keyed by id. */
 const runningSubagents = new Map<string, RunningSubagent>();
 
-// When this extension is loaded inside a subagent that itself spawns children
-// (e.g. a worker delegating to scout/researcher), `subagent-done.ts` runs in the
-// same process and needs to know whether this session still has children in
-// flight — so it can suppress auto-exit and keep the session open until they all
-// report back. Expose a live count through a process-global symbol that both
-// modules share. (subagent-done.ts reads it; if absent it assumes zero.)
-const RUNNING_CHILDREN_COUNT_KEY = Symbol.for("pi-subagents/running-children-count");
-(globalThis as any)[RUNNING_CHILDREN_COUNT_KEY] = () => [...runningSubagents.values()].filter((child) => !child.settled).length;
-
 // ── Widget management ──
 
 /** Latest ExtensionContext from session_start, used for widget updates. */
@@ -1456,35 +1447,20 @@ function copyClaudeSession(sentinelFile: string): string | null {
   }
 }
 
-/** Retain the legacy single-question slot; #11 owns multiple questions/replies. */
+/** Questions share the retained inbox and stable notification outbox. */
 function deliverPendingQuestion(running: RunningSubagent): void {
   if (!isCurrent(running)) return;
-  const askFile = `${running.sessionFile}.ask`;
-  if (!existsSync(askFile)) return;
-  const payload = JSON.parse(readFileSync(askFile, "utf-8"));
-  if (!payload?.question) throw new Error(`Invalid pending question retained at ${askFile}`);
-  if (payload.executionId && payload.executionId !== running.id) return;
-  const eventId = payload.eventId ?? `subagent-question:${running.id}:${createHash("sha256").update(payload.question).digest("hex")}`;
-
-  const name = running.name; // unique per session (deduped at spawn) — targets the reply
-  const sessionId = existsSync(running.sessionFile) ? getSessionId(running.sessionFile) : null;
-  const elapsed = Math.floor((Date.now() - running.startTime) / 1000);
-  const replyHint = `\n\nReply with subagent_message({ name: "${name}", message: "…" }) — the same name works whether it is still running or has since exited. It stays open until you reply.`;
-
-  running.owner!.notifications.publish(
-    {
+  for (const question of new SubagentInbox(running.sessionFile).questions()) {
+    if (question.state === "answered") continue;
+    const reply = { id: running.subagentId, replyTo: question.questionId, message: "…" };
+    running.owner!.notifications.publish({
       customType: "subagent_question",
-      content: `Sub-agent "${name}" asks (${formatElapsed(elapsed)}):\n\n${payload.question}${replyHint}`,
+      content: `Sub-agent ${JSON.stringify(running.name)} asks:\n\n${question.question}\n\nQuestion ID: ${question.questionId}\nReply with subagent_message(${JSON.stringify(reply)}). Ordinary messages do not answer this question.`,
       display: true,
-      details: {
-        eventId, id: running.subagentId, generation: running.generation,
-        name,
-        agent: running.agent,
-        question: payload.question,
-        ...(sessionId ? { sessionId } : {}),
-      },
-    },
-  );
+      details: { eventId: question.eventId, id: running.subagentId, generation: running.generation,
+        name: running.name, agent: running.agent, question: question.question, questionId: question.questionId },
+    });
+  }
   running.owner!.notifications.deliver(running.owner!.pi);
 }
 
@@ -1804,6 +1780,11 @@ export default function subagentsExtension(pi: ExtensionAPI) {
     if (boundRuntime === runtime && boundRuntime) detachRuntime(boundRuntime, event.reason === "reload");
   });
 
+  // Pi 0.87 has an idle preparation window before agent_start. Notifications
+  // must not open a parallel custom run in the middle of that user prompt.
+  pi.on("input", (_event, ctx) => { if (boundRuntime === runtime && ctx.isIdle()) boundRuntime?.notifications.prepareInput(); });
+  pi.on("agent_start", () => { if (boundRuntime === runtime) boundRuntime?.notifications.agentStart(); });
+
   // The spawning tools are always registered here. Whether a child process can
   // actually see/use them is governed by the parent's `--tools` allowlist and
   // by which extensions are loaded into the child (default-deny --no-extensions
@@ -2029,7 +2010,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         const inbox = new SubagentInbox(run.sessionFile).snapshot(run);
         const notifications = new SubagentNotifications(runs).list().filter((event) => event.message.details.id === run.id)
           .map((event) => ({ eventId: event.message.details.eventId, type: event.message.customType, state: event.state }));
-        return { ...run, ...inbox, notifications, ...(inbox.paused ? { state: "paused-uncertain" } : {}), liveness: { surface: inventory, writer: writerExited(run) ? "exited" : "claimed-or-unknown", heartbeatAt: heartbeat,
+        return { ...run, ...inbox, questions: new SubagentInbox(run.sessionFile).questions(), notifications, ...(inbox.paused ? { state: "paused-uncertain" } : {}), liveness: { surface: inventory, writer: writerExited(run) ? "exited" : "claimed-or-unknown", heartbeatAt: heartbeat,
           responsive: heartbeat === null ? "unknown" : Date.now() - heartbeat < 20_000 ? "responsive" : "unresponsive" } };
       };
       if (params.id || params.name !== undefined) {
@@ -2105,6 +2086,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         "Concurrent completed-session messages share one fenced writer. messageId is an optional retry/dedup key; reusing it with different bytes/mode fails. " +
         "Queued is not child acceptance, transcript consumption, settlement, or completion; subagent_status exposes that evidence. Results arrive automatically; do not poll for completion. " +
         "Uncertain consumption/effects pause only this collaborator, including ordinary new messages. Only explicit user authorization/reconciliation of the exact actionId releases it: retry permits repeating that instruction; confirm-completed records that it must not repeat. " +
+        "Answer a question only with replyTo, including when just one question remains; ordinary messages never resolve questions. " +
         "Never infer permission from generic follow-up/resume. Claude children retain legacy terminal messaging without managed-Pi delivery guarantees.",
       promptSnippet: "Queue exact subagent instructions (auto, steer, followUp). A durable queue acknowledgement is not consumption/completion. Uncertainty requires explicit affected-action authorization, never routine resume.",
       parameters: Type.Object({
@@ -2113,6 +2095,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         message: Type.Optional(Type.String({ description: "Exact instruction bytes. Required unless explicitly resolving an uncertain action." })),
         messageId: Type.Optional(Type.String({ minLength: 1, maxLength: 200, description: "Stable logical message id for safe caller retries." })),
         deliverAs: Type.Optional(Type.Union([Type.Literal("auto"), Type.Literal("steer"), Type.Literal("followUp")])),
+        replyTo: Type.Optional(Type.String({ minLength: 1, description: "Exact questionId from this child's question notification/status. Required for answers, even with one pending question; omitted means ordinary instruction." })),
         authorization: Type.Optional(Type.Object({
           actionId: Type.String({ description: "Exact uncertain actionId from status; not a collaborator or generic resume id." }),
           decision: Type.Union([Type.Literal("retry"), Type.Literal("confirm-completed")]),
@@ -2173,6 +2156,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         const requestedName = entry.name;
         const runningMatch = Array.from(runningSubagents.values()).find((r) => r.subagentId === entry.id && r.id === entry.executionId);
         if (runningMatch?.cli === "claude") {
+          if (params.replyTo !== undefined) throw new Error("Claude messaging does not support managed question replies");
           if (!params.message) throw new Error("Claude messaging does not support durable action authorization");
           const error = delegationError(runningMatch.agent) ?? terminalDeliveryError(runningMatch);
           if (error) throw new Error(error);
@@ -2554,7 +2538,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
           contentLines.push(details.question ?? "");
           contentLines.push("");
           contentLines.push(
-            theme.fg("dim", `Reply: subagent_message({ name: "${name}", message: "…" })`),
+            theme.fg("dim", `Reply: subagent_message(${JSON.stringify({ id: details.id, replyTo: details.questionId, message: "…" })})`),
           );
         } else {
           const preview = (details.question ?? "").split("\n")[0].slice(0, width - 10);

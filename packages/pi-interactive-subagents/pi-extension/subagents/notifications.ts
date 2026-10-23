@@ -1,8 +1,8 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { replace, transaction, type SubagentRuns } from "./runs.ts";
+import { projectRun, replace, transaction, writerFile, type SubagentRuns } from "./runs.ts";
 
 export interface Notification {
   customType: string;
@@ -22,6 +22,7 @@ export class SubagentNotifications {
   private readonly attempted: Set<string>;
   private readonly token = randomUUID();
   private readonly ownerFile: string;
+  private preparing = false;
   constructor(private readonly runs: SubagentRuns) {
     this.directory = join(runs.directory, "notifications");
     this.ownerFile = join(runs.directory, "observer.json");
@@ -82,8 +83,59 @@ export class SubagentNotifications {
       return { message, state: persisted.has(message.details.eventId) ? "persisted" : this.attempted.has(message.details.eventId) ? "dispatched-unconfirmed" : "pending" };
     });
   }
+  prepareInput(): void { this.preparing = true; }
+  agentStart(): void { this.preparing = false; }
+  private assertReceiver(executionId: string): void {
+    const file = writerFile(this.runs.parentSessionFile);
+    if (existsSync(file) && JSON.parse(readFileSync(file, "utf8")).executionId !== executionId) throw new Error("Stale descendant-result receiver");
+  }
+  /** Model exposure is separate from both void dispatch and history persistence. */
+  observeResults(messages: any[], executionId: string): void {
+    this.assertReceiver(executionId);
+    const events = this.list();
+    for (const message of messages) {
+      if (message.role !== "custom" || message.customType !== "subagent_result") continue;
+      const event = events.find((event) => event.message.details.eventId === message.details?.eventId && event.message.content === message.content);
+      if (!event) continue;
+      const file = this.incorporationFile(event.message.details.eventId);
+      const receipt = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : undefined;
+      if (!receipt || (!receipt.incorporated && receipt.executionId !== executionId)) replace(file, { eventId: event.message.details.eventId, executionId, observed: true });
+    }
+  }
+  private incorporationFile(eventId: string): string {
+    const directory = join(this.directory, "incorporation");
+    mkdirSync(directory, { recursive: true });
+    return join(directory, `${createHash("sha256").update(eventId).digest("hex")}.json`);
+  }
+  /** A completed child still owes its parent a persisted, model-observed result. */
+  pendingResults(ctx: ExtensionContext, executionId: string): boolean {
+    this.assertReceiver(executionId);
+    const events = this.list();
+    const branch = ctx.sessionManager.getBranch();
+    const projected = ctx.sessionManager.buildSessionProjection().entries;
+    return this.runs.list().some((record) => {
+      const run = projectRun(record);
+      if (["starting", "running"].includes(run.state) || !run.latestResult) return true;
+      const event = events.find(({ message }) => message.customType === "subagent_result" && message.details.id === run.id && message.details.generation === run.generation && message.details.resultFile === run.latestResult!.resultFile);
+      if (!event || event.state !== "persisted") return true;
+      const file = this.incorporationFile(event.message.details.eventId);
+      if (!existsSync(file)) return true;
+      const receipt = JSON.parse(readFileSync(file, "utf8"));
+      if (receipt.incorporated) return false;
+      if (receipt.executionId !== executionId) return true;
+      // Compaction/context edits can hide an already-observed event. Its raw
+      // active-branch ancestry still binds the effective subsequent response;
+      // an event on an abandoned branch cannot complete this wait.
+      const index = branch.findIndex((entry) => entry.type === "custom_message" && entry.customType === "subagent_result" && (entry.details as any)?.eventId === event.message.details.eventId);
+      const after = new Set(index < 0 ? [] : branch.slice(index + 1).map((entry) => entry.id));
+      const response = projected.findLast(({ sourceEntry, messages }) => after.has(sourceEntry.id) && messages.some((message) => message.role === "assistant"));
+      if (!response) return true;
+      replace(file, { ...receipt, incorporated: true, entryId: response.sourceEntry.id, leafId: ctx.sessionManager.getLeafId() });
+      return false;
+    });
+  }
   deliver(pi: ExtensionAPI): void {
-    if (!this.owns()) return;
+    if (!this.owns() || this.preparing) return;
     for (const event of this.list()) {
       if (event.state !== "pending") continue;
       const id = event.message.details.eventId;

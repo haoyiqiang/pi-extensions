@@ -7,47 +7,19 @@
  * only after `agent_settled` has durably published the outcome. Explicitly
  * resident agents report each settled task without closing their surface.
  *
- * `ask_question` keeps the session OPEN: it writes a `${sessionFile}.ask`
- * signal the parent's watcher picks up, parks the session in a "waiting" state
- * (auto-exit is suppressed for that turn via `awaitingAnswer`), and the parent
- * replies with subagent_message — which lands as the subagent's next turn.
+ * Questions remain in the durable inbox until an explicitly correlated reply
+ * is persisted and observed by this child. Ordinary input is never an answer.
  */
 import type { ExtensionAPI, ExtensionContext, SessionMessageEntry } from "@earendil-works/pi-coding-agent";
 import { Box, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { existsSync } from "node:fs";
-import { randomUUID } from "node:crypto";
 import { createSubagentActivityRecorder, LIVENESS_INTERVAL_MS, writeSubagentLiveness } from "./activity.ts";
 import { readSubagentOutcomes, writeSubagentOutcome } from "./outcome.ts";
-import { createInboxReceiver } from "./inbox.ts";
-import { replace, writerFile } from "./runs.ts";
+import { createInboxReceiver, SubagentInbox } from "./inbox.ts";
+import { SubagentRuns, writerFile } from "./runs.ts";
+import { SubagentNotifications } from "./notifications.ts";
 import { summarizeEntryUsage } from "./session.ts";
-
-/**
- * Number of child subagents this session itself still has in flight.
- *
- * When this extension is loaded inside a subagent that can spawn its own
- * children (e.g. a worker delegating to scout/researcher), `index.ts` runs in
- * the same process and publishes a live count through a shared process-global
- * symbol. A subagent that spawns children and then writes a "waiting for
- * results" message would otherwise auto-exit the instant that turn ends —
- * killing the session before its children report back. Reading this count lets
- * `agent_settled` keep the session open until every child has finished and its
- * result has been delivered.
- *
- * Returns 0 when the spawning tools aren't loaded (scout/researcher, or a
- * standalone session), so those agents auto-exit exactly as before.
- */
-function runningChildrenCount(): number {
-  const fn = (globalThis as any)[Symbol.for("pi-subagents/running-children-count")];
-  if (typeof fn !== "function") return 0;
-  try {
-    const n = fn();
-    return typeof n === "number" && n > 0 ? n : 0;
-  } catch {
-    return 0;
-  }
-}
 
 export function parseDeniedTools(rawValue: string | undefined): string[] {
   return (rawValue ?? "")
@@ -70,6 +42,8 @@ export default function (pi: ExtensionAPI) {
   const executionId = process.env.PI_SUBAGENT_ID;
   let heartbeat: ReturnType<typeof setInterval> | undefined;
   let sequence = 0;
+  let descendants: SubagentNotifications | undefined;
+  const mailbox = sessionFile ? new SubagentInbox(sessionFile) : undefined;
   const inbox = sessionFile && executionId && existsSync(writerFile(sessionFile)) ? createInboxReceiver(pi, sessionFile, executionId) : undefined;
   let seenEntries = new Set<string>();
   let startLeafId: string | null = null;
@@ -132,16 +106,10 @@ export default function (pi: ExtensionAPI) {
     );
   }
 
-  // Set when ask_question is called; suppresses auto-exit so the session stays
-  // open while it waits for the orchestrator's reply. Cleared when the reply
-  // lands on `input`, including a reply steered into the current run. Automatic
-  // retries and recovery do not count as replies.
-  let awaitingAnswer = false;
-
   // Show widget + status bar on session start
-  pi.on("session_start", (_event, ctx) => {
+  pi.on("session_start", (event, ctx) => {
     recorder.sessionStart();
-    inbox?.start(ctx);
+    inbox?.start(ctx, event.reason === "reload");
     if (heartbeat) clearInterval(heartbeat);
     if (sessionFile && executionId) {
       writeSubagentLiveness(sessionFile, executionId);
@@ -150,6 +118,9 @@ export default function (pi: ExtensionAPI) {
         catch (error) { console.error("Subagent liveness publication failed:", error); }
       }, LIVENESS_INTERVAL_MS);
       heartbeat.unref?.();
+    }
+    if (sessionFile && ctx.sessionManager.getSessionFile() === sessionFile) {
+      descendants = new SubagentNotifications(new SubagentRuns(ctx.sessionManager.getSessionId(), sessionFile, ctx.sessionManager.getSessionDir()));
     }
     seenEntries = new Set(ctx.sessionManager.getEntries().map((entry) => entry.id));
     startLeafId = ctx.sessionManager.getLeafId();
@@ -165,21 +136,12 @@ export default function (pi: ExtensionAPI) {
     if (inbox?.paused()) return { action: "handled" };
     inbox?.input(ctx.isIdle());
     recorder.input();
-    // A submitted message is the orchestrator's (or a human's) reply — the
-    // pending ask_question has been answered, however it was delivered. Clear
-    // here, not only on agent_start, because a reply steered in *mid-run* is
-    // absorbed into the current run (pi's `steer` behavior injects it before
-    // the next LLM call): no new agent_start fires, so without this the flag
-    // would stay set and settlement would park the session as `waiting` even
-    // though the answer already arrived and was consumed. (The `input` event
-    // fires for mid-run steers because prompt() emits it before queueing.)
-    awaitingAnswer = false;
   });
 
   pi.on("context", (event) => {
+    descendants?.observeResults(event.messages, executionId!);
     if (inbox?.context(event.messages)) {
       recorder.input();
-      awaitingAnswer = false;
     }
   });
 
@@ -235,15 +197,10 @@ export default function (pi: ExtensionAPI) {
       .flatMap(({ sourceEntry, messages }) => messages
         .filter((message) => message.role === "assistant")
         .map((message) => ({ ...sourceEntry, type: "message" as const, message }) as SessionMessageEntry));
-    // Never shut down while this session still has work in flight:
-    //  - awaitingAnswer: an ask_question is pending the orchestrator's reply.
-    //  - runningChildrenCount(): this subagent spawned its own children and is
-    //    waiting for their results (delivered as steered turns). Exiting now
-    //    would strand those children and drop their results.
-    // In both cases the session parks as `waiting` and resumes when the next
-    // turn lands.
-    const hasPendingChildren = runningChildrenCount() > 0;
-    if (awaitingAnswer || hasPendingChildren) {
+    // Durable ownership, not watcher membership, keeps the last descendant
+    // outstanding through dispatch, persistence, model exposure and settlement.
+    const hasPendingChildren = descendants?.pendingResults(ctx, executionId!);
+    if (mailbox?.questions().some((question) => question.state !== "answered") || hasPendingChildren) {
       recorder.agentEndWaiting();
       return;
     }
@@ -403,29 +360,20 @@ export default function (pi: ExtensionAPI) {
         );
       }
 
-      // Keep the session open: suppress auto-exit for this turn and park in the
-      // "waiting" phase. The parent's watcher picks up the `.ask` signal and
-      // notifies the orchestrator, who replies via subagent_message.
-      awaitingAnswer = true;
+      if (!params.question.trim()) throw new Error("Question must not be empty");
+      const question = mailbox!.ask({ executionId: executionId!, subagentId, question: params.question });
       recorder.askQuestion();
-      const askData = {
-        eventId: `subagent-question:${randomUUID()}`, executionId,
-        name: process.env.PI_SUBAGENT_NAME ?? "subagent",
-        agent: process.env.PI_SUBAGENT_AGENT ?? "",
-        question: params.question,
-      };
-      replace(`${sessionFile}.ask`, askData);
 
       return {
         content: [
           {
             type: "text",
             text:
-              "Question sent to the orchestrator. Stop here and wait — do not continue working or " +
+              `Question ${question.questionId} durably recorded for the orchestrator. Stop here and wait — do not continue working or ` +
               "assume an answer. Their reply will arrive as your next message.",
           },
         ],
-        details: { question: params.question },
+        details: question,
       };
     },
 

@@ -72,7 +72,7 @@ subagent_status({ id: "<stable id>", name: "scout" });
 - **Running** — exact message strings (including indentation, CRLF and trailing newlines) are durably published, then the child bridge uses Pi's ID-bearing custom-message interface. No terminal keys, editor focus, slash-command expansion or shell interpretation participates. `deliverAs: "auto"` (default) and `"steer"` steer busy work; `"followUp"` waits behind the current automatic work. All modes start a prompt when idle.
 - **Finished / starting** — concurrent instructions queue behind a single fenced writer reservation, rather than launching once per message. A completed child reclaims its stable identity and pinned loadout. An auto-exiting writer is not replaced until its exit is positively observed.
 
-Optional `messageId` makes caller retries idempotent within that collaborator's inbox. Reuse the same ID, exact bytes and delivery mode; conflicting reuse fails. Queue order uses an explicit monotonically allocated `sequence`, not wall-clock/random filename order. Steering can intentionally run before an earlier follow-up, as Pi's two queues require.
+Optional `messageId` makes caller retries idempotent within that collaborator's inbox. Reuse the same ID, exact bytes, delivery mode and `replyTo` association; conflicting reuse fails. Queue order uses an explicit monotonically allocated `sequence`, not wall-clock/random filename order. Steering can intentionally run before an earlier follow-up, as Pi's two queues require.
 
 Tool acknowledgements and `subagent_status.messages` separate evidence:
 
@@ -107,9 +107,18 @@ Missing, partial, corrupt or unknown-version snapshots cannot become unrestricte
 
 ### ask_question
 
-A sub-agent can ask its orchestrator a single freeform question when requirements are ambiguous or a decision materially affects the work. The session **stays open** (parked as `waiting`) instead of exiting; the parent is notified with the sub-agent's name, replies via `subagent_message({ name, message })`, and the reply arrives as the sub-agent's next turn. Parallel questions are supported — each waiting sub-agent has its own name.
+A sub-agent can ask one freeform question per call when requirements are ambiguous or a decision materially affects the work. Every `ask_question({ question })` returns an independent `details.questionId` and durably retains the question in the existing inbox. Multiple calls by one child and parallel children cannot overwrite one another. Parent notifications include the child identity, exact question ID and a ready-to-use reply instruction:
 
-If the reply arrives while the sub-agent is still mid-turn, it is absorbed into the current turn — either way the question is marked answered and the session exits normally when the work is done. If the parent never replies, the pane stays open until a human closes it. Only available inside sub-agent sessions.
+```typescript
+subagent_message({ id: "<child id>", replyTo: "<questionId>", message: "Use v2" });
+// Name-based addressing also works, but replyTo is required even for one question.
+```
+
+**Compatibility correction:** messages without `replyTo` remain ordinary instructions. Human input, retries, new runs and revisited history do not implicitly answer questions. Unknown/foreign question IDs and a second distinct reply to an already queued/answered question fail explicitly; retry an existing reply with its original `messageId` and association.
+
+`subagent_status.questions` exposes each original question, `questionId`, `replyMessageId` and `pending` / `reply-queued` / `answered` state. Durable enqueue or Pi's memory queue alone leaves it waiting: the correlated reply must have its exact managed attempt persisted in the child transcript **and** be observed in model context. Only that question is answered. Both ordinary and steered replies continue the same collaborator with its pinned policy.
+
+Unanswered questions survive child/parent reload and suppress terminal-result publication and autonomous exit. Parent notification parsing or sending failures retain the question/event rather than deleting it. If the parent never answers, the child stays waiting. Asking does not roll back sibling tools already executing in the same parallel tool batch. This tool is available only inside sub-agent sessions.
 
 ## Bundled agents
 
@@ -174,7 +183,7 @@ Omitting `auto-exit` now defaults to **autonomous** (`true`). The child publishe
 Set `auto-exit: false` explicitly for a **resident** role. Each settled task still returns a result automatically, but the parent does not close the resident surface. It can accept another task in the same process. Resume restores this policy from the original snapshot rather than forcing autonomous behavior.
 
 - **Manual input adds work, not residency.** It never changes the role's recorded lifetime policy. A manual abort is reported distinctly and leaves the child open for inspection or further input.
-- **Pending work suppresses finalization:** an unanswered `ask_question` or outstanding descendant work parks the child as `waiting`. The last descendant remains outstanding until Pi accepts its result.
+- **Pending work suppresses finalization:** an unanswered `ask_question` or outstanding descendant work parks the child as `waiting`. Descendant waiting is reconstructed from durable parent-owned records, not live watcher membership. The last descendant remains outstanding after surface cleanup and void notification dispatch until its stable result event is persisted in this parent's history, observed in model context and followed by a response at final settlement. This incorporation evidence survives reload; hiding/abandoning an unincorporated result does not fabricate completion. Nested parents repeat this same result path up to the root, without a separate scheduler. Notifications are held during minimum Pi's idle user-prompt preparation window rather than starting a competing custom run.
 
 ### Settled results
 
@@ -196,7 +205,7 @@ A crash before notification is repaired from the retained outcome/event. A crash
 
 Only one parent observer publishes notifications and performs terminal cleanup. Its claim is released on orderly detach or reclaimed after **positive process absence**. A live/reused PID, permission ambiguity, unknown terminal/backend or an orphaned short mutation lock is not takeover/relaunch authority. A replacement parent reconnects live children and delivers retained terminal outcomes without a UI. Confirmed-dead work with no settled result is reported as interrupted/failed with history retained; it is **not automatically rerun**. Inbox consumption/effect uncertainty remains paused under ADR-0001, and reload is not user authorization.
 
-Normal quit/session-switch suspension, automatic continuation of safely suspended work, explicit stop, multiple questions and correlated replies remain later lifecycle slices. The current single-question slot is atomically retained for parent-crash recovery, not a claim of a complete question/reply protocol. The optional Claude Code path retains its legacy completion handling and is outside managed-Pi recovery guarantees.
+Normal quit/session-switch suspension, automatic continuation of safely suspended work and explicit stop remain later lifecycle slices. Multiple independent questions, correlated replies and durable descendant-result incorporation are supported through the same inbox/outbox path. The optional Claude Code path retains its legacy completion handling and is outside managed-Pi recovery guarantees.
 
 ### interactive
 
