@@ -160,9 +160,9 @@ export default function (pi: ExtensionAPI) {
     if (ctx.hasUI) renderWidget(ctx, null);
   });
 
-  pi.on("input", () => {
+  pi.on("input", (_event, ctx) => {
     if (inbox?.paused()) return { action: "handled" };
-    inbox?.input();
+    inbox?.input(ctx.isIdle());
     recorder.input();
     // A submitted message is the orchestrator's (or a human's) reply — the
     // pending ask_question has been answered, however it was delivered. Clear

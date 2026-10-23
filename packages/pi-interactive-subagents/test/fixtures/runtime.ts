@@ -55,6 +55,9 @@ const ctx = {
     buildSessionProjection: () => session.buildSessionProjection(),
     getSessionId: () => session.getSessionId(), getLeafId: () => session.getLeafId(),
   },
+  // This fixture's raw user inputs happen only at startup/resident idle; its
+  // mid-run inputs use Pi's managed custom-message path instead.
+  isIdle: () => true,
   hasUI: true,
   ui: { setWidget(_name: string, factory: any) { widgets.push(factory({}, plainTheme).render(100).join("\n")); } },
   shutdown() { shutdown = true; },

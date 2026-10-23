@@ -145,7 +145,18 @@ test("supported Pi consumes steering before followUp, preserves bytes, and start
     assert.equal(idle.details.generation, 2);
     const fourth = await waitFor(() => provider()[3], "idle prompt request");
     assert.equal(fourth.inputs.at(-1), "idle prompt");
+    const inFlight = (await call("subagent_status", { id: launched.details.id })).details.subagent;
+    assert.equal(inFlight.state, "running", "the prior generation's settled result cannot complete this queued task");
+    assert.equal(inFlight.latestResult.generation, 1);
     release(fourth);
+    const completed = await waitFor(async () => {
+      const current = (await call("subagent_status", { id: launched.details.id })).details.subagent;
+      return current.latestResult?.generation === 2 ? current : undefined;
+    }, "consumed instruction's generation-specific result");
+    const result = JSON.parse(readFileSync(completed.latestResult.resultFile, "utf8"));
+    assert.equal(result.generation, 2);
+    assert.equal(result.subagentId, launched.details.id);
+    assert.equal(result.source.instructionEntryId, completed.messages.find((message: any) => message.id === "idle").evidence.transcriptEntryId);
     const commands = readFileSync(join(terminal, "commands.jsonl"), "utf8");
     assert.doesNotMatch(commands, /send-keys/, "native inbox must never type into the editor or shell");
   }, "pi-runtime.ts");

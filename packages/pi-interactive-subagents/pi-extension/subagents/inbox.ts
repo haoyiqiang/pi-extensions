@@ -183,7 +183,7 @@ export function createInboxReceiver(pi: ExtensionAPI, sessionFile: string, execu
       timer.unref?.();
       // Don't race the CLI's initial prompt during session_start.
     },
-    input() { preparing = true; },
+    input(idle: boolean) { if (idle) preparing = true; },
     agentStart() { preparing = false; awaitingInitialRun = false; },
     context(messages: any[]) {
       let newlyObserved = false;
