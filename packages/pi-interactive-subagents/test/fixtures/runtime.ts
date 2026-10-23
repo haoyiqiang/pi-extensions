@@ -3,6 +3,11 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync
 import { dirname, join } from "node:path";
 import subagentDone from "../../pi-extension/subagents/subagent-done.ts";
 import { mock } from "node:test";
+// Load the same exported SDK class without initializing the unrelated CLI/UI
+// dependency graph in every terminal stand-in. No private methods are used.
+const { SessionManager }: typeof import("@earendil-works/pi-coding-agent") = await import(
+  new URL("./core/session-manager.js", import.meta.resolve("@earendil-works/pi-coding-agent")).href
+);
 import { createMockExtensionApi, plainTheme, waitFor } from "../harness.ts";
 
 const args = process.argv.slice(2);
@@ -24,14 +29,26 @@ let task = taskArg.startsWith("@") ? readFileSync(taskArg.slice(1), "utf8") : ta
 const runtime = createMockExtensionApi();
 const widgets: string[] = [];
 let shutdown = false;
-const branch: any[] = existsSync(sessionFile)
-  ? readFileSync(sessionFile, "utf8").trim().split("\n").map((line) => JSON.parse(line)).filter((entry) => entry.type !== "session")
-  : [];
+mkdirSync(dirname(sessionFile), { recursive: true });
+if (!existsSync(sessionFile)) {
+  writeFileSync(sessionFile, JSON.stringify({ type: "session", version: 3, id: "fixture-child", cwd: process.cwd() }) + "\n");
+}
+let session = SessionManager.open(sessionFile); // The fenced fixture owns this writer.
+let assistantCount = session.getEntries().filter((entry) => entry.type === "message" && entry.message.role === "assistant").length;
+let abandonedLeaf: string | undefined;
+if (task.includes("ABANDONED_BRANCH")) {
+  const activeLeaf = session.getLeafId();
+  abandonedLeaf = session.appendMessage({ role: "assistant", content: [{ type: "text", text: "An old abandoned answer must never complete this task." }], stopReason: "stop" } as any);
+  if (activeLeaf) session.branch(activeLeaf); else session.resetLeaf();
+}
 const ctx = {
+  get model() { return { provider: "fixture", id: task.includes("UNKNOWN_CAPACITY") ? "claude-fixture-unknown" : "parent-model", ...(task.includes("UNKNOWN_CAPACITY") ? {} : { contextWindow: 64_000 }) }; },
   sessionManager: {
-    getBranch: () => branch,
-    getSessionId: () => "fixture-child",
-    getLeafId: () => branch.at(-1)?.id ?? null,
+    getBranch: () => session.getBranch(),
+    getEntries: () => session.getEntries(),
+    buildSessionProjection: () => session.buildSessionProjection(),
+    getSessionId: () => session.getSessionId(),
+    getLeafId: () => session.getLeafId(),
   },
   hasUI: true,
   ui: {
@@ -42,43 +59,54 @@ const ctx = {
   shutdown() { shutdown = true; },
 };
 subagentDone(runtime.api);
-mkdirSync(dirname(sessionFile), { recursive: true });
-if (!existsSync(sessionFile)) {
-  writeFileSync(sessionFile, JSON.stringify({ type: "session", version: 3, id: "fixture-child", cwd: process.cwd() }) + "\n");
-}
 await runtime.emit("session_start", {}, ctx);
 for (;;) {
   await runtime.emit("input", { text: task, source: "interactive" }, ctx);
   await runtime.emit("before_agent_start", { prompt: task }, ctx);
+  session.appendMessage({ role: "user", content: task, timestamp: Date.now() });
   await runtime.emit("agent_start", {}, ctx);
   if (task.includes("LONG_PROVIDER")) await runtime.emit("before_provider_request", {}, ctx);
   if (task.includes("LONG_TOOL")) await runtime.emit("tool_execution_start", { toolCallId: "long-tool", toolName: "bash" }, ctx);
-  writeFileSync(join(root, "received.tmp"), JSON.stringify({ task, widgets, tools: runtime.registeredTools.map((tool) => tool.name), args, autoExit: process.env.PI_SUBAGENT_AUTO_EXIT, cwd: process.cwd(), env: Object.fromEntries(Object.entries(process.env).filter(([key]) => key.startsWith("PI_SUBAGENT_") || key === "PI_CODING_AGENT_DIR" || key === "PI_TERMINAL_RENAME_CONTEXT")) }));
+  writeFileSync(join(root, "received.tmp"), JSON.stringify({ context: session.buildSessionContext().messages, header: session.getHeader(), task, widgets, tools: runtime.registeredTools.map((tool) => tool.name), args, autoExit: process.env.PI_SUBAGENT_AUTO_EXIT, cwd: process.cwd(), env: Object.fromEntries(Object.entries(process.env).filter(([key]) => key.startsWith("PI_SUBAGENT_") || key === "PI_CODING_AGENT_DIR" || key === "PI_TERMINAL_RENAME_CONTEXT")) }));
   renameSync(join(root, "received.tmp"), join(root, "received.json"));
   await waitFor(() => existsSync(join(root, "finish")) ? true : undefined, "permission to complete delegated task", 120_000);
   if (task.includes("EXIT_WITHOUT_RESULT")) {
+    appendFileSync(sessionFile, '{"type":"message","id":"unfinished');
     process.exitCode = 2;
     break;
   }
   const answer = task.match(/Return the exact phrase: ([^\n]+)/)?.[1];
   if (!answer) throw new Error(`Fixture cannot process task: ${task}`);
-  if (task.includes("FINAL_ERROR")) {
-    const partial = { type: "message", id: `fixture-partial-${branch.length}`, parentId: branch.at(-1)?.id ?? null,
+  if (task.includes("FINAL_ERROR") || task.includes("OMITTED_FINAL")) {
+    const partial = { type: "message", id: `fixture-partial-${assistantCount++}`, parentId: session.getLeafId(),
       message: { role: "assistant", stopReason: "toolUse", content: [{ type: "text", text: answer }] } };
-    branch.push(partial);
     appendFileSync(sessionFile, JSON.stringify(partial) + "\n");
+    session = SessionManager.open(sessionFile);
   }
   const message = {
-    role: "assistant", content: task.includes("FINAL_ERROR") ? [] : [{ type: "text", text: task.includes("LONG_OUTPUT")
+    role: "assistant", provider: ctx.model.provider, model: ctx.model.id,
+    usage: { input: 10, output: 5, cacheRead: 2, cacheWrite: 1, totalTokens: 18, cost: { total: 0.01 } },
+    content: task.includes("FINAL_ERROR") ? [] : [{ type: "text", text: task.includes("LONG_OUTPUT")
       ? "complete output start\n" + "retained evidence line\n".repeat(2000) + "complete output end" : answer }],
     stopReason: task.includes("FINAL_ERROR") ? "error" : task.includes("TRUNCATED") ? "length" : task.includes("ABORTED") ? "aborted" : "stop",
     ...(task.includes("FINAL_ERROR") ? { errorMessage: "provider retries exhausted: 529 overloaded" } : {}),
   };
-  const entry = { type: "message", id: `fixture-answer-${branch.length}`, parentId: branch.at(-1)?.id ?? null, message };
+  const entry = { type: "message", id: `fixture-answer-${assistantCount++}`, parentId: session.getLeafId(), message };
   if (!task.includes("NO_OUTPUT")) {
-    branch.push(entry);
     appendFileSync(sessionFile, JSON.stringify(entry) + "\n");
   }
+  session = SessionManager.open(sessionFile);
+  if (abandonedLeaf) session.branch(abandonedLeaf);
+  if (task.includes("USAGE_EVENTS")) {
+    const cost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.02 };
+    session.appendUsage("cache_warm", ctx.model.provider, ctx.model.id, { input: 3, output: 4, cacheRead: 0, cacheWrite: 0, totalTokens: 7, cost });
+    session.appendCompaction("Settled work retained.", entry.id, 18, undefined, true,
+      { input: 7, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 8, cost: { ...cost, total: 0.03 } });
+  }
+  if (task.includes("CONTEXT_EDIT")) session.appendContextEdit(entry.id, { content: "The effective revised answer." });
+  if (task.includes("OMITTED_FINAL")) session.appendContextEdit(entry.id, null);
+  if (task.includes("FOLLOWUP_WITHOUT_ANSWER")) session.appendCustomMessageEntry("fixture_followup", "New instruction without a response.", false);
+  if (task.includes("PARTIAL_TAIL")) appendFileSync(sessionFile, '{"type":"message","id":"unfinished');
   await runtime.emit("agent_end", { messages: [message] }, ctx);
   if (shutdown) throw new Error("Child shut down before final settlement");
   await runtime.emit("agent_before_settle", { outcome: message.stopReason === "error" ? "error" : message.stopReason === "aborted" ? "aborted" : "completed" }, ctx);

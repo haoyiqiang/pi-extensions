@@ -142,7 +142,7 @@ You are a specialized agent that does X...
 
 - `standalone` — fresh session, no lineage link to the caller (default)
 - `lineage-only` — fresh session with `parentSession` linkage for discovery/fork UX, but no copied turns
-- `fork` — child session seeded with the caller's conversation context
+- `fork` — child session seeded from the caller's **live active branch**, up to the complete entry boundary before an executing tool batch; the triggering instruction is retained and the child task enters as a new instruction. Abandoned branches and half-completed tool batches are not copied. Pi interprets inherited compaction and context edits, so the child sees the same effective history rather than raw JSONL order.
 
 ### auto-exit
 
@@ -157,7 +157,11 @@ Set `auto-exit: false` explicitly for a **resident** role. Each settled task sti
 
 Managed Pi children retain structured result artifacts containing the complete output, outcome, error diagnostic and exact session-entry source before notifying the parent or requesting shutdown. Success, final failure, manual abort, truncated output and no new output are distinct outcomes. Failure can include useful partial work; neither truncation nor absence of a new answer is shown as unconditional success. A resumed task cannot reuse an earlier task's answer.
 
-Automatic parent messages are bounded previews with a `Full result:` artifact reference. The `subagent_result` message details also include `outcome`, `resultFile` and `source`. Results do not depend on screen text, and a lost surface or failed diagnostic read cannot reverse an already saved outcome. A shell-level exit without a settled result is not success.
+Automatic parent messages are bounded previews with a `Full result:` artifact reference. The `subagent_result` message details also include `outcome`, `resultFile`, `source`, and the accepted work `generation`. Source references include the exact active leaf, final-response entry, output entries and starting leaf; managed instructions additionally retain their consumed instruction entry and generation association. Output uses Pi's branch/compaction/context-edit projection, but final failure/abort/truncation metadata still comes from the actual terminal response. An omitted final answer is not replaced by an intermediate or historical answer.
+
+The retained artifact and notification details separate `usage.generation` (new entries since this work began) from `usage.session` (all recorded work, including inherited history and abandoned branches). Both account for assistant, nested-tool, compaction and standalone usage; removing context does not refund usage. The context gauge shows the last response's request occupancy using exact matching model metadata. Unknown capacity is explicitly labelled unknown, with no guessed percentage.
+
+Results do not depend on screen text or rereading a possibly unfinished JSONL tail, and a lost surface or failed diagnostic read cannot reverse an already saved outcome. A shell-level exit without a settled result is not success.
 
 This slice retains result evidence but does **not** yet promise result replay or notification deduplication across parent restarts/reloads. Durable inbox transport and correlated multi-question replies are separate lifecycle slices. The optional Claude Code path retains its legacy completion handling; the managed-Pi settlement guarantees do not cover it.
 

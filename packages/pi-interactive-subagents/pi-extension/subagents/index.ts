@@ -37,7 +37,6 @@ import {
   getSessionId,
   readSubagentLoadout,
   seedSubagentSessionFile,
-  summarizeSessionStats,
   writeSubagentLoadout,
   type SessionStats,
   type SubagentLoadout,
@@ -426,22 +425,9 @@ function formatTokens(n: number): string {
   return n < 1000 ? String(n) : n < 10000 ? `${(n / 1000).toFixed(1)}k` : `${Math.round(n / 1000)}k`;
 }
 
-/**
- * Known context-window sizes by model id substring, used for the context-usage
- * gauge. Unknown models fall back to a window-less "Nk ctx" label.
- */
-function contextWindowFor(model: string | null | undefined): number | undefined {
-  if (!model) return undefined;
-  const m = model.toLowerCase();
-  if (m.includes("claude")) return 200_000;
-  if (m.includes("gpt-4.1") || m.includes("gpt-4o")) return 128_000;
-  if (m.includes("gemini")) return 1_000_000;
-  return undefined;
-}
-
 /** Context-usage gauge: "18.0%/200k" when window known, else "37k ctx". */
 function formatContextUsage(tokens: number, contextWindow: number | undefined): string {
-  if (!contextWindow) return `${formatTokens(tokens)} ctx`;
+  if (!contextWindow) return `${formatTokens(tokens)} ctx (capacity unknown)`;
   const pct = (tokens / contextWindow) * 100;
   const maxStr =
     contextWindow >= 1_000_000
@@ -644,6 +630,7 @@ interface SubagentResult {
   keepAlive?: boolean;
   /** Aggregate usage/model/tool stats parsed from the completed session file. */
   stats?: SessionStats;
+  usage?: SubagentOutcome["usage"];
 }
 
 /**
@@ -767,7 +754,7 @@ async function confirmSubagentReady(running: RunningSubagent): Promise<void> {
       const exited = existsSync(processExitFile(running.sessionFile, running.id));
       // Native inventory can outlast the entire child run. Sample readiness and
       // durable settlement after absence/exit so fast completion wins that race.
-      if (readSubagentLiveness(running.sessionFile, running.id) !== null || readSubagentOutcomes(running.sessionFile, running.id).length) {
+      if (readSubagentLiveness(running.sessionFile, running.id) !== null || readSubagentOutcomes(running.sessionFile, running.id, running.lastResultSequence, running.generation).length) {
         recordTerminal(running, "ready");
         return;
       }
@@ -1218,7 +1205,6 @@ export const __test__ = {
   formatElapsed,
   formatTokens,
   formatContextUsage,
-  contextWindowFor,
   formatUsageSegments,
   widgetIcon,
 };
@@ -1324,6 +1310,7 @@ async function launchSubagent(
         parentSessionFile: sessionFile,
         childSessionFile: subagentSessionFile,
         childCwd: targetCwdForSession,
+        ...(launchBehavior.seededSessionMode === "fork" ? { parentBranch: ctx.sessionManager.getBranch() } : {}),
       });
     }
 
@@ -1381,6 +1368,8 @@ async function launchSubagent(
       `PI_SUBAGENT_AUTO_EXIT=${loadout.autoExit ? "1" : "0"}`,
       `PI_SUBAGENT_SESSION=${shellEscape(subagentSessionFile)}`,
       `PI_SUBAGENT_ID=${shellEscape(id)}`,
+      `PI_SUBAGENT_RUN_ID=${shellEscape(record.id)}`,
+      `PI_SUBAGENT_GENERATION=${record.generation}`,
       `PI_SUBAGENT_ACTIVITY_FILE=${shellEscape(activityFile)}`,
     ];
     let taskArg = fullTask;
@@ -1496,10 +1485,10 @@ async function watchSubagent(
       for (;;) {
         observationSignal.throwIfAborted();
         if (!isCurrent(running)) return null;
-        const published = readSubagentOutcomes(sessionFile, running.id, running.lastResultSequence)[0];
+        const published = readSubagentOutcomes(sessionFile, running.id, running.lastResultSequence, running.generation)[0];
         if (published) {
           const { result, resultFile } = published;
-          const stats = summarizeSessionStats(sessionFile);
+          const stats = result.usage?.generation;
           return {
             name, task, summary: result.output, sessionFile,
             sessionId: result.source.sessionId,
@@ -1509,6 +1498,7 @@ async function watchSubagent(
             keepAlive: !result.autoExit || result.outcome === "aborted",
             ...(result.errorMessage ? { errorMessage: result.errorMessage } : {}),
             ...(stats ? { stats } : {}),
+            ...(result.usage ? { usage: result.usage } : {}),
           };
         }
         const now = Date.now();
@@ -1528,13 +1518,16 @@ async function watchSubagent(
         if (exited || running.terminalState === "absent") {
           // Publication can race inventory/process observation. Durable results
           // always win, even after the surface is already gone.
-          if (readSubagentOutcomes(sessionFile, running.id, running.lastResultSequence).length > 0) continue;
+          if (readSubagentOutcomes(sessionFile, running.id, running.lastResultSequence, running.generation).length > 0) continue;
           if (running.settled) return null;
           const errorMessage = exited
             ? `Child process exited (${readFileSync(processExitFile(sessionFile, running.id), "utf8")}) without a durable settled result`
             : `Terminal surface ${surface} confirmed absent before settlement; delegated work was interrupted. History is retained; no automatic restart.`;
           writeSubagentOutcome({
-            version: 1, executionId: running.id, sequence: (running.lastResultSequence ?? 0) + 1, outcome: "failed",
+            version: 1, executionId: running.id,
+            sequence: Math.max(running.lastResultSequence ?? 0, readSubagentOutcomes(sessionFile, running.id).at(-1)?.result.sequence ?? 0) + 1,
+            outcome: "failed",
+            subagentId: running.subagentId, generation: running.generation,
             output: "", errorMessage, autoExit: true,
             source: {
               kind: exited ? "process_exit" : "surface_absent", sessionFile, sessionId: getSessionId(sessionFile) ?? running.id,
@@ -1689,6 +1682,7 @@ function startSubagentWatch(
             ...(result.errorMessage ? { errorMessage: result.errorMessage.slice(0, 1000) } : {}),
             ...(result.claudeSessionId ? { claudeSessionId: result.claudeSessionId } : {}),
             ...(result.stats ? { stats: result.stats } : {}),
+            ...(result.usage ? { usage: result.usage } : {}),
           },
         },
         { triggerTurn: true, deliverAs: "steer" },
@@ -2208,6 +2202,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         resumeEnvParts.push(`PI_SUBAGENT_NAME=${shellEscape(name)}`);
         resumeEnvParts.push(`PI_SUBAGENT_SESSION=${shellEscape(sessionPath)}`);
         resumeEnvParts.push(`PI_SUBAGENT_ID=${shellEscape(id)}`);
+        resumeEnvParts.push(`PI_SUBAGENT_RUN_ID=${shellEscape(record.id)}`);
+        resumeEnvParts.push(`PI_SUBAGENT_GENERATION=${record.generation}`);
         resumeEnvParts.push(`PI_SUBAGENT_ACTIVITY_FILE=${shellEscape(activityFile)}`);
         resumeEnvParts.push(`PI_SUBAGENT_AUTO_EXIT=${autoExit ? "1" : "0"}`);
         const resumeEnvPrefix = resumeEnvParts.join(" ") + " ";
@@ -2349,9 +2345,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         // Usage line: ↑in ↓out R… W… $cost · context-gauge (color-coded by %).
         let usageLine: string | null = null;
         if (stats) {
-          const segs = formatUsageSegments(stats).map((s) => theme.fg("dim", s));
+          const segs = ["This generation:", ...formatUsageSegments(stats)].map((s) => theme.fg("dim", s));
           if (stats.contextTokens > 0) {
-            const window = contextWindowFor(stats.model);
+            const window = stats.contextWindow;
             const ctxStr = formatContextUsage(stats.contextTokens, window);
             const pct = window ? (stats.contextTokens / window) * 100 : 0;
             const coloredCtx =
@@ -2371,6 +2367,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         // Build content for the box
         const contentLines = [header];
         if (usageLine) contentLines.push(usageLine);
+        if (details.usage?.session) contentLines.push(theme.fg("dim", `Whole session (includes inherited history): ${formatUsageSegments(details.usage.session).join(" ") || "no recorded usage"}`));
 
         if (options.expanded) {
           // Full view: complete summary + session info
