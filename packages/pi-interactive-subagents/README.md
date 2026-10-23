@@ -27,7 +27,7 @@ Spawn several in parallel — they run concurrently and steer results back indep
 - Child readiness has a 15-second budget after native creation. Failed startup cleans up its owned surface and confirms absence where possible. Closure reconciliation has a 3-second budget after the bounded backend close call; backend command/inventory timeouts are additional finite bounds. The obsolete `PI_SUBAGENT_SHELL_READY_DELAY_MS` setting is no longer used.
 - Failed or unconfirmed closure retains an inspectable `<session>.terminal-<execution>.json` diagnostic and ownership, and emits a status message with that path. It does not reverse durable success or claim a completed cleanup. An ambiguous create receipt retains its launch script/diagnostic and is never automatically retried; an unidentified surface may require manual terminal inspection.
 
-Persistent run facts now back identity, status and the widget. Full watcher takeover, inbox transport and parent recovery still belong to subsequent lifecycle slices; reading a record does not restart or take over its child.
+Persistent run facts back identity, status and the widget. Parent startup/reload reconnects observation and notification delivery without restarting the child's Pi writer; querying a record is still read-only. See [Reload and parent recovery](#reload-and-parent-recovery).
 
 ## Tools
 
@@ -99,7 +99,7 @@ Each parent's `artifacts/<sessionId>/subagent-runs.json` retains ownership, chil
 
 The managed-Pi startup script runs a **single-use writer gate before Pi opens the transcript** (opening can itself migrate/write history). Its persistent claim outlives the parent process and is reusable only after the gate observes Pi's actual exit. Replayed native startup commands fail before opening Pi. Heartbeat age, a completed task, a missing surface and a parent restart are **not** writer-exit proof. A killed exit observer or an orphaned short mutation lock is retained for inspection rather than stolen on a stale timeout. This deliberately favors a diagnosable refusal over two writers.
 
-A replacement controller can query retained state and publish instructions to the existing fenced receiver without taking over its writer. Old-generation observation and cleanup cannot update or close its replacement. `subagent_status` and the widget project retained outcomes; completed resident surfaces are not counted as running delegated work. Full parent-runtime reload takeover, suspension and notification replay remain separate lifecycle work. Optional Claude children retain legacy terminal messaging and are not covered by the managed-Pi inbox guarantees.
+A replacement controller can query retained state and publish instructions to the existing fenced receiver without taking over its writer. Old-generation observation and cleanup cannot update or close its replacement. `subagent_status` and the widget project retained outcomes; completed resident surfaces are not counted as running delegated work. Optional Claude children retain legacy terminal messaging and are not covered by the managed-Pi inbox/recovery guarantees.
 
 **Resume replays the original loadout.** Before launch, a versioned, validated `<session>.loadout.json` snapshot records the actual tool allowlist and extension paths, qualified model, thinking, identity/prompt mode, selected skill paths, cwd/config root, isolation options, delegation policy and auto-exit/resident policy. Editing, moving or deleting the role does not change a resumed child. Required resources and model availability are checked again; references pin paths, not dependency file contents.
 
@@ -186,7 +186,17 @@ The retained artifact and notification details separate `usage.generation` (new 
 
 Results do not depend on screen text or rereading a possibly unfinished JSONL tail, and a lost surface or failed diagnostic read cannot reverse an already saved outcome. A shell-level exit without a settled result is not success.
 
-This slice retains result evidence but does **not** yet promise result replay or notification deduplication across parent restarts/reloads. Durable inbox transport and correlated multi-question replies are separate lifecycle slices. The optional Claude Code path retains its legacy completion handling; the managed-Pi settlement guarantees do not cover it.
+### Reload and parent recovery
+
+`/reload` detaches the old observer's watchers, timers and UI bindings. It never closes a child merely because observation stopped. The replacement runtime reconstructs owned collaborators, including completed residents, and observes their existing writers. Epoch and work-generation fences also apply after awaits: stale callbacks cannot publish state, close surfaces or send into the replacement parent.
+
+Results, questions and status notifications have stable `details.eventId` values and are retained in an fsynced external outbox **before** Pi is called. `subagent_status.notifications` distinguishes `pending`, `dispatched-unconfirmed` and `persisted`. Pi's notification APIs return void; neither that return nor the manager's in-memory entries confirms history persistence. Recovery reads the parent's actual JSONL bytes, tolerating an incomplete final record, and suppresses events already in persisted custom messages. Deduplication covers the entire parent history, including abandoned branches and messages hidden by compaction/context edits; it is not a change to current-branch result provenance. Records remain available after confirmation.
+
+A crash before notification is repaired from the retained outcome/event. A crash after the parent stored the message but before any acknowledgement does not trigger another logical notification. Pi keeps its queues on extension reload; process-local dispatch tracking avoids re-enqueueing those same pending events. A notification without disk confirmation stays inspectable and recoverable, not falsely acknowledged. This does not promise fsync/power-loss durability for Pi's JSONL or exactly-once external effects.
+
+Only one parent observer publishes notifications and performs terminal cleanup. Its claim is released on orderly detach or reclaimed after **positive process absence**. A live/reused PID, permission ambiguity, unknown terminal/backend or an orphaned short mutation lock is not takeover/relaunch authority. A replacement parent reconnects live children and delivers retained terminal outcomes without a UI. Confirmed-dead work with no settled result is reported as interrupted/failed with history retained; it is **not automatically rerun**. Inbox consumption/effect uncertainty remains paused under ADR-0001, and reload is not user authorization.
+
+Normal quit/session-switch suspension, automatic continuation of safely suspended work, explicit stop, multiple questions and correlated replies remain later lifecycle slices. The current single-question slot is atomically retained for parent-crash recovery, not a claim of a complete question/reply protocol. The optional Claude Code path retains its legacy completion handling and is outside managed-Pi recovery guarantees.
 
 ### interactive
 
@@ -277,7 +287,9 @@ This includes the [#3 native-tool prefactor](https://github.com/haoyiqiang/pi-ex
 [#5 settled outcomes](https://github.com/haoyiqiang/pi-extensions/issues/5) and
 [#6 terminal startup/liveness](https://github.com/haoyiqiang/pi-extensions/issues/6) and
 [#7 persistent identity/single-writer status](https://github.com/haoyiqiang/pi-extensions/issues/7) and
-[#8 durable inbox/uncertainty](https://github.com/haoyiqiang/pi-extensions/issues/8), not
+[#8 durable inbox/uncertainty](https://github.com/haoyiqiang/pi-extensions/issues/8),
+[#9 branch-aware context/results](https://github.com/haoyiqiang/pi-extensions/issues/9) and
+[#10 reload/parent recovery](https://github.com/haoyiqiang/pi-extensions/issues/10), not
 all of [Spec #2](https://github.com/haoyiqiang/pi-extensions/issues/2). Public-tool tests
 cover role aliases/precedence/visibility, missing versus empty tools, invalid resources
 and snapshots, model/cwd/identity/skill/isolation replay, lifetime policy, nested refusals
@@ -294,8 +306,11 @@ redelivery, uncertain in-memory/transcript consumption, explicit retry/reconcili
 retained IDs and independent target routing. Test-file concurrency is bounded; the
 real-Pi queue fixtures use a controlled controller clock around cold SDK startup while
 still requiring the real bridge-ready signal. Production readiness bounds are unchanged
-and tested separately by the terminal lifecycle suite. Complete parent recovery remains
-a separate slice.
+and tested separately by the terminal lifecycle suite. Real parent-controller exits and
+replacement processes exercise both notification crash windows, live observation takeover,
+question recovery and one-writer preservation; a supported-Pi parent reload additionally
+checks deduplication against real history on an abandoned/context-edited branch. Normal
+suspension/continuation and explicit stop remain separate slices.
 See the repository `GLOSSARY.md` and `docs/adr/0001-pause-uncertain-delegated-actions.md`
 for the reviewed domain language and recovery policy.
 

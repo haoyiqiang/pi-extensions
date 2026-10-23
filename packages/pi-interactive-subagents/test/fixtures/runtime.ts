@@ -140,6 +140,10 @@ for (;;) {
   await runtime.emit("agent_before_settle", { outcome: message.stopReason === "error" ? "error" : message.stopReason === "aborted" ? "aborted" : "completed" }, ctx);
   if (pending.length) { task = undefined; continue; }
   await runtime.emit("agent_settled", {}, ctx);
+  if (shutdown && existsSync(join(root, "hold-exit"))) {
+    writeFileSync(join(root, "waiting-exit"), "outcome retained, process still live");
+    await waitFor(() => existsSync(join(root, "release-exit")) ? true : undefined, "permission for writer exit", 120_000);
+  }
   if (task.includes("LONG_OUTPUT")) {
     writeFileSync(join(root, "diagnostics-unavailable"), "gone");
     writeFileSync(join(root, "surface"), "gone");

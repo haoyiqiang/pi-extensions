@@ -15,11 +15,12 @@
 import type { ExtensionAPI, ExtensionContext, SessionMessageEntry } from "@earendil-works/pi-coding-agent";
 import { Box, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { createSubagentActivityRecorder, LIVENESS_INTERVAL_MS, writeSubagentLiveness } from "./activity.ts";
 import { readSubagentOutcomes, writeSubagentOutcome } from "./outcome.ts";
 import { createInboxReceiver } from "./inbox.ts";
-import { writerFile } from "./runs.ts";
+import { replace, writerFile } from "./runs.ts";
 import { summarizeEntryUsage } from "./session.ts";
 
 /**
@@ -408,11 +409,12 @@ export default function (pi: ExtensionAPI) {
       awaitingAnswer = true;
       recorder.askQuestion();
       const askData = {
+        eventId: `subagent-question:${randomUUID()}`, executionId,
         name: process.env.PI_SUBAGENT_NAME ?? "subagent",
         agent: process.env.PI_SUBAGENT_AGENT ?? "",
         question: params.question,
       };
-      writeFileSync(`${sessionFile}.ask`, JSON.stringify(askData));
+      replace(`${sessionFile}.ask`, askData);
 
       return {
         content: [

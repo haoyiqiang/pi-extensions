@@ -294,6 +294,124 @@ test("revisited managed context is not a fresh reply and cannot settle work wait
   });
 });
 
+test("reload detaches observation without closing live work and reconnects result delivery without a UI", { timeout: 30_000 }, async () => {
+  await withIdentity(async ({ call, terminal, parent, ctx }) => {
+    const launched = await call("subagent", { agent: "echo", task });
+    await parent.emit("session_shutdown", { reason: "reload" }, ctx);
+    assert.equal(readFileSync(join(terminal, "surface"), "utf8"), "open");
+    writeFileSync(join(terminal, "finish"), "complete while parent detached");
+    await waitFor(() => existsSync(join(terminal, "control-pid")) && existsSync(`${launched.details.sessionFile}.process-exit-${JSON.parse(readFileSync(join(terminal, "received.json"), "utf8")).env.PI_SUBAGENT_ID}`) ? true : undefined, "child exit after retained result");
+    const replacement = createMockExtensionApi();
+    subagents(replacement.api);
+    const restored = { ...ctx, hasUI: false };
+    try {
+      await replacement.emit("session_start", { reason: "reload" }, restored);
+      const notification = await waitFor(() => replacement.sentMessages.find((e: any) => e.message.customType === "subagent_result"), "recovered result notification");
+      assert.equal(notification.message.details.id, launched.details.id);
+      assert.equal(typeof notification.message.details.eventId, "string");
+      assert.match(notification.message.content, /identity retained\./);
+      assert.equal(parent.sentMessages.filter((e: any) => e.message.customType === "subagent_result").length, 0, "detached callbacks cannot send");
+      const status = await replacement.tool("subagent_status").execute("restored", { id: launched.details.id }, undefined, undefined, restored);
+      assert.equal(status.details.subagent.state, "completed");
+      const commands = readFileSync(join(terminal, "commands.jsonl"), "utf8").trim().split("\n").map((line: string) => JSON.parse(line));
+      assert.equal(commands.filter((e: any) => e.args[0] === "split-window").length, 1, "recovery never starts another writer");
+    } finally { await replacement.emit("session_shutdown", { reason: "quit" }, restored); }
+  });
+});
+
+test("detached cleanup cannot close a child or send into a replacement parent context", { timeout: 30_000 }, async () => {
+  await withIdentity(async ({ call, terminal, parent, ctx, sessions }) => {
+    writeFileSync(join(terminal, "hold-exit"), "retain a live writer after settlement");
+    const launched = await call("subagent", { agent: "echo", task });
+    writeFileSync(join(terminal, "finish"), "settle");
+    await waitFor(() => parent.sentMessages.find((e: any) => e.message.customType === "subagent_result"), "result before deferred cleanup");
+    await parent.emit("session_shutdown", { reason: "reload" }, ctx);
+    const nextFile = join(sessions, "another-parent.jsonl");
+    writeFileSync(nextFile, JSON.stringify({ type: "session", version: 3, id: "another-parent" }) + "\n");
+    const next = { ...ctx, sessionManager: { ...ctx.sessionManager, getSessionFile: () => nextFile, getSessionId: () => "another-parent" } };
+    await parent.emit("session_start", { reason: "new" }, next);
+    try {
+      writeFileSync(join(terminal, "release-exit"), "positive exit");
+      const executionId = JSON.parse(readFileSync(join(terminal, "received.json"), "utf8")).env.PI_SUBAGENT_ID;
+      await waitFor(() => existsSync(`${launched.details.sessionFile}.process-exit-${executionId}`) ? true : undefined, "writer exit after detachment");
+      const listed = await parent.tool("subagent_status").execute("next", {}, undefined, undefined, next);
+      assert.deepEqual(listed.details.subagents, []);
+      const commands = readFileSync(join(terminal, "commands.jsonl"), "utf8").trim().split("\n").map((line: string) => JSON.parse(line));
+      assert.equal(commands.filter((e: any) => e.args[0] === "kill-pane").length, 0, "old deferred cleanup has no surface authority after detach");
+      assert.equal(parent.sentMessages.filter((e: any) => e.message.customType === "subagent_result").length, 1);
+    } finally { await parent.emit("session_shutdown", { reason: "quit" }, next); }
+  });
+});
+
+test("reconstruction reports confirmed-dead work without a result and retains unknown inventory without closing or restarting", { timeout: 30_000 }, async () => {
+  await withIdentity(async ({ call, parent, ctx, terminal }) => {
+    const launched = await call("subagent", { agent: "echo", task: `${task}\nEXIT_WITHOUT_RESULT` });
+    await parent.emit("session_shutdown", { reason: "reload" }, ctx);
+    writeFileSync(join(terminal, "finish"), "exit without settlement");
+    const executionId = JSON.parse(readFileSync(join(terminal, "received.json"), "utf8")).env.PI_SUBAGENT_ID;
+    await waitFor(() => existsSync(`${launched.details.sessionFile}.process-exit-${executionId}`) ? true : undefined, "positive child process exit");
+    writeFileSync(join(terminal, "inventory-unknown"), "unavailable");
+    await parent.emit("session_start", { reason: "reload" }, ctx);
+    const event = await waitFor(() => parent.sentMessages.find((e: any) => e.message.customType === "subagent_result"), "recovered interruption");
+    assert.equal(event.message.details.outcome, "failed");
+    assert.equal(event.message.details.source.kind, "process_exit");
+    const status = (await call("subagent_status", { id: launched.details.id })).details.subagent;
+    assert.equal(status.state, "failed");
+    assert.equal(status.liveness.surface, "unknown");
+    assert.equal(status.liveness.writer, "exited");
+    const commands = readFileSync(join(terminal, "commands.jsonl"), "utf8").trim().split("\n").map((line: string) => JSON.parse(line));
+    assert.equal(commands.filter((e: any) => e.args[0] === "split-window").length, 1);
+    assert.equal(commands.filter((e: any) => e.args[0] === "kill-pane").length, 0, "inventory uncertainty is not cleanup authority");
+  });
+});
+
+test("a pending question survives a real parent crash before notification without relaunching its waiting child", { timeout: 60_000 }, async () => {
+  await withIdentity(async ({ root, parent, ctx, terminal }) => {
+    await parent.emit("session_shutdown", { reason: "reload" }, ctx);
+    process.env.SUBAGENT_TEST_PARENT_HISTORY = "crash-before-send";
+    const a = await controller(root);
+    const launched = await a.call("subagent", { agent: "echo", task: `${task}\nASK_AFTER_INPUT` });
+    const exited = new Promise<void>((resolve) => a.child.once("exit", () => resolve()));
+    writeFileSync(join(terminal, "finish"), "ask and wait");
+    await exited;
+    process.env.SUBAGENT_TEST_PARENT_HISTORY = "persist";
+    const b = await controller(root);
+    try {
+      const question = await waitFor(() => b.notifications.find((e: any) => e.message.customType === "subagent_question"), "recovered question");
+      assert.equal(question.message.details.question, "Confirm the next step?");
+      assert.equal(typeof question.message.details.eventId, "string");
+      const status = (await b.call("subagent_status", { id: launched.details.id })).details.subagent;
+      assert.equal(status.state, "running");
+      assert.equal(status.liveness.surface, "present");
+      assert.ok(status.notifications.some((e: any) => e.eventId === question.message.details.eventId && e.state === "persisted"));
+      const commands = readFileSync(join(terminal, "commands.jsonl"), "utf8").trim().split("\n").map((line: string) => JSON.parse(line));
+      assert.equal(commands.filter((e: any) => e.args[0] === "split-window").length, 1);
+      assert.equal(commands.filter((e: any) => e.args[0] === "kill-pane").length, 0);
+    } finally { b.child.kill("SIGKILL"); }
+  });
+});
+
+test("reload does not create a second logical status notification for the same lost-liveness evidence", { timeout: 30_000 }, async (t) => {
+  await withIdentity(async ({ call, parent, ctx }) => {
+    process.env.SUBAGENT_TEST_CLOCK = String(Date.now());
+    await call("subagent", { agent: "echo", task: `${task}\nLONG_PROVIDER` });
+    await parent.emit("session_shutdown", { reason: "reload" }, ctx);
+    t.mock.timers.enable({ apis: ["Date", "setInterval"], now: Date.now() + 86_400_000 });
+    try {
+      await parent.emit("session_start", { reason: "reload" }, ctx);
+      t.mock.timers.tick(1000);
+      const statuses = () => parent.sentMessages.filter((event: any) => event.message.customType === "subagent_status" && event.message.content.includes("unresponsive"));
+      assert.equal(statuses().length, 1);
+      const eventId = statuses()[0].message.details.eventId;
+      await parent.emit("session_shutdown", { reason: "reload" }, ctx);
+      await parent.emit("session_start", { reason: "reload" }, ctx);
+      t.mock.timers.tick(1000);
+      assert.equal(statuses().length, 1, "unchanged retained heartbeat evidence identifies one logical status event across reload");
+      assert.equal(statuses()[0].message.details.eventId, eventId);
+    } finally { t.mock.timers.reset(); }
+  });
+});
+
 test("invalid names and failed durable reservation fail before creating a surface", async () => {
   await withIdentity(async ({ call, terminal, sessions }) => {
     for (const name of ["", " ", "two\nlines", "escape\u001b", "a".repeat(65)]) {
@@ -331,6 +449,7 @@ test("legacy names remain inspectable but ambiguous aliases and unknown writers 
 });
 
 async function controller(root: string, parentId?: string) {
+  const notifications: any[] = [];
   const child = fork(join(testDir, "fixtures/controller.ts"), [root, ...(parentId ? [parentId] : [])], { execArgv: ["--import", fileURLToPath(import.meta.resolve("tsx"))], stdio: ["ignore", "ignore", "pipe", "ipc"] });
   let sequence = 0;
   const pending = new Map<number, (message: any) => void>();
@@ -340,11 +459,18 @@ async function controller(root: string, parentId?: string) {
     const timeout = setTimeout(() => { child.kill("SIGKILL"); reject(new Error(`Controller startup timeout: ${stderr}`)); }, 30_000);
     child.once("exit", (code) => { clearTimeout(timeout); reject(new Error(`Controller exited ${code}: ${stderr}`)); });
     child.on("message", (message: any) => {
-      if (message.ready) { clearTimeout(timeout); resolve(); }
+      if (message.notification) notifications.push(message.notification);
+      else if (message.ready) { clearTimeout(timeout); resolve(); }
       else { pending.get(message.sequence)?.(message); pending.delete(message.sequence); }
     });
   });
-  return { child, call(tool: string, params: any): Promise<any> {
+  return { child, notifications, lifecycle(lifecycle: string, params: any): Promise<any> {
+    const id = ++sequence;
+    return new Promise((resolve, reject) => {
+      pending.set(id, (message) => message.error ? reject(new Error(message.error)) : resolve(message.result));
+      child.send({ sequence: id, lifecycle, params });
+    });
+  }, call(tool: string, params: any): Promise<any> {
     const id = ++sequence;
     return new Promise((resolve, reject) => {
       pending.set(id, (message) => message.error ? reject(new Error(message.error)) : resolve(message.result));
@@ -394,6 +520,73 @@ test("cross-process concurrent resume queues both instructions behind one writer
       assert.equal(completed.state, "completed");
       assert.equal(completed.latestResult.generation, 2);
       assert.equal(JSON.parse(readFileSync(completed.latestResult.resultFile, "utf8")).output, "identity retained.");
+    } finally { a.child.kill("SIGKILL"); b.child.kill("SIGKILL"); }
+  });
+});
+
+test("real parent process replacement replays a crash-before-send event and deduplicates persisted history after a lost receipt", { timeout: 60_000 }, async () => {
+  await withIdentity(async ({ root, parent, ctx, terminal, call }) => {
+    await parent.emit("session_shutdown", { reason: "reload" }, ctx);
+    process.env.SUBAGENT_TEST_PARENT_HISTORY = "crash-before-send";
+    const first = await controller(root);
+    const launched = await first.call("subagent", { agent: "echo", task });
+    const exited = new Promise<void>((resolve) => first.child.once("exit", () => resolve()));
+    writeFileSync(join(terminal, "finish"), "complete before parent notification");
+    await exited;
+    assert.equal(first.notifications.filter((e: any) => e.message.customType === "subagent_result").length, 0);
+    process.env.SUBAGENT_TEST_PARENT_HISTORY = "crash-after-persist";
+    // Startup itself may die after writing the recovered message, before ready.
+    await assert.rejects(controller(root), /exited/);
+    const history = () => readFileSync(ctx.sessionManager.getSessionFile(), "utf8").trim().split("\n").map((line: string) => JSON.parse(line)).filter((entry: any) => entry.type === "custom_message" && entry.customType === "subagent_result");
+    assert.equal(history().length, 1, "the pre-notification crash is repaired by a real replacement controller");
+    assert.equal(typeof history()[0].details.eventId, "string");
+    process.env.SUBAGENT_TEST_PARENT_HISTORY = "persist";
+    const final = await controller(root);
+    try {
+      const recovered = (await final.call("subagent_status", { id: launched.details.id })).details.subagent;
+      assert.equal(recovered.state, "completed");
+      assert.equal(recovered.notifications.find((e: any) => e.eventId === history()[0].details.eventId).state, "persisted");
+      assert.equal(final.notifications.filter((e: any) => e.message.customType === "subagent_result").length, 0, "persisted message wins over a missing notification receipt");
+      assert.equal(history().length, 1);
+      const commands = readFileSync(join(terminal, "commands.jsonl"), "utf8").trim().split("\n").map((line: string) => JSON.parse(line));
+      assert.equal(commands.filter((e: any) => e.args[0] === "split-window").length, 1);
+    } finally { final.child.kill("SIGKILL"); }
+  });
+});
+
+test("only one live parent observer delivers, and a passive controller takes over after positive parent exit", { timeout: 60_000 }, async () => {
+  await withIdentity(async ({ root, parent, ctx, terminal, project }) => {
+    await parent.emit("session_shutdown", { reason: "reload" }, ctx);
+    delete process.env.SUBAGENT_TEST_PARENT_HISTORY; // No persistence receipt: a second live observer must still not send.
+    writeFileSync(join(project, ".pi/agents/resident.md"), "---\nname: resident\ntools: read\nauto-exit: false\n---\nStay available\n");
+    const a = await controller(root);
+    const first = await a.call("subagent", { agent: "resident", task });
+    const b = await controller(root);
+    try {
+      writeFileSync(join(terminal, "finish"), "settle once with two live controllers");
+      await waitFor(() => a.notifications.find((e: any) => e.message.customType === "subagent_result"), "authoritative observer delivery");
+      await b.lifecycle("session_shutdown", { reason: "reload" });
+      await b.lifecycle("session_start", { reason: "reload" });
+      // Reconstruction must not make the passive runtime a second sender.
+      const passive = await b.call("subagent_status", { id: first.details.id });
+      assert.equal(passive.details.subagent.state, "completed");
+      assert.equal(b.notifications.filter((e: any) => e.message.customType === "subagent_result").length, 0, "another live controller cannot become a second sender/cleanup owner");
+      await waitFor(() => existsSync(join(terminal, "parked")) ? true : undefined, "resident boundary");
+      for (const file of ["finish", "parked", "received.json"]) rmSync(join(terminal, file), { force: true });
+      const exit = new Promise<void>((resolve) => a.child.once("exit", () => resolve()));
+      a.child.kill("SIGKILL");
+      await exit;
+      await b.call("subagent_message", { id: first.details.id, message: "Return the exact phrase: same live writer after parent loss." });
+      await waitFor(() => existsSync(join(terminal, "received.json")) ? true : undefined, "same writer input after takeover");
+      writeFileSync(join(terminal, "finish"), "complete followup");
+      const result = await waitFor(() => b.notifications.find((e: any) => e.message.customType === "subagent_result" && e.message.details.generation === 2), "new observer after positive parent death");
+      assert.match(result.message.content, /same live writer after parent loss\./);
+      const status = (await b.call("subagent_status", { id: first.details.id })).details.subagent;
+      assert.equal(status.liveness.surface, "present");
+      assert.equal(status.executionId, passive.details.subagent.executionId);
+      const commands = readFileSync(join(terminal, "commands.jsonl"), "utf8").trim().split("\n").map((line: string) => JSON.parse(line));
+      assert.equal(commands.filter((e: any) => e.args[0] === "split-window").length, 1, "observation takeover does not relaunch the resident writer");
+      assert.equal(commands.filter((e: any) => e.args[0] === "kill-pane").length, 0);
     } finally { a.child.kill("SIGKILL"); b.child.kill("SIGKILL"); }
   });
 });
