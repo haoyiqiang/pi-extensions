@@ -14,6 +14,14 @@ interface Instruction {
   subagentId: string;
   executionId: string;
   generation: number;
+  replyTo?: string;
+}
+interface Question {
+  questionId: string;
+  eventId: string;
+  executionId: string;
+  subagentId?: string;
+  question: string;
 }
 export interface Authorization {
   actionId: string;
@@ -85,7 +93,7 @@ export class SubagentInbox {
         ?? attempts.find((r) => r.phase === "accepted");
       const authorization = active && mailbox.authorizations.find((a) => a.actionId === active.attemptId);
       const association = active && associations.get(active.attemptId);
-      const mismatched = association && (association.content !== message.content || association.details.messageId !== message.id || association.details.executionId !== active?.executionId);
+      const mismatched = association && (association.content !== message.content || association.details.messageId !== message.id || association.details.executionId !== active?.executionId || association.details.replyTo !== message.replyTo);
       const entryId = association && !mismatched ? association.id : undefined;
       const delivery = entryId ? "consumed" : active ? "accepted" : "queued";
       const uncertainReason = mismatched ? "Persisted instruction differs from the exact managed payload/context; reconcile before proceeding."
@@ -100,12 +108,18 @@ export class SubagentInbox {
     return { messages, paused: messages.some((message) => !!message.uncertainty) };
   }
   /** The same short cross-process lock allocates order, deduplicates, and reserves a writer before launch. */
-  enqueue(run: SubagentRun, input: { message?: string; messageId?: string; deliverAs?: DeliveryMode; authorization?: Authorization }, prepare: () => { run: SubagentRun; launch: boolean; waitingForExit?: boolean }) {
+  enqueue(run: SubagentRun, input: { message?: string; messageId?: string; deliverAs?: DeliveryMode; replyTo?: string; authorization?: Authorization }, prepare: () => { run: SubagentRun; launch: boolean; waitingForExit?: boolean }) {
     return transaction(this.directory, () => {
       const mailbox = this.read();
       const id = input.messageId ?? randomUUID();
       const existing = input.message === undefined ? undefined : mailbox.messages.find((message) => message.id === id);
-      if (existing && (existing.content !== input.message || existing.deliverAs !== (input.deliverAs ?? "auto"))) throw new Error("Message ID conflict: the same id cannot identify different content or delivery mode");
+      if (existing && (existing.content !== input.message || existing.deliverAs !== (input.deliverAs ?? "auto") || existing.replyTo !== input.replyTo)) throw new Error("Message ID conflict: the same id cannot identify different content or delivery mode");
+      if (input.replyTo !== undefined) {
+        if (input.message === undefined) throw new Error("A replyTo requires a message");
+        const question = this.questions().find((q) => q.questionId === input.replyTo && (!q.subagentId || q.subagentId === run.id));
+        if (!question) throw new Error("Unknown or invalid question replyTo for this child; no reply accepted");
+        if (question.replyMessageId && question.replyMessageId !== existing?.id) throw new Error("Question already has a queued or answered reply; use the same messageId for a retry");
+      }
       if (input.authorization) {
         const uncertainty = this.snapshot(run).messages.find((message) => message.uncertainty?.actionId === input.authorization!.actionId)?.uncertainty;
         if (!uncertainty) throw new Error("Authorization must name the exact current uncertain actionId; no uncertainty cleared");
@@ -126,9 +140,29 @@ export class SubagentInbox {
         }
       }
       if (input.message !== undefined && !existing) mailbox.messages.push({ id, sequence: (mailbox.messages.at(-1)?.sequence ?? 0) + 1, content: input.message, deliverAs: input.deliverAs ?? "auto",
-        subagentId: target.run.id, executionId: target.run.executionId, generation: target.run.generation });
+        subagentId: target.run.id, executionId: target.run.executionId, generation: target.run.generation, ...(input.replyTo ? { replyTo: input.replyTo } : {}) });
       replace(join(this.directory, "messages.json"), mailbox);
       return { ...target, message: this.snapshot(target.run).messages.find((m) => m.id === id), paused };
+    });
+  }
+  ask(input: Omit<Question, "questionId" | "eventId">) {
+    return transaction(this.directory, () => {
+      if (existsSync(writerFile(this.sessionFile)) && JSON.parse(readFileSync(writerFile(this.sessionFile), "utf8")).executionId !== input.executionId) throw new Error("Stale question writer; no question accepted");
+      const questionId = randomUUID();
+      const question = { ...input, questionId, eventId: `subagent-question:${questionId}` };
+      replace(join(this.directory, `question-${questionId}.json`), question);
+      return question;
+    });
+  }
+  questions() {
+    if (!existsSync(this.directory)) return [];
+    const messages = this.snapshot().messages;
+    return readdirSync(this.directory).filter((name) => name.startsWith("question-") && name.endsWith(".json")).map((name) => {
+      const question: Question = JSON.parse(readFileSync(join(this.directory, name), "utf8"));
+      if (!question.questionId || !question.question || !question.eventId) throw new Error(`Invalid retained question: ${name}`);
+      const reply = messages.find((message) => message.replyTo === question.questionId);
+      const answered = !!reply?.evidence.transcriptEntryId && reply.evidence.contextObserved;
+      return { ...question, state: answered ? "answered" : reply ? "reply-queued" : "pending", replyMessageId: reply?.id };
     });
   }
   pending() {
@@ -165,14 +199,15 @@ export function createInboxReceiver(pi: ExtensionAPI, sessionFile: string, execu
         inbox.save(receipt); // Crash after this point is NOT permission to replay.
         owned.set(message.id, receipt);
         pi.sendMessage({ customType: INSTRUCTION_TYPE, content: message.content, display: true,
-          details: { messageId: message.id, attemptId: receipt.attemptId, subagentId: message.subagentId, executionId, generation: message.generation, sequence: message.sequence } },
+          details: { messageId: message.id, attemptId: receipt.attemptId, subagentId: message.subagentId, executionId, generation: message.generation, sequence: message.sequence, ...(message.replyTo ? { replyTo: message.replyTo } : {}) } },
         { triggerTurn: true, deliverAs: message.deliverAs === "followUp" ? "followUp" : "steer" });
       }
     } finally { pumping = false; }
   }
   return {
-    start(ctx: ExtensionContext) {
+    start(ctx: ExtensionContext, reloaded = false) {
       context = ctx;
+      if (reloaded) awaitingInitialRun = false;
       // A replacement receiver records its own identity, never rewrites the
       // previous writer's facts. Old dispatch intent is now uncertain, whereas
       // accepted-but-never-dispatched input is safe to re-accept.

@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import subagents, { registerToolExtension } from "../pi-extension/subagents/index.ts";
 import subagentDone from "../pi-extension/subagents/subagent-done.ts";
-import { buildSessionProjection } from "@earendil-works/pi-coding-agent";
+import { buildSessionProjection, SessionManager } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { createMockExtensionApi, plainTheme, waitFor } from "./harness.ts";
 import { closeSurface, shellEscape } from "../pi-extension/subagents/tmux.ts";
@@ -20,6 +20,7 @@ function lifecycleSession(branch: any[], id: string) {
     getBranch: () => branch,
     getEntries: () => branch,
     getSessionId: () => id,
+    getSessionFile: () => undefined,
     getLeafId: () => branch.at(-1)?.id ?? null,
     buildSessionProjection: () => buildSessionProjection(branch.map((entry, index) => ({ ...entry, parentId: branch[index - 1]?.id ?? null }))),
   };
@@ -73,7 +74,7 @@ test("retry, queued and recovery runs cannot terminate delegated work before fin
   }
 });
 
-test("pending questions survive automatic restarts until actual reply input arrives", async () => {
+test("independent durable questions survive ordinary input, retries and child runtime replacement", async () => {
   const root = mkdtempSync(join(tmpdir(), "subagent-question-settlement-"));
   const previousEnv = { ...process.env };
   process.env.PI_SUBAGENT_SESSION = join(root, "child.jsonl");
@@ -91,7 +92,10 @@ test("pending questions survive automatic restarts until actual reply input arri
     subagentDone(child.api);
     await child.emit("session_start", {}, ctx);
     await child.emit("agent_start", {}, ctx);
-    await child.tool("ask_question").execute("question-1", { question: "Which API version?" }, undefined, undefined, ctx);
+    const first = await child.tool("ask_question").execute("question-1", { question: "Which API version?" }, undefined, undefined, ctx);
+    const second = await child.tool("ask_question").execute("question-2", { question: "Which region?" }, undefined, undefined, ctx);
+    assert.equal(typeof first.details.questionId, "string");
+    assert.notEqual(first.details.questionId, second.details.questionId);
     await child.emit("agent_end", { messages: [] }, ctx);
     // An automatic recovery run is not a reply from the parent.
     await child.emit("agent_start", {}, ctx);
@@ -105,7 +109,16 @@ test("pending questions survive automatic restarts until actual reply input arri
     } });
     await child.emit("agent_before_settle", { outcome: "completed" }, ctx);
     await child.emit("agent_settled", {}, ctx);
-    assert.equal(shutdown, true);
+    assert.equal(shutdown, false, "human input is not a correlated reply, even with only one pending question");
+    await child.emit("session_shutdown", { reason: "reload" }, ctx);
+    const replacement = createMockExtensionApi();
+    subagentDone(replacement.api);
+    await replacement.emit("session_start", { reason: "reload" }, ctx);
+    await replacement.emit("agent_start", {}, ctx);
+    await replacement.emit("agent_before_settle", { outcome: "completed" }, ctx);
+    await replacement.emit("agent_settled", {}, ctx);
+    assert.equal(shutdown, false, "reload restores unanswered questions rather than an empty wait flag");
+    await replacement.emit("session_shutdown", { reason: "quit" }, ctx);
   } finally {
     await child.emit("session_shutdown", { reason: "quit" }, ctx);
     process.env = previousEnv;
@@ -214,16 +227,16 @@ test("native delegation acknowledges launch before child completion and automati
     subagentDone(bridge.api);
     process.env = envBeforeBridge;
     let delegatorShutdown = false;
-    const delegatorBranch: any[] = [];
+    const delegatorSession = SessionManager.open(parentFile);
     const delegatorCtx = {
       hasUI: false, ui: { setWidget() {} },
-      sessionManager: lifecycleSession(delegatorBranch, "fixture-parent"),
+      sessionManager: delegatorSession,
       shutdown() { delegatorShutdown = true; },
     };
     await bridge.emit("session_start", {}, delegatorCtx);
-    delegatorBranch.push({ type: "message", id: "waiting-for-child", message: {
+    delegatorSession.appendMessage({
       role: "assistant", stopReason: "stop", content: [{ type: "text", text: "Waiting for descendant." }],
-    } });
+    } as any);
     await bridge.emit("agent_before_settle", { outcome: "completed" }, delegatorCtx);
     await bridge.emit("agent_settled", {}, delegatorCtx);
     assert.equal(delegatorShutdown, false);
@@ -253,10 +266,23 @@ test("native delegation acknowledges launch before child completion and automati
     const delivered = await waitFor(() => parent.sentMessages.find((event) => event.message.customType === "subagent_result"), "automatic parent result");
     assert.match(delivered.message.content, /deterministic task complete\./);
     parent.api.sendMessage = acceptMessage;
-    await bridge.emit("input", { text: "Descendant result accepted" }, delegatorCtx);
-    delegatorBranch.push({ type: "message", id: "incorporated-child", message: {
+    await bridge.emit("agent_settled", {}, delegatorCtx);
+    assert.equal(delegatorShutdown, false, "removing the last live observation and a void send still owe result incorporation");
+    const resultEntryId = delegatorSession.appendCustomMessageEntry(delivered.message.customType, delivered.message.content, true, delivered.message.details);
+    await bridge.emit("agent_settled", {}, delegatorCtx);
+    assert.equal(delegatorShutdown, false, "history persistence alone is not model incorporation");
+    await bridge.emit("context", { messages: [{ role: "custom", ...delivered.message }] }, delegatorCtx);
+    await bridge.emit("agent_settled", {}, delegatorCtx);
+    assert.equal(delegatorShutdown, false, "model exposure without a subsequent response is not final incorporation");
+    delegatorSession.branch(delegatorSession.getEntry(resultEntryId)!.parentId!);
+    delegatorSession.appendMessage({ role: "assistant", stopReason: "stop", content: [{ type: "text", text: "Unrelated abandoned-branch response." }] } as any);
+    await bridge.emit("agent_settled", {}, delegatorCtx);
+    assert.equal(delegatorShutdown, false, "history-wide notification persistence cannot borrow a response from a different active branch");
+    delegatorSession.branch(resultEntryId);
+    delegatorSession.appendContextEdit(resultEntryId, null);
+    delegatorSession.appendMessage({
       role: "assistant", stopReason: "stop", content: [{ type: "text", text: "Incorporated descendant result." }],
-    } });
+    } as any);
     await bridge.emit("agent_before_settle", { outcome: "completed" }, delegatorCtx);
     await bridge.emit("agent_settled", {}, delegatorCtx);
     assert.equal(delegatorShutdown, true, "delegator may finish after incorporating its last child");
