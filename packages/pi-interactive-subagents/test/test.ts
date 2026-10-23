@@ -1416,9 +1416,10 @@ describe("tool registration", () => {
     const subagentTool = registeredTools.find((tool) => tool.name === "subagent");
     assert.ok(subagentTool, "expected subagent tool to be registered");
 
-    const result = await subagentTool.execute("call-1", { name: "x", task: "do it" }, undefined, undefined, { cwd: process.cwd() });
-    assert.equal(result.details?.error, "agent required");
-    assert.match(result.content[0].text, /specify which agent/i);
+    await assert.rejects(
+      () => subagentTool.execute("call-1", { name: "x", task: "do it" }, undefined, undefined, { cwd: process.cwd() }),
+      /specify which agent/i,
+    );
   });
 
   it("rejects a top-level spawn naming an unknown agent", async () => {
@@ -1427,13 +1428,11 @@ describe("tool registration", () => {
     const subagentTool = registeredTools.find((tool) => tool.name === "subagent");
     assert.ok(subagentTool, "expected subagent tool to be registered");
 
-    const result = await subagentTool.execute("call-1", {
+    await assert.rejects(() => subagentTool.execute("call-1", {
       name: "x",
       task: "do it",
       agent: "wizard",
-    }, undefined, undefined, { cwd: process.cwd() });
-    assert.equal(result.details?.error, "unknown agent");
-    assert.match(result.content[0].text, /not a known agent/i);
+    }, undefined, undefined, { cwd: process.cwd() }), /not a known agent/i);
   });
 
   it("exposes a debloated schema: agent+task required, name/model/cwd optional, no override knobs", () => {
