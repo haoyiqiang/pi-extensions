@@ -76,6 +76,12 @@ for (;;) {
     const steering = await consume(pending.splice(index, 1)[0]);
     if (steering.includes("Return the exact phrase:")) task = steering;
   }
+  if (task.includes("ASK_AFTER_INPUT")) {
+    await runtime.tool("ask_question").execute("fixture-question", { question: "Confirm the next step?" }, undefined, undefined, ctx);
+    // Automatic provider/tool continuation revisits existing context; it is not
+    // a fresh reply merely because an earlier managed instruction is present.
+    await runtime.emit("context", { messages: branch.filter((e) => e.type === "custom_message").map((e) => ({ role: "custom", ...e })) }, ctx);
+  }
   if (task.includes("EXIT_WITHOUT_RESULT")) { process.exitCode = 2; break; }
   const answer = task.match(/Return the exact phrase: ([^\n]+)/)?.[1];
   if (!answer) throw new Error(`Fixture cannot process task: ${task}`);

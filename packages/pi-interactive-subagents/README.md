@@ -272,7 +272,8 @@ This includes the [#3 native-tool prefactor](https://github.com/haoyiqiang/pi-ex
 [#4 role/loadout safety](https://github.com/haoyiqiang/pi-extensions/issues/4),
 [#5 settled outcomes](https://github.com/haoyiqiang/pi-extensions/issues/5) and
 [#6 terminal startup/liveness](https://github.com/haoyiqiang/pi-extensions/issues/6) and
-[#7 persistent identity/single-writer status](https://github.com/haoyiqiang/pi-extensions/issues/7), not
+[#7 persistent identity/single-writer status](https://github.com/haoyiqiang/pi-extensions/issues/7) and
+[#8 durable inbox/uncertainty](https://github.com/haoyiqiang/pi-extensions/issues/8), not
 all of [Spec #2](https://github.com/haoyiqiang/pi-extensions/issues/2). Public-tool tests
 cover role aliases/precedence/visibility, missing versus empty tools, invalid resources
 and snapshots, model/cwd/identity/skill/isolation replay, lifetime policy, nested refusals
@@ -282,8 +283,15 @@ readiness, long work and lost liveness. The mux suite retains its startup-comman
 contracts. No paid model or real terminal smoke run is required for the deterministic
 suite. Real controller processes also race name allocation and double resume against
 shared temporary storage, replay stale/duplicate startup scripts, and verify generation
-fencing and status after runtime recreation. Durable messaging and complete parent
-recovery remain separate slices.
+fencing and status after runtime recreation. Supported Pi AgentSession/provider cases verify
+preparation, steering/follow-up/idle queues and real transcript evidence, not synchronous
+mock consumption. Genuine child-control process restarts cover safe never-dispatched
+redelivery, uncertain in-memory/transcript consumption, explicit retry/reconciliation,
+retained IDs and independent target routing. Test-file concurrency is bounded; the
+real-Pi queue fixtures use a controlled controller clock around cold SDK startup while
+still requiring the real bridge-ready signal. Production readiness bounds are unchanged
+and tested separately by the terminal lifecycle suite. Complete parent recovery remains
+a separate slice.
 See the repository `GLOSSARY.md` and `docs/adr/0001-pause-uncertain-delegated-actions.md`
 for the reviewed domain language and recovery policy.
 

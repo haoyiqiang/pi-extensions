@@ -18,7 +18,7 @@ import { Type } from "typebox";
 import { existsSync, writeFileSync } from "node:fs";
 import { createSubagentActivityRecorder, LIVENESS_INTERVAL_MS, writeSubagentLiveness } from "./activity.ts";
 import { writeSubagentOutcome } from "./outcome.ts";
-import { createInboxReceiver, INSTRUCTION_TYPE } from "./inbox.ts";
+import { createInboxReceiver } from "./inbox.ts";
 import { writerFile } from "./runs.ts";
 
 /**
@@ -170,8 +170,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("context", (event) => {
-    inbox?.context(event.messages);
-    if (event.messages.some((message) => message.role === "custom" && message.customType === INSTRUCTION_TYPE)) {
+    if (inbox?.context(event.messages)) {
       recorder.input();
       awaitingAnswer = false;
     }

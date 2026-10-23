@@ -186,11 +186,13 @@ export function createInboxReceiver(pi: ExtensionAPI, sessionFile: string, execu
     input() { preparing = true; },
     agentStart() { preparing = false; awaitingInitialRun = false; },
     context(messages: any[]) {
+      let newlyObserved = false;
       for (const message of messages) {
         if (message.role !== "custom" || message.customType !== INSTRUCTION_TYPE) continue;
         const receipt = owned.get(message.details?.messageId);
-        if (receipt && receipt.attemptId === message.details?.attemptId && !receipt.contextSeen) { receipt.contextSeen = true; inbox.save(receipt); }
+        if (receipt && receipt.attemptId === message.details?.attemptId && !receipt.contextSeen) { receipt.contextSeen = true; inbox.save(receipt); newlyObserved = true; }
       }
+      return newlyObserved;
     },
     toolStart(id: string) { for (const receipt of owned.values()) if (receipt.contextSeen && receipt.phase !== "settled") { receipt.activeTools = [...(receipt.activeTools ?? []), id]; inbox.save(receipt); } },
     toolEnd(id: string) { for (const receipt of owned.values()) if (receipt.activeTools?.includes(id)) { receipt.activeTools = receipt.activeTools.filter((tool) => tool !== id); inbox.save(receipt); } },

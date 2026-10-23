@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { mock, test } from "node:test";
 import { fork, spawnSync } from "node:child_process";
 import assert from "node:assert/strict";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -37,10 +37,18 @@ async function withIdentity(run: (h: any) => Promise<void>, fixture = "runtime.t
     ui: { setWidget(_name: string, factory: any) { if (typeof factory === "function") widgets.push(factory({}, plainTheme).render(100).join("\n")); } },
   };
   const call = (tool: string, params: any, context = ctx) => parent.tool(tool).execute("identity", params, undefined, undefined, context);
+  // Queue/persistence cases run actual Pi, whose cold module import time is not
+  // the behavior under test. Freeze only the controller's startup deadline while
+  // still requiring a real child-ready signal; node:test's real timeout remains.
+  // Production startup deadlines have their own controlled-clock terminal suite.
+  const boot = async (tool: string, params: any) => {
+    mock.timers.enable({ apis: ["Date"], now: Date.now() });
+    try { return await call(tool, params); } finally { mock.timers.reset(); }
+  };
   try {
     subagents(parent.api);
     await parent.emit("session_start", {}, ctx);
-    await run({ root, parent, ctx, call, terminal, sessions, project, widgets });
+    await run({ root, parent, ctx, call, boot, terminal, sessions, project, widgets });
   } catch (error) {
     if (existsSync(join(terminal, "screen"))) console.error(readFileSync(join(terminal, "screen"), "utf8"));
     throw error;
@@ -98,10 +106,10 @@ test("native inbox preserves exact multiline instructions and reports enqueue se
 });
 
 test("supported Pi consumes steering before followUp, preserves bytes, and starts idle prompts without terminal keys", { timeout: 90_000 }, async () => {
-  await withIdentity(async ({ call, terminal, project, parent }) => {
+  await withIdentity(async ({ call, boot, terminal, project, parent }) => {
     writeFileSync(join(terminal, "gate-preparation"), "hold initial prompt before agent_start");
     writeFileSync(join(project, ".pi/agents/resident.md"), "---\nname: resident\ntools:\nauto-exit: false\n---\nStay available\n");
-    const launched = await call("subagent", { agent: "resident", task });
+    const launched = await boot("subagent", { agent: "resident", task });
     const provider = () => existsSync(join(terminal, "provider-input.jsonl")) ? readFileSync(join(terminal, "provider-input.jsonl"), "utf8").trim().split("\n").map((line: string) => JSON.parse(line)) : [];
     const release = (request: any) => writeFileSync(join(terminal, `release-${request.call}`), "complete");
     await waitFor(() => existsSync(join(terminal, "preparing")) ? true : undefined, "actual Pi initial preparation boundary");
@@ -144,9 +152,9 @@ test("supported Pi consumes steering before followUp, preserves bytes, and start
 });
 
 test("a real child-control process restart retains consumed IDs and pauses effects until exact-action authorization", { timeout: 90_000 }, async () => {
-  await withIdentity(async ({ call, terminal, project, parent }) => {
+  await withIdentity(async ({ call, boot, terminal, project, parent }) => {
     writeFileSync(join(project, ".pi/agents/resident.md"), "---\nname: resident\ntools:\nauto-exit: false\n---\nStay available\n");
-    const launched = await call("subagent", { agent: "resident", task });
+    const launched = await boot("subagent", { agent: "resident", task });
     const provider = () => existsSync(join(terminal, "provider-input.jsonl")) ? readFileSync(join(terminal, "provider-input.jsonl"), "utf8").trim().split("\n").map((line: string) => JSON.parse(line)) : [];
     const release = (request: any) => writeFileSync(join(terminal, `release-${request.call}`), "complete");
     release(await waitFor(() => provider()[0], "first provider call"));
@@ -175,7 +183,7 @@ test("a real child-control process restart retains consumed IDs and pauses effec
       assert.equal(reconstructed.messages[0].uncertainty.actionId, actionId);
     } finally { replacementController.child.kill("SIGKILL"); }
     await waitFor(() => parent.sentMessages.find((e: any) => e.message.details?.uncertainty?.actionId === actionId), "parent uncertainty notification");
-    const authorized = await call("subagent_message", { id: launched.details.id, authorization: { actionId, decision: "retry", reason: "User explicitly permits repeating the affected operation after checking the destination." } });
+    const authorized = await boot("subagent_message", { id: launched.details.id, authorization: { actionId, decision: "retry", reason: "User explicitly permits repeating the affected operation after checking the destination." } });
     assert.equal(authorized.details.status, "queued");
     const restarted = await waitFor(() => provider().find((r: any) => r.executionId !== interrupted.executionId), "genuine replacement child-control process");
     assert.equal(restarted.inputs.at(-1), instruction);
@@ -252,6 +260,26 @@ test("accepted memory-only delivery becomes uncertain after process loss and exp
     assert.equal(status.messages[0].resolution.actionId, actionId);
     assert.equal(status.messages[0].evidence.settled, false, "explicit reconciliation is not fabricated Pi settlement");
     writeFileSync(join(terminal, "finish"), "complete");
+  });
+});
+
+test("revisited managed context is not a fresh reply and cannot settle work waiting on a question", { timeout: 30_000 }, async () => {
+  await withIdentity(async ({ call, terminal, project, parent }) => {
+    writeFileSync(join(project, ".pi/agents/resident.md"), "---\nname: resident\ntools: read\nauto-exit: false\n---\nStay available\n");
+    const launched = await call("subagent", { agent: "resident", task });
+    writeFileSync(join(terminal, "finish"), "complete initial task");
+    await waitFor(() => parent.sentMessages.find((e: any) => e.message.customType === "subagent_result"), "initial settlement");
+    await waitFor(() => existsSync(join(terminal, "parked")) ? true : undefined, "resident initial boundary");
+    for (const file of ["finish", "parked", "received.json"]) rmSync(join(terminal, file), { force: true });
+    await call("subagent_message", { id: launched.details.id, message: "Return the exact phrase: waiting for parent.\nASK_AFTER_INPUT" });
+    await waitFor(() => existsSync(join(terminal, "received.json")) ? true : undefined, "managed task visible to child");
+    writeFileSync(join(terminal, "finish"), "reach question boundary");
+    await waitFor(() => existsSync(join(terminal, "parked")) ? true : undefined, "question task reached settlement boundary");
+    await waitFor(() => parent.sentMessages.find((e: any) => e.message.customType === "subagent_question"), "parent question notification");
+    assert.equal(parent.sentMessages.filter((e: any) => e.message.customType === "subagent_result").length, 1);
+    const status = (await call("subagent_status", { id: launched.details.id })).details.subagent;
+    assert.equal(status.generation, 2);
+    assert.equal(status.latestResult.generation, 1, "historical input in a retry context cannot answer a newer question");
   });
 });
 
