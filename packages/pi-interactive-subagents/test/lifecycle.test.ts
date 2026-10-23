@@ -45,7 +45,8 @@ test("native delegation acknowledges launch before child completion and automati
   const parent = createMockExtensionApi();
   const widgets: string[] = [];
   const ctx = {
-    cwd: project, hasUI: true,
+    cwd: project, hasUI: true, model: { provider: "fixture", id: "parent-model" },
+    modelRegistry: { getAll: () => [{ provider: "fixture", id: "parent-model" }] },
     sessionManager: {
       getSessionFile: () => parentFile,
       getSessionId: () => "fixture-parent",
@@ -57,6 +58,7 @@ test("native delegation acknowledges launch before child completion and automati
       },
     },
   };
+  parent.api.getThinkingLevel = () => "off";
   try {
     subagents(parent.api);
     await parent.emit("session_start", {}, ctx);

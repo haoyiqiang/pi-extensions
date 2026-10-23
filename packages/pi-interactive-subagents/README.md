@@ -48,7 +48,7 @@ subagent({ agent: "worker", name: "dark-mode", task: "Implement the dark mode to
 | `agent` | string | required | Which agent to spawn (must be known and permitted) |
 | `task` | string | required | Task prompt |
 | `name` | string | agent name | Display name for the pane and widget. Must be unique — duplicates are auto-suffixed (`scout`, `scout-2`, …) |
-| `model` | string | agent's model | Override the model for this spawn |
+| `model` | string | role, then parent model | Override with an exact `provider/model` ID (or an unambiguous exact model ID) |
 | `cwd` | string | agent's `cwd` | Working directory (see [Role folders](#role-folders)) |
 
 ### Messaging
@@ -60,11 +60,13 @@ subagent_message({ name: "scout", message: "Also check the auth middleware" });
 ```
 
 - **Running** — the message is typed into the live pane (newlines flattened) and picked up at the next turn boundary. The call returns immediately; the eventual completion still arrives as a steer message.
-- **Finished** — the session is resumed with the message as the follow-up task, like a fresh spawn: fire-and-forget, always autonomous, result steered back later. The resumed run reclaims its original name.
+- **Finished** — the session is resumed with the message as the follow-up task: fire-and-forget, with the original role's recorded auto-exit/resident policy. The resumed run reclaims its original name.
 
 Every spawn records name → session file in `artifacts/<sessionId>/subagent-registry.json`, so names stay addressable across pi restarts. A nested sub-agent that spawns children gets its own registry keyed by its own session id. Resume is refused with a clear error (listing known names) if the name isn't registered, the session file is gone, or the session predates sandboxed resume.
 
-**Resume replays the original sandbox.** At spawn time the fully-resolved loadout — tool allowlist, backing extensions, model, thinking level, system prompt, spawn whitelist, cwd — is snapshotted to `<session>.loadout.json`. Resume rebuilds the exact same restricted process from that snapshot rather than relaunching unrestricted.
+**Resume replays the original loadout.** Before launch, a versioned, validated `<session>.loadout.json` snapshot records the actual tool allowlist and extension paths, qualified model, thinking, identity/prompt mode, selected skill paths, cwd/config root, isolation options, delegation policy and auto-exit/resident policy. Editing, moving or deleting the role does not change a resumed child. Required resources and model availability are checked again; references pin paths, not dependency file contents.
+
+Missing, partial, corrupt or unknown-version snapshots cannot become unrestricted launches. Unsafe legacy records remain readable but cannot resume: the error asks you to delegate a fresh named role and leaves history intact. Only legacy records with explicitly pinned, restrictive built-in/control tools, model/thinking, cwd/config and lifecycle fields can resume; old custom-extension or delegation grants cannot be verified.
 
 ### ask_question
 
@@ -84,7 +86,7 @@ All three are autonomous (`auto-exit: true`) and carry their identity in the sys
 
 ## Custom agents
 
-Place a `.md` file in `.pi/agents/` (project) or `~/.pi/agent/agents/` (global). Discovery priority: **project > global > package-bundled** — a project-local file overrides a bundled agent with the same name.
+Place a `.md` file in `.pi/agents/` (project) or `~/.pi/agent/agents/` (global). Discovery priority: **project > global > package-bundled** — definitions override by declared name, not filename. Launch uses the parsed definition discovery selected, even when its declared name differs from the source filename. Hidden definitions still shadow lower-priority definitions and remain explicitly addressable.
 
 ```markdown
 ---
@@ -106,16 +108,19 @@ You are a specialized agent that does X...
 | ----- | ---- | ----------- |
 | `name` | string | Agent name (used in `agent: "my-agent"`) |
 | `description` | string | Shown in `subagents_list` |
-| `model` | string | Default model |
+| `model` | string | Exact role model; precedence is call override > role > current parent model |
 | `thinking` | string | `minimal`, `low`, `medium`, or `high` |
-| `tools` | string | Strict tool allowlist. Built-ins: `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`. Extension-backed: `web_search`, `web_fetch`, `safe_bash`, `video_extract`, `youtube_search`, `google_image_search`. Only the extensions backing the listed tools are loaded into the child |
+| `tools` | string | **Required.** Omission is a configuration error; an empty `tools:` grants only conversation and required control capabilities (`ask_question`). Strict tool allowlist. Built-ins: `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`. Extension-backed: `web_search`, `web_fetch`, `safe_bash`, `video_extract`, `youtube_search`, `google_image_search`. Only the extensions backing the listed tools are loaded into the child |
 | `subagent_agents` | string | Comma-separated agent names this agent may spawn. **Presence of this field grants the spawning toolset** (`subagent`, `subagent_message`, `subagents_list`) and restricts spawn targets to the list. Omit it and the agent cannot spawn at all |
 | `skills` | string | Comma-separated skill names to auto-load |
 | `session-mode` | string | `standalone` (default), `lineage-only`, or `fork` — see below |
 | `system-prompt` | string | `append` or `replace`: pass the body as the child's `--append-system-prompt` / `--system-prompt`. Omit and the body is prepended to the task prompt instead |
-| `auto-exit` | boolean | Auto-shutdown when the agent finishes (see below) |
+| `auto-exit` | boolean | Defaults to `true` (autonomous); explicit `false` is resident. Replayed on resume |
 | `interactive` | boolean | Whether stall/recovery transitions wake the parent (see below) |
-| `cwd` | string | Default working directory |
+| `cwd` | string | Default working directory, resolved relative to the role's source root (see below) |
+| `no-skills` | boolean | Disable ambient skill discovery; explicitly selected skills still load |
+| `no-prompt-templates` | boolean | Disable ambient prompt-template discovery |
+| `no-context-files` | boolean | Disable ambient AGENTS.md/CLAUDE.md discovery |
 | `disable-model-invocation` | boolean | Hide from `subagents_list`; still spawnable by explicit name |
 | `cli` | string | `claude` runs the agent via the Claude Code CLI instead of pi |
 
@@ -127,7 +132,7 @@ You are a specialized agent that does X...
 
 ### auto-exit
 
-With `auto-exit: true`, the session shuts down when the agent's turn ends — the agent just writes its final message and stops (there is no "done" tool). The last assistant message becomes the summary returned to the parent. Recommended for all autonomous agents.
+An omitted `auto-exit` resolves to `true`; use explicit `auto-exit: false` for a resident role. This effective policy is recorded and preserved on resume. With `auto-exit: true`, the session shuts down when the agent's work finishes — the agent just writes its final message and stops (there is no "done" tool). The last assistant message becomes the summary returned to the parent. Recommended for all autonomous agents.
 
 Notes:
 
@@ -142,7 +147,9 @@ Controls whether `stalled`/`recovered` status transitions send a steer message t
 
 Access is **whitelist-only**. Every sub-agent process is launched with `--no-extensions` (extension discovery disabled) and `--tools <allowlist>`; only the extensions backing the listed tools are loaded back in explicitly. There is no default toolset and no deny-list — an agent gets exactly what its frontmatter lists. The restriction survives resume via the loadout snapshot.
 
-Spawns must name a known agent at **every** depth. A top-level session may spawn anything discoverable; a sub-agent may only spawn the agents in its `subagent_agents` list (enforced via `PI_SUBAGENT_ALLOWED`). There is no agentless spawn route, so a child can never escalate to a full-toolset profile by omitting its agent.
+Spawns must name a known agent at **every** depth. A top-level session may spawn any known definition, including hidden roles; a managed child may only spawn targets in its recorded `subagent_agents` list, never its own role. Launch, follow-up and resume enforce that policy from the caller's validated snapshot, not an inherited `PI_SUBAGENT_ALLOWED` or other ambient grant. Explicitly loading the controller extension does not grant delegation rights. Unknown tools and missing backing extensions fail before a runnable child is created.
+
+**These are Pi tool restrictions, not an OS sandbox.** A child with bash/write/edit capabilities retains the user's filesystem and process permissions. Pattern-based `safe_bash` is not a security boundary. No container, worktree or arbitrary shell-side-effect isolation is added here. The optional `cli: claude` path is not covered by the managed-Pi loadout/resume guarantees.
 
 Extensions can register additional tools for sub-agents at runtime via `registerToolExtension(name, path)` on the `__pi_interactive_subagents` process global.
 
@@ -161,7 +168,7 @@ project/
 subagent({ agent: "worker", cwd: "agents/sre", task: "Review the deployment pipeline" });
 ```
 
-Set a per-agent default with `cwd:` in frontmatter.
+Set a per-agent default with `cwd:` in frontmatter. Relative role cwd resolves against the project root for project roles, the agent configuration root for global roles, and this package's root for bundled roles. A relative call override resolves against the current parent's context cwd; omission inherits that actual cwd. The resolved absolute directory (including inheritance) and selected config root are recorded once, so a changed parent cwd cannot move a resumed child. Isolation options are profile-only; ordinary calls cannot override tools, skills or isolation to expand permissions.
 
 ## Status widget & configuration
 
@@ -216,10 +223,13 @@ npm run test:integration --workspace pi-interactive-subagents
 # Optional: PI_TEST_MODEL=provider/model PI_TEST_TIMEOUT=120000
 ```
 
-This is the [#3 prefactor](https://github.com/haoyiqiang/pi-extensions/issues/3), not
-all of [Spec #2](https://github.com/haoyiqiang/pi-extensions/issues/2). Launch and
-follow-up share observation/result delivery, but existing lifecycle semantics are
-preserved; settlement, durable messaging and reload recovery remain later slices.
+This includes the [#3 native-tool prefactor](https://github.com/haoyiqiang/pi-extensions/issues/3)
+and [#4 role/loadout safety](https://github.com/haoyiqiang/pi-extensions/issues/4), not
+all of [Spec #2](https://github.com/haoyiqiang/pi-extensions/issues/2). Public-tool tests
+cover role aliases/precedence/visibility, missing versus empty tools, invalid resources
+and snapshots, model/cwd/identity/skill/isolation replay, lifetime policy and nested refusals.
+Settlement, durable messaging, stable identity/single-writer ownership and complete
+parent recovery remain separate slices.
 See the repository `GLOSSARY.md` and `docs/adr/0001-pause-uncertain-delegated-actions.md`
 for the reviewed domain language and recovery policy.
 

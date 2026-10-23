@@ -31,7 +31,7 @@ await runtime.emit("session_start", {}, ctx);
 await runtime.emit("input", { text: task, source: "interactive" }, ctx);
 await runtime.emit("before_agent_start", { prompt: task }, ctx);
 await runtime.emit("agent_start", {}, ctx);
-writeFileSync(join(root, "received.tmp"), JSON.stringify({ task, widgets, tools: runtime.registeredTools.map((tool) => tool.name), args }));
+writeFileSync(join(root, "received.tmp"), JSON.stringify({ task, widgets, tools: runtime.registeredTools.map((tool) => tool.name), args, cwd: process.cwd(), env: Object.fromEntries(Object.entries(process.env).filter(([key]) => key.startsWith("PI_SUBAGENT_") || key === "PI_CODING_AGENT_DIR")) }));
 renameSync(join(root, "received.tmp"), join(root, "received.json"));
 await waitFor(() => existsSync(join(root, "finish")) ? true : undefined, "permission to complete delegated task");
 const answer = task.match(/Return the exact phrase: ([^\n]+)/)?.[1];
@@ -39,5 +39,8 @@ if (!answer) throw new Error(`Fixture cannot process task: ${task}`);
 const message = { role: "assistant", content: [{ type: "text", text: answer }], stopReason: "stop" };
 appendFileSync(sessionFile, JSON.stringify({ type: "message", id: "fixture-answer", parentId: null, message }) + "\n");
 await runtime.emit("agent_end", { messages: [message] }, ctx);
-if (!shutdown) throw new Error("Autonomous child did not request shutdown");
+if (!shutdown) {
+  if (process.env.PI_SUBAGENT_AUTO_EXIT !== "0") throw new Error("Autonomous child did not request shutdown");
+  await waitFor(() => existsSync(join(root, "close-resident")) ? true : undefined, "manual resident closure");
+}
 await runtime.emit("session_shutdown", { reason: "quit" }, ctx);
