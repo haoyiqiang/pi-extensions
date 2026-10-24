@@ -1005,9 +1005,8 @@ function buildSubagentToolAllowlist(
  *
  * This is the single source of truth for reconstructing a subagent's loadout,
  * used both by the initial `launchSubagent` and by the `subagent_message`
- * resume path so the two can never drift. Env vars (PI_SUBAGENT_AGENT /
- * PI_SUBAGENT_ALLOWED / PI_CODING_AGENT_DIR) and cwd are the caller's
- * responsibility since they differ slightly between launch and resume.
+ * resume path so the two can never drift. managedPiCommand supplies the shared
+ * identity, lifecycle environment and cwd for both launch modes.
  */
 function applySandboxToParts(
   parts: string[],
@@ -1059,6 +1058,22 @@ function buildPiPromptArgs(params: {
     ...skillPrompts,
     params.taskArg,
   ];
+}
+
+/** One command policy; fresh prompt delivery and inbox-only resume stay explicit. */
+function managedPiCommand(record: SubagentRun, artifactDir: string, activityFile: string, initial?: { taskDelivery: "direct" | "artifact"; taskArg: string }): string {
+  const loadout = record.loadout!;
+  const parts = ["pi", "--session", shellEscape(record.sessionFile)];
+  applySandboxToParts(parts, loadout, { artifactDir, name: `${record.id}-${record.executionId}` });
+  const env = {
+    PI_CODING_AGENT_DIR: loadout.agentDir, PI_SUBAGENT_ALLOWED: loadout.spawnable.join(","),
+    PI_SUBAGENT_AGENT: loadout.agent, PI_SUBAGENT_NAME: record.name,
+    PI_SUBAGENT_SESSION: record.sessionFile, PI_SUBAGENT_ID: record.executionId, PI_SUBAGENT_INBOX_ONLY: initial ? "0" : "1",
+    PI_SUBAGENT_RUN_ID: record.id, PI_SUBAGENT_GENERATION: String(record.generation),
+    PI_SUBAGENT_ACTIVITY_FILE: activityFile, PI_SUBAGENT_AUTO_EXIT: loadout.autoExit ? "1" : "0",
+  };
+  if (initial) parts.push(...buildPiPromptArgs({ ...initial, effectiveSkills: loadout.skills.map((skill) => skill.name).join(",") }).map(shellEscape));
+  return fencedCommand(`cd ${shellEscape(loadout.cwd)} && ${Object.entries(env).map(([key, value]) => `${key}=${shellEscape(value)}`).join(" ")} ${parts.join(" ")}`, record);
 }
 
 function activityLabel(activity: SubagentActivityState): string | undefined {
@@ -1363,22 +1378,6 @@ async function launchSubagent(
     }
 
     if (!loadout) throw new Error("Missing managed Pi loadout");
-    const parts = ["pi", "--session", shellEscape(subagentSessionFile)];
-    // Fresh and resumed writers replay the same default-deny launch policy.
-    applySandboxToParts(parts, loadout, { artifactDir, name: `${record.id}-${id}` });
-    const envParts = [
-      `PI_CODING_AGENT_DIR=${shellEscape(loadout.agentDir)}`,
-      `PI_SUBAGENT_ALLOWED=${shellEscape(loadout.spawnable.join(","))}`,
-      `PI_SUBAGENT_NAME=${shellEscape(params.name)}`,
-      `PI_SUBAGENT_AGENT=${shellEscape(params.agent)}`,
-      `PI_SUBAGENT_AUTO_EXIT=${loadout.autoExit ? "1" : "0"}`,
-      `PI_SUBAGENT_SESSION=${shellEscape(subagentSessionFile)}`,
-      `PI_SUBAGENT_ID=${shellEscape(id)}`,
-      "PI_SUBAGENT_INBOX_ONLY=0",
-      `PI_SUBAGENT_RUN_ID=${shellEscape(record.id)}`,
-      `PI_SUBAGENT_GENERATION=${record.generation}`,
-      `PI_SUBAGENT_ACTIVITY_FILE=${shellEscape(activityFile)}`,
-    ];
     let taskArg = fullTask;
     if (launchBehavior.taskDelivery === "artifact") {
       const artifactPath = join(artifactDir, "context", `${record.id}-${id}.md`);
@@ -1386,15 +1385,9 @@ async function launchSubagent(
       writeFileSync(artifactPath, fullTask, "utf8");
       taskArg = `@${artifactPath}`;
     }
-    for (const promptArg of buildPiPromptArgs({
-      effectiveSkills: loadout.skills.map((skill) => skill.name).join(","),
-      taskDelivery: launchBehavior.taskDelivery,
-      taskArg,
-    })) parts.push(shellEscape(promptArg));
-
-    const piCommand = `cd ${shellEscape(effectiveCwd)} && ${envParts.join(" ")} ${parts.join(" ")}`;
+    const command = managedPiCommand(record, artifactDir, activityFile, { taskDelivery: launchBehavior.taskDelivery, taskArg });
     const launchScriptFile = join(artifactDir, "subagent-scripts", `${record.id}-${id}.sh`);
-    const surface = createSubagentSurface(params.name, fencedCommand(piCommand, record), launchScriptFile, subagentSessionFile, id);
+    const surface = createSubagentSurface(params.name, command, launchScriptFile, subagentSessionFile, id);
     const running: RunningSubagent = {
       owner, backend: record.backend,
       id, subagentId: record.id, generation: record.generation, runs,
@@ -1738,16 +1731,7 @@ async function launchRecorded(owner: ParentRuntime, runs: SubagentRuns, record: 
   const artifactDir = runs.directory;
   const activityFile = getSubagentActivityFile(artifactDir, id);
   mkdirSync(dirname(activityFile), { recursive: true });
-  const parts = ["pi", "--session", shellEscape(record.sessionFile)];
-  applySandboxToParts(parts, loadout, { artifactDir, name: `${record.id}-${id}` });
-  const env = {
-    PI_CODING_AGENT_DIR: loadout.agentDir, PI_SUBAGENT_ALLOWED: loadout.spawnable.join(","),
-    PI_SUBAGENT_AGENT: loadout.agent, PI_SUBAGENT_NAME: record.name,
-    PI_SUBAGENT_SESSION: record.sessionFile, PI_SUBAGENT_ID: id, PI_SUBAGENT_INBOX_ONLY: "1",
-    PI_SUBAGENT_RUN_ID: record.id, PI_SUBAGENT_GENERATION: String(record.generation),
-    PI_SUBAGENT_ACTIVITY_FILE: activityFile, PI_SUBAGENT_AUTO_EXIT: loadout.autoExit ? "1" : "0",
-  };
-  const command = fencedCommand(`cd ${shellEscape(loadout.cwd)} && ${Object.entries(env).map(([key, value]) => `${key}=${shellEscape(value)}`).join(" ")} ${parts.join(" ")}`, record);
+  const command = managedPiCommand(record, artifactDir, activityFile);
   const launchScriptFile = join(artifactDir, "subagent-scripts", `${record.id}-resume-${id}.sh`);
   let surface: string;
   try { surface = createSubagentSurface(record.name, command, launchScriptFile, record.sessionFile, id); }
