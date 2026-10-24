@@ -70,5 +70,5 @@ test("discovery defaults 可统一修正思考映射和模型元数据", () => {
 		"xhigh",
 		"max",
 	]);
-	assert.equal(model.compat?.supportsStrictMode, false);
+	assert.equal((model.compat as { supportsStrictMode?: boolean }).supportsStrictMode, false);
 });

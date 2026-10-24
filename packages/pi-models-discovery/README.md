@@ -1,6 +1,8 @@
 # @kevinhao/pi-models-discovery
 
-Generic model discovery extension: reads providers marked with `"discoverModels": true` in `~/.pi/agent/models.json`, requests `GET {baseUrl}/models`, and registers the discovered models automatically — no handwritten `models` array required. After the first successful discovery the model list is persisted to a local cache, so subsequent startups read the cache and **perform no network requests**.
+Generic model discovery extension: reads providers marked with `"discoverModels": true` in `~/.pi/agent/models.json`, requests `GET {baseUrl}/models`, and registers the discovered models automatically — no handwritten `models` array required.
+
+It registers a complete Pi `Provider` (not a legacy provider config) and delegates all catalog state to Pi: `refreshModels` restores the last catalog through `context.stored`, fetches with `context.credential` and `context.signal`, and publishes through `context.publish({ persist })`, which Pi writes to its own `models-store.json`. There is no extension-private cache file and no manual refresh command — Pi refreshes catalogs after interactive startup and whenever `/model` opens.
 
 Suitable for local/self-hosted LLM proxies (one gateway exposing many models), Ollama, vLLM, and other OpenAI-compatible services.
 
@@ -40,7 +42,7 @@ Add `"discoverModels": true` to a provider in `~/.pi/agent/models.json`:
 }
 ```
 
-`baseUrl` and `api` are required; `apiKey` is optional (omit for unauthenticated services). Multiple providers sharing the same `baseUrl+apiKey` reuse a single `/models` request.
+`baseUrl` and `api` are required; `api` can be any api Pi implements — `openai-completions`, `openai-responses`, `anthropic-messages`, `google-generative-ai` (the four the interactive picker offers), but also `azure-openai-responses`, `google-vertex`, `mistral-conversations`, `bedrock-converse-stream`, `openai-codex-responses`, or `pi-messages`. `apiKey` is optional (omit for unauthenticated services) and accepts a literal or `$ENV_VAR` / `${ENV_VAR}` interpolation. `!command` values are executed by Pi, and the resolved key reaches discovery on every refresh through `context.credential`; only the loading-time cold-start fetch cannot run commands — it warns and leaves the catalog to the next refresh.
 
 Hand edits require `/reload` to take effect; changes made through `/config:model-discovery` apply immediately.
 
@@ -87,20 +89,24 @@ When `/models` mixes image models, different wire protocols, or gateway-private 
 
 `include` / `exclude` are whole-ID globs supporting `*` and `?`; include runs first, then exclude. `defaults` accepts `reasoning`, `thinkingLevelMap`, `input`, `contextWindow`, `maxTokens`, and `compat`. Per-model `context_window` / `max_tokens` values returned by `/models` take precedence over defaults; standard models.json `modelOverrides` can still refine individual models.
 
-## Refreshing the cache
+## Refreshing the catalog
 
-```
-/config:model-discovery-refresh
-```
+Pi drives refreshes; there is nothing to run by hand:
 
-Forces a rediscovery of every discovery provider and updates the local cache, notifying the result for each provider.
+- **Interactive startup** refreshes every dynamic provider (restore from `models-store.json`, then `GET /models`) and persists the result.
+- **Opening `/model`** refreshes again and re-renders the picker with the result, so a model added on the gateway shows up on the next picker open.
+- **`pi -p` and subagents** do not start a network refresh; they read the catalog Pi persisted in `models-store.json`. The extension only fetches while loading when no usable persisted catalog exists for that provider (skipped when `PI_OFFLINE` is set), and hands that cold-start seed to Pi on the first refresh so Pi persists it instead of refetching every run.
+
+`/config:model-discovery` → *Add provider* / *Rediscover models* go through the same `modelRegistry.refresh({ providers, allowNetwork: true, force: true })` path, so the command reuses Pi's credential resolution and persistence instead of fetching on its own.
 
 ## Behavior
 
-- **Startup (cache-first)**: when the cache hits, models are registered directly from the persisted list with zero network requests. The cache lives at `~/.pi/agent/extensions/pi-models-discovery/cache.json`. The cache is invalidated automatically when the provider configuration fingerprint (baseUrl+api+apiKey+headers+compat+modelDiscovery) changes, triggering a fresh network discovery.
-- **Online refresh**: `/config:model-discovery-refresh`, or the `refreshModels` hook triggered when opening `/model`, rediscovers online and updates the cache.
-- **Offline / fetch failure**: handwritten `models` in models.json (if any) are kept as a fallback, and an explicit warning is surfaced via in-session notify — never a silent degradation. One provider failing does not affect the others.
-- **apiKey resolution** (discovery request only): an explicit `apiKey` supports literals and `$ENV_VAR` / `${ENV_VAR}` interpolation; `!command` values skip discovery with an explicit warning. When `apiKey` is omitted, discovery reuses an `api_key` credential stored for the same provider ID in auth.json. Chat requests continue to use Pi's own authentication resolution.
+- **Catalog ownership**: the extension holds the discovered list in memory and mirrors Pi's `stored` catalog on restore; persistence is Pi's `models-store.json` and the extension never writes it. Restored models are kept only when their `baseUrl`, `api`, and current include/exclude rules still match, so a config change drops stale entries instead of showing them.
+- **Config changes**: editing models.json takes effect after `/reload`; Pi's next refresh re-discovers. `/config:model-discovery` writes the file, registers the provider, and forces a provider-scoped refresh.
+- **Restored metadata**: a catalog restored from `models-store.json` keeps the metadata it was discovered with. Endpoint, `api`, and dropping/narrowing filters invalidate entries immediately; changes to `defaults` or `compat` only show up after the next network refresh (interactive startup or `/model`). Model `headers` apply immediately; a `!command` header value is resolved by Pi for requests but skipped for the discovery request.
+- **Offline / fetch failure**: a failed fetch keeps the previous catalog (Pi reports the provider error in the model picker) and handwritten `models` in models.json still apply. One provider failing does not affect the others.
+- **Authentication**: the provider's `ProviderAuth` consumes the credential Pi already composed (`context.credential`, covering `auth.json`, the models.json `apiKey`, and `!command` values) and never re-resolves it; with no credential at all it reports a configured keyless provider, so unauthenticated local endpoints still refresh. The loading-time cold-start fetch is the only place that resolves a key itself (models.json `apiKey`, then `auth.json`).
+- **Any api**: streaming is delegated to Pi's api registry, so every api Pi implements works (`openai-*`, `anthropic-messages`, `google-*`, `azure-openai-responses`, `mistral-conversations`, `bedrock-converse-stream`, …). An api Pi does not implement still registers and fails at request time, as it did with the legacy form.
 - Default parameters for discovered models: `reasoning: true`, `input: ["text", "image"]`, zero cost, `contextWindow` 1M, `maxTokens` 64K, `compat.supportsDeveloperRole: false`. Provider-level `compat` and `modelDiscovery.defaults` are merged into every discovered model.
 - Discovered models declare `thinkingLevelMap: { xhigh: "xhigh", max: "max" }`, so `xhigh` and `max` appear in `/thinking`; the standard levels stay omitted and keep pi's provider default mapping. `/models` cannot report per-model thinking capability, so this is a blanket default for every discovered model: when a provider rejects those levels, override it per model through `modelOverrides` in models.json (set `xhigh` / `max` to `null` to hide them), or declare the model yourself in a handwritten `models` entry.
 
@@ -118,7 +124,7 @@ Forces a rediscovery of every discovery provider and updates the local cache, no
 ```
 - Model metadata may carry `name` / `context_window` (or `contextWindow`) / `max_tokens` (or `maxTokens`); defaults are used when absent.
 
-The old `/model-discovery`, `/model-discovery-refresh`, `/pi-model-discovery`, and `/pi-model-discovery-refresh` names remain available as compatibility aliases.
+The old `/model-discovery` and `/pi-model-discovery` names remain available as compatibility aliases. The former `/model-discovery-refresh` and `/pi-model-discovery-refresh` commands are gone: Pi refreshes catalogs on its own.
 
 ## Uninstall
 

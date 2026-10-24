@@ -14,7 +14,7 @@
     "README.zh-CN.md"
   ],
   "scripts": {
-    "test": "tsx --test tests/catalog.test.ts",
+    "test": "tsx --test tests/*.test.ts",
     "typecheck": "tsc --noEmit --pretty false",
     "build": "npm run typecheck",
     "check": "npm run typecheck && npm test && npm pack --dry-run --json > /dev/null"
@@ -47,8 +47,8 @@
     "coding-agent"
   ],
   "peerDependencies": {
-    "@earendil-works/pi-ai": ">=0.80.0",
-    "@earendil-works/pi-coding-agent": ">=0.80.0"
+    "@earendil-works/pi-ai": ">=0.87.1",
+    "@earendil-works/pi-coding-agent": ">=0.87.1"
   },
   "dependencies": {
     "@kevinhao/pi-utils": "^0.1.0"
