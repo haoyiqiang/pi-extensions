@@ -134,9 +134,15 @@ test("supported Pi reports management refusals as tool failures without launchin
         return status.subagent.notifications.find((event: any) => event.type === "subagent_result" && event.state === "dispatched-unconfirmed");
       }, "hidden result queued in actual Pi");
       if (dequeue) assert.deepEqual(session.clearQueue(), { steering: [], followUp: [] }, "hidden messages are discarded, not restored to the editor");
+      // Abort skips the successful pre-settlement boundary. The replacement
+      // runtime must repair this still-unconfirmed attempt, not rely on the
+      // old observer having already redelivered it before reload.
+      const aborting = dequeue ? session.abort() : undefined;
       providerGate = undefined;
       releaseProvider();
       await active;
+      await aborting;
+      if (dequeue) assert.equal(session.sessionManager.getEntries().some((entry: any) => entry.type === "custom_message" && entry.details?.eventId === event.eventId), false);
       await session.reload();
       await session.waitForIdle();
       await session.prompt("Further ordinary work must not lose or duplicate the child notification");
