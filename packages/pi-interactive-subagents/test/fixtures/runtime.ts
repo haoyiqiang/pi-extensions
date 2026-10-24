@@ -102,6 +102,9 @@ for (;;) {
     await waitFor(() => shutdown ? true : undefined, "cooperative shutdown", 120_000);
     break;
   }
+  // Actual Pi emits the tool's terminal event before settlement. Aborted tools
+  // above intentionally keep their interruption evidence instead.
+  if (task.includes("LONG_TOOL")) await runtime.emit("tool_execution_end", { toolCallId: "long-tool", toolName: "bash", isError: false }, ctx);
   for (let index = pending.findIndex((m) => m.options.deliverAs !== "followUp"); index >= 0; index = pending.findIndex((m) => m.options.deliverAs !== "followUp")) {
     const steering = await consume(pending.splice(index, 1)[0]);
     if (steering.includes("Return the exact phrase:")) task = steering;
