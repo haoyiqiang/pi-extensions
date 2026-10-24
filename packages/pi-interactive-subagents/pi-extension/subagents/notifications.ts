@@ -83,6 +83,20 @@ export class SubagentNotifications {
       return { message, state: persisted.has(message.details.eventId) ? "persisted" : this.attempted.has(message.details.eventId) ? "dispatched-unconfirmed" : "pending" };
     });
   }
+  /** Pi's boundary preview exposes its real custom queues, unlike the user
+   * queue display/hasPendingMessages in 0.87. Only an empty preview proves a
+   * discarded attempt cannot still be queued behind another message. */
+  reconcile(ctx: ExtensionContext, pendingMessages: unknown[]): void {
+    if (!this.owns() || pendingMessages.length) return;
+    const memory = new Set(ctx.sessionManager.getEntries().flatMap((entry) =>
+      entry.type === "custom_message" && typeof (entry.details as any)?.eventId === "string" ? [(entry.details as any).eventId] : []));
+    const persisted = this.history();
+    for (const id of this.attempted) {
+      // Memory inclusion prevents duplicate dispatch, but never upgrades the
+      // event to persisted: only actual parent-history bytes do that.
+      if (!memory.has(id) && !persisted.has(id)) this.attempted.delete(id);
+    }
+  }
   prepareInput(): void { this.preparing = true; }
   agentStart(): void { this.preparing = false; }
   private assertReceiver(executionId: string): void {

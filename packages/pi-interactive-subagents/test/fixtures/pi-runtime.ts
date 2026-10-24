@@ -29,7 +29,8 @@ modelRuntime.registerProvider("fixture", {
     const ask = inputs.some((input) => input.includes("ASK_TWO")) && !context.messages.some((m) => m.role === "toolResult" && m.toolName === "ask_question");
     const questionCalls = ["Which API version?", "Which region?"].map((question, index) => ({ type: "toolCall" as const, id: `question-${index}`, name: "ask_question", arguments: { question } }));
     const output = nested ? `${nested.includes("NEST_PARENT") ? "Parent" : nested.includes("NEST_CHILD") ? "Child" : "Leaf"} incorporated: ${inputs.at(-1)}` : `Completed request ${request}.`;
-    const calls = ask ? questionCalls : nestedCalls;
+    const effect = inputs.some((input) => input.includes("CRASH_EFFECT")) && !context.messages.some((message) => message.role === "toolResult" && message.toolName === "fixture_effect");
+    const calls = effect ? [{ type: "toolCall" as const, id: "fixture-effect", name: "fixture_effect", arguments: {} }] : ask ? questionCalls : nestedCalls;
     const message: AssistantMessage = { role: "assistant", api: model.api, provider: model.provider, model: model.id, timestamp: Date.now(),
       content: calls.length ? calls : [{ type: "text", text: output }], stopReason: "pending",
       usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };

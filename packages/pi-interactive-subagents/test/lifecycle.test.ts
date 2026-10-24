@@ -346,13 +346,16 @@ test("native delegation acknowledges launch before child completion and automati
     assert.equal(failed.message.details.exitCode, 1);
     assert.match(failed.message.content, /partial work retained/);
     assert.match(failed.message.content, /529 overloaded/);
-    assert.doesNotMatch(failed.message.content, /did not produce a result/);
+    assert.match(failed.message.content, /failed after final settlement/);
+    assert.match(failed.message.content, /subagent_message\(\{ name: "Echo"/);
+    assert.doesNotMatch(failed.message.content, /Session id:|did not produce a result/);
     const failureEvidence = JSON.parse(readFileSync(failed.message.details.resultFile, "utf8"));
     assert.equal(failureEvidence.source.entryId, "fixture-answer-3");
     assert.deepEqual(failureEvidence.source.outputEntryIds, ["fixture-partial-2"]);
     const failureView = renderer.renderer(failed.message, { expanded: true }, plainTheme).render(100).join("\n");
     assert.match(failureView, /✗/);
     assert.doesNotMatch(failureView, /✓/);
+    assert.match(failureView, /0\.0%\/64k/, "registered rendering uses known model context metadata");
 
     for (const [marker, outcome, partial] of [
       ["TRUNCATED", "truncated", "useful but unfinished"],

@@ -195,9 +195,9 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("context", (event) => {
     descendants?.observeResults(event.messages, executionId!);
-    if (inbox?.context(event.messages)) {
-      recorder.input();
-    }
+    const delivery = inbox?.context(event.messages);
+    if (delivery?.newlyObserved) recorder.input();
+    if (delivery) return { messages: delivery.messages };
   });
 
   pi.on("before_agent_start", () => {

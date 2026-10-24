@@ -9,16 +9,9 @@ import { createMockExtensionApi } from "./harness.ts";
 import * as subagentsModule from "../pi-extension/subagents/index.ts";
 
 import {
-  getLeafId,
-  getNewEntries,
-  countSessionEntryLines,
   getSessionId,
   resetSessionIndexCache,
   resolveSessionFileById,
-  findLastAssistantMessage,
-  appendBranchSummary,
-  copySessionFile,
-  mergeNewEntries,
 } from "../pi-extension/subagents/session.ts";
 
 import {
@@ -131,39 +124,6 @@ const USER_MSG = {
     content: [{ type: "text", text: "Hello, plan something" }],
   },
 };
-const ASSISTANT_MSG = {
-  type: "message",
-  id: "asst-001",
-  parentId: "user-001",
-  message: {
-    role: "assistant",
-    content: [{ type: "text", text: "Here is my plan..." }],
-  },
-};
-const ASSISTANT_MSG_2 = {
-  type: "message",
-  id: "asst-002",
-  parentId: "asst-001",
-  message: {
-    role: "assistant",
-    content: [
-      { type: "thinking", thinking: "Let me think..." },
-      { type: "text", text: "Updated plan with details." },
-    ],
-  },
-};
-const TOOL_RESULT = {
-  type: "message",
-  id: "tool-001",
-  parentId: "asst-001",
-  message: {
-    role: "toolResult",
-    toolCallId: "tc-001",
-    toolName: "bash",
-    content: [{ type: "text", text: "output here" }],
-  },
-};
-
 // --- Tests ---
 
 describe("session.ts", () => {
@@ -175,48 +135,6 @@ describe("session.ts", () => {
 
   after(() => {
     rmSync(dir, { recursive: true, force: true });
-  });
-
-  describe("getLeafId", () => {
-    it("returns last entry id", () => {
-      const file = createSessionFile(dir, [SESSION_HEADER, MODEL_CHANGE, USER_MSG, ASSISTANT_MSG]);
-      assert.equal(getLeafId(file), "asst-001");
-    });
-
-    it("returns null for empty file", () => {
-      const file = join(dir, "empty.jsonl");
-      writeFileSync(file, "");
-      assert.equal(getLeafId(file), null);
-    });
-  });
-
-  describe("getNewEntries", () => {
-    it("returns entries after a given line", () => {
-      const file = createSessionFile(dir, [SESSION_HEADER, MODEL_CHANGE, USER_MSG, ASSISTANT_MSG]);
-      const entries = getNewEntries(file, 2);
-      assert.equal(entries.length, 2);
-      assert.equal(entries[0].id, "user-001");
-      assert.equal(entries[1].id, "asst-001");
-    });
-
-    it("returns empty array when no new entries", () => {
-      const file = createSessionFile(dir, [SESSION_HEADER, MODEL_CHANGE]);
-      const entries = getNewEntries(file, 2);
-      assert.equal(entries.length, 0);
-    });
-
-    it("countSessionEntryLines matches getNewEntries(0).length without parsing", () => {
-      const file = createSessionFile(dir, [SESSION_HEADER, MODEL_CHANGE, USER_MSG, ASSISTANT_MSG]);
-      assert.equal(countSessionEntryLines(file), getNewEntries(file, 0).length);
-      assert.equal(countSessionEntryLines(file), 4);
-    });
-
-    it("countSessionEntryLines ignores blank lines and returns 0 for missing files", () => {
-      const file = join(dir, "blanks.jsonl");
-      writeFileSync(file, JSON.stringify({ type: "session", id: "x" }) + "\n\n\n");
-      assert.equal(countSessionEntryLines(file), 1);
-      assert.equal(countSessionEntryLines(join(dir, "does-not-exist.jsonl")), 0);
-    });
   });
 
   describe("getSessionId / resolveSessionFileById", () => {
@@ -266,178 +184,6 @@ describe("session.ts", () => {
       // cheap refresh should index it.
       const b = writeSession(dir, "second.jsonl", "id-second");
       assert.equal(resolveSessionFileById("id-second", dir), b);
-    });
-  });
-
-  describe("findLastAssistantMessage", () => {
-    it("finds last assistant text", () => {
-      const entries = [USER_MSG, ASSISTANT_MSG, ASSISTANT_MSG_2] as any[];
-      const text = findLastAssistantMessage(entries);
-      assert.equal(text, "Updated plan with details.");
-    });
-
-    it("skips thinking blocks, gets text only", () => {
-      const entries = [ASSISTANT_MSG_2] as any[];
-      const text = findLastAssistantMessage(entries);
-      assert.equal(text, "Updated plan with details.");
-    });
-
-    it("skips tool results", () => {
-      const entries = [ASSISTANT_MSG, TOOL_RESULT] as any[];
-      const text = findLastAssistantMessage(entries);
-      assert.equal(text, "Here is my plan...");
-    });
-
-    it("returns null when no assistant messages", () => {
-      const entries = [USER_MSG] as any[];
-      assert.equal(findLastAssistantMessage(entries), null);
-    });
-
-    it("returns null for empty array", () => {
-      assert.equal(findLastAssistantMessage([]), null);
-    });
-
-    it("skips empty assistant messages and returns real content above", () => {
-      const realMsg = {
-        type: "message",
-        message: {
-          role: "assistant",
-          content: [{ type: "text", text: "Real summary content." }],
-        },
-      };
-      const emptyMsg = {
-        type: "message",
-        message: {
-          role: "assistant",
-          content: [],
-        },
-      };
-      const entries = [realMsg, emptyMsg] as any[];
-      assert.equal(findLastAssistantMessage(entries), "Real summary content.");
-    });
-
-    it("surfaces errorMessage when last assistant ended with stopReason=error and no text", () => {
-      // Reproduces the overload-exhaustion case: an earlier turn looked
-      // normal, then the provider went 529 and auto-retry gave up. Without
-      // the errorMessage fallback we'd return the stale earlier summary and
-      // the orchestrator would believe the subagent completed.
-      const earlierGood = {
-        type: "message",
-        message: {
-          role: "assistant",
-          content: [{ type: "text", text: "Investigating the bug..." }],
-        },
-      };
-      const overloadError = {
-        type: "message",
-        message: {
-          role: "assistant",
-          content: [],
-          stopReason: "error",
-          errorMessage: "Anthropic 529 Overloaded after 3 retries",
-        },
-      };
-      const entries = [earlierGood, overloadError] as any[];
-      assert.equal(
-        findLastAssistantMessage(entries),
-        "Subagent error: Anthropic 529 Overloaded after 3 retries",
-      );
-    });
-
-    it("prefers text content even when an error stopReason is set", () => {
-      // If the model produced text before the error (rare but possible), we
-      // prefer the actual content over the synthetic error fallback.
-      const msg = {
-        type: "message",
-        message: {
-          role: "assistant",
-          content: [{ type: "text", text: "Here is partial output." }],
-          stopReason: "error",
-          errorMessage: "stream interrupted",
-        },
-      };
-      assert.equal(findLastAssistantMessage([msg] as any[]), "Here is partial output.");
-    });
-
-    it("does not invent a summary for a stop=error message with no errorMessage", () => {
-      const msg = {
-        type: "message",
-        message: {
-          role: "assistant",
-          content: [],
-          stopReason: "error",
-        },
-      };
-      assert.equal(findLastAssistantMessage([msg] as any[]), null);
-    });
-  });
-
-  describe("appendBranchSummary", () => {
-    it("appends valid branch_summary entry", () => {
-      const file = createSessionFile(dir, [SESSION_HEADER, USER_MSG, ASSISTANT_MSG]);
-      const id = appendBranchSummary(file, "user-001", "asst-001", "The plan was created.");
-
-      assert.ok(id, "should return an id");
-      assert.equal(typeof id, "string");
-
-      // Read back and verify
-      const lines = readFileSync(file, "utf8").trim().split("\n");
-      assert.equal(lines.length, 4); // 3 original + 1 summary
-
-      const summary = JSON.parse(lines[3]);
-      assert.equal(summary.type, "branch_summary");
-      assert.equal(summary.id, id);
-      assert.equal(summary.parentId, "user-001");
-      assert.equal(summary.fromId, "asst-001");
-      assert.equal(summary.summary, "The plan was created.");
-      assert.ok(summary.timestamp);
-    });
-
-    it("uses branchPointId as fromId fallback", () => {
-      const file = createSessionFile(dir, [SESSION_HEADER]);
-      appendBranchSummary(file, "branch-pt", null, "summary");
-
-      const lines = readFileSync(file, "utf8").trim().split("\n");
-      const summary = JSON.parse(lines[1]);
-      assert.equal(summary.fromId, "branch-pt");
-    });
-  });
-
-  describe("copySessionFile", () => {
-    it("creates a copy with different path", () => {
-      const file = createSessionFile(dir, [SESSION_HEADER, USER_MSG]);
-      const copyDir = join(dir, "copies");
-      mkdirSync(copyDir, { recursive: true });
-      const copy = copySessionFile(file, copyDir);
-
-      assert.notEqual(copy, file);
-      assert.ok(copy.endsWith(".jsonl"));
-      assert.equal(readFileSync(copy, "utf8"), readFileSync(file, "utf8"));
-    });
-  });
-
-  describe("mergeNewEntries", () => {
-    it("appends new entries from source to target", () => {
-      // Source starts with same base (2 entries), then has 1 new entry
-      const sourceFile = join(dir, "merge-source.jsonl");
-      const targetFile = join(dir, "merge-target.jsonl");
-      writeFileSync(
-        sourceFile,
-        [SESSION_HEADER, USER_MSG, ASSISTANT_MSG].map((e) => JSON.stringify(e)).join("\n") + "\n",
-      );
-      writeFileSync(
-        targetFile,
-        [SESSION_HEADER, USER_MSG].map((e) => JSON.stringify(e)).join("\n") + "\n",
-      );
-
-      // Merge entries after line 2 (the shared base)
-      const merged = mergeNewEntries(sourceFile, targetFile, 2);
-      assert.equal(merged.length, 1);
-      assert.equal(merged[0].id, "asst-001");
-
-      // Target should now have 3 entries
-      const targetLines = readFileSync(targetFile, "utf8").trim().split("\n");
-      assert.equal(targetLines.length, 3);
     });
   });
 
@@ -893,59 +639,6 @@ describe("subagent discovery", () => {
       const loaded = testApi.loadAgentDefaults("interactive-unset-test-agent");
       assert.equal(loaded?.interactive, undefined);
     });
-  });
-
-  it("resolveEffectiveInteractive defaults to the inverse of auto-exit", () => {
-    // Autonomous agents (auto-exit: true) are NOT interactive — parent gets stall pings.
-    assert.equal(
-      testApi.resolveEffectiveInteractive({ name: "A", task: "T" }, { autoExit: true }),
-      false,
-    );
-    // Explicit resident agents default to quiet status notifications.
-    assert.equal(
-      testApi.resolveEffectiveInteractive({ name: "A", task: "T" }, { autoExit: false }),
-      true,
-    );
-    assert.equal(
-      testApi.resolveEffectiveInteractive({ name: "A", task: "T" }, {}),
-      false,
-    );
-    // Omitted policy is autonomous, independent of notification configuration.
-    assert.equal(
-      testApi.resolveEffectiveInteractive({ name: "A", task: "T" }, null),
-      false,
-    );
-  });
-
-  it("resolveEffectiveInteractive honors explicit frontmatter over the auto-exit default", () => {
-    // Autonomous agent that still wants to be treated as interactive.
-    assert.equal(
-      testApi.resolveEffectiveInteractive(
-        { name: "A", task: "T" },
-        { autoExit: true, interactive: true },
-      ),
-      true,
-    );
-    // Non-auto-exit agent that opts back into stall pings.
-    assert.equal(
-      testApi.resolveEffectiveInteractive(
-        { name: "A", task: "T" },
-        { interactive: false },
-      ),
-      false,
-    );
-  });
-
-  it("bundled scout/researcher/worker all resolve as non-interactive (auto-exit)", () => {
-    for (const name of ["scout", "researcher", "worker"]) {
-      const defs = testApi.loadAgentDefaults(name);
-      assert.ok(defs, `expected bundled agent ${name} to be discoverable`);
-      assert.equal(
-        testApi.resolveEffectiveInteractive({ name, task: "" }, defs),
-        false,
-        `${name} should resolve as non-interactive (autonomous, auto-exit)`,
-      );
-    }
   });
 
   it("worker is granted the spawning toolset restricted to scout and researcher", () => {
@@ -1541,49 +1234,6 @@ describe("subagent interruption", () => {
     assert.equal(names.includes("subagent_resume"), false);
   });
 
-  it("formats exit code 130 as an ordinary failure", () => {
-    const testApi = (subagentsModule as any).__test__;
-    const presentation = testApi.resolveResultPresentation(
-      {
-        exitCode: 130,
-        elapsed: 61,
-        summary: "Sub-agent exited with code 130",
-        sessionFile: "/tmp/subagent.jsonl",
-        sessionId: "019f-abc",
-      },
-      "Worker",
-    );
-
-    assert.match(presentation, /failed after final settlement/);
-    assert.match(presentation, /exited with code 130/);
-    assert.doesNotMatch(presentation, /interrupted/);
-    // Follow-ups reference the name (not the session id).
-    assert.match(presentation, /subagent_message\(\{ name: "Worker"/);
-    assert.doesNotMatch(presentation, /Session id:/);
-  });
-
-  it("renders a clear provider/agent error when errorMessage is set", () => {
-    // Final failure retains useful partial text alongside its diagnostic.
-    const testApi = (subagentsModule as any).__test__;
-    const presentation = testApi.resolveResultPresentation(
-      {
-        exitCode: 1,
-        elapsed: 14,
-        summary: "Useful partial work retained.",
-        sessionFile: "/tmp/subagent.jsonl",
-        sessionId: "019f-xyz",
-        errorMessage: "Anthropic 529 Overloaded after 3 retries",
-      },
-      "Worker",
-    );
-
-    assert.match(presentation, /Sub-agent "Worker" failed/);
-    assert.match(presentation, /failed after final settlement/);
-    assert.match(presentation, /Error: Anthropic 529 Overloaded after 3 retries/);
-    assert.match(presentation, /subagent_message\(\{ name: "Worker"/);
-    assert.doesNotMatch(presentation, /Session id:/);
-    assert.match(presentation, /Useful partial work retained/);
-  });
 });
 
 describe("subagent status renderer", () => {
@@ -1779,17 +1429,6 @@ describe("subagent display helpers", () => {
       assert.equal(testApi.formatTokens(850), "850");
       assert.equal(testApi.formatTokens(3200), "3.2k");
       assert.equal(testApi.formatTokens(45000), "45k");
-    });
-  });
-
-  describe("formatContextUsage", () => {
-    it("shows a percent gauge when the window is known", () => {
-      assert.equal(testApi.formatContextUsage(36_000, 200_000), "18.0%/200k");
-      assert.equal(testApi.formatContextUsage(500_000, 1_000_000), "50.0%/1.0M");
-    });
-
-    it("falls back to a window-less ctx label when unknown", () => {
-      assert.equal(testApi.formatContextUsage(37_000, undefined), "37k ctx (capacity unknown)");
     });
   });
 

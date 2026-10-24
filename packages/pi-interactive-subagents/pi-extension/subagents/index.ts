@@ -722,11 +722,19 @@ function recordTerminal(running: RunningSubagent, phase: string, diagnostic?: st
 async function closeOwnedSurface(running: RunningSubagent): Promise<void> {
   if (!isCurrent(running) || running.closure === "confirmed") return;
   running.closing = true;
-  // Let the gate observe autonomous Pi exit before closing its shell surface.
+  // Settlement is not process exit: trusted extensions may still be doing
+  // asynchronous shutdown work. Never kill the writer's exit witness to clean
+  // up its surface. A bounded unknown remains retained and can be reconciled.
   if (running.settled) {
-    for (let attempt = 0; attempt < 10 && !existsSync(processExitFile(running.sessionFile, running.id)); attempt++) {
+    const deadline = Date.now() + CLOSE_TIMEOUT_MS;
+    while (!existsSync(processExitFile(running.sessionFile, running.id)) && Date.now() < deadline) {
       await delay(25);
       if (!isCurrent(running)) return;
+    }
+    if (!existsSync(processExitFile(running.sessionFile, running.id))) {
+      running.closure = "unconfirmed";
+      recordTerminal(running, "closure-unconfirmed", "Writer exit not yet witnessed; shutdown surface and wrapper retained, no forced close or ownership reclaim");
+      return;
     }
   }
   if (!isCurrent(running) || (running.backend && running.backend !== getMuxBackend())) return;
@@ -997,9 +1005,8 @@ function buildSubagentToolAllowlist(
  *
  * This is the single source of truth for reconstructing a subagent's loadout,
  * used both by the initial `launchSubagent` and by the `subagent_message`
- * resume path so the two can never drift. Env vars (PI_SUBAGENT_AGENT /
- * PI_SUBAGENT_ALLOWED / PI_CODING_AGENT_DIR) and cwd are the caller's
- * responsibility since they differ slightly between launch and resume.
+ * resume path so the two can never drift. managedPiCommand supplies the shared
+ * identity, lifecycle environment and cwd for both launch modes.
  */
 function applySandboxToParts(
   parts: string[],
@@ -1051,6 +1058,22 @@ function buildPiPromptArgs(params: {
     ...skillPrompts,
     params.taskArg,
   ];
+}
+
+/** One command policy; fresh prompt delivery and inbox-only resume stay explicit. */
+function managedPiCommand(record: SubagentRun, artifactDir: string, activityFile: string, initial?: { taskDelivery: "direct" | "artifact"; taskArg: string }): string {
+  const loadout = record.loadout!;
+  const parts = ["pi", "--session", shellEscape(record.sessionFile)];
+  applySandboxToParts(parts, loadout, { artifactDir, name: `${record.id}-${record.executionId}` });
+  const env = {
+    PI_CODING_AGENT_DIR: loadout.agentDir, PI_SUBAGENT_ALLOWED: loadout.spawnable.join(","),
+    PI_SUBAGENT_AGENT: loadout.agent, PI_SUBAGENT_NAME: record.name,
+    PI_SUBAGENT_SESSION: record.sessionFile, PI_SUBAGENT_ID: record.executionId, PI_SUBAGENT_INBOX_ONLY: initial ? "0" : "1",
+    PI_SUBAGENT_RUN_ID: record.id, PI_SUBAGENT_GENERATION: String(record.generation),
+    PI_SUBAGENT_ACTIVITY_FILE: activityFile, PI_SUBAGENT_AUTO_EXIT: loadout.autoExit ? "1" : "0",
+  };
+  if (initial) parts.push(...buildPiPromptArgs({ ...initial, effectiveSkills: loadout.skills.map((skill) => skill.name).join(",") }).map(shellEscape));
+  return fencedCommand(`cd ${shellEscape(loadout.cwd)} && ${Object.entries(env).map(([key, value]) => `${key}=${shellEscape(value)}`).join(" ")} ${parts.join(" ")}`, record);
 }
 
 function activityLabel(activity: SubagentActivityState): string | undefined {
@@ -1190,16 +1213,13 @@ export const __test__ = {
   discoverAgentDefinitions,
   resolveEffectiveSessionMode,
   resolveLaunchBehavior,
-  resolveEffectiveInteractive,
   buildSubagentToolAllowlist,
   buildPiPromptArgs,
   formatWidgetRightLabel,
   observeRunningSubagent,
   getToolExtensionPath,
-  resolveResultPresentation,
   formatElapsed,
   formatTokens,
-  formatContextUsage,
   formatUsageSegments,
   widgetIcon,
 };
@@ -1358,22 +1378,6 @@ async function launchSubagent(
     }
 
     if (!loadout) throw new Error("Missing managed Pi loadout");
-    const parts = ["pi", "--session", shellEscape(subagentSessionFile)];
-    // Fresh and resumed writers replay the same default-deny launch policy.
-    applySandboxToParts(parts, loadout, { artifactDir, name: `${record.id}-${id}` });
-    const envParts = [
-      `PI_CODING_AGENT_DIR=${shellEscape(loadout.agentDir)}`,
-      `PI_SUBAGENT_ALLOWED=${shellEscape(loadout.spawnable.join(","))}`,
-      `PI_SUBAGENT_NAME=${shellEscape(params.name)}`,
-      `PI_SUBAGENT_AGENT=${shellEscape(params.agent)}`,
-      `PI_SUBAGENT_AUTO_EXIT=${loadout.autoExit ? "1" : "0"}`,
-      `PI_SUBAGENT_SESSION=${shellEscape(subagentSessionFile)}`,
-      `PI_SUBAGENT_ID=${shellEscape(id)}`,
-      "PI_SUBAGENT_INBOX_ONLY=0",
-      `PI_SUBAGENT_RUN_ID=${shellEscape(record.id)}`,
-      `PI_SUBAGENT_GENERATION=${record.generation}`,
-      `PI_SUBAGENT_ACTIVITY_FILE=${shellEscape(activityFile)}`,
-    ];
     let taskArg = fullTask;
     if (launchBehavior.taskDelivery === "artifact") {
       const artifactPath = join(artifactDir, "context", `${record.id}-${id}.md`);
@@ -1381,15 +1385,9 @@ async function launchSubagent(
       writeFileSync(artifactPath, fullTask, "utf8");
       taskArg = `@${artifactPath}`;
     }
-    for (const promptArg of buildPiPromptArgs({
-      effectiveSkills: loadout.skills.map((skill) => skill.name).join(","),
-      taskDelivery: launchBehavior.taskDelivery,
-      taskArg,
-    })) parts.push(shellEscape(promptArg));
-
-    const piCommand = `cd ${shellEscape(effectiveCwd)} && ${envParts.join(" ")} ${parts.join(" ")}`;
+    const command = managedPiCommand(record, artifactDir, activityFile, { taskDelivery: launchBehavior.taskDelivery, taskArg });
     const launchScriptFile = join(artifactDir, "subagent-scripts", `${record.id}-${id}.sh`);
-    const surface = createSubagentSurface(params.name, fencedCommand(piCommand, record), launchScriptFile, subagentSessionFile, id);
+    const surface = createSubagentSurface(params.name, command, launchScriptFile, subagentSessionFile, id);
     const running: RunningSubagent = {
       owner, backend: record.backend,
       id, subagentId: record.id, generation: record.generation, runs,
@@ -1463,9 +1461,10 @@ async function watchSubagent(
       for (;;) {
         observationSignal.throwIfAborted();
         if (!isCurrent(running)) return null;
-        const uncertain = new SubagentInbox(sessionFile).snapshot(running.runs?.resolve({ id: running.subagentId })).messages.find((message) => message.uncertainty)?.uncertainty;
+        const inbox = new SubagentInbox(sessionFile).snapshot(running.runs?.resolve({ id: running.subagentId }));
+        const uncertain = inbox.uncertainty ?? inbox.messages.find((message) => message.uncertainty)?.uncertainty;
         if (uncertain && running.uncertaintyNotified !== uncertain.actionId) {
-          const line = `${name}: paused for uncertain action ${uncertain.actionId} (message ${uncertain.messageId}). ${uncertain.reason} Ordinary follow-up/resume cannot authorize repetition. Reconcile, or obtain explicit user authorization and call subagent_message with authorization: { actionId, decision: "retry" | "confirm-completed", reason }.`;
+          const line = `${name}: paused for uncertain action ${uncertain.actionId}. ${uncertain.reason} Ordinary follow-up/resume cannot authorize repetition. Reconcile, or obtain explicit user authorization and call subagent_message with authorization: { actionId, decision: "retry" | "confirm-completed", reason }.`;
           running.owner!.notifications.publish({ customType: "subagent_status", content: line, display: true,
             details: { id: running.subagentId, name, eventId: `subagent-uncertain:${uncertain.actionId}`, uncertainty: uncertain, lines: [line], overflow: 0 } });
           running.owner!.notifications.deliver(running.owner!.pi);
@@ -1615,8 +1614,29 @@ async function watchSubagent(
 async function reconcileClosure(pi: ExtensionAPI, running: RunningSubagent): Promise<void> {
   await closeOwnedSurface(running);
   if (!isCurrent(running)) { forgetRunning(running); return; }
-  if (running.closure === "confirmed") forgetRunning(running);
-  else {
+  if (running.closure === "confirmed") {
+    forgetRunning(running);
+    const owner = running.owner!;
+    const runs = running.runs;
+    if (runs && !owner.leaving) {
+      const record = runs.resolve({ id: running.subagentId });
+      const inbox = new SubagentInbox(record.sessionFile);
+      // An explicit instruction can outlast the caller's bounded closing wait.
+      // Once exit AND closure are proven, give retained safe input a consumer.
+      if (!record.control && writerExited(record) && !inbox.snapshot(record).paused && inbox.pending().length) {
+        const loadout = readSubagentLoadout(record.sessionFile);
+        if (!loadout) throw new Error("Queued continuation retained: recorded loadout is unavailable");
+        const queued = inbox.enqueue(record, {}, () => {
+          const target = runs.messageTarget(record.id);
+          return target.launch ? { run: runs.resume(target.run.id, target.run.generation, loadout), launch: true } : target;
+        });
+        if (queued.launch) await launchRecorded(owner, runs, queued.run, "Retained queued follow-up");
+      }
+    }
+  } else {
+    // Retry observation, not termination, at the next reconciliation checkpoint.
+    running.observing = false;
+    running.owner!.observed.delete(`${running.id}:${running.generation}`);
     const line = `${running.name}: surface closure unconfirmed (inventory=${running.terminalState}); history and ownership retained.`;
     running.owner!.notifications.publish({ customType: "subagent_status", content: line, display: true,
       details: { eventId: `subagent-closure:${running.id}:${running.generation}`, id: running.subagentId, generation: running.generation, name: running.name, surface: running.surface, closure: running.closure,
@@ -1711,16 +1731,7 @@ async function launchRecorded(owner: ParentRuntime, runs: SubagentRuns, record: 
   const artifactDir = runs.directory;
   const activityFile = getSubagentActivityFile(artifactDir, id);
   mkdirSync(dirname(activityFile), { recursive: true });
-  const parts = ["pi", "--session", shellEscape(record.sessionFile)];
-  applySandboxToParts(parts, loadout, { artifactDir, name: `${record.id}-${id}` });
-  const env = {
-    PI_CODING_AGENT_DIR: loadout.agentDir, PI_SUBAGENT_ALLOWED: loadout.spawnable.join(","),
-    PI_SUBAGENT_AGENT: loadout.agent, PI_SUBAGENT_NAME: record.name,
-    PI_SUBAGENT_SESSION: record.sessionFile, PI_SUBAGENT_ID: id, PI_SUBAGENT_INBOX_ONLY: "1",
-    PI_SUBAGENT_RUN_ID: record.id, PI_SUBAGENT_GENERATION: String(record.generation),
-    PI_SUBAGENT_ACTIVITY_FILE: activityFile, PI_SUBAGENT_AUTO_EXIT: loadout.autoExit ? "1" : "0",
-  };
-  const command = fencedCommand(`cd ${shellEscape(loadout.cwd)} && ${Object.entries(env).map(([key, value]) => `${key}=${shellEscape(value)}`).join(" ")} ${parts.join(" ")}`, record);
+  const command = managedPiCommand(record, artifactDir, activityFile);
   const launchScriptFile = join(artifactDir, "subagent-scripts", `${record.id}-resume-${id}.sh`);
   let surface: string;
   try { surface = createSubagentSurface(record.name, command, launchScriptFile, record.sessionFile, id); }
@@ -1942,6 +1953,11 @@ export default function subagentsExtension(pi: ExtensionAPI) {
   // must not open a parallel custom run in the middle of that user prompt.
   pi.on("input", (_event, ctx) => { if (boundRuntime === runtime && ctx.isIdle()) boundRuntime?.notifications.prepareInput(); });
   pi.on("agent_start", () => { if (boundRuntime === runtime) boundRuntime?.notifications.agentStart(); });
+  pi.on("agent_before_settle", (event, ctx) => {
+    if (boundRuntime !== runtime || !boundRuntime) return;
+    boundRuntime.notifications.reconcile(ctx, event.context.pendingMessages);
+    boundRuntime.notifications.deliver(pi);
+  });
 
   // The spawning tools are always registered here. Whether a child process can
   // actually see/use them is governed by the parent's `--tools` allowlist and

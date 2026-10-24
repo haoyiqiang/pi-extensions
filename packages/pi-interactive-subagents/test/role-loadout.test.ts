@@ -86,6 +86,26 @@ test("omitted tools fail before launch while an explicit empty set keeps only co
   });
 });
 
+test("resolved lifetime and notification policy are observable through native run status", { timeout: 60_000 }, async () => {
+  await withRoles(async ({ role, call, finish }) => {
+    for (const [policy, autoExit, interactive] of [
+      ["", true, false],
+      ["auto-exit: false", false, true],
+      ["auto-exit: true\ninteractive: true", true, true],
+      ["auto-exit: false\ninteractive: false", false, false],
+    ] as const) {
+      role("policy", `name: policy\ntools: read\n${policy}`);
+      const launched = await call("subagent", { agent: "policy", task });
+      const status = await call("subagent_status", { id: launched.details.id });
+      assert.equal(status.details.subagent.loadout.autoExit, autoExit);
+      assert.equal(status.details.subagent.loadout.interactive, interactive);
+      await finish();
+      if (!autoExit) await call("subagent_stop", { id: launched.details.id });
+      else await waitFor(async () => (await call("subagent_status", { id: launched.details.id })).details.subagent.closure === "confirmed" ? true : undefined, "autonomous cleanup before fixture surface reuse");
+    }
+  });
+});
+
 test("unknown tools, missing backing extensions and ungranted delegation tools fail closed", { timeout: 30_000 }, async () => {
   await withRoles(async ({ role, call, terminal, root }) => {
     registerToolExtension("missing_fixture_tool", join(root, "not-installed.ts"));

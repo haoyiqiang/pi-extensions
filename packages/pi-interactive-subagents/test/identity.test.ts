@@ -5,7 +5,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdir
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import subagents from "../pi-extension/subagents/index.ts";
+import subagents, { registerToolExtension } from "../pi-extension/subagents/index.ts";
 import { shellEscape } from "@kevinhao/pi-terminal-mux";
 import { createMockExtensionApi, plainTheme, waitFor } from "./harness.ts";
 
@@ -60,6 +60,107 @@ async function withIdentity(run: (h: any) => Promise<void>, fixture = "runtime.t
     rmSync(root, { recursive: true, force: true });
   }
 }
+
+for (const manual of [false, true]) test(`${manual ? "resident manual" : "initial CLI"} crash retains exact-action uncertainty across generic follow-up and reload`, { timeout: 90_000 }, async () => {
+  registerToolExtension("fixture_effect", join(testDir, "fixtures/effect.ts"));
+  await withIdentity(async ({ boot, call, terminal, project, parent, ctx }) => {
+    writeFileSync(join(project, ".pi/agents/effect.md"), `---\nname: effect\ntools: fixture_effect\nauto-exit: ${!manual}\n---\nControlled harmless effect\n`);
+    const launched = await boot("subagent", { agent: "effect", task: manual ? "First settled resident work" : "CRASH_EFFECT" });
+    const requests = () => existsSync(join(terminal, "provider-input.jsonl")) ? readFileSync(join(terminal, "provider-input.jsonl"), "utf8").trim().split("\n").map((line: string) => JSON.parse(line)) : [];
+    const status = async () => (await call("subagent_status", { id: launched.details.id })).details.subagent;
+    if (manual) {
+      const first = await waitFor(() => requests()[0], "initial resident provider");
+      writeFileSync(join(terminal, `release-${first.call}`), "settle first task");
+      await waitFor(() => parent.sentMessages.find((event: any) => event.message.customType === "subagent_result"), "previous resident result");
+      assert.equal((await status()).paused, false);
+      writeFileSync(join(terminal, "runtime-command.json"), JSON.stringify({ id: "manual-effect", action: "input", text: "CRASH_EFFECT" }));
+    }
+    const active = await waitFor(() => requests()[manual ? 1 : 0], "actual effect provider request");
+    writeFileSync(join(terminal, `release-${active.call}`), "perform harmless temp-dir write");
+    await waitFor(() => existsSync(join(terminal, "effect-started")) ? true : undefined, "effect happened before tool returns");
+    rmSync(join(terminal, "runtime-command.json"), { force: true });
+    process.kill(Number(readFileSync(join(terminal, "control-pid"), "utf8")), "SIGKILL");
+    const crashed = await waitFor(async () => { const s = await status(); return s.liveness.writer === "exited" ? s : undefined; }, "positive writer exit");
+    assert.equal(crashed.state, "paused-uncertain");
+    assert.equal(crashed.paused, true);
+    assert.deepEqual(crashed.uncertainty.activeTools, ["fixture-effect"]);
+    const actionId = crashed.uncertainty.actionId;
+    const ordinary = await boot("subagent_message", { id: launched.details.id, message: "Continue the original work", messageId: "ordinary-crash-followup" });
+    assert.equal(ordinary.details.status, "paused-uncertain");
+    assert.equal((await status()).generation, 1);
+    await parent.emit("session_shutdown", { reason: "reload" }, ctx);
+    await parent.emit("session_start", { reason: "reload" }, ctx);
+    assert.equal((await status()).uncertainty.actionId, actionId);
+    assert.equal(requests().length, manual ? 2 : 1, "reload and ordinary input cannot replay the affected work");
+    await assert.rejects(call("subagent_message", { id: launched.details.id, authorization: { actionId: "wrong-action", decision: "retry", reason: "not specific" } }), /exact current uncertain/);
+    await boot("subagent_message", { id: launched.details.id, authorization: { actionId, decision: manual ? "confirm-completed" : "retry", reason: "User explicitly authorized only this affected action after inspecting its harmless temp-dir effect" } });
+    const resumed = await waitFor(() => requests().find((request: any) => request.executionId !== active.executionId), "authorized replacement gets a real provider", 30_000);
+    assert.ok(resumed.inputs.includes("Continue the original work"));
+    assert.ok(resumed.inputs.some((input: string) => input.includes(actionId) && input.includes(manual ? '"decision":"confirm-completed"' : '"decision":"retry"')), "the replacement receives the exact decision, not generic replay permission");
+    assert.equal((await status()).paused, false);
+    assert.equal((await status()).generation, 2);
+  }, "pi-runtime.ts");
+});
+
+test("asynchronous Pi shutdown preserves positive writer exit and a queued follow-up gets a real replacement consumer", { timeout: 90_000 }, async () => {
+  registerToolExtension("fixture_effect", join(testDir, "fixtures/effect.ts"));
+  await withIdentity(async ({ boot, call, terminal, project }) => {
+    writeFileSync(join(project, ".pi/agents/slow.md"), "---\nname: slow\ntools: fixture_effect\n---\nControlled orderly shutdown\n");
+    const launched = await boot("subagent", { agent: "slow", task: "Legitimate asynchronous shutdown" });
+    const requests = () => existsSync(join(terminal, "provider-input.jsonl")) ? readFileSync(join(terminal, "provider-input.jsonl"), "utf8").trim().split("\n").map((line: string) => JSON.parse(line)) : [];
+    const first = await waitFor(() => requests()[0], "actual provider");
+    writeFileSync(join(terminal, `release-${first.call}`), "settle");
+    await waitFor(() => existsSync(join(terminal, "slow-shutdown-started")) ? true : undefined, "real asynchronous shutdown handler");
+    const followup = await call("subagent_message", { id: launched.details.id, message: "New legitimate task", messageId: "after-slow-exit" });
+    assert.equal(followup.details.generation, 2, "positive exit releases exactly one replacement writer");
+    const resumed = await waitFor(() => requests().find((request: any) => request.executionId !== first.executionId), "queued follow-up actually reaches replacement Pi", 30_000);
+    assert.equal(resumed.inputs.at(-1), "New legitimate task");
+    writeFileSync(join(terminal, `release-${resumed.call}`), "settle follow-up");
+    const completed = await waitFor(async () => { const s = (await call("subagent_status", { id: launched.details.id })).details.subagent; return s.generation === 2 && s.closure === "confirmed" ? s : undefined; }, "normal cleanup follows positive exit");
+    assert.equal(completed.state, "completed");
+    assert.equal(completed.liveness.writer, "exited");
+    assert.equal(completed.paused, false);
+  }, "pi-runtime.ts");
+});
+
+test("a bounded unknown shutdown retains its witness and queued work starts only after positive exit", { timeout: 60_000 }, async () => {
+  await withIdentity(async ({ call, terminal, parent }) => {
+    writeFileSync(join(terminal, "hold-exit"), "delay an orderly child shutdown beyond the cleanup bound");
+    const launched = await call("subagent", { agent: "echo", task });
+    writeFileSync(join(terminal, "finish"), "settle");
+    await waitFor(() => existsSync(join(terminal, "waiting-exit")) ? true : undefined, "actual child shutdown pending");
+    await waitFor(() => parent.sentMessages.find((event: any) => event.message.customType === "subagent_result"), "durable completion");
+    const queued = await call("subagent_message", { id: launched.details.id, message: "Return the exact phrase: retained closing follow-up.", messageId: "bounded-shutdown-followup" });
+    assert.equal(queued.details.status, "queued");
+    const retained = await waitFor(async () => { const s = (await call("subagent_status", { id: launched.details.id })).details.subagent; return s.closure === "unconfirmed" ? s : undefined; }, "bounded honest cleanup diagnostic");
+    assert.equal(retained.generation, 1);
+    assert.equal(retained.liveness.writer, "claimed-or-unknown");
+    assert.equal(retained.liveness.surface, "present");
+    for (const file of ["hold-exit", "finish", "received.json"]) rmSync(join(terminal, file), { force: true });
+    writeFileSync(join(terminal, "release-exit"), "positive exit, not age-based reclaim");
+    const input = await waitFor(() => {
+      const file = join(terminal, "received.json");
+      return existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : undefined;
+    }, "retained follow-up gets a consumer after the original caller returned", 30_000);
+    assert.equal(input.env.PI_SUBAGENT_GENERATION, "2");
+    assert.equal(input.task, "Return the exact phrase: retained closing follow-up.");
+    writeFileSync(join(terminal, "finish"), "settle continuation");
+  });
+});
+
+test("confirmed settled failure remains resumable without uncertain-action authorization", { timeout: 30_000 }, async () => {
+  await withIdentity(async ({ call, terminal, parent }) => {
+    const launched = await call("subagent", { agent: "echo", task: `${task}\nFINAL_ERROR` });
+    writeFileSync(join(terminal, "finish"), "settle a final provider failure");
+    await waitFor(() => parent.sentMessages.find((event: any) => event.message.customType === "subagent_result"), "settled failure");
+    const status = (await call("subagent_status", { id: launched.details.id })).details.subagent;
+    assert.equal(status.state, "failed");
+    assert.equal(status.paused, false, "a durable settled error is not an unproven crash");
+    const queued = await call("subagent_message", { id: launched.details.id, message: task });
+    assert.equal(queued.details.generation, 2);
+    assert.equal(queued.details.paused, false);
+  });
+});
 
 test("normal parent quit suspends and restores known work with an explicit continuation, not the original task", { timeout: 90_000 }, async () => {
   await withIdentity(async ({ boot, call, terminal, parent, ctx, project }) => {
@@ -665,9 +766,14 @@ test("a real child-control process restart retains consumed IDs and pauses effec
 });
 
 test("a demonstrably never-dispatched instruction is safely redelivered after a real child restart with its original id and order", { timeout: 60_000 }, async () => {
-  await withIdentity(async ({ call, terminal }) => {
+  await withIdentity(async ({ call, terminal, project, parent }) => {
     process.env.SUBAGENT_TEST_CLOCK = String(Date.now()); // Freeze only the external child's receiver polling.
-    const launched = await call("subagent", { agent: "echo", task });
+    writeFileSync(join(project, ".pi/agents/resident.md"), "---\nname: resident\ntools: read\nauto-exit: false\n---\nKnown settled work\n");
+    const launched = await call("subagent", { agent: "resident", task });
+    writeFileSync(join(terminal, "finish"), "settle the initial task before the queued-only crash");
+    await waitFor(() => parent.sentMessages.find((event: any) => event.message.customType === "subagent_result"), "known initial settlement");
+    await waitFor(() => existsSync(join(terminal, "parked")) ? true : undefined, "resident boundary");
+    for (const file of ["finish", "parked", "received.json"]) rmSync(join(terminal, file), { force: true });
     const message = "Return the exact phrase: safe queued redelivery.\n\nretain final newline\n";
     const queued = await call("subagent_message", { id: launched.details.id, message, messageId: "safe-redelivery" });
     assert.equal(queued.details.message.state, "queued");
@@ -679,7 +785,7 @@ test("a demonstrably never-dispatched instruction is safely redelivered after a 
     const resent = await call("subagent_message", { id: launched.details.id, message, messageId: "safe-redelivery" });
     assert.equal(resent.details.message.id, "safe-redelivery");
     assert.equal(resent.details.message.sequence, 1);
-    assert.equal(resent.details.generation, 2);
+    assert.equal(resent.details.generation, 3);
     const consumed = await waitFor(() => existsSync(join(terminal, "consumed.json")) ? JSON.parse(readFileSync(join(terminal, "consumed.json"), "utf8")) : undefined, "redelivery visible to child");
     assert.deepEqual(consumed.map((m: any) => [m.details.messageId, m.content]), [["safe-redelivery", message]]);
     writeFileSync(join(terminal, "finish"), "complete");
@@ -711,6 +817,8 @@ test("accepted memory-only delivery becomes uncertain after process loss and exp
     assert.equal(ordinary.details.status, "paused-uncertain");
     assert.ok((await call("subagents_list", {})).details.agents.some((agent: any) => agent.name === "echo"), "independent parent work remains available");
     const actionId = paused.messages[0].uncertainty.actionId;
+    assert.ok(paused.uncertainty, "the initial unfinished task is independent of the queued message's dispatch uncertainty");
+    await call("subagent_message", { id: launched.details.id, authorization: { actionId: paused.uncertainty.actionId, decision: "confirm-completed", reason: "User separately reconciled the initial unfinished task; no replay" } });
     await call("subagent_message", { id: launched.details.id, authorization: { actionId, decision: "confirm-completed", reason: "User reconciled the affected action and explicitly instructed us not to repeat it." } });
     const consumed = await waitFor(() => existsSync(join(terminal, "consumed.json")) ? JSON.parse(readFileSync(join(terminal, "consumed.json"), "utf8")) : undefined, "post-reconciliation child input");
     assert.deepEqual(consumed.map((m: any) => m.details.messageId), ["after-reconciliation"], "accepted-but-uncertain original must not be silently repeated");
@@ -804,7 +912,8 @@ test("reconstruction reports confirmed-dead work without a result and retains un
     assert.equal(event.message.details.outcome, "failed");
     assert.equal(event.message.details.source.kind, "process_exit");
     const status = (await call("subagent_status", { id: launched.details.id })).details.subagent;
-    assert.equal(status.state, "failed");
+    assert.equal(status.state, "paused-uncertain");
+    assert.equal(status.latestResult.outcome, "failed", "fallback failure is retained but is not proof that replay is safe");
     assert.equal(status.liveness.surface, "unknown");
     assert.equal(status.liveness.writer, "exited");
     const commands = readFileSync(join(terminal, "commands.jsonl"), "utf8").trim().split("\n").map((line: string) => JSON.parse(line));
