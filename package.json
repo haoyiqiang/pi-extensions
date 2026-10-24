@@ -19,27 +19,51 @@
       "packages/pi-distill/index.ts",
       "packages/pi-models-discovery/index.ts",
       "packages/pi-web-search/index.ts",
-      "packages/pi-subagent/index.ts"
+      "packages/pi-interactive-subagents/pi-extension/subagents/index.ts"
     ],
     "themes": [
       "packages/pi-spark/themes"
     ]
   },
+  "files": [
+    "packages",
+    "!packages/**/test",
+    "!packages/**/tests",
+    "!packages/**/node_modules",
+    "!packages/**/config.json",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "@kevinhao/pi-terminal-mux": "^0.6.5",
+    "@kevinhao/pi-web-search": "^1.6.0",
+    "@kevinhao/pi-utils": "^0.1.1",
+    "@grpc/grpc-js": "^1.14.4",
+    "@grpc/proto-loader": "^0.8.1",
+    "defu": "^6.1.7",
+    "ky": "^2.0.2",
+    "parse-duration": "^2.1.8",
+    "pretty-ms": "^9.3.0",
+    "undici": "^7.29.1",
+    "zod": "^4.4.3"
+  },
   "peerDependencies": {
     "@earendil-works/pi-agent-core": ">=0.87.1",
     "@earendil-works/pi-ai": ">=0.87.1",
     "@earendil-works/pi-coding-agent": ">=0.87.1",
-    "@earendil-works/pi-tui": ">=0.87.1"
+    "@earendil-works/pi-tui": ">=0.87.1",
+    "typebox": "^1.3.27"
   },
   "scripts": {
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "check": "npm run typecheck && npm test && node scripts/check-no-local-bindings.mjs && node scripts/check-lockfile-registry.mjs && npm run check:boundaries && node scripts/check-package-config.mjs && npm run test:pack && node scripts/check-release-order.mjs",
     "check:boundaries": "node scripts/check-package-boundaries.mjs",
-    "test:pack": "node scripts/check-package-tarballs.mjs"
+    "test:pack": "node scripts/check-package-tarballs.mjs && node scripts/check-subagents-install.mjs"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.19.0"
   },
   "devDependencies": {
     "@types/node": "24.12.4",

@@ -17,4 +17,8 @@ export interface BackendOps {
   readAsync(surface: string, lines?: number): Promise<string>;
   close(surface: string): void;
   rename(surface: string, name: string): void;
+  /** Absence must come from a successful inventory, never from a failed read. */
+  state(surface: string): SurfaceState;
 }
+
+export type SurfaceState = "present" | "absent" | "unknown";

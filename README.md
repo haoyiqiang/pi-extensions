@@ -19,7 +19,8 @@ Published packages are independently installable from npm. Each package owns its
 | [`@kevinhao/pi-models-discovery`](./packages/pi-models-discovery) | Discovers models from `{baseUrl}/models` for providers marked with `discoverModels` in models.json, with a persistent startup cache and a manual refresh command. | [English](./packages/pi-models-discovery/README.md) · [中文](./packages/pi-models-discovery/README.zh-CN.md) |
 | [`@kevinhao/pi-utils`](./packages/pi-utils) | Library for portable JSON config I/O and deterministic test fixtures. Not a Pi extension. | [English](./packages/pi-utils/README.md) · [中文](./packages/pi-utils/README.zh-CN.md) |
 | [`@kevinhao/pi-web-search`](./packages/pi-web-search) | Combines LLM built-in web search, independent Search APIs, Gemini/Vertex URL Context, bounded web fetching, and opt-in GitHub repository extraction. | [English](./packages/pi-web-search/README.md) · [中文](./packages/pi-web-search/README.zh-CN.md) |
-| [`@kevinhao/pi-subagent`](./packages/pi-subagent) | Runs persistent subagents in a terminal panel through `pi-terminal-mux`. No `/subagent` command. | [English](./packages/pi-subagent/README.md) · [中文](./packages/pi-subagent/README.zh-CN.md) |
+| [`pi-interactive-subagents`](./packages/pi-interactive-subagents) | Default native asynchronous subagent controller, with retained sessions, correlated questions, reload and safe continuation. Private Git/local integration, not an npm release. | [English](./packages/pi-interactive-subagents/README.md) · [中文](./packages/pi-interactive-subagents/README.zh-CN.md) |
+| [`@kevinhao/pi-subagent`](./packages/pi-subagent) | Separate opt-in CLI/panel runner through `pi-terminal-mux`; not loaded by the root profile. No `/subagent` command. | [English](./packages/pi-subagent/README.md) · [中文](./packages/pi-subagent/README.zh-CN.md) |
 
 Shared libraries are published for feature-package dependencies. [`@kevinhao/pi-utils`](./packages/pi-utils) is a library, not a Pi extension. It owns portable JSON config I/O and deterministic test fixtures. [`@kevinhao/pi-terminal-mux`](./packages/pi-terminal-mux) provides terminal surface operations.
 
@@ -27,19 +28,19 @@ Shared libraries are published for feature-package dependencies. [`@kevinhao/pi-
 
 > `pi-session-tools` has been retired and removed from this repository. Existing sessions with its historical `session-squash` entries remain readable by compatibility code in packages that explicitly support them.
 
-> `pi-interactive-subagents`, `pi-subagents`, and `pi-workflow` are retired and removed from this repository. Stop old work and remove separately installed old entries before reloading; the old subagent tools, `/plan`/`/iterate`/`/subagent` aliases, and `/wf` commands are not retained. [`@kevinhao/pi-subagent`](./packages/pi-subagent) is a separate panel-based runner and does not restore those commands.
+> The root profile now owns exactly one subagent controller: the consolidated [`pi-interactive-subagents`](./packages/pi-interactive-subagents). `pi-subagents` and `pi-workflow` remain retired; their `/plan`, `/iterate` and `/wf` aliases are not restored. If you separately installed an older interactive controller, review your configuration and enable only one entry before reloading. No user package configuration is edited automatically. The independent [`@kevinhao/pi-subagent`](./packages/pi-subagent) CLI and its run store remain untouched and are never imported, deleted or silently migrated.
 
 Extension management slash commands use the `/config:<feature>[-action]` convention.
 
 ## Install everything
 
-Requirements: Pi 0.87.1 or a tested compatible extension runtime, and Node.js 22 or newer.
+Requirements: Pi 0.87.1 or a tested compatible extension runtime, and Node.js 22.19 or newer.
 
 ```bash
 pi install git:github.com/haoyiqiang/pi-extensions
 ```
 
-The repository root is also an explicit full-suite Pi profile. Its manifest allowlists every extension and includes the `pi-spark` themes; library-only packages such as `pi-terminal-mux` are never loaded as extensions. Adding a workspace package does not automatically add it to this profile.
+The repository root is also an explicit full-suite Pi profile. Its manifest explicitly allowlists the default extensions (excluding the independent CLI controller) and includes the `pi-spark` themes; library-only packages such as `pi-terminal-mux` are never loaded as extensions. Adding a workspace package does not automatically add it to this profile.
 
 The full profile intentionally enables invasive features together: `pi-spark` replaces the editor/footer and folds transcript activity, and `pi-distill` transforms tool results. Prefer single-package npm installs for published capabilities when you do not want the complete composition.
 `pi-action-fusion` is also loaded by the profile but stays disabled until explicitly enabled with `/config:action-fusion enable` followed by `/reload`. It does not replace `pi-distill` or add another compaction owner.
@@ -69,7 +70,9 @@ npm run check
 
 The check command runs workspace type checks, tests, and the portability/i18n gates.
 
-The retired interactive-subagent and workflow products are not workspaces, root-profile entries, or release candidates. Their external archive is not a repository dependency. `pi-subagent` is the current panel-based package.
+The imported interactive controller preserves its upstream name/version/repository and MIT attribution. It is a private integration-only workspace: included in root deployment and packed-resource/isolated-install gates, but intentionally absent from release-please and npm publishing. This is not package-ownership migration. The separate public `pi-subagent` package retains its existing release and CLI contract.
+
+`npm run check` includes actual packed root and independent controller installation against Pi 0.87.1 with deterministic local providers, exercising discovery, spawn, messages, questions/replies, settlement, reload, suspension/continuation and retained stop. This uses a controlled temporary npm cache/consumer, not personal extension paths; no paid calls or user terminals. See the controller README for explicit opt-in disposable tmux/Orca smoke.
 
 The repository pins `https://registry.npmjs.org/` in `.npmrc` so lockfile tarball URLs stay portable. Installing through a mirror registry rewrites those URLs and makes `npm ci` fail on npm 12+ with `EALLOWREMOTE`; `node scripts/check-lockfile-registry.mjs` (part of `npm run check`) blocks that before merge.
 

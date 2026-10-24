@@ -17,6 +17,7 @@ const rootActivePrivateDirectories = [...new Set((rootManifest.pi?.extensions ??
     return JSON.parse(readFileSync(manifestPath, "utf8")).private === true;
   }))].sort();
 const packageTargets = [
+  { directory: ".", kind: "root distribution" },
   ...releasePackageDirectories.map((directory) => ({ directory, kind: "public release" })),
   ...rootActivePrivateDirectories.map((directory) => ({ directory, kind: "private root deployment" })),
 ];

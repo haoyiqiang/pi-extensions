@@ -40,6 +40,8 @@ const workspaceNames = new Set(
 for (const dir of packageDirs) {
   const pkgJson = JSON.parse(readFileSync(join(PACKAGES_DIR, dir, "package.json"), "utf8"));
   const name = pkgJson.name;
+  // Private integration-only upstream workspaces do not claim npm ownership.
+  if (pkgJson.private === true) continue;
 
   const result = await fetchNpmInfo(name);
 
