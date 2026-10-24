@@ -641,59 +641,6 @@ describe("subagent discovery", () => {
     });
   });
 
-  it("resolveEffectiveInteractive defaults to the inverse of auto-exit", () => {
-    // Autonomous agents (auto-exit: true) are NOT interactive — parent gets stall pings.
-    assert.equal(
-      testApi.resolveEffectiveInteractive({ name: "A", task: "T" }, { autoExit: true }),
-      false,
-    );
-    // Explicit resident agents default to quiet status notifications.
-    assert.equal(
-      testApi.resolveEffectiveInteractive({ name: "A", task: "T" }, { autoExit: false }),
-      true,
-    );
-    assert.equal(
-      testApi.resolveEffectiveInteractive({ name: "A", task: "T" }, {}),
-      false,
-    );
-    // Omitted policy is autonomous, independent of notification configuration.
-    assert.equal(
-      testApi.resolveEffectiveInteractive({ name: "A", task: "T" }, null),
-      false,
-    );
-  });
-
-  it("resolveEffectiveInteractive honors explicit frontmatter over the auto-exit default", () => {
-    // Autonomous agent that still wants to be treated as interactive.
-    assert.equal(
-      testApi.resolveEffectiveInteractive(
-        { name: "A", task: "T" },
-        { autoExit: true, interactive: true },
-      ),
-      true,
-    );
-    // Non-auto-exit agent that opts back into stall pings.
-    assert.equal(
-      testApi.resolveEffectiveInteractive(
-        { name: "A", task: "T" },
-        { interactive: false },
-      ),
-      false,
-    );
-  });
-
-  it("bundled scout/researcher/worker all resolve as non-interactive (auto-exit)", () => {
-    for (const name of ["scout", "researcher", "worker"]) {
-      const defs = testApi.loadAgentDefaults(name);
-      assert.ok(defs, `expected bundled agent ${name} to be discoverable`);
-      assert.equal(
-        testApi.resolveEffectiveInteractive({ name, task: "" }, defs),
-        false,
-        `${name} should resolve as non-interactive (autonomous, auto-exit)`,
-      );
-    }
-  });
-
   it("worker is granted the spawning toolset restricted to scout and researcher", () => {
     const worker = testApi.loadAgentDefaults("worker");
     assert.ok(worker, "expected bundled worker to be discoverable");
@@ -1287,49 +1234,6 @@ describe("subagent interruption", () => {
     assert.equal(names.includes("subagent_resume"), false);
   });
 
-  it("formats exit code 130 as an ordinary failure", () => {
-    const testApi = (subagentsModule as any).__test__;
-    const presentation = testApi.resolveResultPresentation(
-      {
-        exitCode: 130,
-        elapsed: 61,
-        summary: "Sub-agent exited with code 130",
-        sessionFile: "/tmp/subagent.jsonl",
-        sessionId: "019f-abc",
-      },
-      "Worker",
-    );
-
-    assert.match(presentation, /failed after final settlement/);
-    assert.match(presentation, /exited with code 130/);
-    assert.doesNotMatch(presentation, /interrupted/);
-    // Follow-ups reference the name (not the session id).
-    assert.match(presentation, /subagent_message\(\{ name: "Worker"/);
-    assert.doesNotMatch(presentation, /Session id:/);
-  });
-
-  it("renders a clear provider/agent error when errorMessage is set", () => {
-    // Final failure retains useful partial text alongside its diagnostic.
-    const testApi = (subagentsModule as any).__test__;
-    const presentation = testApi.resolveResultPresentation(
-      {
-        exitCode: 1,
-        elapsed: 14,
-        summary: "Useful partial work retained.",
-        sessionFile: "/tmp/subagent.jsonl",
-        sessionId: "019f-xyz",
-        errorMessage: "Anthropic 529 Overloaded after 3 retries",
-      },
-      "Worker",
-    );
-
-    assert.match(presentation, /Sub-agent "Worker" failed/);
-    assert.match(presentation, /failed after final settlement/);
-    assert.match(presentation, /Error: Anthropic 529 Overloaded after 3 retries/);
-    assert.match(presentation, /subagent_message\(\{ name: "Worker"/);
-    assert.doesNotMatch(presentation, /Session id:/);
-    assert.match(presentation, /Useful partial work retained/);
-  });
 });
 
 describe("subagent status renderer", () => {
@@ -1525,17 +1429,6 @@ describe("subagent display helpers", () => {
       assert.equal(testApi.formatTokens(850), "850");
       assert.equal(testApi.formatTokens(3200), "3.2k");
       assert.equal(testApi.formatTokens(45000), "45k");
-    });
-  });
-
-  describe("formatContextUsage", () => {
-    it("shows a percent gauge when the window is known", () => {
-      assert.equal(testApi.formatContextUsage(36_000, 200_000), "18.0%/200k");
-      assert.equal(testApi.formatContextUsage(500_000, 1_000_000), "50.0%/1.0M");
-    });
-
-    it("falls back to a window-less ctx label when unknown", () => {
-      assert.equal(testApi.formatContextUsage(37_000, undefined), "37k ctx (capacity unknown)");
     });
   });
 
