@@ -15,7 +15,6 @@
 | --- | --- | --- |
 | [`@kevinhao/pi-spark`](./packages/pi-spark) | 统一管理紧凑 editor/footer、清爽对话折叠、provider 余额、模型预设、空闲回顾、指标、会话/终端命名和 `#` 资源选择器。 | [English](./packages/pi-spark/README.md) · [中文](./packages/pi-spark/README.zh-CN.md) |
 | [`@kevinhao/pi-distill`](./packages/pi-distill) | 已启用工具结果先归档再摘要，可选本地核验的诊断证据提取。 | [English](./packages/pi-distill/README.md) · [中文](./packages/pi-distill/README.zh-CN.md) |
-| [`@kevinhao/pi-action-fusion`](./packages/pi-action-fusion) | 将单文件编辑／写入与后续命令合并为一次工具调用，改编自 SoL-Pi，默认关闭。新包待首次 npm 发布，现可通过 Git／本地套件使用。 | [English](./packages/pi-action-fusion/README.md) · [中文](./packages/pi-action-fusion/README.zh-CN.md) |
 | [`@kevinhao/pi-models-discovery`](./packages/pi-models-discovery) | 自动发现 models.json 中标记 `discoverModels` 的 provider 的模型列表，启动走持久化缓存，并提供手动刷新命令。 | [English](./packages/pi-models-discovery/README.md) · [中文](./packages/pi-models-discovery/README.zh-CN.md) |
 | [`@kevinhao/pi-utils`](./packages/pi-utils) | 工具库：可移植的 JSON 配置读写，以及确定性的测试 fixture。不是 Pi 扩展。 | [English](./packages/pi-utils/README.md) · [中文](./packages/pi-utils/README.zh-CN.md) |
 | [`@kevinhao/pi-web-search`](./packages/pi-web-search) | 整合 LLM 内置网络搜索、独立 Search API、Gemini/Vertex URL Context、有界网页抓取和可选 GitHub 仓库提取。 | [English](./packages/pi-web-search/README.md) · [中文](./packages/pi-web-search/README.zh-CN.md) |
@@ -42,7 +41,6 @@ pi install git:github.com/haoyiqiang/pi-extensions
 仓库根目录本身也是一个显式维护的全量 Pi profile。manifest 逐项列出扩展入口，并包含 `pi-spark` 主题；`pi-terminal-mux` 等纯库包不会被当成扩展加载。新增 workspace 包不会自动进入这个 profile。
 
 全量 profile 会有意同时启用若干侵入性能力：`pi-spark` 替换 editor/footer 并折叠运行过程，`pi-distill` 改写工具结果。如果不需要完整组合，已发布的能力包可以通过 npm 单独安装。
-profile 也加载 `pi-action-fusion`，但功能保持关闭，需明确运行 `/config:action-fusion enable` 并 `/reload` 才启用。它不替换 `pi-distill`，也不接管自动压缩。
 
 安装后重新加载 Pi：
 

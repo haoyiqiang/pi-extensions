@@ -15,7 +15,6 @@ Published packages are independently installable from npm. Each package owns its
 | --- | --- | --- |
 | [`@kevinhao/pi-spark`](./packages/pi-spark) | Owns the compact editor/footer TUI, clean transcript folding, provider credits, model presets, idle recaps, metrics, session/terminal naming, and the `#` resource picker. | [English](./packages/pi-spark/README.md) · [中文](./packages/pi-spark/README.zh-CN.md) |
 | [`@kevinhao/pi-distill`](./packages/pi-distill) | Archives sources before summarizing enabled tool results, with opt-in locally verified diagnostic evidence. | [English](./packages/pi-distill/README.md) · [中文](./packages/pi-distill/README.zh-CN.md) |
-| [`@kevinhao/pi-action-fusion`](./packages/pi-action-fusion) | Opt-in single-file edit/write plus a follow-up command in one tool call; adapted from SoL-Pi, disabled by default. New package, pending first npm release; available in the Git/local suite. | [English](./packages/pi-action-fusion/README.md) · [中文](./packages/pi-action-fusion/README.zh-CN.md) |
 | [`@kevinhao/pi-models-discovery`](./packages/pi-models-discovery) | Discovers models from `{baseUrl}/models` for providers marked with `discoverModels` in models.json, with a persistent startup cache and a manual refresh command. | [English](./packages/pi-models-discovery/README.md) · [中文](./packages/pi-models-discovery/README.zh-CN.md) |
 | [`@kevinhao/pi-utils`](./packages/pi-utils) | Library for portable JSON config I/O and deterministic test fixtures. Not a Pi extension. | [English](./packages/pi-utils/README.md) · [中文](./packages/pi-utils/README.zh-CN.md) |
 | [`@kevinhao/pi-web-search`](./packages/pi-web-search) | Combines LLM built-in web search, independent Search APIs, Gemini/Vertex URL Context, bounded web fetching, and opt-in GitHub repository extraction. | [English](./packages/pi-web-search/README.md) · [中文](./packages/pi-web-search/README.zh-CN.md) |
@@ -42,7 +41,6 @@ pi install git:github.com/haoyiqiang/pi-extensions
 The repository root is also an explicit full-suite Pi profile. Its manifest allowlists every extension and includes the `pi-spark` themes; library-only packages such as `pi-terminal-mux` are never loaded as extensions. Adding a workspace package does not automatically add it to this profile.
 
 The full profile intentionally enables invasive features together: `pi-spark` replaces the editor/footer and folds transcript activity, and `pi-distill` transforms tool results. Prefer single-package npm installs for published capabilities when you do not want the complete composition.
-`pi-action-fusion` is also loaded by the profile but stays disabled until explicitly enabled with `/config:action-fusion enable` followed by `/reload`. It does not replace `pi-distill` or add another compaction owner.
 
 Reload Pi after installation:
 

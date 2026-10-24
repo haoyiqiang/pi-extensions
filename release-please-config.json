@@ -9,7 +9,6 @@
     "packages/pi-utils": {},
     "packages/pi-web-search": {},
     "packages/pi-distill": {},
-    "packages/pi-action-fusion": {},
     "packages/pi-terminal-mux": {},
     "packages/pi-models-discovery": {},
     "packages/pi-spark": {},
