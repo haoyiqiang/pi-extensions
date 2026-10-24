@@ -116,6 +116,37 @@ test("supported Pi reports management refusals as tool failures without launchin
     await waitFor(() => readFileSync(join(terminal, "surface"), "utf8") === "closed" ? true : undefined, "initial notification cleanup");
     for (const file of ["surface", "received.json", "finish"]) rmSync(join(terminal, file), { force: true });
 
+    // A hidden custom steering message is not in Pi's user queue display.
+    // Dequeue may discard it; retain/retry its stable event without duplicating
+    // a still-queued event, an in-memory entry, or persisted history on reload.
+    for (const dequeue of [false, true]) {
+      providerGate = new Promise<void>((resolve) => { releaseProvider = resolve; });
+      const ctx = () => session!.extensionRunner!.createContext();
+      const tool = (name: string, args: any) => session!.extensionRunner!.getToolDefinition(name)!.execute("notification-contract", args, undefined, undefined, ctx());
+      const started = await tool("subagent", { agent: "safe", task: `Return the exact phrase: ${dequeue ? "discarded" : "queued"} notification retained.` });
+      const id = (started.details as any).id;
+      const before = providerRequests;
+      const active = session.prompt("Unrelated parent work keeps its provider busy");
+      await waitFor(() => providerRequests > before ? true : undefined, "actual busy parent provider");
+      writeFileSync(join(terminal, "finish"), "child settles while parent is busy");
+      const event = await waitFor(async () => {
+        const status = (await tool("subagent_status", { id })).details as any;
+        return status.subagent.notifications.find((event: any) => event.type === "subagent_result" && event.state === "dispatched-unconfirmed");
+      }, "hidden result queued in actual Pi");
+      if (dequeue) assert.deepEqual(session.clearQueue(), { steering: [], followUp: [] }, "hidden messages are discarded, not restored to the editor");
+      providerGate = undefined;
+      releaseProvider();
+      await active;
+      await session.reload();
+      await session.waitForIdle();
+      await session.prompt("Further ordinary work must not lose or duplicate the child notification");
+      const entries = readFileSync(session.sessionFile!, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+      assert.equal(entries.filter((entry) => entry.type === "custom_message" && entry.details?.eventId === event.eventId).length, 1,
+        "one stable notification reaches real persisted parent history, including after dequeue and same-process reload");
+      await waitFor(() => readFileSync(join(terminal, "surface"), "utf8") === "closed" ? true : undefined, "notification child cleanup");
+      for (const file of ["surface", "received.json", "finish"]) rmSync(join(terminal, file), { force: true });
+    }
+
     const refused = await call("subagent", { agent: "unsafe", task: "Must never run." });
     assert.match(JSON.stringify(refused.content), /explicitly declare tools/);
     assert.equal(refused.isError, true, "a resolved execute result must not turn a refused launch into success");

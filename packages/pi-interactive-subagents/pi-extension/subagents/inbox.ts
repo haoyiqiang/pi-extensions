@@ -30,6 +30,13 @@ export interface Authorization {
   reason: string;
 }
 interface Mailbox { version: 1; messages: Instruction[]; authorizations: Authorization[] }
+interface UnmanagedWork {
+  actionId: string;
+  receiverId: string;
+  phase: "running" | "settled" | "suspended";
+  activeTools: string[];
+  uncertain?: string;
+}
 interface Receipt {
   messageId: string;
   attemptId: string;
@@ -51,6 +58,8 @@ export class SubagentInbox {
     if (value.version !== 1 || !Array.isArray(value.messages) || !Array.isArray(value.authorizations)) throw new Error(`Invalid subagent inbox: ${file}`);
     return value;
   }
+  workFile(executionId: string): string { return join(this.directory, `work-${executionId}.json`); }
+  resolutions(): Authorization[] { return this.read().authorizations; }
   receipts(): Receipt[] {
     if (!existsSync(this.directory)) return [];
     return readdirSync(this.directory).filter((name) => name.startsWith("receipt-") && name.endsWith(".json"))
@@ -107,7 +116,14 @@ export class SubagentInbox {
         ...(authorization ? { resolution: authorization } : {}), ...(uncertainty ? { uncertainty } : {}), attemptId: active?.attemptId, retry: authorization?.decision === "retry" };
     });
     const checkpoint = run && readCheckpoint(run);
-    const interruption = checkpoint?.uncertainty ?? (run?.control?.kind === "suspend" && exited && !checkpoint
+    const workFile = this.workFile(run?.executionId ?? receiver?.executionId);
+    const work: UnmanagedWork | undefined = existsSync(workFile) ? JSON.parse(readFileSync(workFile, "utf8")) : undefined;
+    // CLI/manual input has no inbox receipt. Its writer-owned lifecycle witness
+    // fences unfinished work too; a fallback failure is not settlement proof.
+    const interrupted = exited || (run?.latestResult && JSON.parse(readFileSync(run.latestResult.resultFile, "utf8")).source.kind !== "agent_settled");
+    const unfinished = work?.phase === "running" && (work.uncertain || interrupted || receiver?.receiverId !== work.receiverId)
+      ? { actionId: work.actionId, reason: work.uncertain ?? "Initial/manual work was interrupted before verified settlement; consumption or effects may be incomplete. Reconcile or explicitly authorize this exact action.", activeTools: work.activeTools } : undefined;
+    const interruption = checkpoint?.uncertainty ?? unfinished ?? (run?.control?.kind === "suspend" && exited && !checkpoint
       ? { actionId: `subagent-action:${run.control.id}`, reason: "Writer exited without a verified suspension checkpoint; consumption/effects and active branch must be reconciled before continuation.", activeTools: [] } : undefined);
     const resolution = interruption && mailbox.authorizations.find((authorization) => authorization.actionId === interruption.actionId);
     const uncertainty = interruption && !resolution ? interruption : undefined;
@@ -193,13 +209,16 @@ export function createInboxReceiver(pi: ExtensionAPI, sessionFile: string, execu
   let pumping = false;
   let preparing = false;
   let awaitingInitialRun = process.env.PI_SUBAGENT_INBOX_ONLY !== "1";
+  const workFile = inbox.workFile(executionId);
+  let work: UnmanagedWork | undefined;
+  function saveWork() { if (work) replace(workFile, work); }
   function fenced() {
     const claim = JSON.parse(readFileSync(writerFile(sessionFile), "utf8"));
     return claim.executionId === executionId;
   }
   function paused() { return inbox.snapshot().paused; }
   function pump() {
-    if (stopped || pumping || preparing || awaitingInitialRun || !context || !fenced() || readControl(sessionFile, executionId)) return;
+    if (stopped || pumping || preparing || awaitingInitialRun || !context || !fenced() || readControl(sessionFile, executionId) || existsSync(writerClosingFile(sessionFile, executionId))) return;
     pumping = true;
     try {
       if (paused()) return;
@@ -230,7 +249,13 @@ export function createInboxReceiver(pi: ExtensionAPI, sessionFile: string, execu
       timer.unref?.();
       // Don't race the CLI's initial prompt during session_start.
     },
-    input(idle: boolean) { if (idle) preparing = true; },
+    input(idle: boolean) {
+      if (idle) preparing = true;
+      // Raw CLI/manual input crosses this hook; managed custom messages have
+      // their own receipts and do not pass through the user-input interface.
+      if (work?.phase !== "running") work = { actionId: `subagent-action:${randomUUID()}`, receiverId, phase: "running", activeTools: [] };
+      saveWork();
+    },
     agentStart() { preparing = false; awaitingInitialRun = false; },
     context(messages: any[]) {
       let newlyObserved = false;
@@ -239,14 +264,29 @@ export function createInboxReceiver(pi: ExtensionAPI, sessionFile: string, execu
         const receipt = owned.get(message.details?.messageId);
         if (receipt && receipt.attemptId === message.details?.attemptId && !receipt.contextSeen) { receipt.contextSeen = true; inbox.save(receipt); newlyObserved = true; }
       }
-      return newlyObserved;
+      const resolutions = inbox.resolutions();
+      return { newlyObserved, messages: resolutions.length ? [{
+        role: "custom", customType: "subagent_action_resolution", display: false, timestamp: Date.now(),
+        content: `Explicit affected-action decisions (apply only to the exact actionId; confirm-completed forbids repeating that action, retry permits it): ${JSON.stringify(resolutions)}`,
+      }, ...messages] : messages };
     },
-    toolStart(id: string) { for (const receipt of owned.values()) if (receipt.contextSeen && receipt.phase !== "settled") { receipt.activeTools = [...(receipt.activeTools ?? []), id]; inbox.save(receipt); } },
-    toolEnd(id: string) { for (const receipt of owned.values()) if (receipt.activeTools?.includes(id)) { receipt.activeTools = receipt.activeTools.filter((tool) => tool !== id); inbox.save(receipt); } },
+    toolStart(id: string) {
+      if (work?.phase === "running") { work.activeTools.push(id); saveWork(); }
+      for (const receipt of owned.values()) if (receipt.contextSeen && receipt.phase !== "settled") { receipt.activeTools = [...(receipt.activeTools ?? []), id]; inbox.save(receipt); }
+    },
+    toolEnd(id: string) {
+      if (work?.activeTools.includes(id)) { work.activeTools = work.activeTools.filter((tool) => tool !== id); saveWork(); }
+      for (const receipt of owned.values()) if (receipt.activeTools?.includes(id)) { receipt.activeTools = receipt.activeTools.filter((tool) => tool !== id); inbox.save(receipt); }
+    },
     beforeSettle() { pump(); },
     boundary(action: () => void) { transaction(inbox.directory, action); },
     closing() { replace(writerClosingFile(sessionFile, executionId), { executionId, receiverId }); },
     settled(outcome: "completed" | "aborted" | "error") {
+      if (work?.phase === "running") {
+        if (!work.activeTools.length) work.phase = "settled";
+        else work.uncertain = "Pi settled without observing active tool outcomes; reconcile their effects before continuation.";
+        saveWork();
+      }
       const snapshot = inbox.snapshot();
       for (const receipt of owned.values()) {
         if (!receipt.contextSeen || !snapshot.messages.find((m) => m.attemptId === receipt.attemptId)?.evidence.transcriptEntryId) continue;
@@ -256,6 +296,9 @@ export function createInboxReceiver(pi: ExtensionAPI, sessionFile: string, execu
       }
     },
     suspend() {
+      // The cooperative checkpoint retains any interrupted tool uncertainty;
+      // confirmed safe suspension is not an abnormal unfinished-work crash.
+      if (work) { work.phase = "suspended"; saveWork(); }
       const snapshot = inbox.snapshot();
       for (const receipt of owned.values()) {
         if (receipt.phase === "settled" || receipt.uncertain) continue;

@@ -722,11 +722,19 @@ function recordTerminal(running: RunningSubagent, phase: string, diagnostic?: st
 async function closeOwnedSurface(running: RunningSubagent): Promise<void> {
   if (!isCurrent(running) || running.closure === "confirmed") return;
   running.closing = true;
-  // Let the gate observe autonomous Pi exit before closing its shell surface.
+  // Settlement is not process exit: trusted extensions may still be doing
+  // asynchronous shutdown work. Never kill the writer's exit witness to clean
+  // up its surface. A bounded unknown remains retained and can be reconciled.
   if (running.settled) {
-    for (let attempt = 0; attempt < 10 && !existsSync(processExitFile(running.sessionFile, running.id)); attempt++) {
+    const deadline = Date.now() + CLOSE_TIMEOUT_MS;
+    while (!existsSync(processExitFile(running.sessionFile, running.id)) && Date.now() < deadline) {
       await delay(25);
       if (!isCurrent(running)) return;
+    }
+    if (!existsSync(processExitFile(running.sessionFile, running.id))) {
+      running.closure = "unconfirmed";
+      recordTerminal(running, "closure-unconfirmed", "Writer exit not yet witnessed; shutdown surface and wrapper retained, no forced close or ownership reclaim");
+      return;
     }
   }
   if (!isCurrent(running) || (running.backend && running.backend !== getMuxBackend())) return;
@@ -1463,9 +1471,10 @@ async function watchSubagent(
       for (;;) {
         observationSignal.throwIfAborted();
         if (!isCurrent(running)) return null;
-        const uncertain = new SubagentInbox(sessionFile).snapshot(running.runs?.resolve({ id: running.subagentId })).messages.find((message) => message.uncertainty)?.uncertainty;
+        const inbox = new SubagentInbox(sessionFile).snapshot(running.runs?.resolve({ id: running.subagentId }));
+        const uncertain = inbox.uncertainty ?? inbox.messages.find((message) => message.uncertainty)?.uncertainty;
         if (uncertain && running.uncertaintyNotified !== uncertain.actionId) {
-          const line = `${name}: paused for uncertain action ${uncertain.actionId} (message ${uncertain.messageId}). ${uncertain.reason} Ordinary follow-up/resume cannot authorize repetition. Reconcile, or obtain explicit user authorization and call subagent_message with authorization: { actionId, decision: "retry" | "confirm-completed", reason }.`;
+          const line = `${name}: paused for uncertain action ${uncertain.actionId}. ${uncertain.reason} Ordinary follow-up/resume cannot authorize repetition. Reconcile, or obtain explicit user authorization and call subagent_message with authorization: { actionId, decision: "retry" | "confirm-completed", reason }.`;
           running.owner!.notifications.publish({ customType: "subagent_status", content: line, display: true,
             details: { id: running.subagentId, name, eventId: `subagent-uncertain:${uncertain.actionId}`, uncertainty: uncertain, lines: [line], overflow: 0 } });
           running.owner!.notifications.deliver(running.owner!.pi);
@@ -1615,8 +1624,29 @@ async function watchSubagent(
 async function reconcileClosure(pi: ExtensionAPI, running: RunningSubagent): Promise<void> {
   await closeOwnedSurface(running);
   if (!isCurrent(running)) { forgetRunning(running); return; }
-  if (running.closure === "confirmed") forgetRunning(running);
-  else {
+  if (running.closure === "confirmed") {
+    forgetRunning(running);
+    const owner = running.owner!;
+    const runs = running.runs;
+    if (runs && !owner.leaving) {
+      const record = runs.resolve({ id: running.subagentId });
+      const inbox = new SubagentInbox(record.sessionFile);
+      // An explicit instruction can outlast the caller's bounded closing wait.
+      // Once exit AND closure are proven, give retained safe input a consumer.
+      if (!record.control && writerExited(record) && !inbox.snapshot(record).paused && inbox.pending().length) {
+        const loadout = readSubagentLoadout(record.sessionFile);
+        if (!loadout) throw new Error("Queued continuation retained: recorded loadout is unavailable");
+        const queued = inbox.enqueue(record, {}, () => {
+          const target = runs.messageTarget(record.id);
+          return target.launch ? { run: runs.resume(target.run.id, target.run.generation, loadout), launch: true } : target;
+        });
+        if (queued.launch) await launchRecorded(owner, runs, queued.run, "Retained queued follow-up");
+      }
+    }
+  } else {
+    // Retry observation, not termination, at the next reconciliation checkpoint.
+    running.observing = false;
+    running.owner!.observed.delete(`${running.id}:${running.generation}`);
     const line = `${running.name}: surface closure unconfirmed (inventory=${running.terminalState}); history and ownership retained.`;
     running.owner!.notifications.publish({ customType: "subagent_status", content: line, display: true,
       details: { eventId: `subagent-closure:${running.id}:${running.generation}`, id: running.subagentId, generation: running.generation, name: running.name, surface: running.surface, closure: running.closure,
@@ -1942,6 +1972,11 @@ export default function subagentsExtension(pi: ExtensionAPI) {
   // must not open a parallel custom run in the middle of that user prompt.
   pi.on("input", (_event, ctx) => { if (boundRuntime === runtime && ctx.isIdle()) boundRuntime?.notifications.prepareInput(); });
   pi.on("agent_start", () => { if (boundRuntime === runtime) boundRuntime?.notifications.agentStart(); });
+  pi.on("agent_before_settle", (event, ctx) => {
+    if (boundRuntime !== runtime || !boundRuntime) return;
+    boundRuntime.notifications.reconcile(ctx, event.context.pendingMessages);
+    boundRuntime.notifications.deliver(pi);
+  });
 
   // The spawning tools are always registered here. Whether a child process can
   // actually see/use them is governed by the parent's `--tools` allowlist and
