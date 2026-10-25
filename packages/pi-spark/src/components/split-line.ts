@@ -53,7 +53,13 @@ export class SplitLine implements Component {
   }
 
   render(width: number): [string] {
-    const contentWidth = width - this.padding * 2;
+    const totalWidth = Math.max(0, Math.floor(width));
+
+    // A viewport narrower than the padding has nothing left to draw. Returning early keeps the
+    // line within `width`, which matters because Pi may lay components out at width 0.
+    if (totalWidth <= this.padding * 2) return [""];
+
+    const contentWidth = totalWidth - this.padding * 2;
     const content = this.renderContent(contentWidth);
     const paddingText = this.spacingChar.repeat(this.padding);
 
@@ -69,7 +75,9 @@ export class SplitLine implements Component {
     const renderedSecondary = secondary.render(secondaryWidth)[0];
 
     const [renderedLeft, renderedRight] = this.primarySide === "left" ? [renderedPrimary, renderedSecondary] : [renderedSecondary, renderedPrimary];
-    const spacingWidth = width - visibleWidth(renderedLeft) - visibleWidth(renderedRight);
+    // Clamp: the rendered sides can still exceed the budget on very narrow widths, and
+    // `String.repeat()` throws on a negative count, which used to crash Pi.
+    const spacingWidth = Math.max(0, width - visibleWidth(renderedLeft) - visibleWidth(renderedRight));
 
     return `${renderedLeft}${this.spacingChar.repeat(spacingWidth)}${renderedRight}`;
   }
