@@ -234,9 +234,15 @@ export function hasPendingInbox(runDir: string): boolean {
 }
 
 /** Parent-owned stop: close the panel, wait for the child to exit, then drop the run records. */
-export async function stopRun(metadata: RunMetadata): Promise<void> {
+export async function stopRun(metadata: RunMetadata, timeoutMs = 2000): Promise<void> {
 	closeRunSurface(metadata.surface);
-	await waitForRunShutdown(metadata.runDir);
+	try {
+		await waitForRunShutdown(metadata.runDir, timeoutMs);
+	} catch (error) {
+		// The panel is gone but the child needed longer than the poll window to be reported absent;
+		// records can still go. When the panel is still there, keep everything for a retry.
+		if (!surfaceGone(metadata.surface)) throw error;
+	}
 	removeRunDir(metadata.runDir);
 }
 

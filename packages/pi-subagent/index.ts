@@ -79,8 +79,10 @@ export default function subagentExtension(pi: ExtensionAPI) {
 		pi.on("turn_end", (_event, ctx) => {
 			for (const run of listRuns(ctx.sessionManager.getSessionId())) {
 				if (!run.autoStop || !run.hasStarted) continue;
-				if (effectiveRunState(run) !== "idle" || hasPendingInbox(run.runDir)) continue;
-				void stopRun(run).catch((error: unknown) => {
+				const state = effectiveRunState(run);
+				// Failed runs are kept for inspection; idle and already-exited ones are collected.
+				if ((state !== "idle" && state !== "exited") || hasPendingInbox(run.runDir)) continue;
+				void stopRun(run, 10_000).catch((error: unknown) => {
 					const message = error instanceof Error ? error.message : String(error);
 					if (ctx.hasUI) ctx.ui.notify(`Could not auto-stop ${runDisplayName(run)}: ${message}`, "warning");
 				});
