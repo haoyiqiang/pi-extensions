@@ -53,6 +53,12 @@ subagent spawn \
 subagent spawn --tools read,grep,find,ls --prompt "Investigate the failure"
 ```
 
+一次性委派可以自动收尾，不必记得手动 stop：
+
+```sh
+subagent spawn --auto-stop --name audit --prompt "审计依赖边"
+```
+
 用 handle 管理一次运行：
 
 ```sh
@@ -77,4 +83,4 @@ subagent list
 - `--no-prompt-templates`：关闭 prompt templates
 - `--no-context-files`：忽略仓库指令文件
 
-不允许嵌套子代理。子会话不加载 subagent skill。子代理在 `/reload` 后继续存在。父会话退出或被替换时，正在运行的子代理会被挂起：面板关闭，但记录和元数据保留；恢复该父会话时会用完整历史重新打开。`subagent stop` 会永久删除运行；无法确认面板关闭时保留记录。
+不允许嵌套子代理。子会话不加载 subagent skill。子代理在 `/reload` 后继续存在。父会话退出或被替换时，正在运行的子代理会被挂起：面板关闭，但记录和元数据保留；恢复该父会话时会用完整历史重新打开。`subagent stop` 会永久删除运行；无法确认面板关闭时保留记录。`--auto-stop` 在发起或最后一次使用该 run 的回合结束时执行同样的 stop，前提是子代理已 idle 且没有排队消息；仍在运行、失败或已自行退出的 run 会保留记录以便查看。

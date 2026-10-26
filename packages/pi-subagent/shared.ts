@@ -41,6 +41,8 @@ export interface RunMetadata {
 	launchArgs?: string[];
 	/** Set by the parent when it stops the child on quit or session switch; the child is relaunched on resume. */
 	suspended?: boolean;
+	/** `spawn --auto-stop`: the parent stops this run at the end of its turn once the child is idle. */
+	autoStop?: boolean;
 	state: RunState;
 	hasStarted: boolean;
 	createdAt: string;
@@ -223,6 +225,19 @@ export function closeRunSurface(surface: string): void {
 	} catch (error) {
 		if (surfaceState(surface) !== "absent") throw error;
 	}
+}
+
+/** Whether the run has inbox messages that still need delivering. */
+export function hasPendingInbox(runDir: string): boolean {
+	const dir = inboxDir(runDir);
+	return existsSync(dir) && readdirSync(dir).some((file) => file.endsWith(".json"));
+}
+
+/** Parent-owned stop: close the panel, wait for the child to exit, then drop the run records. */
+export async function stopRun(metadata: RunMetadata): Promise<void> {
+	closeRunSurface(metadata.surface);
+	await waitForRunShutdown(metadata.runDir);
+	removeRunDir(metadata.runDir);
 }
 
 export function effectiveRunState(metadata: RunMetadata): RunState {

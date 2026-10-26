@@ -17,6 +17,8 @@ subagent spawn --name implementation --prompt "Complete task"
 
 By default, the child inherits the current Pi provider, model, and reasoning level from the bash environment. Use `--provider`, `--model`, or `--thinking` only when deliberately choosing a different configuration, for example a faster model for simple investigation or a stronger model for difficult review. Never pass `$PI_PROVIDER`, `$PI_MODEL`, or `$PI_REASONING_LEVEL` back to the CLI explicitly.
 
+`--auto-stop` stops the run at the end of the turn that spawned or last used it, once the child is idle and no message is queued. Use it for one-shot delegation you will not follow up on; leave it off when you plan to `send` another message later. Runs that are still busy, failed, or already exited keep their records either way.
+
 `--cwd` defaults to the current directory. To run a child in an existing Git worktree, pass `--cwd /path/to/worktree`. Repeat `--prompt` and `--file` as needed; Pi receives all of them in the first user turn. Run `subagent spawn` directly without piping or redirecting its concise output.
 
 ## Tools
@@ -89,3 +91,5 @@ subagent stop <handle>
 ```
 
 Explicitly stop every subagent when it is no longer needed; do not leave completed subagents running idle. This closes the panel and removes the run transcript and metadata; when closure cannot be confirmed the run is preserved. Keep an idle subagent alive only when concrete follow-up work is expected, then stop it afterward.
+
+`--auto-stop` covers the case where nothing will follow up. It is not a substitute for reviewing results first: stop only after `wait` returned the final response, or spawn with `--auto-stop` when the response is read in the same turn.

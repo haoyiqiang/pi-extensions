@@ -53,6 +53,12 @@ Restrict tools for a read-only investigation:
 subagent spawn --tools read,grep,find,ls --prompt "Investigate the failure"
 ```
 
+Close a one-shot delegation automatically instead of remembering to stop it:
+
+```sh
+subagent spawn --auto-stop --name audit --prompt "Audit the dependency edges"
+```
+
 Manage a run by its generated handle:
 
 ```sh
@@ -77,4 +83,4 @@ Optional spawn flags:
 - `--no-prompt-templates`: disable prompt templates
 - `--no-context-files`: ignore repository instruction files
 
-Nested subagents are disabled. Child sessions do not receive the subagent skill. Children survive `/reload`. When their spawning Pi session quits or is replaced, running children are suspended: the panel closes, but transcript and metadata are kept. Resuming that parent session reopens them with their full history. `subagent stop` removes a run permanently, and preserves it when panel closure cannot be confirmed.
+Nested subagents are disabled. Child sessions do not receive the subagent skill. Children survive `/reload`. When their spawning Pi session quits or is replaced, running children are suspended: the panel closes, but transcript and metadata are kept. Resuming that parent session reopens them with their full history. `subagent stop` removes a run permanently, and preserves it when panel closure cannot be confirmed. `--auto-stop` runs that same stop at the end of the turn that spawned or last used the run, provided the child is idle with nothing queued; busy, failed, or already exited runs keep their records for inspection.
