@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
 	assistantText,
@@ -12,10 +12,11 @@ import {
 	inboxDir,
 	launchRun,
 	listRuns,
+	pendingMessageCount,
 	readLatestAssistant,
 	readMetadata,
 	removeRunDir,
-	runDisplayName,
+	runAge,
 	isValidRunName,
 	surfaceGone,
 	type InboxMessage,
@@ -32,16 +33,71 @@ function fail(message: string): never {
 }
 
 function usage(): never {
-	fail(`Usage:
+	process.stderr.write(`usage:
   subagent spawn [--name <name>] [--provider <provider>] [--model <model>] [--thinking <level>]
     [--cwd <dir>] [--tools <names>] [--no-extensions] [--no-skills]
     [--no-prompt-templates] [--no-context-files] (--prompt <text> | --file <path>)...
-  subagent status <handle>
+  subagent status <handle> [--json]
   subagent rename <handle> <name>
   subagent send <handle> [--follow-up] <message>
   subagent wait <handle> [--timeout <seconds>]
   subagent stop <handle>
-  subagent list`);
+  subagent list [--json]`);
+	process.exit(2);
+}
+
+/** Results go to stdout; hints and diagnostics go to stderr. */
+function emit(line: string): void {
+	process.stdout.write(`${line}\n`);
+}
+
+function emitHint(line: string): void {
+	process.stderr.write(`${line}\n`);
+}
+
+function takeJsonFlag(args: string[]): { args: string[]; json: boolean } {
+	const json = args.includes("--json");
+	return { args: args.filter((arg) => arg !== "--json"), json };
+}
+
+interface RunView {
+	handle: string;
+	name: string | null;
+	state: string;
+	age: string;
+	cwd: string;
+	model: string;
+	thinking: string;
+	pending: number;
+}
+
+function runView(metadata: RunMetadata): RunView {
+	return {
+		handle: metadata.handle,
+		name: metadata.name ?? null,
+		state: effectiveRunState(metadata),
+		age: runAge(metadata),
+		cwd: metadata.cwd,
+		model: `${metadata.provider}/${metadata.model}`,
+		thinking: metadata.thinking,
+		pending: pendingMessageCount(metadata.runDir),
+	};
+}
+
+/** One copyable line, emitted only when the run is idle and stopping is the next useful action. */
+function hintStopOnIdle(metadata: RunMetadata): void {
+	if (effectiveRunState(metadata) === "idle") {
+		emitHint(`Use \`subagent stop ${metadata.handle}\` to stop this subagent when it is no longer needed.`);
+	}
+}
+
+function formatTable(headers: string[], rows: string[][]): string {
+	const widths = headers.map((header, index) =>
+		Math.max(header.length, ...rows.map((row) => row[index].length)),
+	);
+	const line = (cells: string[]): string =>
+		cells.map((cell, index) => cell.padEnd(widths[index])).join("  ").trimEnd();
+	return [line(headers), ...rows.map(line)].join("\n");
 }
 
 function valueAfter(args: string[], index: number, option: string): string {
@@ -52,18 +108,18 @@ function valueAfter(args: string[], index: number, option: string): string {
 
 function normalizeRunName(value: string): string {
 	const name = value.trim();
-	if (!isValidRunName(name)) fail("Subagent name must be a single line of 1 to 64 characters");
+	if (!isValidRunName(name)) fail("subagent name must be a single line of 1 to 64 characters");
 	return name;
 }
 
 function runDirForHandle(handle: string): string {
-	if (!/^[a-z0-9]+$/.test(handle)) fail(`Invalid subagent handle: ${handle}`);
+	if (!/^[a-z0-9]+$/.test(handle)) fail(`invalid subagent handle: ${handle}`);
 	return join(getRunsDir(), handle);
 }
 
 function getRun(handle: string): RunMetadata {
 	const metadata = readMetadata(runDirForHandle(handle));
-	if (!metadata) fail(`Unknown subagent: ${handle}`);
+	if (!metadata) fail(`unknown subagent: ${handle}`);
 	return metadata;
 }
 
@@ -73,11 +129,11 @@ function generateHandle(): string {
 		const handle = randomBytes(3).toString("hex");
 		if (!existsSync(runDirForHandle(handle))) return handle;
 	}
-	fail("Could not allocate a unique subagent handle");
+	fail("could not allocate a unique subagent handle");
 }
 
 function spawnSubagent(args: string[]): void {
-	if (process.env.PI_SUBAGENT_RUN_DIR) fail("Nested subagents are disabled");
+	if (process.env.PI_SUBAGENT_RUN_DIR) fail("nested subagents are disabled");
 	let name: string | undefined;
 	let provider = process.env.PI_PROVIDER;
 	let model = process.env.PI_MODEL;
@@ -88,6 +144,7 @@ function spawnSubagent(args: string[]): void {
 	let noSkills = false;
 	let noPromptTemplates = false;
 	let noContextFiles = false;
+	let json = false;
 	const prompts: string[] = [];
 	const files: string[] = [];
 
@@ -136,23 +193,26 @@ function spawnSubagent(args: string[]): void {
 				break;
 			case "--file": {
 				const file = resolve(valueAfter(args, i, arg));
-				if (!existsSync(file)) fail(`File not found: ${file}`);
+				if (!existsSync(file)) fail(`file not found: ${file}`);
 				files.push(file);
 				i++;
 				break;
 			}
+			case "--json":
+				json = true;
+				break;
 			default:
-				fail(`Unknown spawn argument: ${arg}`);
+				fail(`unknown spawn argument: ${arg}`);
 		}
 	}
 
-	if (!provider) fail("No provider specified and PI_PROVIDER is not set");
-	if (!model) fail("No model specified and PI_MODEL is not set");
-	if (!VALID_THINKING_LEVELS.has(thinking)) fail(`Invalid thinking level: ${thinking}`);
+	if (!provider) fail("no provider specified and PI_PROVIDER is not set");
+	if (!model) fail("no model specified and PI_MODEL is not set");
+	if (!VALID_THINKING_LEVELS.has(thinking)) fail(`invalid thinking level: ${thinking}`);
 	if (tools !== undefined && !tools.split(",").some((name) => name.trim()))
 		fail("--tools requires at least one tool name");
 	if (prompts.length === 0 && files.length === 0) fail("spawn requires at least one --prompt or --file");
-	if (!existsSync(cwd)) fail(`Working directory not found: ${cwd}`);
+	if (!existsSync(cwd)) fail(`working directory not found: ${cwd}`);
 
 	const handle = generateHandle();
 	const runDir = runDirForHandle(handle);
@@ -198,26 +258,41 @@ function spawnSubagent(args: string[]): void {
 		throw error;
 	}
 
-	process.stdout.write(
-		`Spawned ${runDisplayName(readMetadata(runDir) ?? metadata)}\nState: busy\nPanel: ${(readMetadata(runDir) ?? metadata).surface}\n`,
-	);
+	const spawned = readMetadata(runDir) ?? metadata;
+	if (json) emit(JSON.stringify({ handle: spawned.handle, name: spawned.name ?? null }));
+	else emit(`spawned ${spawned.handle}${spawned.name ? ` ${spawned.name}` : ""}`);
 }
 
 function statusSubagent(args: string[]): void {
-	if (args.length !== 1) usage();
-	const metadata = getRun(args[0]);
-	process.stdout.write(
-		`${runDisplayName(metadata)}: ${effectiveRunState(metadata)} (${metadata.provider}/${metadata.model}, ${metadata.thinking})\nPanel: ${metadata.surface}\n`,
+	const parsed = takeJsonFlag(args);
+	if (parsed.args.length !== 1) usage();
+	const metadata = getRun(parsed.args[0]);
+	const view = runView(metadata);
+	if (parsed.json) {
+		emit(JSON.stringify(view));
+		return;
+	}
+	emit(
+		[
+			`handle: ${view.handle}`,
+			`name: ${view.name ?? "-"}`,
+			`state: ${view.state}`,
+			`age: ${view.age}`,
+			`cwd: ${view.cwd}`,
+			`model: ${view.model}`,
+			`thinking: ${view.thinking}`,
+			`pending: ${view.pending}`,
+		].join("\n"),
 	);
+	hintStopOnIdle(metadata);
 }
 
 function renameSubagent(args: string[]): void {
 	if (args.length !== 2) usage();
 	const metadata = getRun(args[0]);
 	const name = normalizeRunName(args[1]);
-	const updated = updateMetadata(metadata.runDir, { name });
-	if (!updated) fail(`Could not rename subagent: ${metadata.handle}`);
-	process.stdout.write(`Renamed ${runDisplayName(updated)}\n`);
+	if (!updateMetadata(metadata.runDir, { name })) fail(`could not rename subagent ${metadata.handle}`);
+	emit(`${metadata.handle} renamed ${name}`);
 }
 
 function sendSubagent(args: string[]): void {
@@ -227,13 +302,13 @@ function sendSubagent(args: string[]): void {
 	const messageParts: string[] = [];
 	for (const arg of args) {
 		if (arg === "--follow-up") followUp = true;
-		else if (arg.startsWith("--")) fail(`Unknown send argument: ${arg}`);
+		else if (arg.startsWith("--")) fail(`unknown send argument: ${arg}`);
 		else messageParts.push(arg);
 	}
 	const message = messageParts.join(" ").trim();
 	if (!message) fail("send requires a message");
 	const metadata = getRun(handle);
-	if (surfaceGone(metadata.surface)) fail(`${handle} is not running`);
+	if (surfaceGone(metadata.surface)) fail(`subagent ${handle} is not running`);
 
 	const queueDir = inboxDir(metadata.runDir);
 	mkdirSync(queueDir, { recursive: true, mode: 0o700 });
@@ -245,8 +320,8 @@ function sendSubagent(args: string[]): void {
 	renameSync(temporary, target);
 
 	const state = effectiveRunState(metadata);
-	const verb = followUp && state === "busy" ? "Queued follow-up for" : state === "idle" ? "Prompted" : "Steered";
-	process.stdout.write(`${verb} ${runDisplayName(metadata)}\n`);
+	const verb = followUp && state === "busy" ? "follow-up queued" : state === "idle" ? "prompted" : "steered";
+	emit(`${metadata.handle} ${verb}`);
 }
 
 function parseTimeout(args: string[]): number {
@@ -265,16 +340,15 @@ async function waitSubagent(args: string[]): Promise<void> {
 
 	while (Date.now() < deadline) {
 		const metadata = getRun(handle);
-		const pending = existsSync(inboxDir(metadata.runDir))
-			? readdirSync(inboxDir(metadata.runDir)).some((file) => file.endsWith(".json"))
-			: false;
+		const pending = pendingMessageCount(metadata.runDir) > 0;
 		const state = effectiveRunState(metadata);
 		if (state === "error") fail(metadata.error || `${handle} failed`);
 		if (state === "exited") fail(`${handle} exited before finishing`);
 		if (metadata.hasStarted && state === "idle" && !pending) {
 			const message = readLatestAssistant(metadata.sessionFile);
 			if (!message) fail(`${handle} finished without an assistant response`);
-			process.stdout.write(`${handle} finished\n\n${assistantText(message)}\n`);
+			emit(assistantText(message));
+			hintStopOnIdle(metadata);
 			if (message.stopReason === "error" || message.stopReason === "aborted") process.exitCode = 1;
 			return;
 		}
@@ -289,21 +363,34 @@ async function stopSubagent(args: string[]): Promise<void> {
 	closeRunSurface(metadata.surface);
 	await waitForRunShutdown(metadata.runDir);
 	removeRunDir(metadata.runDir);
-	process.stdout.write(`Stopped ${runDisplayName(metadata)}\n`);
+	emit(`${metadata.handle} stopped`);
 }
 
 function listSubagents(args: string[]): void {
-	if (args.length !== 0) usage();
-	const runs = listRuns(process.env.PI_SESSION_ID || undefined);
-	if (runs.length === 0) {
-		process.stdout.write("No subagents\n");
+	const parsed = takeJsonFlag(args);
+	if (parsed.args.length !== 0) usage();
+	const views = listRuns(process.env.PI_SESSION_ID || undefined).map(runView);
+	if (parsed.json) {
+		emit(JSON.stringify(views));
 		return;
 	}
-	for (const metadata of runs) {
-		process.stdout.write(
-			`${runDisplayName(metadata)}  ${effectiveRunState(metadata).padEnd(8)}  ${metadata.provider}/${metadata.model}  ${metadata.thinking}\n`,
-		);
+	if (views.length === 0) {
+		emit("no subagents");
+		return;
 	}
+	emit(
+		formatTable(
+			["HANDLE", "NAME", "STATE", "AGE", "CWD", "MODEL"],
+			views.map((view) => [
+				view.handle,
+				view.name ?? "-",
+				view.state,
+				view.age,
+				view.cwd,
+				view.model,
+			]),
+		),
+	);
 }
 
 async function main(): Promise<void> {
@@ -337,6 +424,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
-	process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+	process.stderr.write(`error: ${error instanceof Error ? error.message : String(error)}\n`);
 	process.exitCode = 1;
 });

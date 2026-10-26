@@ -53,6 +53,10 @@ subagent spawn \
 subagent spawn --tools read,grep,find,ls --prompt "Investigate the failure"
 ```
 
+spawn 打印 `spawned <handle> <name>`；后续所有命令都用 handle 标识运行。结果走 stdout，提示走 stderr，因此输出可管道化：`subagent wait <handle> > report.md` 只会写入响应内容。运行处于 idle 时，stderr 会追加一行给 agent 的指令，例如 ``Use `subagent stop a1b2c3` to stop this subagent when it is no longer needed.``。
+
+`spawn`、`status`、`list` 支持 `--json`，输出机器可读字段。
+
 用 handle 管理一次运行：
 
 ```sh
@@ -65,7 +69,7 @@ subagent stop a1b2c3
 subagent list
 ```
 
-用 `subagent status` 查看活跃运行及其当前状态。每次运行都会打印 panel ID，面板本身已经开在父会话旁边；headless 运行打印 `headless:` 开头 ID，没有面板可看。
+用 `subagent list` 查看本会话所有运行及其 handle、名称、状态、运行时长、工作目录和模型；`subagent status` 以 `key: value` 形式打印单个运行的同样信息。面板已经开在父会话旁边，因此 panel ID 只保存在运行元数据里，不再出现在输出中。
 
 ## 隔离
 

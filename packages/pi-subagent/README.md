@@ -53,6 +53,10 @@ Restrict tools for a read-only investigation:
 subagent spawn --tools read,grep,find,ls --prompt "Investigate the failure"
 ```
 
+Spawn prints `spawned <handle> <name>`; the handle is the identifier for every later command. Results go to stdout and hints to stderr, so output stays pipeable: `subagent wait <handle> > report.md` captures only the response. When a run is idle, stderr adds one instruction such as ``Use `subagent stop a1b2c3` to stop this subagent when it is no longer needed.``.
+
+Add `--json` to `spawn`, `status`, or `list` for machine-readable fields.
+
 Manage a run by its generated handle:
 
 ```sh
@@ -65,7 +69,7 @@ subagent stop a1b2c3
 subagent list
 ```
 
-Use `subagent status` to see active runs and their current state. Each run prints its panel ID; the panel itself is already open beside the parent. A headless run prints a `headless:` ID and has no panel to look at.
+Use `subagent list` to see every run of this session with its handle, name, state, age, working directory, and model; `subagent status` prints the same facts for one run as `key: value` lines. Panels are already open beside the parent, so panel IDs stay in the run metadata instead of the output.
 
 ## Isolation
 

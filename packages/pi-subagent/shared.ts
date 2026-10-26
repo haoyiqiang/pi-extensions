@@ -235,6 +235,23 @@ export function effectiveRunState(metadata: RunMetadata): RunState {
 	return metadata.state;
 }
 
+export function pendingMessageCount(runDir: string): number {
+	const queueDir = inboxDir(runDir);
+	if (!existsSync(queueDir)) return 0;
+	return readdirSync(queueDir).filter((entry) => entry.endsWith(".json")).length;
+}
+
+/** Compact, human-readable run age: 42s, 2m14s, 3h07m, 2d04h. */
+export function runAge(metadata: RunMetadata): string {
+	const seconds = Math.max(0, Math.round((Date.now() - Date.parse(metadata.createdAt)) / 1000));
+	if (seconds < 60) return `${seconds}s`;
+	const minutes = Math.floor(seconds / 60);
+	if (minutes < 60) return `${minutes}m${String(seconds % 60).padStart(2, "0")}s`;
+	const hours = Math.floor(minutes / 60);
+	if (hours < 24) return `${hours}h${String(minutes % 60).padStart(2, "0")}m`;
+	return `${Math.floor(hours / 24)}d${String(hours % 24).padStart(2, "0")}h`;
+}
+
 export function listRuns(parentSessionId?: string): RunMetadata[] {
 	const root = getRunsDir();
 	if (!existsSync(root)) return [];
