@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
 	assistantText,
+	closeRunSurface,
 	effectiveRunState,
 	extensionPath,
 	getRunsDir,
@@ -15,13 +16,12 @@ import {
 	readMetadata,
 	removeRunDir,
 	runDisplayName,
-	hasPendingInbox,
 	isValidRunName,
-	stopRun,
 	surfaceGone,
 	type InboxMessage,
 	type RunMetadata,
 	updateMetadata,
+	waitForRunShutdown,
 	writeMetadata,
 } from "./shared.ts";
 
@@ -35,8 +35,7 @@ function usage(): never {
 	fail(`Usage:
   subagent spawn [--name <name>] [--provider <provider>] [--model <model>] [--thinking <level>]
     [--cwd <dir>] [--tools <names>] [--no-extensions] [--no-skills]
-    [--no-prompt-templates] [--no-context-files] [--auto-stop]
-    (--prompt <text> | --file <path>)...
+    [--no-prompt-templates] [--no-context-files] (--prompt <text> | --file <path>)...
   subagent status <handle>
   subagent rename <handle> <name>
   subagent send <handle> [--follow-up] <message>
@@ -89,7 +88,6 @@ function spawnSubagent(args: string[]): void {
 	let noSkills = false;
 	let noPromptTemplates = false;
 	let noContextFiles = false;
-	let autoStop = false;
 	const prompts: string[] = [];
 	const files: string[] = [];
 
@@ -131,9 +129,6 @@ function spawnSubagent(args: string[]): void {
 				break;
 			case "--no-context-files":
 				noContextFiles = true;
-				break;
-			case "--auto-stop":
-				autoStop = true;
 				break;
 			case "--prompt":
 				prompts.push(valueAfter(args, i, arg));
@@ -187,7 +182,6 @@ function spawnSubagent(args: string[]): void {
 		model,
 		thinking,
 		launchArgs,
-		...(autoStop ? { autoStop: true } : {}),
 		state: "starting",
 		hasStarted: false,
 		createdAt: now,
@@ -271,7 +265,9 @@ async function waitSubagent(args: string[]): Promise<void> {
 
 	while (Date.now() < deadline) {
 		const metadata = getRun(handle);
-		const pending = hasPendingInbox(metadata.runDir);
+		const pending = existsSync(inboxDir(metadata.runDir))
+			? readdirSync(inboxDir(metadata.runDir)).some((file) => file.endsWith(".json"))
+			: false;
 		const state = effectiveRunState(metadata);
 		if (state === "error") fail(metadata.error || `${handle} failed`);
 		if (state === "exited") fail(`${handle} exited before finishing`);
@@ -290,7 +286,9 @@ async function waitSubagent(args: string[]): Promise<void> {
 async function stopSubagent(args: string[]): Promise<void> {
 	if (args.length !== 1) usage();
 	const metadata = getRun(args[0]);
-	await stopRun(metadata);
+	closeRunSurface(metadata.surface);
+	await waitForRunShutdown(metadata.runDir);
+	removeRunDir(metadata.runDir);
 	process.stdout.write(`Stopped ${runDisplayName(metadata)}\n`);
 }
 

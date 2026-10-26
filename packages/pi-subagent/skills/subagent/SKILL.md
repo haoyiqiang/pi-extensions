@@ -19,8 +19,6 @@ By default, the child inherits the current Pi provider, model, and reasoning lev
 
 `--cwd` defaults to the current directory. To run a child in an existing Git worktree, pass `--cwd /path/to/worktree`. Repeat `--prompt` and `--file` as needed; Pi receives all of them in the first user turn. Run `subagent spawn` directly without piping or redirecting its concise output.
 
-Add `--auto-stop` when nothing will follow up: the run closes at the end of the turn that used it, once the child has replied and no message is queued, so you do not need to stop it yourself. Omit it when you may send another message or read the result in a later turn, and stop that run yourself instead. A failed run keeps its records either way.
-
 ## Tools
 
 Without `--tools`, Pi enables its four default tools:
@@ -49,6 +47,7 @@ Three additional built-in tools are available but off by default:
 ```
 
 ## Isolation flags
+
 - `--no-extensions` - Disable normal extension discovery. Use for an independent run that should not inherit unrelated extension behavior or extension-provided tools. The subagent control bridge is still explicitly loaded.
 - `--no-skills` - Hide installed skills from the child. Use for tightly specified tasks that should rely only on the supplied prompt and files.
 - `--no-prompt-templates` - Disable prompt-template commands. Usually unnecessary, but useful when testing a minimal child environment.
@@ -88,5 +87,5 @@ Names are 1–64 characters and need not be unique. Messages use the subagent ex
 ```sh
 subagent stop <handle>
 ```
-Explicitly stop every subagent when it is no longer needed; do not leave completed subagents running idle. This closes the panel and removes the run transcript and metadata; when closure cannot be confirmed the run is preserved. Keep an idle subagent alive only when concrete follow-up work is expected, then stop it afterward.
 
+Explicitly stop every subagent when it is no longer needed; do not leave completed subagents running idle. This closes the panel and removes the run transcript and metadata; when closure cannot be confirmed the run is preserved. Keep an idle subagent alive only when concrete follow-up work is expected, then stop it afterward.

@@ -4,15 +4,12 @@ import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
 	closeRunSurface,
-	effectiveRunState,
-	hasPendingInbox,
 	inboxDir,
 	launchRun,
 	listRuns,
 	readMetadata,
 	removeRunDir,
 	runDisplayName,
-	stopRun,
 	surfaceGone,
 	type InboxMessage,
 	updateMetadata,
@@ -71,21 +68,6 @@ export default function subagentExtension(pi: ExtensionAPI) {
 					updateMetadata(run.runDir, { error: message });
 					if (ctx.hasUI) ctx.ui.notify(`Could not suspend ${runDisplayName(run)}: ${message}`, "error");
 				}
-			}
-		});
-		// `spawn --auto-stop` runs are stopped at the end of the turn that owns them, once the child is
-		// idle and has no queued message. Busy, failed, and already exited runs keep their records so the
-		// transcript stays available for inspection.
-		pi.on("turn_end", (_event, ctx) => {
-			for (const run of listRuns(ctx.sessionManager.getSessionId())) {
-				if (!run.autoStop || !run.hasStarted) continue;
-				const state = effectiveRunState(run);
-				// Failed runs are kept for inspection; idle and already-exited ones are collected.
-				if ((state !== "idle" && state !== "exited") || hasPendingInbox(run.runDir)) continue;
-				void stopRun(run, 10_000).catch((error: unknown) => {
-					const message = error instanceof Error ? error.message : String(error);
-					if (ctx.hasUI) ctx.ui.notify(`Could not auto-stop ${runDisplayName(run)}: ${message}`, "warning");
-				});
 			}
 		});
 		return;
