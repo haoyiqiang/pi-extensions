@@ -32,7 +32,7 @@
 
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { BfsSplitStateManager, createBackendLogger, hasCommand, withFileLock } from "./shared.ts";
+import { BfsSplitStateManager, createBackendLogger, createBfsSurface, hasCommand } from "./shared.ts";
 import type { BackendOps, CreateSurfaceOptions, SurfaceState } from "./types.ts";
 
 const ORCA_RUNTIME_CHECK_TIMEOUT_MS = 1_500;
@@ -244,30 +244,12 @@ export function createOrcaSurface(name: string, options?: CreateSurfaceOptions):
   const agentHandle = AGENT_ORCA_TERMINAL_HANDLE;
   if (!agentHandle) return createOrcaTab(name, options);
 
-  const markerFile = orcaStateFile();
-  const lockPath = `${markerFile}.lock`;
   try {
-    return withFileLock(lockPath, { timeoutMs: 3_000 }, () => {
-      let state = new BfsSplitStateManager(markerFile);
-      if (state.panes().length === 0) {
-        const handle = splitOrcaTerminal("right", agentHandle, options);
-        state.add(handle);
-        return handle;
-      }
-      const next = state.next();
-      if (!next) throw new Error("Cannot determine the next Orca split source.");
-      // Resolve stale placement before submitting work. Never retry an ambiguous create failure.
-      if (queryOrcaTerminalState(next.source).kind === "absent") {
-        for (const pane of state.panes()) state.remove(pane);
-        state = new BfsSplitStateManager(markerFile);
-        const handle = splitOrcaTerminal("right", agentHandle, options);
-        state.add(handle);
-        return handle;
-      }
-      const handle = splitOrcaTerminal(next.direction, next.source, options);
-      state.advance();
-      state.add(handle);
-      return handle;
+    return createBfsSurface({
+      statePath: orcaStateFile(),
+      base: agentHandle,
+      split: (direction, source) => splitOrcaTerminal(direction, source, options),
+      isAbsent: (handle) => queryOrcaTerminalState(handle).kind === "absent",
     });
   } catch (error) {
     orcaLog(`[create] failed: ${(error as Error).message}`);

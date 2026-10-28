@@ -208,6 +208,53 @@ export class BfsSplitStateManager {
   }
 }
 
+// ── BFS 分屏创建（tmux / Orca 共用） ──
+
+export interface BfsSplitOptions {
+  /** BFS 状态 marker 文件路径 */
+  statePath: string;
+  /** 第一个 pane 的分屏源（agent 自己的 pane） */
+  base: string;
+  /** 执行一次分屏，返回新 pane ID */
+  split: (direction: BfsNext["direction"], source: string) => string;
+  /** 该 pane 是否已消失，用于丢弃僵尸状态 */
+  isAbsent: (pane: string) => boolean;
+}
+
+/**
+ * 按 BFS 网格从 base 分屏：首次向右，之后按轮次交替 right/down，
+ * 让多个 subagent 铺成二维网格而不是一路向右切窄。
+ *
+ * 状态存于 statePath（跨进程），用文件锁串行化并发创建。
+ * 下一个分屏源已消失时清空状态，重新从 base 向右开始。
+ */
+export function createBfsSurface(options: BfsSplitOptions): string {
+  const { statePath, base, split, isAbsent } = options;
+  return withFileLock(`${statePath}.lock`, { timeoutMs: 3_000 }, () => {
+    let state = new BfsSplitStateManager(statePath);
+    const first = (): string => {
+      const pane = split("right", base);
+      state.add(pane);
+      return pane;
+    };
+
+    if (state.panes().length === 0) return first();
+
+    const next = state.next();
+    if (!next) throw new Error("Cannot determine the next split source.");
+    if (isAbsent(next.source)) {
+      for (const pane of state.panes()) state.remove(pane);
+      state = new BfsSplitStateManager(statePath);
+      return first();
+    }
+
+    const pane = split(next.direction, next.source);
+    state.advance();
+    state.add(pane);
+    return pane;
+  });
+}
+
 // ── 命令可用性检测 ──
 
 const commandAvailability = new Map<string, boolean>();

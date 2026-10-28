@@ -63,7 +63,7 @@ const scriptPath = sendLongCommand(surface, "pi --session /tmp/child.jsonl", {
 
 | 函数 | 行为 |
 |------|------|
-| `createSurface(name, options?)` | tmux 向右分屏；Orca 从调用方做 BFS 分屏，没有调用方 handle 时新建 tab；无后端时 headless。`options.command` 在创建时启动任务 |
+| `createSurface(name, options?)` | tmux 与 Orca 一致：从调用方 pane 出发做 BFS 网格分屏；Orca 没有调用方 handle 时新建 tab；无后端时 headless。`options.command` 在创建时启动任务 |
 | `createSurfaceSplit(name, direction, fromSurface?, options?)` | 指定方向 left/right/up/down 分屏；可传 `options.command`。要求 tmux 或 Orca，headless 没有布局 |
 | `sendCommand(surface, command)` | 向现有终端发送文本并回车 |
 | `sendLongCommand(surface, command, options?)` | 先写脚本再执行；支持 `scriptPath`、`scriptPreamble` 和 `interpreter: "bash" | "powershell"` |

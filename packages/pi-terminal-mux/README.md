@@ -63,7 +63,7 @@ Automatic detection prefers tmux, then Orca. Force a backend with `PI_TERMINAL_M
 
 | Function | Behavior |
 |----------|----------|
-| `createSurface(name, options?)` | tmux right-split; Orca breadth-first splits from the caller, or a new tab without a caller handle; headless fallback. `options.command` starts work during creation |
+| `createSurface(name, options?)` | tmux and Orca both breadth-first split from the caller's pane into a grid; Orca opens a new tab without a caller handle; headless fallback. `options.command` starts work during creation |
 | `createSurfaceSplit(name, direction, fromSurface?, options?)` | Explicit split; `direction` is left/right/up/down, `options.command` is optional. Requires tmux or Orca; headless has no pane layout |
 | `sendCommand(surface, command)` | Send input followed by Enter to an existing terminal |
 | `sendLongCommand(surface, command, options?)` | Write a script, then execute it. Supports `scriptPath`, `scriptPreamble`, and `interpreter: "bash" | "powershell"` |
