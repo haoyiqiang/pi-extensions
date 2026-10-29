@@ -332,7 +332,7 @@ jobs:
           unset NODE_AUTH_TOKEN
           VERSION=$(node -p "require('./package.json').version")
           if [[ "$VERSION" =~ -[a-zA-Z] ]]; then
-            npm publish --access public --provenance --tag beta
+            npm publish --access public --provenance --tag beta --loglevel verbose
           else
-            npm publish --access public --provenance
+            npm publish --access public --provenance --loglevel verbose
           fi
