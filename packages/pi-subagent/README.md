@@ -77,6 +77,7 @@ Optional spawn flags:
 
 - `--tools <names>`: comma-separated tool allowlist
 - `--no-extensions`: disable extension discovery while retaining the control bridge
+- `--extension <path>` / `-e <path>`: load one extra extension (repeatable). Use with `--no-extensions` to keep only the control bridge plus named extensions
 - `--no-skills`: disable skills
 - `--no-prompt-templates`: disable prompt templates
 - `--no-context-files`: ignore repository instruction files

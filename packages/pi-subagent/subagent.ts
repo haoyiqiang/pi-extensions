@@ -35,7 +35,7 @@ function fail(message: string): never {
 function usage(): never {
 	process.stderr.write(`usage:
   subagent spawn [--name <name>] [--provider <provider>] [--model <model>] [--thinking <level>]
-    [--cwd <dir>] [--tools <names>] [--no-extensions] [--no-skills]
+    [--cwd <dir>] [--tools <names>] [--extension <path>] [--no-extensions] [--no-skills]
     [--no-prompt-templates] [--no-context-files] (--prompt <text> | --file <path>)...
   subagent status <handle> [--json]
   subagent rename <handle> <name>
@@ -147,6 +147,7 @@ function spawnSubagent(args: string[]): void {
 	let json = false;
 	const prompts: string[] = [];
 	const files: string[] = [];
+	const extraExtensions: string[] = [];
 
 	for (let i = 0; i < args.length; i++) {
 		const arg = args[i];
@@ -175,6 +176,14 @@ function spawnSubagent(args: string[]): void {
 				tools = valueAfter(args, i, arg);
 				i++;
 				break;
+			case "--extension":
+			case "-e": {
+				const extension = resolve(valueAfter(args, i, arg));
+				if (!existsSync(extension)) fail(`extension not found: ${extension}`);
+				extraExtensions.push(extension);
+				i++;
+				break;
+			}
 			case "--no-extensions":
 				noExtensions = true;
 				break;
@@ -222,7 +231,13 @@ function spawnSubagent(args: string[]): void {
 
 	const launchArgs: string[] = [];
 	if (tools) launchArgs.push("--tools", tools);
-	if (noExtensions) launchArgs.push("--no-extensions", "--extension", extensionPath);
+	if (noExtensions) launchArgs.push("--no-extensions");
+	const seenExtensions = new Set<string>();
+	for (const extension of extraExtensions) {
+		if (extension === extensionPath || seenExtensions.has(extension)) continue;
+		seenExtensions.add(extension);
+		launchArgs.push("--extension", extension);
+	}
 	if (noSkills) launchArgs.push("--no-skills");
 	if (noPromptTemplates) launchArgs.push("--no-prompt-templates");
 	if (noContextFiles) launchArgs.push("--no-context-files");

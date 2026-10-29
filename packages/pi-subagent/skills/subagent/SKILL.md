@@ -49,6 +49,7 @@ Three additional built-in tools are available but off by default:
 ## Isolation flags
 
 - `--no-extensions` - Disable normal extension discovery. Use for an independent run that should not inherit unrelated extension behavior or extension-provided tools. The subagent control bridge is still explicitly loaded.
+- `--extension <path>` - Load one extra extension file or directory. Repeatable. Combine with `--no-extensions` to keep only the control bridge plus the named extensions, for example a custom provider such as `pi-models-discovery`.
 - `--no-skills` - Hide installed skills from the child. Use for tightly specified tasks that should rely only on the supplied prompt and files.
 - `--no-prompt-templates` - Disable prompt-template commands. Usually unnecessary, but useful when testing a minimal child environment.
 - `--no-context-files` - Ignore repository instruction files such as `AGENTS.md` and `CLAUDE.md`. Use only when those instructions would bias an independent investigation. Do not use for implementation unless intentionally bypassing repository guidance.

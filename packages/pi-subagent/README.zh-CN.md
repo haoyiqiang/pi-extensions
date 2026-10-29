@@ -77,6 +77,7 @@ subagent list
 
 - `--tools <names>`：逗号分隔的工具白名单
 - `--no-extensions`：关闭扩展发现，保留控制桥
+- `--extension <path>` / `-e <path>`：额外加载一个扩展（可重复）。配合 `--no-extensions` 时只保留控制桥和点名的扩展
 - `--no-skills`：关闭 skills
 - `--no-prompt-templates`：关闭 prompt templates
 - `--no-context-files`：忽略仓库指令文件
