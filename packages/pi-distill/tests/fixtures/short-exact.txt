@@ -1,7 +1,0 @@
-id=42
-status=ready
-region=eu
-
-SELECT id FROM orders WHERE status = 'failed';
-
-ERROR E_CONNRESET: upstream closed connection
