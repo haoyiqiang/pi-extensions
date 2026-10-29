@@ -74,8 +74,8 @@ jobs:
 
       - name: Update npm for OIDC support
         run: |
-          corepack enable npm
-          corepack prepare npm@11.20.0 --activate
+          npm install -g npm@11.20.0
+          which npm
           npm --version
 
       - name: Verify tarball
@@ -88,6 +88,7 @@ jobs:
           # npm@latest (12.2) skipped OIDC and returned ENEEDAUTH. Pin 11.20,
           # which exchanges a GitHub ID token for an npm publish token.
           # Do not set NODE_AUTH_TOKEN: a dummy token makes npm skip OIDC.
+          echo "npm $(npm --version) at $(which npm)"
           echo "OIDC token URL present: ${ACTIONS_ID_TOKEN_REQUEST_URL:+yes}"
           npmrc="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
           if [ -f "$npmrc" ]; then
@@ -126,8 +127,8 @@ jobs:
 
       - name: Update npm for OIDC support
         run: |
-          corepack enable npm
-          corepack prepare npm@11.20.0 --activate
+          npm install -g npm@11.20.0
+          which npm
           npm --version
 
       - name: Verify published workspace dependencies
@@ -143,6 +144,7 @@ jobs:
         if: ${{ contains(needs.release-please.outputs.paths_released, matrix.dir) }}
         working-directory: ${{ matrix.dir }}
         run: |
+          echo "npm $(npm --version) at $(which npm)"
           echo "OIDC token URL present: ${ACTIONS_ID_TOKEN_REQUEST_URL:+yes}"
           npmrc="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
           if [ -f "$npmrc" ]; then
@@ -174,8 +176,8 @@ jobs:
 
       - name: Update npm for OIDC support
         run: |
-          corepack enable npm
-          corepack prepare npm@11.20.0 --activate
+          npm install -g npm@11.20.0
+          which npm
           npm --version
 
       - name: Verify published workspace dependencies
@@ -188,6 +190,7 @@ jobs:
       - name: Publish to npm
         working-directory: packages/pi-terminal-mux
         run: |
+          echo "npm $(npm --version) at $(which npm)"
           echo "OIDC token URL present: ${ACTIONS_ID_TOKEN_REQUEST_URL:+yes}"
           npmrc="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
           if [ -f "$npmrc" ]; then
@@ -225,8 +228,8 @@ jobs:
 
       - name: Update npm for OIDC support
         run: |
-          corepack enable npm
-          corepack prepare npm@11.20.0 --activate
+          npm install -g npm@11.20.0
+          which npm
           npm --version
 
       - name: Verify published workspace dependencies
@@ -242,6 +245,7 @@ jobs:
         if: ${{ contains(needs.release-please.outputs.paths_released, matrix.dir) }}
         working-directory: ${{ matrix.dir }}
         run: |
+          echo "npm $(npm --version) at $(which npm)"
           echo "OIDC token URL present: ${ACTIONS_ID_TOKEN_REQUEST_URL:+yes}"
           npmrc="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
           if [ -f "$npmrc" ]; then
@@ -275,8 +279,8 @@ jobs:
 
       - name: Update npm for OIDC support
         run: |
-          corepack enable npm
-          corepack prepare npm@11.20.0 --activate
+          npm install -g npm@11.20.0
+          which npm
           npm --version
 
       - name: Install dependencies
@@ -318,6 +322,7 @@ jobs:
       - name: Publish to npm
         working-directory: ${{ inputs.package_dir }}
         run: |
+          echo "npm $(npm --version) at $(which npm)"
           echo "OIDC token URL present: ${ACTIONS_ID_TOKEN_REQUEST_URL:+yes}"
           npmrc="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
           if [ -f "$npmrc" ]; then
