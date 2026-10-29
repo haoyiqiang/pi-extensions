@@ -62,6 +62,9 @@ jobs:
     needs: [release-please, release-verify]
     if: ${{ always() && github.event_name == 'push' && contains(needs.release-please.outputs.paths_released, 'packages/pi-utils') && needs.release-verify.result == 'success' }}
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -72,7 +75,7 @@ jobs:
       - name: Update npm for OIDC support
         run: |
           corepack enable npm
-          corepack prepare npm@latest --activate
+          corepack prepare npm@11.20.0 --activate
           npm --version
 
       - name: Verify tarball
@@ -82,19 +85,21 @@ jobs:
       - name: Publish to npm
         working-directory: packages/pi-utils
         run: |
-          # setup-node + registry-url writes a dummy _authToken that makes npm
-          # skip OIDC and 404 after provenance. Do not set NODE_AUTH_TOKEN here.
+          # npm@latest (12.2) skipped OIDC and returned ENEEDAUTH. Pin 11.20,
+          # which exchanges a GitHub ID token for an npm publish token.
+          # Do not set NODE_AUTH_TOKEN: a dummy token makes npm skip OIDC.
+          echo "OIDC token URL present: ${ACTIONS_ID_TOKEN_REQUEST_URL:+yes}"
           npmrc="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
           if [ -f "$npmrc" ]; then
             sed -i '/_authToken/d' "$npmrc"
             sed -i '/^always-auth/d' "$npmrc"
           fi
-          unset NODE_AUTH_TOKEN NPM_CONFIG_USERCONFIG
+          unset NODE_AUTH_TOKEN
           VERSION=$(node -p "require('./package.json').version")
           if [[ "$VERSION" =~ -[a-zA-Z] ]]; then
-            npm publish --provenance --tag beta
+            npm publish --access public --provenance --tag beta
           else
-            npm publish --provenance
+            npm publish --access public --provenance
           fi
 
   # Wave 2: feature packages whose shared foundation is now available.
@@ -102,6 +107,9 @@ jobs:
     needs: [release-please, release-verify, publish-pi-utils]
     if: ${{ always() && github.event_name == 'push' && needs.release-please.outputs.paths_released && needs.release-verify.result == 'success' && (needs.publish-pi-utils.result == 'success' || needs.publish-pi-utils.result == 'skipped') }}
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -119,7 +127,7 @@ jobs:
       - name: Update npm for OIDC support
         run: |
           corepack enable npm
-          corepack prepare npm@latest --activate
+          corepack prepare npm@11.20.0 --activate
           npm --version
 
       - name: Verify published workspace dependencies
@@ -135,17 +143,18 @@ jobs:
         if: ${{ contains(needs.release-please.outputs.paths_released, matrix.dir) }}
         working-directory: ${{ matrix.dir }}
         run: |
+          echo "OIDC token URL present: ${ACTIONS_ID_TOKEN_REQUEST_URL:+yes}"
           npmrc="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
           if [ -f "$npmrc" ]; then
             sed -i '/_authToken/d' "$npmrc"
             sed -i '/^always-auth/d' "$npmrc"
           fi
-          unset NODE_AUTH_TOKEN NPM_CONFIG_USERCONFIG
+          unset NODE_AUTH_TOKEN
           VERSION=$(node -p "require('./package.json').version")
           if [[ "$VERSION" =~ -[a-zA-Z] ]]; then
-            npm publish --provenance --tag beta
+            npm publish --access public --provenance --tag beta
           else
-            npm publish --provenance
+            npm publish --access public --provenance
           fi
 
   # Wave 2b: terminal-mux waits for the shared foundation, then unlocks its consumers.
@@ -153,6 +162,9 @@ jobs:
     needs: [release-please, release-verify, publish-pi-utils]
     if: ${{ always() && github.event_name == 'push' && contains(needs.release-please.outputs.paths_released, 'packages/pi-terminal-mux') && needs.release-verify.result == 'success' && (needs.publish-pi-utils.result == 'success' || needs.publish-pi-utils.result == 'skipped') }}
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -163,7 +175,7 @@ jobs:
       - name: Update npm for OIDC support
         run: |
           corepack enable npm
-          corepack prepare npm@latest --activate
+          corepack prepare npm@11.20.0 --activate
           npm --version
 
       - name: Verify published workspace dependencies
@@ -176,17 +188,18 @@ jobs:
       - name: Publish to npm
         working-directory: packages/pi-terminal-mux
         run: |
+          echo "OIDC token URL present: ${ACTIONS_ID_TOKEN_REQUEST_URL:+yes}"
           npmrc="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
           if [ -f "$npmrc" ]; then
             sed -i '/_authToken/d' "$npmrc"
             sed -i '/^always-auth/d' "$npmrc"
           fi
-          unset NODE_AUTH_TOKEN NPM_CONFIG_USERCONFIG
+          unset NODE_AUTH_TOKEN
           VERSION=$(node -p "require('./package.json').version")
           if [[ "$VERSION" =~ -[a-zA-Z] ]]; then
-            npm publish --provenance --tag beta
+            npm publish --access public --provenance --tag beta
           else
-            npm publish --provenance
+            npm publish --access public --provenance
           fi
 
   # Wave 3: Spark imports terminal-mux at runtime.
@@ -194,6 +207,9 @@ jobs:
     needs: [release-please, release-verify, publish-pi-utils, publish-terminal-mux]
     if: ${{ always() && github.event_name == 'push' && needs.release-please.outputs.paths_released && needs.release-verify.result == 'success' && (needs.publish-pi-utils.result == 'success' || needs.publish-pi-utils.result == 'skipped') && (needs.publish-terminal-mux.result == 'success' || needs.publish-terminal-mux.result == 'skipped') }}
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -210,7 +226,7 @@ jobs:
       - name: Update npm for OIDC support
         run: |
           corepack enable npm
-          corepack prepare npm@latest --activate
+          corepack prepare npm@11.20.0 --activate
           npm --version
 
       - name: Verify published workspace dependencies
@@ -226,23 +242,27 @@ jobs:
         if: ${{ contains(needs.release-please.outputs.paths_released, matrix.dir) }}
         working-directory: ${{ matrix.dir }}
         run: |
+          echo "OIDC token URL present: ${ACTIONS_ID_TOKEN_REQUEST_URL:+yes}"
           npmrc="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
           if [ -f "$npmrc" ]; then
             sed -i '/_authToken/d' "$npmrc"
             sed -i '/^always-auth/d' "$npmrc"
           fi
-          unset NODE_AUTH_TOKEN NPM_CONFIG_USERCONFIG
+          unset NODE_AUTH_TOKEN
           VERSION=$(node -p "require('./package.json').version")
           if [[ "$VERSION" =~ -[a-zA-Z] ]]; then
-            npm publish --provenance --tag beta
+            npm publish --access public --provenance --tag beta
           else
-            npm publish --provenance
+            npm publish --access public --provenance
           fi
 
   # Manual recovery for a GitHub Release whose npm publication failed.
   publish-npm-retry:
     if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -256,7 +276,7 @@ jobs:
       - name: Update npm for OIDC support
         run: |
           corepack enable npm
-          corepack prepare npm@latest --activate
+          corepack prepare npm@11.20.0 --activate
           npm --version
 
       - name: Install dependencies
@@ -298,15 +318,16 @@ jobs:
       - name: Publish to npm
         working-directory: ${{ inputs.package_dir }}
         run: |
+          echo "OIDC token URL present: ${ACTIONS_ID_TOKEN_REQUEST_URL:+yes}"
           npmrc="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
           if [ -f "$npmrc" ]; then
             sed -i '/_authToken/d' "$npmrc"
             sed -i '/^always-auth/d' "$npmrc"
           fi
-          unset NODE_AUTH_TOKEN NPM_CONFIG_USERCONFIG
+          unset NODE_AUTH_TOKEN
           VERSION=$(node -p "require('./package.json').version")
           if [[ "$VERSION" =~ -[a-zA-Z] ]]; then
-            npm publish --provenance --tag beta
+            npm publish --access public --provenance --tag beta
           else
-            npm publish --provenance
+            npm publish --access public --provenance
           fi
