@@ -1,9 +1,9 @@
 {
   "packages/pi-utils": "0.1.1",
-  "packages/pi-web-search": "1.6.0",
-  "packages/pi-distill": "1.9.2",
-  "packages/pi-terminal-mux": "0.6.5",
-  "packages/pi-models-discovery": "1.4.0",
-  "packages/pi-spark": "0.28.0",
-  "packages/pi-subagent": "0.1.0"
+  "packages/pi-web-search": "1.7.0",
+  "packages/pi-distill": "1.10.0",
+  "packages/pi-terminal-mux": "0.7.0",
+  "packages/pi-models-discovery": "2.0.0",
+  "packages/pi-spark": "0.29.0",
+  "packages/pi-subagent": "1.0.0"
 }

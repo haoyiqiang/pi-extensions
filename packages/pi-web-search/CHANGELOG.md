@@ -11,6 +11,18 @@
 - Restored OpenCode session headers, Copilot Anthropic Bearer auth, Azure endpoint/key/deployment handling, and explicit API-key Vertex Express support for native Vertex models.
 - Added deterministic regression tests for the repaired paths.
 
+## [1.7.0](https://github.com/haoyiqiang/pi-extensions/compare/pi-web-search-v1.6.0...pi-web-search-v1.7.0) (2026-10-29)
+
+
+### Features
+
+* add lightweight LLM and API web search ([832ec4e](https://github.com/haoyiqiang/pi-extensions/commit/832ec4e363d5612c2c6b71ad64671dfb30302df5))
+
+
+### Bug Fixes
+
+* **web-search:** repair integration regressions and provider compatibility ([2bf42f0](https://github.com/haoyiqiang/pi-extensions/commit/2bf42f0c82c4449f550e20d2bce21fbc842efb24))
+
 ## 1.6.0
 
 - Introduced the publishable package as `@maplezzk/pi-web-search` while preserving the `pi-web-search` feature and config names.

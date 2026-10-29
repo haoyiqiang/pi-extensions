@@ -1,6 +1,6 @@
 {
   "name": "@kevinhao/pi-subagent",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Persistent Pi subagents in a terminal panel, managed by the subagent CLI",
   "type": "module",
   "main": "./index.ts",
@@ -54,7 +54,7 @@
     "subagent"
   ],
   "dependencies": {
-    "@kevinhao/pi-terminal-mux": "^0.6.5"
+    "@kevinhao/pi-terminal-mux": "^0.7.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.87.1",
