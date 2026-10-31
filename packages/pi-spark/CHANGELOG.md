@@ -20,6 +20,19 @@
 * remove automatic session title generation; use `pi-naming` for session and terminal names
 * remove the scrolling `write` preview; `write` display stays with `pi-extensions-tool-display`
 
+## [0.30.0](https://github.com/haoyiqiang/pi-extensions/compare/pi-spark-v0.29.0...pi-spark-v0.30.0) (2026-10-31)
+
+
+### Features
+
+* **pi-spark:** name sessions without terminal renaming ([5b7a9bd](https://github.com/haoyiqiang/pi-extensions/commit/5b7a9bdc56cd015811160965347a4e049ed1b0a0))
+
+
+### Bug Fixes
+
+* **pi-spark:** resolve the distro icon without inherited object keys ([285f20b](https://github.com/haoyiqiang/pi-extensions/commit/285f20b3e2621a979fa73beec7f46d4d1150f26d))
+* **pi-spark:** show the distro logo in the p10k footer on Linux ([312cebb](https://github.com/haoyiqiang/pi-extensions/commit/312cebbc5d1cb50bfdcab5da994c8793ef382ac4))
+
 ## [0.29.0](https://github.com/haoyiqiang/pi-extensions/compare/pi-spark-v0.28.0...pi-spark-v0.29.0) (2026-10-29)
 
 
