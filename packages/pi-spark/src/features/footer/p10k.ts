@@ -7,6 +7,30 @@ const FOLDER = "\uF115";
 const GIT = "\uF113";
 const BRANCH = "\uF126";
 
+/** Distro logos from the `nf-linux-*` set, the same codepoints powerlevel10k uses for `nerdfont-v3`. */
+const DISTRO_ICONS: Record<string, string> = {
+  alpine: "\uF300",
+  arch: "\uF303",
+  artix: "\uF31F",
+  centos: "\uF304",
+  debian: "\uF306",
+  endeavouros: "\uF322",
+  fedora: "\uF30A",
+  gentoo: "\uF30D",
+  kali: "\uF327",
+  linuxmint: "\uF30E",
+  manjaro: "\uF312",
+  nixos: "\uF313",
+  "opensuse-leap": "\uF314",
+  "opensuse-tumbleweed": "\uF314",
+  raspbian: "\uF315",
+  redhat: "\uF316",
+  rocky: "\uF32B",
+  suse: "\uF314",
+  ubuntu: "\uF31B",
+  void: "\uF32E",
+};
+
 export interface P10kPaint {
   text: (value: string) => string;
   dim: (value: string) => string;
@@ -21,12 +45,12 @@ export interface P10kLeftInput {
   branch: string | null;
 }
 
-export function osPromptIcon(platform: NodeJS.Platform): string | undefined {
+export function osPromptIcon(platform: NodeJS.Platform, distroIds: readonly string[] = []): string | undefined {
   switch (platform) {
     case "darwin":
       return APPLE;
     case "linux":
-      return LINUX;
+      return distroIds.map((id) => DISTRO_ICONS[id]).find(Boolean) ?? LINUX;
     case "win32":
       return WINDOWS;
     default:

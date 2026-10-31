@@ -29,3 +29,12 @@ test("p10k left prompt omits git when there is no branch", () => {
   const text = formatP10kLeft({ path: "~/src", branch: null }, plain);
   assert.equal(text, "\uF115 ~/src");
 });
+
+test("os prompt icon uses the distro logo and falls back to Tux", () => {
+  assert.equal(osPromptIcon("linux", ["arch"]), "\uF303");
+  assert.equal(osPromptIcon("linux", ["cachyos", "arch"]), "\uF303");
+  assert.equal(osPromptIcon("linux", ["unknown"]), "\uF17C");
+  assert.equal(osPromptIcon("linux"), "\uF17C");
+  assert.equal(osPromptIcon("darwin", ["arch"]), "\uF179");
+  assert.equal(osPromptIcon("win32", ["arch"]), "\uF17A");
+});

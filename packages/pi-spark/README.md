@@ -239,7 +239,7 @@ The `statusPosition` field is optional and defaults to `inline`.
 | `statusPosition` | `inline` (default) | Shows extension statuses on the same line as session info, cost, and context usage. |
 |  | `below` | Moves extension statuses to a new line below. |
 | `style` | `default` (default) | Shortened path, branch, and session name, separated by ` · `. |
-|  | `p10k` | Lean powerlevel10k left prompt. The path stays fish-shortened. Requires a Nerd Font. Omits the session name. |
+|  | `p10k` | Lean powerlevel10k left prompt. The path stays fish-shortened. Requires a Nerd Font. Omits the session name. On Linux the OS icon is the distro logo, falling back to Tux for unknown distros. |
 
 #### `MetricsConfig`
 

@@ -130,7 +130,7 @@ pi remove npm:pi-naming
 | `cleanMode` | `CleanModeConfig` | 把一次 agent 运行折叠成耗时头和动作组；设为 `false` 可关闭。 |
 | `credits` | `CreditsConfig` | 状态栏的余额或速率限制用量。`providers` 可逐个 provider 开关。 |
 | `editor` | `EditorConfig` | 顶部边框的 working 指示与模型名。`spinner` 可选 `dots`、`lights`、`tildes`（默认）、`pulse`。 |
-| `footer` | `FooterConfig` | 会话信息、扩展状态、花费与上下文用量。`statusPosition` 可选 `inline`（默认）或 `below`。`style` 可选 `default`（默认）或 `p10k`。 |
+| `footer` | `FooterConfig` | 会话信息、扩展状态、花费与上下文用量。`statusPosition` 可选 `inline`（默认）或 `below`。`style` 可选 `default`（默认）或 `p10k`；`p10k` 在 Linux 上用发行版图标，未知发行版回退到 Tux。 |
 | `metrics` | `MetricsConfig` | 通过原生通知显示耗时和 TPS/TTFT/token/成本遥测。`display` 为 `on-stop`（默认）或 `live`；设为 `false` 可关闭。 |
 | `naming` | `NamingConfig` | 会话和授权终端目标的自动标题及 `/rename`；设为 `false` 关闭。 |
 | `resources` | `{}` | `#` 会话资源选择器。设为 `false` 可关闭。 |

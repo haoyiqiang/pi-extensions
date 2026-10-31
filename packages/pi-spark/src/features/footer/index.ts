@@ -6,6 +6,7 @@ import { Text } from "@earendil-works/pi-tui";
 import { SplitLine } from "../../components/split-line";
 import { loadConfig } from "../../config";
 import { formatContextUsage, formatCwd, formatLink, sanitizeText } from "../../utils/format";
+import { linuxDistroIds } from "../../utils/os";
 import { getEntryUsage } from "../../utils/usage";
 import { formatP10kLeft, osPromptIcon } from "./p10k";
 
@@ -68,9 +69,10 @@ class FooterComponent implements Component {
   }
 
   private getP10kLeft(cwdText: string, branch: string | null): string {
+    const os = platform();
     return formatP10kLeft(
       {
-        osIcon: osPromptIcon(platform()),
+        osIcon: osPromptIcon(os, os === "linux" ? linuxDistroIds() : []),
         path: this.theme.fg("accent", cwdText),
         branch,
       },
