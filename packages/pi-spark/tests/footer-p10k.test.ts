@@ -38,3 +38,7 @@ test("os prompt icon uses the distro logo and falls back to Tux", () => {
   assert.equal(osPromptIcon("darwin", ["arch"]), "\uF179");
   assert.equal(osPromptIcon("win32", ["arch"]), "\uF17A");
 });
+
+test("os prompt icon ignores inherited object keys", () => {
+  assert.equal(osPromptIcon("linux", ["constructor"]), "\uF17C");
+});

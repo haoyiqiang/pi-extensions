@@ -50,7 +50,7 @@ export function osPromptIcon(platform: NodeJS.Platform, distroIds: readonly stri
     case "darwin":
       return APPLE;
     case "linux":
-      return distroIds.map((id) => DISTRO_ICONS[id]).find(Boolean) ?? LINUX;
+      return distroIds.map((id) => (Object.hasOwn(DISTRO_ICONS, id) ? DISTRO_ICONS[id] : undefined)).find(Boolean) ?? LINUX;
     case "win32":
       return WINDOWS;
     default:
