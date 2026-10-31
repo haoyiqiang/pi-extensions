@@ -96,18 +96,18 @@ Typing `#` at a token boundary opens a tabbed picker above the spark editor. It 
 - Set `resources` to `false` to disable it. An old `extensions/pi-session-resources/config.json` with `"enabled": false` is used only when `spark.json` does not set `resources`.
 - Remove `npm:pi-session-resources` if it is still installed, or the command names conflict.
 
-### Session and terminal naming
+### Session naming
 
 Naming is now a Spark feature, migrated from `pi-naming`.
 
 - The first real user input in a new, unnamed session generates a title in the background. Automatic naming attempts once, never overwrites an existing title, and ignores extension-injected input.
 - `/rename [name]` applies an explicit name or generates one from **all user messages on the current branch**. Later corrections take precedence; procedural follow-ups such as “continue” do not replace the main topic.
-- Run `/config:spark` → Session and terminal naming → Detailed settings to configure naming; the same feature menu provides a reset action.
-- `naming.targets` independently controls the Pi session, workspace and tab. Set both terminal targets to `false` for session-only naming without loading the terminal adapter. Set `naming: false` to disable automatic and manual naming.
+- Run `/config:spark` → Session naming → Detailed settings to configure naming; the same feature menu provides a reset action.
+- Naming renames the Pi session only. Set `naming: false` to disable automatic and manual naming; legacy `naming.targets` keys are accepted and ignored.
 - Naming uses the current Pi model/authentication and makes a separate background request. OpenAI Codex requests use isolated UUIDv7 sessions and clean them up afterwards. Generated names obey the length limit; explicit names are not truncated.
-- Manual requests supersede pending automatic requests. Session changes invalidate pending results and errors. Failed or unsupported terminal targets do not prevent the other targets from being named.
+- Manual requests supersede pending automatic requests. Session changes invalidate pending results and errors.
 
-`pi-terminal-mux` stays an independent, automatically installed library. It executes terminal operations; Spark owns title generation and naming policy. Child terminal ownership comes from `PI_TERMINAL_RENAME_CONTEXT`: shared or unidentified targets are skipped, never replaced with the current focus. Restricted children cannot rename a shared workspace. Spark requires a mux version exporting `resolveTerminalRenameTargets` and `renameTerminalTarget`; release CI publishes terminal-mux before Spark and verifies the dependency range is available on npm.
+Spark no longer renames tmux windows, tmux sessions or Orca tabs, and no longer depends on `@kevinhao/pi-terminal-mux`. A pane proves no exclusive ownership of its window, session or tab, and subagents now launch in detached tmux sessions, so terminal naming had no target it could safely rewrite.
 
 #### Migrating from pi-naming
 
@@ -179,7 +179,7 @@ All fields are optional. Each top-level feature runs with the defaults below unl
 | `editor` | `EditorConfig` | Shows a working indicator and the current model on the editor's top border. |
 | `footer` | `FooterConfig` | Shows session info, extension statuses, cost, and context usage. |
 | `metrics` | `MetricsConfig` | Shows elapsed time and TPS, TTFT, token, and cost telemetry through native notifications. |
-| `naming` | `NamingConfig` | Automatic titles and `/rename` for sessions and owned terminal targets. |
+| `naming` | `NamingConfig` | Automatic titles and `/rename` for the Pi session. |
 | `resources` | `{}` | Enables the `#` session resource picker. Set it to `false` to disable the picker. |
 | `presets` | `{ [name]: Preset }` | Defines named model presets, keyed by name. |
 | `recap` | `RecapConfig` | Generates a session recap when idle or on demand. |
@@ -252,7 +252,7 @@ Set `metrics` to `false` to disable both the elapsed label and telemetry.
 
 #### `NamingConfig`
 
-All fields are optional. `automaticNaming` and `manualNaming` default to `true`; `targets.session`, `targets.workspace` and `targets.tab` also default to `true`.
+All fields are optional. `automaticNaming` and `manualNaming` default to `true`.
 
 | `title` field | Default | Meaning |
 | --- | --- | --- |

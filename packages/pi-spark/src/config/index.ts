@@ -109,9 +109,7 @@ export function loadConfig(ctx: ExtensionContext): SparkConfig {
 function mergeNaming(global: unknown, project: unknown): unknown {
   if (!isObject(global) || !isObject(project)) return project === undefined ? global : project;
   const merged = { ...global, ...project };
-  for (const key of ["targets", "title"] as const) {
-    if (isObject(global[key]) && isObject(project[key])) merged[key] = { ...global[key], ...project[key] };
-  }
+  if (isObject(global.title) && isObject(project.title)) merged.title = { ...global.title, ...project.title };
   return merged;
 }
 

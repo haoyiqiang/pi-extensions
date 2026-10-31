@@ -77,7 +77,6 @@
     "parse-duration": "^2.1.8",
     "pretty-ms": "^9.3.0",
     "zod": "^4.4.3",
-    "@kevinhao/pi-terminal-mux": "^0.7.0",
     "@kevinhao/pi-utils": "^0.1.0"
   },
   "peerDependencies": {

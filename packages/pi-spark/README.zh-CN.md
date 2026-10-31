@@ -71,18 +71,18 @@ pi install git:github.com/haoyiqiang/pi-extensions
 - `resources: false` 关闭选择器。只有 `spark.json` 没有 `resources` 时，才会读取旧配置里显式的 `"enabled": false`。
 - 如果还安装了 `npm:pi-session-resources`，请移除，否则命令会冲突。
 
-### 会话与终端命名
+### 会话命名
 
 命名功能已从独立的 `pi-naming` 合并到 Spark。
 
 - 新的未命名会话收到第一条真实用户输入时，在后台生成标题；自动命名只尝试一次，不覆盖已有标题，也不处理扩展注入的输入。
 - `/rename [名称]` 使用显式名称；省略名称时综合**当前分支全部用户消息**生成。后续明确纠正优先，“继续”等流程性消息不应盖过主要任务。
-- 用 `/config:spark` → Session and terminal naming → Detailed settings 配置命名；该功能菜单同时提供重置入口。
-- `naming.targets` 分别控制 Pi 会话、工作区和标签页。关闭两个终端目标后，只命名会话，不加载终端适配器；`naming: false` 同时关闭自动和手动命名。
+- 用 `/config:spark` → Session naming → Detailed settings 配置命名；该功能菜单同时提供重置入口。
+- 只命名 Pi 会话；`naming: false` 同时关闭自动和手动命名，旧的 `naming.targets` 会被接受但忽略。
 - 使用当前 Pi 模型及鉴权发起独立后台请求；OpenAI Codex 使用独立 UUIDv7 会话并在结束后清理。生成名称受长度限制，显式名称不截断。
-- 手动请求使旧自动请求失效，会话变化使旧结果及错误失效。单个终端目标失败或不受支持，不影响其他目标。
+- 手动请求使旧自动请求失效，会话变化使旧结果及错误失效。
 
-`pi-terminal-mux` 继续作为独立库自动安装，负责终端操作；Spark 负责生成标题和命名策略。子会话使用 `PI_TERMINAL_RENAME_CONTEXT` 中的目标归属授权；共享或身份不明的目标会跳过，不使用当前焦点代替。受限子会话不能改共享工作区名称。Spark 要求 mux 导出 `resolveTerminalRenameTargets` 和 `renameTerminalTarget`；发布 CI 先发布 terminal-mux，再发布 Spark，并检查 npm 上的依赖范围已可用。
+Spark 不再改 tmux 窗口、tmux 会话或 Orca 标签页标题，也不再依赖 `@kevinhao/pi-terminal-mux`。pane 不能证明独占其窗口、会话或标签页，且子代理现在在 detached tmux 会话中启动，终端命名已没有可安全改写的目标。
 
 #### 从 pi-naming 迁移
 
@@ -143,7 +143,7 @@ pi remove npm:pi-naming
 
 ### NamingConfig
 
-所有字段可省略。`automaticNaming`、`manualNaming` 以及 `targets.session`、`targets.workspace`、`targets.tab` 默认均为 `true`。
+所有字段可省略。`automaticNaming`、`manualNaming` 默认均为 `true`。
 
 | `title` 字段 | 默认值 | 说明 |
 | --- | --- | --- |

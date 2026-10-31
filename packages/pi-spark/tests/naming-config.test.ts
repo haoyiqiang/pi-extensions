@@ -5,29 +5,23 @@ import { DEFAULT_TITLE_CONFIG, TITLE_EFFORT_LEVELS, isTitleEffort, namingConfigS
 const DEFAULTS = {
   automaticNaming: true,
   manualNaming: true,
-  targets: { session: true, workspace: true, tab: true },
   title: DEFAULT_TITLE_CONFIG,
 };
 
-test("naming defaults enable both entrypoints and all targets without shared mutable state", () => {
+test("naming defaults enable both entrypoints without shared mutable state", () => {
   assert.deepEqual(parseConfig({}), DEFAULTS);
   assert.deepEqual(namingConfigSchema.parse({}), DEFAULTS);
   const changed = parseConfig({});
   changed.title.maxTokens = 123;
-  changed.targets.tab = false;
   assert.deepEqual(parseConfig({}), DEFAULTS);
   assert.ok(Object.isFrozen(DEFAULT_TITLE_CONFIG));
 });
 
-test("naming switches and targets can be disabled independently", () => {
+test("naming switches can be disabled independently and legacy targets are discarded", () => {
   for (const key of ["automaticNaming", "manualNaming"] as const) {
     assert.deepEqual(parseConfig({ [key]: false }), { ...DEFAULTS, [key]: false });
   }
-  for (const target of ["session", "workspace", "tab"] as const) {
-    assert.deepEqual(parseConfig({ targets: { [target]: false } }), {
-      ...DEFAULTS, targets: { ...DEFAULTS.targets, [target]: false },
-    });
-  }
+  assert.deepEqual(parseConfig({ targets: { session: false, workspace: false, tab: false } }), DEFAULTS);
 });
 
 test("title settings preserve independent budgets and normalize text", () => {
@@ -52,7 +46,7 @@ test("invalid shapes, unknown fields and mistyped values fail rather than enable
     null, undefined, [], true, false, "naming", 1,
     { unknown: true }, { allowWorkspaceRename: false },
     { automaticNaming: "false" }, { manualNaming: null },
-    { targets: null }, { targets: [] }, { targets: { unknown: true } }, { targets: { session: "false" } },
+    { targets: null }, { targets: [] },
     { title: null }, { title: [] }, { title: { typo: 1 } },
     { title: { language: " " } }, { title: { language: 1 } },
     { title: { instructions: false } }, { title: { effort: "none" } }, { title: { effort: "LOW" } },

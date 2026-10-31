@@ -6,7 +6,8 @@ export const TITLE_EFFORT_LEVELS = ["minimal", "low", "medium", "high", "xhigh",
 export type TitleEffort = typeof TITLE_EFFORT_LEVELS[number];
 
 const NAMING_SWITCHES = ["automaticNaming", "manualNaming"] as const;
-const TARGET_KEYS = ["session", "workspace", "tab"] as const;
+/** Accepted and discarded so pre-existing config files keep loading. */
+const LEGACY_TARGETS_KEY = "targets";
 
 export interface TitleConfig {
   maxLength: number;
@@ -31,7 +32,6 @@ export const DEFAULT_TITLE_CONFIG: Readonly<TitleConfig> = Object.freeze({
 export interface NamingConfig {
   automaticNaming: boolean;
   manualNaming: boolean;
-  targets: { session: boolean; workspace: boolean; tab: boolean };
   title: TitleConfig;
 }
 
@@ -56,15 +56,12 @@ export function isTitleEffort(value: unknown): value is TitleEffort {
 /** Strict validation; only omitted fields receive defaults. No file I/O lives here. */
 export function parseConfig(value: unknown): NamingConfig {
   const raw = object(value, "config");
-  const allowed = new Set<string>([...NAMING_SWITCHES, "targets", "title"]);
+  const allowed = new Set<string>([...NAMING_SWITCHES, LEGACY_TARGETS_KEY, "title"]);
   for (const key of Object.keys(raw)) if (!allowed.has(key)) invalid(key);
   for (const key of NAMING_SWITCHES) {
     if (raw[key] !== undefined && typeof raw[key] !== "boolean") invalid(key);
   }
-  const targetRaw = raw.targets === undefined ? {} : object(raw.targets, "targets");
-  for (const key of Object.keys(targetRaw)) {
-    if (!TARGET_KEYS.some((target) => target === key) || typeof targetRaw[key] !== "boolean") invalid(`targets.${key}`);
-  }
+  if (raw[LEGACY_TARGETS_KEY] !== undefined) object(raw[LEGACY_TARGETS_KEY], LEGACY_TARGETS_KEY);
   const titleRaw = raw.title === undefined ? {} : object(raw.title, "title");
   for (const key of Object.keys(titleRaw)) {
     if (!Object.hasOwn(DEFAULT_TITLE_CONFIG, key)) invalid(`title.${key}`);
@@ -88,11 +85,6 @@ export function parseConfig(value: unknown): NamingConfig {
   return {
     automaticNaming: (raw.automaticNaming as boolean | undefined) ?? true,
     manualNaming: (raw.manualNaming as boolean | undefined) ?? true,
-    targets: {
-      session: (targetRaw.session as boolean | undefined) ?? true,
-      workspace: (targetRaw.workspace as boolean | undefined) ?? true,
-      tab: (targetRaw.tab as boolean | undefined) ?? true,
-    },
     title,
   };
 }

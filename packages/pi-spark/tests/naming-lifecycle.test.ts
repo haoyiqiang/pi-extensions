@@ -19,14 +19,14 @@ test("Spark refreshes config before feature startup handlers on reload", async (
       const harness = createExtensionRegistrationHarness();
       await harness.load("pi-spark", spark);
       assert.deepEqual([...harness.commands.keys()].sort(), ["clean", "config:spark", "rename"]);
-      writeFileSync(path, JSON.stringify({ naming: { targets: { workspace: false, tab: false } } }));
+      writeFileSync(path, JSON.stringify({ naming: { automaticNaming: false } }));
       assert.equal(loadNamingConfig(ctx), false, "cached until lifecycle boundary");
       const firstStart = harness.events.find((event) => event.event === "session_start");
       assert.ok(firstStart);
       await firstStart.handler({ type: "session_start", reason: "reload" }, ctx);
       const config = loadNamingConfig(ctx);
       assert.notEqual(config, false);
-      if (config !== false) assert.deepEqual(config.targets, { session: true, workspace: false, tab: false });
+      if (config !== false) assert.equal(config.automaticNaming, false);
       assert.equal(harness.events.some((event) => event.event === "session_switch"), false);
     } finally { clearConfigCache(); }
   }, "spark-naming-lifecycle-");

@@ -167,15 +167,15 @@ test("a legacy project feature owns panel edits and migrates only its file", asy
 
 test("unified panel opens detailed naming settings and preserves project scope", async () => {
   await fixture(async ({ ctx, global, project }) => {
-    writeJson(global, { naming: { targets: { tab: false } } });
+    writeJson(global, { naming: { manualNaming: false } });
     writeJson(project, { naming: { automaticNaming: true }, metrics: false });
     await openSparkConfigPanel(ctx);
     const saved = readConfigObject(project) as any;
     assert.equal(saved.naming.automaticNaming, false);
-    assert.equal(saved.naming.targets.tab, false);
+    assert.equal(saved.naming.manualNaming, false);
     assert.equal(saved.metrics, false);
-    assert.deepEqual(readConfigObject(global), { naming: { targets: { tab: false } } });
-  }, ["Session and terminal naming:", "Detailed settings", "Automatic naming:", "Done", "Back", "Done"]);
+    assert.deepEqual(readConfigObject(global), { naming: { manualNaming: false } });
+  }, ["Session naming:", "Detailed settings", "Automatic naming:", "Done", "Back", "Done"]);
 });
 
 test("unified panel opens clean-mode settings and saves activity rows", async () => {

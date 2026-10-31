@@ -1,5 +1,4 @@
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { TerminalRenameOutcome, TerminalRenameTarget, ResolveRenameOptions } from "@kevinhao/pi-terminal-mux";
 import { isTitleEffort, parseConfig, TITLE_EFFORT_LEVELS, type NamingConfig } from "./config.ts";
 import { loadNamingConfig } from "../../config/naming-store.ts";
 
@@ -7,39 +6,16 @@ import { getCurrentSessionUserMessages, requestSessionNameWithTimeout, type Sess
 
 const RENAME_COMMAND = "rename";
 
-function targetLabel(target: string): string {
-  return {
-    workspace: "workspace",
-    tab: "tab",
-    window: "window",
-    pane: "pane",
-    session: "session",
-    terminal: "terminal",
-  }[target] ?? target;
-}
-
-function skipReason(reason: string, setting: string): string {
-  return {
-    unsupported: "unsupported by the current backend",
-    disabled: `backend setting is disabled: ${setting}`,
-    shared: "the target is shared with other sessions and was not granted for renaming",
-    unverified: "exclusive target ownership could not be verified",
-    "missing-id": "missing an explicit target ID; current focus is not a substitute",
-  }[reason] ?? reason;
-}
 const CONFIG_OPTION = {
   automaticNaming: 0,
   manualNaming: 1,
-  sessionTarget: 2,
-  workspaceTarget: 3,
-  tabTarget: 4,
-  maxLength: 5,
-  preferredLength: 6,
-  language: 7,
-  instructions: 8,
-  timeout: 9,
-  maxTokens: 10,
-  effort: 11,
+  maxLength: 2,
+  preferredLength: 3,
+  language: 4,
+  instructions: 5,
+  timeout: 6,
+  maxTokens: 7,
+  effort: 8,
 } as const;
 const MAX_LENGTH_PRESETS = ["15", "30", "60"] as const;
 const PREFERRED_LENGTH_PRESETS = ["10", "20", "40"] as const;
@@ -47,17 +23,6 @@ const LANGUAGE_PRESETS = ["auto", "中文", "English", "日本語"] as const;
 const TIMEOUT_PRESETS = ["5000", "10000", "30000"] as const;
 const MAX_TOKENS_PRESETS = ["1024", "2048", "4096"] as const;
 const MESSAGE_TYPE = "pi-spark";
-
-export interface TerminalNamingAdapter {
-  resolve(options: ResolveRenameOptions): TerminalRenameOutcome[];
-  rename(reference: TerminalRenameTarget, title: string): TerminalRenameOutcome;
-}
-
-/** 终端能力按需加载；session-only 使用不依赖终端运行环境。 */
-async function loadTerminalAdapter(): Promise<TerminalNamingAdapter> {
-  const mux = await import("@kevinhao/pi-terminal-mux");
-  return { resolve: mux.resolveTerminalRenameTargets, rename: mux.renameTerminalTarget };
-}
 
 /** 格式化捕获的异常，不丢失原始错误。 */
 function errorMessage(error: unknown): string {
@@ -147,9 +112,6 @@ export async function openNamingConfigPanel(
     const choices = [
       `Automatic naming: ${toggle(config.automaticNaming)}`,
       `Manual /rename: ${toggle(config.manualNaming)}`,
-      `Name session: ${toggle(config.targets.session)}`,
-      `Name workspace: ${toggle(config.targets.workspace)}`,
-      `Name tab: ${toggle(config.targets.tab)}`,
       `Maximum title length: ${config.title.maxLength}`,
       `Preferred title length: ${config.title.preferredLength}`,
       `Title language: ${config.title.language}`,
@@ -167,12 +129,6 @@ export async function openNamingConfigPanel(
       next = parseConfig({ ...config, automaticNaming: !config.automaticNaming });
     } else if (selectedIndex === CONFIG_OPTION.manualNaming) {
       next = parseConfig({ ...config, manualNaming: !config.manualNaming });
-    } else if (selectedIndex === CONFIG_OPTION.sessionTarget) {
-      next = parseConfig({ ...config, targets: { ...config.targets, session: !config.targets.session } });
-    } else if (selectedIndex === CONFIG_OPTION.workspaceTarget) {
-      next = parseConfig({ ...config, targets: { ...config.targets, workspace: !config.targets.workspace } });
-    } else if (selectedIndex === CONFIG_OPTION.tabTarget) {
-      next = parseConfig({ ...config, targets: { ...config.targets, tab: !config.targets.tab } });
     } else {
       let inputTitle = "Request timeout (positive milliseconds)";
       let inputValue = String(config.title.timeoutMs);
@@ -243,13 +199,12 @@ interface SessionNamingState {
 export function registerNaming(
   pi: ExtensionAPI,
   selection: NamingConfigSelection | NamingConfigGetter,
-  dependencies: { requestName?: SessionNameRequester; loadTerminal?: () => Promise<TerminalNamingAdapter> } = {},
+  dependencies: { requestName?: SessionNameRequester } = {},
 ): void {
-  const { requestName, loadTerminal = loadTerminalAdapter } = dependencies;
+  const { requestName } = dependencies;
   const getConfig: NamingConfigGetter = typeof selection === "function" ? selection : () => selection;
   const sessions = new Map<string, SessionNamingState>();
   let activeSession: string | undefined;
-  let terminalPromise: Promise<TerminalNamingAdapter> | undefined;
   let generation = 0;
   let request = 0;
   let lastConfigError: string | undefined;
@@ -298,7 +253,7 @@ export function registerNaming(
   pi.on("session_shutdown", () => { generation++; activeSession = undefined; });
   pi.on("session_tree", (_event, ctx) => { generation++; sessionState(ctx).eligible = false; });
 
-  /** Capture owned terminal IDs before generation; invalidate every asynchronous boundary. */
+  /** Invalidate every asynchronous boundary before applying a generated title. */
   async function rename(args: string, ctx: ExtensionContext, automatic: boolean, config: NamingConfig): Promise<void> {
     const currentGeneration = generation;
     const currentRequest = ++request;
@@ -306,26 +261,11 @@ export function registerNaming(
     const configSnapshot = JSON.stringify(config);
     const isCurrent = () => {
       if (generation !== currentGeneration || request !== currentRequest || activeSession !== currentSession) return false;
-      // A settings command can disable naming or revoke terminal targets while a request is pending.
+      // A settings command can disable naming while a request is pending.
       return JSON.stringify(readConfig(ctx)) === configSnapshot;
     };
     const canApply = () => isCurrent() && (!automatic || !pi.getSessionName());
     const userMessages = automatic ? [args] : getCurrentSessionUserMessages(ctx);
-    let terminal: TerminalNamingAdapter | undefined;
-    let targets: TerminalRenameOutcome[] = [];
-    let resolutionError: unknown;
-    if (config.targets.workspace || config.targets.tab) {
-      try {
-        terminalPromise ??= Promise.resolve().then(loadTerminal);
-        terminal = await terminalPromise;
-        if (!canApply()) return;
-        targets = terminal.resolve({ tab: config.targets.tab, workspace: config.targets.workspace });
-      } catch (error) {
-        terminalPromise = undefined;
-        resolutionError = error;
-      }
-    }
-    if (!canApply()) return;
     let label = automatic ? "" : args.trim();
     if (!label) {
       try {
@@ -336,43 +276,23 @@ export function registerNaming(
       }
     }
     if (!canApply()) return;
-
-    const renamed: string[] = [];
-    if (config.targets.session) {
-      try { pi.setSessionName(label); renamed.push("Pi session"); }
-      catch (error) { report(pi, ctx, { message: `Naming failed: ${errorMessage(error)}`, level: "error" }); }
-    }
-    if (resolutionError !== undefined) {
-      report(pi, ctx, { message: `Terminal naming failed: ${errorMessage(resolutionError)}`, level: "warning" });
-    }
-    for (const target of targets) {
-      let result = target;
-      if (target.status === "ready" && terminal) {
-        try { result = terminal.rename(target.reference, label); }
-        catch (error) { result = { status: "failed", operation: target.reference.operation, error: errorMessage(error) }; }
-      }
-      if (result.status === "renamed") {
-        renamed.push(targetLabel(result.reference.target));
-      } else if (result.status === "skipped") {
-        report(pi, ctx, { message: `Did not rename ${targetLabel(result.operation)}: ${skipReason(result.reason, result.setting ?? "")}`, level: "warning" });
-      } else if (result.status === "failed") {
-        report(pi, ctx, { message: `Terminal naming failed: ${result.error}`, level: "warning" });
-      }
-    }
-    if (renamed.length > 0) {
-      report(pi, ctx, { message: `Named ${[...new Set(renamed)].join(", ")}: ${label}`, level: "info" });
+    try {
+      pi.setSessionName(label);
+      report(pi, ctx, { message: `Named Pi session: ${label}`, level: "info" });
+    } catch (error) {
+      report(pi, ctx, { message: `Naming failed: ${errorMessage(error)}`, level: "error" });
     }
   }
 
   pi.registerCommand(RENAME_COMMAND, {
-    description: "Name the session and allowed terminal targets; omit the name to summarize all user messages on the current branch",
+    description: "Name the Pi session; omit the name to summarize all user messages on the current branch",
     getArgumentCompletions: () => null,
     handler: async (args, ctx) => {
       const state = sessionState(ctx);
       request++; // Even a disabled manual command supersedes pending automatic work.
       state.attempted = true;
       const config = readConfig(ctx);
-      if (!config || !config.manualNaming || !Object.values(config.targets).some(Boolean)) {
+      if (!config || !config.manualNaming) {
         report(pi, ctx, { message: "Naming is disabled for this session. Enable it in /config:spark, then /reload.", level: "info" });
         return;
       }
@@ -386,7 +306,7 @@ export function registerNaming(
     if (!text) return;
     state.attempted = true;
     const config = readConfig(ctx);
-    if (!config || !config.automaticNaming || !Object.values(config.targets).some(Boolean)) return;
+    if (!config || !config.automaticNaming) return;
     const inputGeneration = generation;
     const naming = rename(text, ctx, true, config);
     const inputRequest = request;

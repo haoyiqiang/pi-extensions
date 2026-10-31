@@ -13,7 +13,7 @@ const FEATURES: Record<Feature, string> = {
   editor: "Editor",
   footer: "Footer",
   metrics: "Metrics",
-  naming: "Session and terminal naming",
+  naming: "Session naming",
   presets: "Model presets",
   recap: "Recap",
   resources: "Session resources",
