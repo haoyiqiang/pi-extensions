@@ -1,7 +1,7 @@
 {
   "name": "@kevinhao/pi-subagent",
   "version": "1.0.0",
-  "description": "Persistent Pi subagents in a terminal panel, managed by the subagent CLI",
+  "description": "Persistent Pi subagents in detached tmux sessions, managed by the subagent CLI",
   "type": "module",
   "main": "./index.ts",
   "bin": {
@@ -53,9 +53,6 @@
     "coding-agent",
     "subagent"
   ],
-  "dependencies": {
-    "@kevinhao/pi-terminal-mux": "^0.7.0"
-  },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.87.1",
     "@earendil-works/pi-tui": ">=0.87.1"

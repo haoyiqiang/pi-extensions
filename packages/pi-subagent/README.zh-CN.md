@@ -2,13 +2,13 @@
 
 可观察、可持久化的 Pi 子代理，用于独立审查、调查和委派实现。
 
-每个子代理在独立终端面板中运行，并拥有自己的 Pi JSONL 会话。父会话可以查看状态、等待持久结果、转向正在进行的工作，或排队后续消息；面板就在当前终端旁边，不需要附着命令。
+每个子代理在独立的 detached tmux session 中运行，并拥有自己的 Pi JSONL 会话。父会话可以查看状态、等待持久结果、转向正在进行的工作，或排队后续消息；扩展会在编辑器上方显示正在运行的子代理，`/subagent` 可以附着到其中一个。
 
 ## 要求
 
 - Pi
 - Node.js 22.18 或更高版本
-- tmux 或 Orca。请在其中启动 Pi；可用 `PI_TERMINAL_MUX` 或 `PI_SUBAGENT_MUX` 覆盖检测结果。两者都不在时，spawn 会降级为 headless 后台子进程，没有可见面板，结果通过 `subagent status` 和 `subagent wait` 读取。
+- tmux
 
 ## 安装
 
@@ -66,10 +66,14 @@ subagent send a1b2c3 "Focus on error handling"
 subagent send a1b2c3 --follow-up "Then summarize"
 subagent wait a1b2c3
 subagent stop a1b2c3
+subagent resume a1b2c3
+subagent rm a1b2c3
 subagent list
 ```
 
-用 `subagent list` 查看本会话所有运行及其 handle、名称、状态、运行时长、工作目录和模型；`subagent status` 以 `key: value` 形式打印单个运行的同样信息。面板已经开在父会话旁边，因此 panel ID 只保存在运行元数据里，不再出现在输出中。
+用 `subagent list` 查看本会话所有运行及其 handle、名称、状态、运行时长、工作目录和模型；`subagent status` 以 `key: value` 形式打印单个运行的同样信息。
+
+每次运行拥有名为 `pi-subagent-<handle>` 的 tmux session。运行期间扩展会在编辑器上方画一个 `Subagents` 状态框；`/subagent` 可以选中并附着进去。session 名始终由 handle 推导，因此 `tmux attach -t pi-subagent-a1b2c3` 同样可用。
 
 ## 隔离
 
@@ -82,4 +86,4 @@ subagent list
 - `--no-prompt-templates`：关闭 prompt templates
 - `--no-context-files`：忽略仓库指令文件
 
-不允许嵌套子代理。子会话不加载 subagent skill。子代理在 `/reload` 后继续存在。父会话退出或被替换时，正在运行的子代理会被挂起：面板关闭，但记录和元数据保留；恢复该父会话时会用完整历史重新打开。`subagent stop` 会永久删除运行；无法确认面板关闭时保留记录。
+不允许嵌套子代理。子会话不加载 subagent skill。子代理在 `/reload` 后继续存在。父会话退出或被替换时，正在运行的子代理进程会被关闭，但记录和元数据保留；恢复该父会话时会用完整历史重新拉起它们。这个关闭不等于 `subagent stop`：只有显式的 `stop` 或 `rm` 才结束一次运行，因此子代理自行退出或被外部杀掉后同样会被拉起。

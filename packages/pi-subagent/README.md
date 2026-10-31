@@ -2,13 +2,13 @@
 
 Observable, persistent Pi subagents for independent reviews, investigations, and delegated implementation.
 
-Each subagent runs in its own terminal panel with a dedicated Pi JSONL session. The parent can inspect status, wait for durable results, steer active work, or queue follow-ups; the panel sits beside the current terminal, so no attach command is needed.
+Each subagent runs in its own detached tmux session with a dedicated Pi JSONL session. The parent can inspect status, wait for durable results, steer active work, or queue follow-ups; the extension shows running subagents above the editor, and `/subagent` attaches to one.
 
 ## Requirements
 
 - Pi
 - Node.js 22.18 or newer
-- tmux or Orca. Start Pi inside one of them; override detection with `PI_TERMINAL_MUX` or `PI_SUBAGENT_MUX`. Outside both, spawn falls back to a headless background child whose output is read through `subagent status` and `subagent wait`, not a visible panel.
+- tmux
 
 ## Install
 
@@ -66,10 +66,14 @@ subagent send a1b2c3 "Focus on error handling"
 subagent send a1b2c3 --follow-up "Then summarize"
 subagent wait a1b2c3
 subagent stop a1b2c3
+subagent resume a1b2c3
+subagent rm a1b2c3
 subagent list
 ```
 
-Use `subagent list` to see every run of this session with its handle, name, state, age, working directory, and model; `subagent status` prints the same facts for one run as `key: value` lines. Panels are already open beside the parent, so panel IDs stay in the run metadata instead of the output.
+Use `subagent list` to see every run of this session with its handle, name, state, age, working directory, and model; `subagent status` prints the same facts for one run as `key: value` lines.
+
+Each run owns the tmux session `pi-subagent-<handle>`. While it is running the extension draws a `Subagents` box above the editor; `/subagent` picks one and attaches to it. The session name is always derived from the handle, so `tmux attach -t pi-subagent-a1b2c3` works too.
 
 ## Isolation
 
@@ -82,4 +86,4 @@ Optional spawn flags:
 - `--no-prompt-templates`: disable prompt templates
 - `--no-context-files`: ignore repository instruction files
 
-Nested subagents are disabled. Child sessions do not receive the subagent skill. Children survive `/reload`. When their spawning Pi session quits or is replaced, running children are suspended: the panel closes, but transcript and metadata are kept. Resuming that parent session reopens them with their full history. `subagent stop` removes a run permanently, and preserves it when panel closure cannot be confirmed.
+Nested subagents are disabled. Child sessions do not receive the subagent skill. Children survive `/reload`. When their spawning Pi session quits or is replaced, running children are shut down but their transcript and metadata are kept; resuming that parent session relaunches them with their full history. That shutdown is not `subagent stop`: only an explicit `stop` or `rm` ends a run, so a child that quits or is killed on its own is relaunched as well.

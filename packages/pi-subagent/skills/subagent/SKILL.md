@@ -5,7 +5,7 @@ description: Spawn and communicate with observable Pi subagents for second opini
 
 # Subagent
 
-Use the `subagent` CLI to delegate work to a separate Pi process with its own context and terminal panel. Managed subagents cannot spawn nested subagents, and this skill is not loaded into their sessions.
+Use the `subagent` CLI to delegate work to a separate Pi process with its own context and tmux session. Managed subagents cannot spawn nested subagents, and this skill is not loaded into their sessions.
 
 ## Spawn
 
@@ -49,12 +49,12 @@ Three additional built-in tools are available but off by default:
 ## Isolation flags
 
 - `--no-extensions` - Disable normal extension discovery. Use for an independent run that should not inherit unrelated extension behavior or extension-provided tools. The subagent control bridge is still explicitly loaded.
-- `--extension <path>` - Load one extra extension file or directory. Repeatable. Combine with `--no-extensions` to keep only the control bridge plus the named extensions, for example a custom provider such as `pi-models-discovery`.
+- `--extension <path>` - Load one extra extension file or directory. Repeatable. Combine with `--no-extensions` to keep only the control bridge plus the named extensions, for example a custom model-provider extension.
 - `--no-skills` - Hide installed skills from the child. Use for tightly specified tasks that should rely only on the supplied prompt and files.
 - `--no-prompt-templates` - Disable prompt-template commands. Usually unnecessary, but useful when testing a minimal child environment.
 - `--no-context-files` - Ignore repository instruction files such as `AGENTS.md` and `CLAUDE.md`. Use only when those instructions would bias an independent investigation. Do not use for implementation unless intentionally bypassing repository guidance.
 
-Spawn prints a random handle and the panel ID. Outside tmux or Orca the child runs headless: the ID starts with `headless:` and there is no panel to look at, so read results through `status` and `wait`. Keep the handle for later commands. Subagents persist after their current turn completes: `wait`, completion, and becoming idle do not terminate them. They survive `/reload`. When the spawning Pi session quits or is replaced, they are suspended and reopened with their history when that session is resumed. They are only removed by `subagent stop`.
+Spawn prints a random handle. Each run owns the tmux session `pi-subagent-<handle>`, shown in the `Subagents` box above the editor while it runs; `/subagent` attaches to one. Keep the handle for later commands. Subagents persist after their current turn completes: `wait`, completion, and becoming idle do not terminate them. They survive `/reload`. When the spawning Pi session quits or is replaced, their processes are shut down but their transcripts are kept, and resuming that session relaunches them with full history. That shutdown is not the same as `subagent stop`: only `subagent stop` and `subagent rm` end a run, so a child that quits or is killed on its own is relaunched too.
 
 ## Inspect and wait
 
@@ -83,10 +83,17 @@ subagent send <handle> --follow-up "message"
 
 Names are 1–64 characters and need not be unique. Messages use the subagent extension's control inbox; do not send terminal keys.
 
-## Stop
+## Stop, resume, remove
 
 ```sh
+# End the run but keep its transcript.
 subagent stop <handle>
+
+# Reopen a stopped or interrupted run with its full history.
+subagent resume <handle>
+
+# Delete the transcript of a run that is not running.
+subagent rm <handle>
 ```
 
-Explicitly stop every subagent when it is no longer needed; do not leave completed subagents running idle. This closes the panel and removes the run transcript and metadata; when closure cannot be confirmed the run is preserved. Keep an idle subagent alive only when concrete follow-up work is expected, then stop it afterward.
+Explicitly stop every subagent when it is no longer needed; do not leave completed subagents running idle. Stopping keeps the record, so `resume` can reopen it later and `rm` is the only command that deletes history. A run whose tmux session disappeared without `stop` — a machine restart, for example — reports `interrupted` and is relaunched when the parent session is resumed.

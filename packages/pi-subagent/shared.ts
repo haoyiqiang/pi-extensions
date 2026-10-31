@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import {
 	existsSync,
 	mkdirSync,
@@ -10,17 +11,12 @@ import {
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-	closeSurface,
-	createSurface,
-	createSurfaceRenameContext,
-	getMuxBackend,
-	shellEscape,
-	surfaceState,
-	TERMINAL_RENAME_CONTEXT_ENV,
-} from "@kevinhao/pi-terminal-mux";
 
-export type RunState = "starting" | "busy" | "idle" | "exited" | "error";
+/** The child's own lifecycle position. Written by the child, or by the parent when it launches one. */
+export type RunState = "starting" | "busy" | "idle";
+
+/** A run's state for humans and CLI output: the child's state while it lives, and the two facts a dead run can show. */
+export type RunView = RunState | "interrupted" | "unstarted" | "stopped";
 
 export interface RunMetadata {
 	version: 1;
@@ -29,8 +25,6 @@ export interface RunMetadata {
 	parentSessionId?: string;
 	parentSessionFile?: string;
 	childSessionId?: string;
-	/** Terminal panel created by pi-terminal-mux. Empty until launch. */
-	surface: string;
 	runDir: string;
 	sessionFile: string;
 	cwd: string;
@@ -39,8 +33,6 @@ export interface RunMetadata {
 	thinking: string;
 	/** Extra pi CLI flags (tools, isolation) reused when the run is relaunched. */
 	launchArgs?: string[];
-	/** Set by the parent when it stops the child on quit or session switch; the child is relaunched on resume. */
-	suspended?: boolean;
 	state: RunState;
 	hasStarted: boolean;
 	createdAt: string;
@@ -88,6 +80,16 @@ export function inboxDir(runDir: string): string {
 	return join(runDir, "inbox");
 }
 
+/** Present only after `subagent stop`. Its presence is the single durable record of "the user ended this". */
+export function stoppedPath(runDir: string): string {
+	return join(runDir, "stopped");
+}
+
+/** Written by the child when its Pi process shuts down, so the parent can wait for it before reopening a session. */
+export function childExitPath(runDir: string): string {
+	return join(runDir, "exited");
+}
+
 export function isValidRunName(value: unknown): value is string {
 	return (
 		typeof value === "string" &&
@@ -111,16 +113,21 @@ export function readMetadata(runDir: string): RunMetadata | undefined {
 			metadata.version !== 1 ||
 			typeof metadata.handle !== "string" ||
 			(metadata.name !== undefined && !isValidRunName(metadata.name)) ||
-			typeof metadata.surface !== "string" ||
 			typeof metadata.sessionFile !== "string" ||
 			typeof metadata.runDir !== "string"
 		) {
 			return undefined;
 		}
-		return metadata as RunMetadata;
+		// Records written by the retired panel-based release used "exited" and "error" as states. They are
+		// never live, so normalizing them to "idle" only affects runs that are about to be relaunched.
+		return { ...(metadata as RunMetadata), state: normalizeState(metadata.state) };
 	} catch {
 		return undefined;
 	}
+}
+
+function normalizeState(value: unknown): RunState {
+	return value === "starting" || value === "busy" ? value : "idle";
 }
 
 export function writeMetadata(metadata: RunMetadata): void {
@@ -146,93 +153,116 @@ export function updateMetadata(runDir: string, patch: Partial<RunMetadata>): Run
 	return next;
 }
 
-export const extensionPath = join(dirname(fileURLToPath(import.meta.url)), "index.ts");
-
-export async function waitForRunShutdown(runDir: string, timeoutMs = 2000): Promise<void> {
-	const surface = readMetadata(runDir)?.surface;
-	const deadline = Date.now() + timeoutMs;
-	while (surface && Date.now() < deadline) {
-		if (surfaceState(surface) === "absent") return;
-		await new Promise<void>((resolveDelay) => setTimeout(resolveDelay, 50));
-	}
-	throw new Error(`Could not confirm subagent panel closure; kept run records: ${runDir}`);
-}
-
 export function removeRunDir(runDir: string): void {
 	rmSync(runDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 }
 
-/** Absence must come from a mux inventory, never from a failed screen read. */
-export function buildLaunchCommand(metadata: RunMetadata, initialArgs: string[]): string {
-	const args = [
-		"--session",
-		metadata.sessionFile,
-		"--provider",
-		metadata.provider,
-		"--model",
-		metadata.model,
-		"--thinking",
-		metadata.thinking,
-		...(metadata.launchArgs ?? []),
-		...initialArgs,
-	];
-	// Explicit user extensions must not suppress the child control bridge.
-	if (!(metadata.launchArgs ?? []).some((arg, index, all) => (arg === "--extension" || arg === "-e") && all[index + 1] === extensionPath))
-		args.push("--extension", extensionPath);
-	// The new panel ID is not available yet. An empty, restricted context grants no
-	// shared window/tab naming rights and never reuses a suspended run's old panel ID.
-	const rename = createSurfaceRenameContext("", getMuxBackend());
-	const env = [
-		`PI_SUBAGENT_RUN_DIR=${shellEscape(metadata.runDir)}`,
-		`${TERMINAL_RENAME_CONTEXT_ENV}=${shellEscape(JSON.stringify(rename))}`,
-	];
-	const command = ["pi", ...args].map((arg) => shellEscape(arg)).join(" ");
-	return `cd ${shellEscape(metadata.cwd)} && exec env ${env.join(" ")} ${command}`;
+export const extensionPath = join(dirname(fileURLToPath(import.meta.url)), "index.ts");
+
+/** Every subagent owns one tmux session whose name is derived from its handle, so no run needs to store it. */
+export function tmuxSessionName(handle: string): string {
+	return `pi-subagent-${handle}`;
 }
 
-/** Open a panel and start the child pi process. The panel id is stored on the run. */
+/**
+ * Names of all live tmux sessions. One call per command instead of one probe per run, and an absent tmux
+ * server simply means nothing is running.
+ */
+export function liveSessions(): Set<string> {
+	const result = spawnSync("tmux", ["list-sessions", "-F", "#{session_name}"], { encoding: "utf8" });
+	if (result.status !== 0) return new Set();
+	return new Set(result.stdout.split("\n").filter(Boolean));
+}
+
+export function isStopped(runDir: string): boolean {
+	return existsSync(stoppedPath(runDir));
+}
+
+export function markStopped(runDir: string): void {
+	writeFileSync(stoppedPath(runDir), "", { mode: 0o600 });
+}
+
+export function clearStopped(runDir: string): void {
+	rmSync(stoppedPath(runDir), { force: true });
+}
+
+export function clearChildExited(runDir: string): void {
+	rmSync(childExitPath(runDir), { force: true });
+}
+
+/** Resolve once the child recorded its shutdown, or when the timeout runs out. */
+export async function waitForChildExit(runDir: string, timeoutMs = 2000): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		if (existsSync(childExitPath(runDir))) return;
+		await new Promise<void>((resolveDelay) => setTimeout(resolveDelay, 50));
+	}
+}
+
+/**
+ * A run is alive when its tmux session exists. Everything else is derived: a dead run that the user ended is
+ * stopped, one that had started working is interrupted and can be resumed, and one that never got going is a
+ * failed spawn.
+ */
+export function runView(metadata: RunMetadata, live: Set<string>): RunView {
+	if (live.has(tmuxSessionName(metadata.handle))) return metadata.state;
+	if (isStopped(metadata.runDir)) return "stopped";
+	return metadata.hasStarted ? "interrupted" : "unstarted";
+}
+
+function controlBridgeArgs(launchArgs: string[] | undefined): string[] {
+	const provided = (launchArgs ?? []).some(
+		(arg, index, all) => (arg === "--extension" || arg === "-e") && all[index + 1] === extensionPath,
+	);
+	return provided ? [] : ["--extension", extensionPath];
+}
+
+/** Start the child pi process in its own detached tmux session. `initialArgs` is passed on the first spawn only. */
 export function launchRun(metadata: RunMetadata, initialArgs: string[] = []): void {
-	const surface = createSurface(metadata.name ?? metadata.handle, {
-		command: buildLaunchCommand(metadata, initialArgs),
-	});
-	try {
-		// Patch only the panel ID: the child may already have recorded its startup state.
-		if (!updateMetadata(metadata.runDir, { surface })) {
-			throw new Error(`Could not record subagent panel: ${metadata.handle}`);
-		}
-	} catch (error) {
-		try {
-			closeSurface(surface);
-		} catch {
-			// The pane may already be gone.
-		}
-		throw error;
-	}
+	const result = spawnSync(
+		"tmux",
+		[
+			"new-session",
+			"-d",
+			"-s",
+			tmuxSessionName(metadata.handle),
+			"-x",
+			"120",
+			"-y",
+			"40",
+			"-c",
+			metadata.cwd,
+			"--",
+			"env",
+			`PI_SUBAGENT_RUN_DIR=${metadata.runDir}`,
+			"pi",
+			"--session",
+			metadata.sessionFile,
+			"--provider",
+			metadata.provider,
+			"--model",
+			metadata.model,
+			"--thinking",
+			metadata.thinking,
+			...(metadata.launchArgs ?? []),
+			...controlBridgeArgs(metadata.launchArgs),
+			...initialArgs,
+		],
+		{ encoding: "utf8" },
+	);
+	if (result.error) throw result.error;
+	if (result.status !== 0) throw new Error(result.stderr.trim() || "Failed to create tmux session");
 }
 
-/** Only a successful inventory can prove a panel is gone. */
-export function surfaceGone(surface: string): boolean {
-	return surfaceState(surface) === "absent";
-}
-
-export function closeRunSurface(surface: string): void {
-	if (!surface) throw new Error("Subagent panel is not recorded; cannot confirm closure");
-	if (surfaceState(surface) === "absent") return;
-	try {
-		closeSurface(surface);
-	} catch (error) {
-		if (surfaceState(surface) !== "absent") throw error;
-	}
-}
-
-export function effectiveRunState(metadata: RunMetadata): RunState {
-	if (
-		(metadata.state === "starting" || metadata.state === "busy" || metadata.state === "idle") &&
-		surfaceGone(metadata.surface)
-	) {
-		return "exited";
-	}
-	return metadata.state;
+/** Kill the run's tmux session. Returns whether there was a live session to kill. */
+export function killRun(handle: string, live = liveSessions()): boolean {
+	const session = tmuxSessionName(handle);
+	if (!live.has(session)) return false;
+	const result = spawnSync("tmux", ["kill-session", "-t", `=${session}`], { encoding: "utf8" });
+	// A session that vanished between the inventory and the kill is already in the desired state.
+	if (result.status !== 0 && liveSessions().has(session))
+		throw new Error(result.stderr.trim() || `Failed to kill tmux session ${session}`);
+	return true;
 }
 
 export function pendingMessageCount(runDir: string): number {
