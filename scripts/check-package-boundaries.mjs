@@ -8,22 +8,14 @@ const PACKAGES_DIR = join(ROOT, "packages");
 
 const PACKAGE_LAYERS = new Map([
   ["@kevinhao/pi-utils", "foundation"],
-  ["@kevinhao/pi-terminal-mux", "foundation"],
   ["@kevinhao/pi-spark", "product"],
-  ["@kevinhao/pi-distill", "capability"],
   ["@kevinhao/pi-web-search", "capability"],
-  ["@kevinhao/pi-models-discovery", "capability"],
   ["@kevinhao/pi-subagent", "capability"],
 ]);
 
 const ALLOWED_WORKSPACE_EDGES = new Set([
-  "@kevinhao/pi-terminal-mux -> @kevinhao/pi-utils",
   "@kevinhao/pi-spark -> @kevinhao/pi-utils",
-  "@kevinhao/pi-spark -> @kevinhao/pi-terminal-mux",
-  "@kevinhao/pi-distill -> @kevinhao/pi-utils",
   "@kevinhao/pi-web-search -> @kevinhao/pi-utils",
-  "@kevinhao/pi-models-discovery -> @kevinhao/pi-utils",
-  "@kevinhao/pi-subagent -> @kevinhao/pi-terminal-mux",
   "@kevinhao/pi-subagent -> @kevinhao/pi-utils",
 ]);
 
