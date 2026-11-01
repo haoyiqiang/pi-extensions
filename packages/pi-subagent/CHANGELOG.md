@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.0](https://github.com/haoyiqiang/pi-extensions/compare/pi-subagent-v1.0.0...pi-subagent-v1.1.0) (2026-11-01)
+
+
+### Features
+
+* **pi-subagent:** run subagents in detached tmux sessions with resumable history ([58d26fd](https://github.com/haoyiqiang/pi-extensions/commit/58d26fd927416b1b2c50f56f2ad86665b4ccc3f6))
+
+
+### Bug Fixes
+
+* **pi-subagent:** keep spawn output free of UI instructions ([6e3a7e3](https://github.com/haoyiqiang/pi-extensions/commit/6e3a7e379dffa297a321c32b38f03ec87b25a9a6))
+
 ## [1.0.0](https://github.com/haoyiqiang/pi-extensions/compare/pi-subagent-v0.1.0...pi-subagent-v1.0.0) (2026-10-29)
 
 

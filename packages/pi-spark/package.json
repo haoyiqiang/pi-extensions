@@ -1,6 +1,6 @@
 {
   "name": "@kevinhao/pi-spark",
-  "version": "0.29.0",
+  "version": "0.30.0",
   "description": "Pi package for a compact TUI, clean transcript, credits, presets, recap, metrics, naming, and session resources",
   "type": "module",
   "main": "./index.ts",
