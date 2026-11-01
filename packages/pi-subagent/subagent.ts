@@ -291,7 +291,6 @@ function spawnSubagent(args: string[]): void {
 	const spawned = readMetadata(runDir) ?? metadata;
 	if (json) emit(JSON.stringify({ handle: spawned.handle, name: spawned.name ?? null }));
 	else emit(`spawned ${spawned.handle}${spawned.name ? ` ${spawned.name}` : ""}`);
-	emitHint(`Attach with \`tmux attach -t ${tmuxSessionName(spawned.handle)}\` or /subagent in the parent session.`);
 }
 
 function statusSubagent(args: string[]): void {

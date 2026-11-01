@@ -54,7 +54,7 @@ Three additional built-in tools are available but off by default:
 - `--no-prompt-templates` - Disable prompt-template commands. Usually unnecessary, but useful when testing a minimal child environment.
 - `--no-context-files` - Ignore repository instruction files such as `AGENTS.md` and `CLAUDE.md`. Use only when those instructions would bias an independent investigation. Do not use for implementation unless intentionally bypassing repository guidance.
 
-Spawn prints a random handle. Each run owns the tmux session `pi-subagent-<handle>`, shown in the `Subagents` box above the editor while it runs; `/subagent` attaches to one. Keep the handle for later commands. Subagents persist after their current turn completes: `wait`, completion, and becoming idle do not terminate them. They survive `/reload`. When the spawning Pi session quits or is replaced, their processes are shut down but their transcripts are kept, and resuming that session relaunches them with full history. That shutdown is not the same as `subagent stop`: only `subagent stop` and `subagent rm` end a run, so a child that quits or is killed on its own is relaunched too.
+Spawn prints a random handle. Keep it for later commands. Subagents persist after their current turn completes: `wait`, completion, and becoming idle do not terminate them. They survive `/reload`. When the spawning Pi session quits or is replaced, their processes are shut down but their transcripts are kept, and resuming that session relaunches them with full history. That shutdown is not the same as `subagent stop`: only `subagent stop` and `subagent rm` end a run, so a child that quits or is killed on its own is relaunched too.
 
 ## Inspect and wait
 
