@@ -233,6 +233,10 @@ function spawnSubagent(args: string[]): void {
 	writeFileSync(sessionFile, "", { mode: 0o600 });
 
 	const launchArgs: string[] = [];
+	// Children run unattended in a detached tmux pane: a blocking question dialog would stall the
+	// run with no signal to the parent. Without the tool the child asks in plain text instead, which
+	// `wait` returns and `send` can answer.
+	launchArgs.push("--exclude-tools", "ask_user_question");
 	if (tools) launchArgs.push("--tools", tools);
 	if (noExtensions) launchArgs.push("--no-extensions", "--extension", extensionPath);
 	const seenExtensions = new Set<string>();
