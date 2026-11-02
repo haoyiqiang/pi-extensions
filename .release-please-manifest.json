@@ -2,5 +2,5 @@
   "packages/pi-utils": "0.1.1",
   "packages/pi-web-search": "1.7.0",
   "packages/pi-spark": "0.30.0",
-  "packages/pi-subagent": "1.1.0"
+  "packages/pi-subagent": "1.2.0"
 }

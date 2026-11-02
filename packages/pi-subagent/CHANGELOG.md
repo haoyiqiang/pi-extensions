@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.2.0](https://github.com/haoyiqiang/pi-extensions/compare/pi-subagent-v1.1.0...pi-subagent-v1.2.0) (2026-11-02)
+
+
+### Features
+
+* **pi-subagent:** draw the subagent status box with a border ([9b132f4](https://github.com/haoyiqiang/pi-extensions/commit/9b132f46aa31e6844d23d3a787bfff60dbe9cae5))
+
+
+### Bug Fixes
+
+* **pi-subagent:** restore the original tmux lifecycle ([6f8ecfd](https://github.com/haoyiqiang/pi-extensions/commit/6f8ecfdb5ad13884ce8c1b49d99f596c7062bdde))
+* **pi-subagent:** restore the original tmux lifecycle ([fd8e607](https://github.com/haoyiqiang/pi-extensions/commit/fd8e607b0945743aa2e0a847d30f78d929ff6579))
+
 ## [1.1.0](https://github.com/haoyiqiang/pi-extensions/compare/pi-subagent-v1.0.0...pi-subagent-v1.1.0) (2026-11-01)
 
 
