@@ -1,5 +1,7 @@
 import { spawnSync } from "node:child_process";
 import {
+	accessSync,
+	constants,
 	existsSync,
 	mkdirSync,
 	readFileSync,
@@ -10,13 +12,8 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 
-/** The child's own lifecycle position. Written by the child, or by the parent when it launches one. */
-export type RunState = "starting" | "busy" | "idle";
-
-/** A run's state for humans and CLI output: the child's state while it lives, and the two facts a dead run can show. */
-export type RunView = RunState | "interrupted" | "unstarted" | "stopped";
+export type RunState = "starting" | "busy" | "idle" | "exited" | "error";
 
 export interface RunMetadata {
 	version: 1;
@@ -25,6 +22,7 @@ export interface RunMetadata {
 	parentSessionId?: string;
 	parentSessionFile?: string;
 	childSessionId?: string;
+	tmuxSession: string;
 	runDir: string;
 	sessionFile: string;
 	cwd: string;
@@ -33,6 +31,8 @@ export interface RunMetadata {
 	thinking: string;
 	/** Extra pi CLI flags (tools, isolation) reused when the run is relaunched. */
 	launchArgs?: string[];
+	/** Set by the parent when it stops the child on quit or session switch; the child is relaunched on resume. */
+	suspended?: boolean;
 	state: RunState;
 	hasStarted: boolean;
 	createdAt: string;
@@ -80,16 +80,6 @@ export function inboxDir(runDir: string): string {
 	return join(runDir, "inbox");
 }
 
-/** Present only after `subagent stop`. Its presence is the single durable record of "the user ended this". */
-export function stoppedPath(runDir: string): string {
-	return join(runDir, "stopped");
-}
-
-/** Written by the child when its Pi process shuts down, so the parent can wait for it before reopening a session. */
-export function childExitPath(runDir: string): string {
-	return join(runDir, "exited");
-}
-
 export function isValidRunName(value: unknown): value is string {
 	return (
 		typeof value === "string" &&
@@ -113,21 +103,16 @@ export function readMetadata(runDir: string): RunMetadata | undefined {
 			metadata.version !== 1 ||
 			typeof metadata.handle !== "string" ||
 			(metadata.name !== undefined && !isValidRunName(metadata.name)) ||
+			typeof metadata.tmuxSession !== "string" ||
 			typeof metadata.sessionFile !== "string" ||
 			typeof metadata.runDir !== "string"
 		) {
 			return undefined;
 		}
-		// Records written by the retired panel-based release used "exited" and "error" as states. They are
-		// never live, so normalizing them to "idle" only affects runs that are about to be relaunched.
-		return { ...(metadata as RunMetadata), state: normalizeState(metadata.state) };
+		return metadata as RunMetadata;
 	} catch {
 		return undefined;
 	}
-}
-
-function normalizeState(value: unknown): RunState {
-	return value === "starting" || value === "busy" ? value : "idle";
 }
 
 export function writeMetadata(metadata: RunMetadata): void {
@@ -153,79 +138,41 @@ export function updateMetadata(runDir: string, patch: Partial<RunMetadata>): Run
 	return next;
 }
 
-export function removeRunDir(runDir: string): void {
-	rmSync(runDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
-}
-
-export const extensionPath = join(dirname(fileURLToPath(import.meta.url)), "index.ts");
-
-/** Every subagent owns one tmux session whose name is derived from its handle, so no run needs to store it. */
-export function tmuxSessionName(handle: string): string {
-	return `pi-subagent-${handle}`;
-}
-
-/**
- * Names of all live tmux sessions. One call per command instead of one probe per run, and an absent tmux
- * server simply means nothing is running.
- */
-export function liveSessions(): Set<string> {
-	const result = spawnSync("tmux", ["list-sessions", "-F", "#{session_name}"], { encoding: "utf8" });
-	if (result.status !== 0) return new Set();
-	return new Set(result.stdout.split("\n").filter(Boolean));
-}
-
-export function isStopped(runDir: string): boolean {
-	return existsSync(stoppedPath(runDir));
-}
-
-export function markStopped(runDir: string): void {
-	writeFileSync(stoppedPath(runDir), "", { mode: 0o600 });
-}
-
-export function clearStopped(runDir: string): void {
-	rmSync(stoppedPath(runDir), { force: true });
-}
-
-export function clearChildExited(runDir: string): void {
-	rmSync(childExitPath(runDir), { force: true });
-}
-
-/** Resolve once the child recorded its shutdown, or when the timeout runs out. */
-export async function waitForChildExit(runDir: string, timeoutMs = 2000): Promise<void> {
+export async function waitForRunShutdown(runDir: string, timeoutMs = 2000): Promise<void> {
 	const deadline = Date.now() + timeoutMs;
 	while (Date.now() < deadline) {
-		if (existsSync(childExitPath(runDir))) return;
+		const metadata = readMetadata(runDir);
+		if (!metadata || metadata.state === "exited") return;
 		await new Promise<void>((resolveDelay) => setTimeout(resolveDelay, 50));
 	}
 }
 
-/**
- * A run is alive when its tmux session exists. Everything else is derived: a dead run that the user ended is
- * stopped, one that had started working is interrupted and can be resumed, and one that never got going is a
- * failed spawn.
- */
-export function runView(metadata: RunMetadata, live: Set<string>): RunView {
-	if (live.has(tmuxSessionName(metadata.handle))) return metadata.state;
-	if (isStopped(metadata.runDir)) return "stopped";
-	return metadata.hasStarted ? "interrupted" : "unstarted";
+export function removeRunDir(runDir: string): void {
+	rmSync(runDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 }
 
-function controlBridgeArgs(launchArgs: string[] | undefined): string[] {
-	const provided = (launchArgs ?? []).some(
-		(arg, index, all) => (arg === "--extension" || arg === "-e") && all[index + 1] === extensionPath,
-	);
-	return provided ? [] : ["--extension", extensionPath];
+export function tmuxSessionExists(session: string): boolean {
+	return spawnSync("tmux", ["has-session", "-t", session], { stdio: "ignore" }).status === 0;
 }
 
-/** Start the child pi process in its own detached tmux session. `initialArgs` is passed on the first spawn only. */
+/** Start the child pi process for a run in its tmux session. `initialArgs` are only passed on first spawn. */
 export function launchRun(metadata: RunMetadata, initialArgs: string[] = []): void {
+	let launcher = "pi";
+	const testLauncher = join(metadata.cwd, "pi-test.sh");
+	try {
+		accessSync(testLauncher, constants.X_OK);
+		launcher = testLauncher;
+	} catch {
+		// Use the installed pi executable.
+	}
+
 	const result = spawnSync(
 		"tmux",
 		[
 			"new-session",
 			"-d",
 			"-s",
-			tmuxSessionName(metadata.handle),
+			metadata.tmuxSession,
 			"-x",
 			"120",
 			"-y",
@@ -235,7 +182,7 @@ export function launchRun(metadata: RunMetadata, initialArgs: string[] = []): vo
 			"--",
 			"env",
 			`PI_SUBAGENT_RUN_DIR=${metadata.runDir}`,
-			"pi",
+			launcher,
 			"--session",
 			metadata.sessionFile,
 			"--provider",
@@ -245,41 +192,21 @@ export function launchRun(metadata: RunMetadata, initialArgs: string[] = []): vo
 			"--thinking",
 			metadata.thinking,
 			...(metadata.launchArgs ?? []),
-			...controlBridgeArgs(metadata.launchArgs),
 			...initialArgs,
 		],
 		{ encoding: "utf8" },
 	);
-	if (result.error) throw result.error;
 	if (result.status !== 0) throw new Error(result.stderr.trim() || "Failed to create tmux session");
 }
 
-/** Kill the run's tmux session. Returns whether there was a live session to kill. */
-export function killRun(handle: string, live = liveSessions()): boolean {
-	const session = tmuxSessionName(handle);
-	if (!live.has(session)) return false;
-	const result = spawnSync("tmux", ["kill-session", "-t", `=${session}`], { encoding: "utf8" });
-	// A session that vanished between the inventory and the kill is already in the desired state.
-	if (result.status !== 0 && liveSessions().has(session))
-		throw new Error(result.stderr.trim() || `Failed to kill tmux session ${session}`);
-	return true;
-}
-
-export function pendingMessageCount(runDir: string): number {
-	const queueDir = inboxDir(runDir);
-	if (!existsSync(queueDir)) return 0;
-	return readdirSync(queueDir).filter((entry) => entry.endsWith(".json")).length;
-}
-
-/** Compact, human-readable run age: 42s, 2m14s, 3h07m, 2d04h. */
-export function runAge(metadata: RunMetadata): string {
-	const seconds = Math.max(0, Math.round((Date.now() - Date.parse(metadata.createdAt)) / 1000));
-	if (seconds < 60) return `${seconds}s`;
-	const minutes = Math.floor(seconds / 60);
-	if (minutes < 60) return `${minutes}m${String(seconds % 60).padStart(2, "0")}s`;
-	const hours = Math.floor(minutes / 60);
-	if (hours < 24) return `${hours}h${String(minutes % 60).padStart(2, "0")}m`;
-	return `${Math.floor(hours / 24)}d${String(hours % 24).padStart(2, "0")}h`;
+export function effectiveRunState(metadata: RunMetadata): RunState {
+	if (
+		(metadata.state === "starting" || metadata.state === "busy" || metadata.state === "idle") &&
+		!tmuxSessionExists(metadata.tmuxSession)
+	) {
+		return "exited";
+	}
+	return metadata.state;
 }
 
 export function listRuns(parentSessionId?: string): RunMetadata[] {
@@ -353,4 +280,21 @@ export function assistantText(message: AssistantMessage): string {
 		if (block.type === "text" && typeof block.text === "string") parts.push(block.text);
 	}
 	return parts.join("\n").trim() || message.errorMessage || "(no response text)";
+}
+
+/** Compact, human-readable run age: 42s, 2m14s, 3h07m, 2d04h. */
+export function runAge(metadata: RunMetadata): string {
+	const seconds = Math.max(0, Math.round((Date.now() - Date.parse(metadata.createdAt)) / 1000));
+	if (seconds < 60) return `${seconds}s`;
+	const minutes = Math.floor(seconds / 60);
+	if (minutes < 60) return `${minutes}m${String(seconds % 60).padStart(2, "0")}s`;
+	const hours = Math.floor(minutes / 60);
+	if (hours < 24) return `${hours}h${String(minutes % 60).padStart(2, "0")}m`;
+	return `${Math.floor(hours / 24)}d${String(hours % 24).padStart(2, "0")}h`;
+}
+
+export function pendingMessageCount(runDir: string): number {
+	const queueDir = inboxDir(runDir);
+	if (!existsSync(queueDir)) return 0;
+	return readdirSync(queueDir).filter((entry) => entry.endsWith(".json")).length;
 }

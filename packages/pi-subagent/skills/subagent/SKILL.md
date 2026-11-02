@@ -54,7 +54,7 @@ Three additional built-in tools are available but off by default:
 - `--no-prompt-templates` - Disable prompt-template commands. Usually unnecessary, but useful when testing a minimal child environment.
 - `--no-context-files` - Ignore repository instruction files such as `AGENTS.md` and `CLAUDE.md`. Use only when those instructions would bias an independent investigation. Do not use for implementation unless intentionally bypassing repository guidance.
 
-Spawn prints a random handle. Keep it for later commands. Subagents persist after their current turn completes: `wait`, completion, and becoming idle do not terminate them. They survive `/reload`. When the spawning Pi session quits or is replaced, their processes are shut down but their transcripts are kept, and resuming that session relaunches them with full history. That shutdown is not the same as `subagent stop`: only `subagent stop` and `subagent rm` end a run, so a child that quits or is killed on its own is relaunched too.
+Spawn prints a random handle. Keep the handle for later commands. Subagents persist after their current turn completes: `wait`, completion, and becoming idle do not terminate them. They survive `/reload`. When the spawning Pi session quits or is replaced, they are suspended and reopened with their history when that session is resumed. They are only removed by `subagent stop`.
 
 ## Inspect and wait
 
@@ -83,17 +83,10 @@ subagent send <handle> --follow-up "message"
 
 Names are 1–64 characters and need not be unique. Messages use the subagent extension's control inbox; do not send terminal keys.
 
-## Stop, resume, remove
+## Stop
 
 ```sh
-# End the run but keep its transcript.
 subagent stop <handle>
-
-# Reopen a stopped or interrupted run with its full history.
-subagent resume <handle>
-
-# Delete the transcript of a run that is not running.
-subagent rm <handle>
 ```
 
-Explicitly stop every subagent when it is no longer needed; do not leave completed subagents running idle. Stopping keeps the record, so `resume` can reopen it later and `rm` is the only command that deletes history. A run whose tmux session disappeared without `stop` — a machine restart, for example — reports `interrupted` and is relaunched when the parent session is resumed.
+Explicitly stop every subagent when it is no longer needed; do not leave completed subagents running idle. This closes the panel and removes the run transcript and metadata; when closure cannot be confirmed the run is preserved. Keep an idle subagent alive only when concrete follow-up work is expected, then stop it afterward.

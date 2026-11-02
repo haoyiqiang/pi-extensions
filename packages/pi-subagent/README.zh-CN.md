@@ -66,14 +66,12 @@ subagent send a1b2c3 "Focus on error handling"
 subagent send a1b2c3 --follow-up "Then summarize"
 subagent wait a1b2c3
 subagent stop a1b2c3
-subagent resume a1b2c3
-subagent rm a1b2c3
 subagent list
 ```
 
 用 `subagent list` 查看本会话所有运行及其 handle、名称、状态、运行时长、工作目录和模型；`subagent status` 以 `key: value` 形式打印单个运行的同样信息。
 
-每次运行拥有名为 `pi-subagent-<handle>` 的 tmux session。运行期间扩展会在编辑器上方画一个 `Subagents` 状态框；`/subagent` 可以选中并附着进去。session 名始终由 handle 推导，因此 `tmux attach -t pi-subagent-a1b2c3` 同样可用。
+每次运行拥有名为 `pi-subagent-<handle>` 的 tmux session。运行期间编辑器上方会显示 `Subagents` 状态框，包含已运行时长、名称与状态；`/subagent` 可以选中并附着进去。
 
 ## 隔离
 
@@ -86,4 +84,4 @@ subagent list
 - `--no-prompt-templates`：关闭 prompt templates
 - `--no-context-files`：忽略仓库指令文件
 
-不允许嵌套子代理。子会话不加载 subagent skill。子代理在 `/reload` 后继续存在。父会话退出或被替换时，正在运行的子代理进程会被关闭，但记录和元数据保留；恢复该父会话时会用完整历史重新拉起它们。这个关闭不等于 `subagent stop`：只有显式的 `stop` 或 `rm` 才结束一次运行，因此子代理自行退出或被外部杀掉后同样会被拉起。
+不允许嵌套子代理。子会话不加载 subagent skill。子代理在 `/reload` 后继续存在。父会话退出或被替换时，正在运行的子代理会被挂起：进程停止，但记录和元数据保留；恢复该父会话时会以空闲状态和完整历史重新打开。`subagent stop` 会永久删除该运行。

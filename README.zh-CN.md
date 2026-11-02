@@ -16,7 +16,7 @@
 | [`@kevinhao/pi-spark`](./packages/pi-spark) | 统一管理紧凑 editor/footer、清爽对话折叠、provider 余额、模型预设、空闲回顾、指标、会话/终端命名和 `#` 资源选择器。 | [English](./packages/pi-spark/README.md) · [中文](./packages/pi-spark/README.zh-CN.md) |
 | [`@kevinhao/pi-utils`](./packages/pi-utils) | 工具库：可移植的 JSON 配置读写，以及确定性的测试 fixture。不是 Pi 扩展。 | [English](./packages/pi-utils/README.md) · [中文](./packages/pi-utils/README.zh-CN.md) |
 | [`@kevinhao/pi-web-search`](./packages/pi-web-search) | 整合 LLM 内置网络搜索、独立 Search API、Gemini/Vertex URL Context、有界网页抓取和可选 GitHub 仓库提取。 | [English](./packages/pi-web-search/README.md) · [中文](./packages/pi-web-search/README.zh-CN.md) |
-| [`@kevinhao/pi-subagent`](./packages/pi-subagent) | 在 detached tmux 会话中运行持久子代理，状态显示在编辑区上方，`/subagent` 可接入。 | [English](./packages/pi-subagent/README.md) · [中文](./packages/pi-subagent/README.zh-CN.md) |
+| [`@kevinhao/pi-subagent`](./packages/pi-subagent) | 在 detached tmux session 中运行可持久化的子代理，编辑器上方有边框状态框跟踪它们，`/subagent` 可附着到其中一个。 | [English](./packages/pi-subagent/README.md) · [中文](./packages/pi-subagent/README.zh-CN.md) |
 
 共享库会发布到 npm 供功能包依赖。[`@kevinhao/pi-utils`](./packages/pi-utils) 是工具库，不是 Pi 扩展，负责可移植的 JSON 配置读写和确定性测试 fixture。
 
@@ -24,7 +24,7 @@
 
 > `pi-session-tools` 已退役并从本仓库移除。对于历史会话中的 `session-squash` 条目，明确提供兼容逻辑的包仍可读取。
 
-> `pi-interactive-subagents`、`pi-subagents` 与 `pi-workflow` 已退役并从本仓库移除。重新加载前，请先停止旧任务，并移除单独安装的旧入口；不保留旧子代理工具、`/plan`／`/iterate`／`/subagent` 别名及 `/wf` 命令。[`@kevinhao/pi-subagent`](./packages/pi-subagent) 是独立的分栏子代理，不会恢复这些命令。
+> `pi-interactive-subagents`、`pi-subagents` 与 `pi-workflow` 已退役并从本仓库移除。重新加载前，请先停止旧任务，并移除单独安装的旧入口；不保留旧子代理工具、`/plan`／`/iterate`／`/subagent` 别名及 `/wf` 命令。[`@kevinhao/pi-subagent`](./packages/pi-subagent) 是独立的 tmux 会话子代理，不会恢复这些命令。
 
 插件管理类斜杠命令统一采用 `/config:<功能>[-动作]` 命名。
 
@@ -65,7 +65,7 @@ npm run check
 
 `check` 会执行 workspace 类型检查、测试，以及可移植性和 i18n 门禁。
 
-已退役的交互式 subagent 与 workflow 产品不再是 workspace、根 profile 入口或发布候选；其外部归档不是本仓库依赖。当前的分栏子代理是 `pi-subagent`。
+已退役的交互式 subagent 与 workflow 产品不再是 workspace、根 profile 入口或发布候选；其外部归档不是本仓库依赖。当前的 tmux 会话子代理是 `pi-subagent`。
 
 仓库根 `.npmrc` 固定 `https://registry.npmjs.org/`，保证 lockfile 里的 tarball 地址可移植。用镜像 registry 安装会把地址改写成镜像域名，导致 npm 12+ 的 `npm ci` 报 `EALLOWREMOTE`；`node scripts/check-lockfile-registry.mjs`（已纳入 `npm run check`）在合并前拦下这类改动。
 

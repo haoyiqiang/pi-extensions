@@ -1,36 +1,34 @@
 #!/usr/bin/env node
 
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { existsSync, mkdirSync, readdirSync, renameSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
 	assistantText,
-	clearChildExited,
-	clearStopped,
+	effectiveRunState,
 	getRunsDir,
 	inboxDir,
-	killRun,
 	launchRun,
-	liveSessions,
 	listRuns,
-	markStopped,
-	isStopped,
-	type RunMetadata,
-	pendingMessageCount,
 	readLatestAssistant,
 	readMetadata,
 	removeRunDir,
-	runAge,
+	runDisplayName,
 	isValidRunName,
-	runView,
-	tmuxSessionName,
-	updateMetadata,
 	type InboxMessage,
+	type RunMetadata,
+	tmuxSessionExists,
+	updateMetadata,
+	waitForRunShutdown,
 	writeMetadata,
-	waitForChildExit,
+	runAge,
+	pendingMessageCount,
 } from "./shared.ts";
 
 const VALID_THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+const extensionPath = join(dirname(fileURLToPath(import.meta.url)), "index.ts");
 
 function fail(message: string): never {
 	throw new Error(message);
@@ -46,8 +44,6 @@ function usage(): never {
   subagent send <handle> [--follow-up] <message>
   subagent wait <handle> [--timeout <seconds>]
   subagent stop <handle>
-  subagent resume <handle>
-  subagent rm <handle>
   subagent list [--json]`);
 	process.exit(2);
 }
@@ -66,7 +62,7 @@ function takeJsonFlag(args: string[]): { args: string[]; json: boolean } {
 	return { args: args.filter((arg) => arg !== "--json"), json };
 }
 
-interface RunViewRow {
+interface RunView {
 	handle: string;
 	name: string | null;
 	state: string;
@@ -77,11 +73,11 @@ interface RunViewRow {
 	pending: number;
 }
 
-function runViewRow(metadata: RunMetadata, live: Set<string>): RunViewRow {
+function runView(metadata: RunMetadata): RunView {
 	return {
 		handle: metadata.handle,
 		name: metadata.name ?? null,
-		state: runView(metadata, live),
+		state: effectiveRunState(metadata),
 		age: runAge(metadata),
 		cwd: metadata.cwd,
 		model: `${metadata.provider}/${metadata.model}`,
@@ -91,8 +87,8 @@ function runViewRow(metadata: RunMetadata, live: Set<string>): RunViewRow {
 }
 
 /** One copyable line, emitted only when the run is idle and stopping is the next useful action. */
-function hintStopOnIdle(metadata: RunMetadata, live: Set<string>): void {
-	if (runView(metadata, live) === "idle") {
+function hintStopOnIdle(metadata: RunMetadata): void {
+	if (effectiveRunState(metadata) === "idle") {
 		emitHint(`Use \`subagent stop ${metadata.handle}\` to stop this subagent when it is no longer needed.`);
 	}
 }
@@ -127,16 +123,6 @@ function getRun(handle: string): RunMetadata {
 	const metadata = readMetadata(runDirForHandle(handle));
 	if (!metadata) fail(`unknown subagent: ${handle}`);
 	return metadata;
-}
-
-/** Fail with the one command that actually helps, instead of a bare "not running". */
-function requireRunning(metadata: RunMetadata, live: Set<string>): void {
-	const view = runView(metadata, live);
-	if (view === "stopped")
-		fail(`${metadata.handle} is stopped; run \`subagent resume ${metadata.handle}\` to continue it`);
-	if (view === "interrupted")
-		fail(`${metadata.handle} was interrupted; its transcript is kept. Run \`subagent resume ${metadata.handle}\``);
-	if (view === "unstarted") fail(`${metadata.handle} never started; spawn a new subagent instead`);
 }
 
 function generateHandle(): string {
@@ -242,12 +228,13 @@ function spawnSubagent(args: string[]): void {
 	const handle = generateHandle();
 	const runDir = runDirForHandle(handle);
 	const sessionFile = join(runDir, "session.jsonl");
+	const tmuxSession = `pi-subagent-${handle}`;
 	mkdirSync(inboxDir(runDir), { recursive: true, mode: 0o700 });
 	writeFileSync(sessionFile, "", { mode: 0o600 });
 
 	const launchArgs: string[] = [];
 	if (tools) launchArgs.push("--tools", tools);
-	if (noExtensions) launchArgs.push("--no-extensions");
+	if (noExtensions) launchArgs.push("--no-extensions", "--extension", extensionPath);
 	const seenExtensions = new Set<string>();
 	for (const extension of extraExtensions) {
 		if (seenExtensions.has(extension)) continue;
@@ -265,6 +252,7 @@ function spawnSubagent(args: string[]): void {
 		name,
 		parentSessionId: process.env.PI_SESSION_ID || undefined,
 		parentSessionFile: process.env.PI_SESSION_FILE || undefined,
+		tmuxSession,
 		runDir,
 		sessionFile,
 		cwd,
@@ -297,8 +285,7 @@ function statusSubagent(args: string[]): void {
 	const parsed = takeJsonFlag(args);
 	if (parsed.args.length !== 1) usage();
 	const metadata = getRun(parsed.args[0]);
-	const live = liveSessions();
-	const view = runViewRow(metadata, live);
+	const view = runView(metadata);
 	if (parsed.json) {
 		emit(JSON.stringify(view));
 		return;
@@ -315,7 +302,7 @@ function statusSubagent(args: string[]): void {
 			`pending: ${view.pending}`,
 		].join("\n"),
 	);
-	hintStopOnIdle(metadata, live);
+	hintStopOnIdle(metadata);
 }
 
 function renameSubagent(args: string[]): void {
@@ -339,8 +326,7 @@ function sendSubagent(args: string[]): void {
 	const message = messageParts.join(" ").trim();
 	if (!message) fail("send requires a message");
 	const metadata = getRun(handle);
-	const live = liveSessions();
-	requireRunning(metadata, live);
+	if (!tmuxSessionExists(metadata.tmuxSession)) fail(`${handle} is not running`);
 
 	const queueDir = inboxDir(metadata.runDir);
 	mkdirSync(queueDir, { recursive: true, mode: 0o700 });
@@ -351,8 +337,8 @@ function sendSubagent(args: string[]): void {
 	writeFileSync(temporary, `${JSON.stringify(payload)}\n`, { encoding: "utf8", mode: 0o600 });
 	renameSync(temporary, target);
 
-	const view = runView(metadata, live);
-	const verb = followUp && view === "busy" ? "follow-up queued" : view === "idle" ? "prompted" : "steered";
+	const state = effectiveRunState(metadata);
+	const verb = followUp && state === "busy" ? "follow-up queued" : state === "idle" ? "prompted" : "steered";
 	emit(`${metadata.handle} ${verb}`);
 }
 
@@ -372,15 +358,15 @@ async function waitSubagent(args: string[]): Promise<void> {
 
 	while (Date.now() < deadline) {
 		const metadata = getRun(handle);
-		const live = liveSessions();
 		const pending = pendingMessageCount(metadata.runDir) > 0;
-		const view = runView(metadata, live);
-		requireRunning(metadata, live);
-		if (metadata.hasStarted && view === "idle" && !pending) {
+		const state = effectiveRunState(metadata);
+		if (state === "error") fail(metadata.error || `${handle} failed`);
+		if (state === "exited") fail(`${handle} exited before finishing`);
+		if (metadata.hasStarted && state === "idle" && !pending) {
 			const message = readLatestAssistant(metadata.sessionFile);
 			if (!message) fail(`${handle} finished without an assistant response`);
 			emit(assistantText(message));
-			hintStopOnIdle(metadata, live);
+			hintStopOnIdle(metadata);
 			if (message.stopReason === "error" || message.stopReason === "aborted") process.exitCode = 1;
 			return;
 		}
@@ -392,53 +378,17 @@ async function waitSubagent(args: string[]): Promise<void> {
 async function stopSubagent(args: string[]): Promise<void> {
 	if (args.length !== 1) usage();
 	const metadata = getRun(args[0]);
-	// Record the intent before the child disappears, so a concurrent parent relaunch cannot revive it.
-	clearChildExited(metadata.runDir);
-	markStopped(metadata.runDir);
-	// Wait only when there was a process to shut down; a run that already died has nothing to flush.
-	if (killRun(metadata.handle)) await waitForChildExit(metadata.runDir);
-	emit(`${metadata.handle} stopped`);
-	emitHint(
-		`Run \`subagent resume ${metadata.handle}\` to reopen it, or \`subagent rm ${metadata.handle}\` to delete its transcript.`,
-	);
-}
-
-function resumeSubagent(args: string[]): void {
-	if (args.length !== 1) usage();
-	const metadata = getRun(args[0]);
-	const live = liveSessions();
-	if (live.has(tmuxSessionName(metadata.handle))) fail(`${metadata.handle} is already running`);
-	if (!existsSync(metadata.sessionFile))
-		fail(`${metadata.handle} has no transcript to resume; spawn a new subagent instead`);
-	const wasStopped = isStopped(metadata.runDir);
-	clearStopped(metadata.runDir);
-	const starting = updateMetadata(metadata.runDir, { state: "starting", error: undefined }) ?? metadata;
-	try {
-		clearChildExited(metadata.runDir);
-		launchRun(starting);
-	} catch (error) {
-		// Keep a stopped run stopped when the relaunch never happened.
-		if (wasStopped) markStopped(metadata.runDir);
-		updateMetadata(metadata.runDir, { error: error instanceof Error ? error.message : String(error) });
-		throw error;
-	}
-	emit(`${metadata.handle} resumed`);
-}
-
-function removeSubagent(args: string[]): void {
-	if (args.length !== 1) usage();
-	const metadata = getRun(args[0]);
-	if (liveSessions().has(tmuxSessionName(metadata.handle)))
-		fail(`${metadata.handle} is still running; run \`subagent stop ${metadata.handle}\` first`);
+	const wasRunning = tmuxSessionExists(metadata.tmuxSession);
+	spawnSync("tmux", ["kill-session", "-t", metadata.tmuxSession], { stdio: "ignore" });
+	if (wasRunning) await waitForRunShutdown(metadata.runDir);
 	removeRunDir(metadata.runDir);
-	emit(`${metadata.handle} removed`);
+	emit(`${metadata.handle} stopped`);
 }
 
 function listSubagents(args: string[]): void {
 	const parsed = takeJsonFlag(args);
 	if (parsed.args.length !== 0) usage();
-	const live = liveSessions();
-	const views = listRuns(process.env.PI_SESSION_ID || undefined).map((run) => runViewRow(run, live));
+	const views = listRuns(process.env.PI_SESSION_ID || undefined).map(runView);
 	if (parsed.json) {
 		emit(JSON.stringify(views));
 		return;
@@ -483,12 +433,6 @@ async function main(): Promise<void> {
 			break;
 		case "stop":
 			await stopSubagent(args);
-			break;
-		case "resume":
-			resumeSubagent(args);
-			break;
-		case "rm":
-			removeSubagent(args);
 			break;
 		case "list":
 			listSubagents(args);
