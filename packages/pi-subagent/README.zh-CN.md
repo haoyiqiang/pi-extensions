@@ -84,4 +84,6 @@ subagent list
 - `--no-prompt-templates`：关闭 prompt templates
 - `--no-context-files`：忽略仓库指令文件
 
+子代理不会获得 `ask_user_question`：每次 spawn 都会排除它，因为 detached 面板里的对话框会让运行卡住且父会话收不到任何信号。需要子代理做决定时，它会把问题写在回复里，`wait` 会返回这段文本，`send` 可以回答。
+
 不允许嵌套子代理。子会话不加载 subagent skill。子代理在 `/reload` 后继续存在。父会话退出或被替换时，正在运行的子代理会被挂起：进程停止，但记录和元数据保留；恢复该父会话时会以空闲状态和完整历史重新打开。`subagent stop` 会永久删除该运行。
