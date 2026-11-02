@@ -71,7 +71,7 @@ subagent list
 
 Use `subagent list` to see every run of this session with its handle, name, state, age, working directory, and model; `subagent status` prints the same facts for one run as `key: value` lines.
 
-Each run owns the tmux session `pi-subagent-<handle>`, shown in the parent footer while it runs; `/subagent` picks one and attaches to it.
+Each run owns the tmux session `pi-subagent-<handle>`. While it runs, a `Subagents` box above the editor shows its elapsed time, name, and state; `/subagent` picks one and attaches to it.
 
 ## Isolation
 

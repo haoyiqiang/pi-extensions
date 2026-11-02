@@ -2,8 +2,8 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DynamicBorder, type ExtensionAPI, type ExtensionContext, keyHint } from "@earendil-works/pi-coding-agent";
-import { Container, type SelectItem, SelectList, Text, type TUI } from "@earendil-works/pi-tui";
+import { DynamicBorder, type ExtensionAPI, type ExtensionContext, keyHint, type Theme } from "@earendil-works/pi-coding-agent";
+import { Container, type SelectItem, SelectList, Text, type TUI, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import {
 	effectiveRunState,
 	inboxDir,
@@ -29,6 +29,76 @@ function isInboxMessage(value: unknown): value is InboxMessage {
 
 function displayState(metadata: RunMetadata): string {
 	return effectiveRunState(metadata).padEnd(8);
+}
+
+const WIDGET_ID = "subagents";
+const WIDGET_ROW_LIMIT = 6;
+
+function formatElapsed(startedAt: string): string {
+	const seconds = Math.max(0, Math.floor((Date.now() - Date.parse(startedAt)) / 1000));
+	return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+/** `╭─ Subagents ───── N running ─╮`, with the count right-aligned inside the frame. */
+function borderTop(title: string, info: string, width: number, accent: (text: string) => string): string {
+	if (width <= 0) return "";
+	if (width === 1) return accent("╭");
+	const inner = width - 2;
+	const head = `─ ${title} `;
+	const tail = ` ${info} ─`;
+	if (head.length + tail.length >= inner) return accent(`╭${`${head}${tail}`.slice(0, inner)}╮`);
+	return accent(`╭${head}${"─".repeat(inner - head.length - tail.length)}${tail}╮`);
+}
+
+function borderBottom(width: number, accent: (text: string) => string): string {
+	if (width <= 0) return "";
+	if (width === 1) return accent("╰");
+	return accent(`╰${"─".repeat(width - 2)}╯`);
+}
+
+/** `│left          right│`, keeping the right side visible when the row has to shrink. */
+function borderLine(left: string, right: string, width: number, accent: (text: string) => string): string {
+	if (width <= 0) return "";
+	if (width === 1) return accent("│");
+	const inner = Math.max(0, width - 2);
+	const rightText = truncateToWidth(right, inner);
+	const rightWidth = visibleWidth(rightText);
+	const leftText = truncateToWidth(left, Math.max(0, inner - rightWidth));
+	const pad = Math.max(0, inner - visibleWidth(leftText) - rightWidth);
+	return `${accent("│")}${leftText}${" ".repeat(pad)}${rightText}${accent("│")}`;
+}
+
+const STATE_LABEL = {
+	starting: "starting",
+	busy: "active",
+	idle: "waiting",
+	error: "error",
+} as const;
+
+function stateLabel(state: ReturnType<typeof effectiveRunState>, theme: Theme): string {
+	const color = state === "busy" ? "warning" : state === "idle" ? "success" : state === "error" ? "error" : "muted";
+	return theme.fg(color, STATE_LABEL[state as keyof typeof STATE_LABEL] ?? state);
+}
+
+function renderWidget(rows: { run: RunMetadata; state: ReturnType<typeof effectiveRunState> }[], theme: Theme, width: number): string[] {
+	const accent = (text: string) => theme.fg("accent", text);
+	const lines = [borderTop("Subagents", `${rows.length} running`, width, accent)];
+	for (const { run, state } of rows.slice(0, WIDGET_ROW_LIMIT)) {
+		lines.push(
+			borderLine(
+				` ${formatElapsed(run.createdAt)}  ${run.name ?? run.handle} `,
+				`${stateLabel(state, theme)} `,
+				width,
+				accent,
+			),
+		);
+	}
+	if (rows.length > WIDGET_ROW_LIMIT) {
+		const hidden = rows.length - WIDGET_ROW_LIMIT;
+		lines.push(borderLine(` +${hidden} more `, " ", width, accent));
+	}
+	lines.push(borderBottom(width, accent));
+	return lines;
 }
 
 export default function subagentExtension(pi: ExtensionAPI) {
@@ -123,26 +193,20 @@ export default function subagentExtension(pi: ExtensionAPI) {
 
 		const refreshWidget = (): void => {
 			if (!widgetContext) return;
-			const activeRuns = listRuns(widgetContext.sessionManager.getSessionId())
+			const rows = listRuns(widgetContext.sessionManager.getSessionId())
 				.map((run) => ({ run, state: effectiveRunState(run) }))
 				.filter(({ state }) => state !== "exited");
-			if (activeRuns.length === 0) {
-				widgetContext.ui.setWidget("subagents", undefined);
+			if (rows.length === 0) {
+				widgetContext.ui.setWidget(WIDGET_ID, undefined);
 				return;
 			}
-
-			const visible = activeRuns.slice(0, 5).map(({ run, state }) => {
-				const color =
-					state === "busy" ? "warning" : state === "idle" ? "success" : state === "error" ? "error" : "muted";
-				return widgetContext!.ui.theme.fg(color, `${run.name ?? run.handle}:${state}`);
-			});
-			if (activeRuns.length > visible.length) {
-				visible.push(widgetContext.ui.theme.fg("muted", `+${activeRuns.length - visible.length}`));
-			}
 			widgetContext.ui.setWidget(
-				"subagents",
-				[widgetContext.ui.theme.fg("dim", "subagents: ") + visible.join(widgetContext.ui.theme.fg("dim", " | "))],
-				{ placement: "belowEditor" },
+				WIDGET_ID,
+				(_tui, theme) => ({
+					invalidate() {},
+					render: (width: number) => renderWidget(rows, theme, width),
+				}),
+				{ placement: "aboveEditor" },
 			);
 		};
 

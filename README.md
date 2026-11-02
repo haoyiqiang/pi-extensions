@@ -16,7 +16,7 @@ Published packages are independently installable from npm. Each package owns its
 | [`@kevinhao/pi-spark`](./packages/pi-spark) | Owns the compact editor/footer TUI, clean transcript folding, provider credits, model presets, idle recaps, metrics, session/terminal naming, and the `#` resource picker. | [English](./packages/pi-spark/README.md) · [中文](./packages/pi-spark/README.zh-CN.md) |
 | [`@kevinhao/pi-utils`](./packages/pi-utils) | Library for portable JSON config I/O and deterministic test fixtures. Not a Pi extension. | [English](./packages/pi-utils/README.md) · [中文](./packages/pi-utils/README.zh-CN.md) |
 | [`@kevinhao/pi-web-search`](./packages/pi-web-search) | Combines LLM built-in web search, independent Search APIs, Gemini/Vertex URL Context, bounded web fetching, and opt-in GitHub repository extraction. | [English](./packages/pi-web-search/README.md) · [中文](./packages/pi-web-search/README.zh-CN.md) |
-| [`@kevinhao/pi-subagent`](./packages/pi-subagent) | Runs persistent subagents in detached tmux sessions; their status shows in the footer and `/subagent` attaches to one. | [English](./packages/pi-subagent/README.md) · [中文](./packages/pi-subagent/README.zh-CN.md) |
+| [`@kevinhao/pi-subagent`](./packages/pi-subagent) | Runs persistent subagents in detached tmux sessions; a bordered status box above the editor tracks them and `/subagent` attaches to one. | [English](./packages/pi-subagent/README.md) · [中文](./packages/pi-subagent/README.zh-CN.md) |
 
 Shared libraries are published for feature-package dependencies. [`@kevinhao/pi-utils`](./packages/pi-utils) is a library, not a Pi extension. It owns portable JSON config I/O and deterministic test fixtures.
 

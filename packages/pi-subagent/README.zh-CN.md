@@ -71,7 +71,7 @@ subagent list
 
 用 `subagent list` 查看本会话所有运行及其 handle、名称、状态、运行时长、工作目录和模型；`subagent status` 以 `key: value` 形式打印单个运行的同样信息。
 
-每次运行拥有名为 `pi-subagent-<handle>` 的 tmux session，运行期间显示在父会话 footer；`/subagent` 可以选中并附着进去。
+每次运行拥有名为 `pi-subagent-<handle>` 的 tmux session。运行期间编辑器上方会显示 `Subagents` 状态框，包含已运行时长、名称与状态；`/subagent` 可以选中并附着进去。
 
 ## 隔离
 

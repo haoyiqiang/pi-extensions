@@ -16,7 +16,7 @@
 | [`@kevinhao/pi-spark`](./packages/pi-spark) | 统一管理紧凑 editor/footer、清爽对话折叠、provider 余额、模型预设、空闲回顾、指标、会话/终端命名和 `#` 资源选择器。 | [English](./packages/pi-spark/README.md) · [中文](./packages/pi-spark/README.zh-CN.md) |
 | [`@kevinhao/pi-utils`](./packages/pi-utils) | 工具库：可移植的 JSON 配置读写，以及确定性的测试 fixture。不是 Pi 扩展。 | [English](./packages/pi-utils/README.md) · [中文](./packages/pi-utils/README.zh-CN.md) |
 | [`@kevinhao/pi-web-search`](./packages/pi-web-search) | 整合 LLM 内置网络搜索、独立 Search API、Gemini/Vertex URL Context、有界网页抓取和可选 GitHub 仓库提取。 | [English](./packages/pi-web-search/README.md) · [中文](./packages/pi-web-search/README.zh-CN.md) |
-| [`@kevinhao/pi-subagent`](./packages/pi-subagent) | 在 detached tmux session 中运行可持久化的子代理，状态显示在 footer，`/subagent` 可附着到其中一个。 | [English](./packages/pi-subagent/README.md) · [中文](./packages/pi-subagent/README.zh-CN.md) |
+| [`@kevinhao/pi-subagent`](./packages/pi-subagent) | 在 detached tmux session 中运行可持久化的子代理，编辑器上方有边框状态框跟踪它们，`/subagent` 可附着到其中一个。 | [English](./packages/pi-subagent/README.md) · [中文](./packages/pi-subagent/README.zh-CN.md) |
 
 共享库会发布到 npm 供功能包依赖。[`@kevinhao/pi-utils`](./packages/pi-utils) 是工具库，不是 Pi 扩展，负责可移植的 JSON 配置读写和确定性测试 fixture。
 
