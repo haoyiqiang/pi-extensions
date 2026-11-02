@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.2.1](https://github.com/haoyiqiang/pi-extensions/compare/pi-subagent-v1.2.0...pi-subagent-v1.2.1) (2026-11-02)
+
+
+### Bug Fixes
+
+* **pi-subagent:** keep the question dialog out of unattended children ([efc4555](https://github.com/haoyiqiang/pi-extensions/commit/efc4555f054e96a386d6966f744bdacbbeab2613))
+* **pi-subagent:** keep the question dialog out of unattended children ([45abf45](https://github.com/haoyiqiang/pi-extensions/commit/45abf4535641d249b224cf7fde8ed174ef3f433b))
+
 ## [1.2.0](https://github.com/haoyiqiang/pi-extensions/compare/pi-subagent-v1.1.0...pi-subagent-v1.2.0) (2026-11-02)
 
 
