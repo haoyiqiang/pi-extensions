@@ -66,14 +66,12 @@ subagent send a1b2c3 "Focus on error handling"
 subagent send a1b2c3 --follow-up "Then summarize"
 subagent wait a1b2c3
 subagent stop a1b2c3
-subagent resume a1b2c3
-subagent rm a1b2c3
 subagent list
 ```
 
 Use `subagent list` to see every run of this session with its handle, name, state, age, working directory, and model; `subagent status` prints the same facts for one run as `key: value` lines.
 
-Each run owns the tmux session `pi-subagent-<handle>`. While it is running the extension draws a `Subagents` box above the editor; `/subagent` picks one and attaches to it. The session name is always derived from the handle, so `tmux attach -t pi-subagent-a1b2c3` works too.
+Each run owns the tmux session `pi-subagent-<handle>`, shown in the parent footer while it runs; `/subagent` picks one and attaches to it.
 
 ## Isolation
 
@@ -86,4 +84,4 @@ Optional spawn flags:
 - `--no-prompt-templates`: disable prompt templates
 - `--no-context-files`: ignore repository instruction files
 
-Nested subagents are disabled. Child sessions do not receive the subagent skill. Children survive `/reload`. When their spawning Pi session quits or is replaced, running children are shut down but their transcript and metadata are kept; resuming that parent session relaunches them with their full history. That shutdown is not `subagent stop`: only an explicit `stop` or `rm` ends a run, so a child that quits or is killed on its own is relaunched as well.
+Nested subagents are disabled. Child sessions do not receive the subagent skill. Children survive `/reload`. When their spawning Pi session quits or is replaced, running children are suspended: the process stops, but transcript and metadata are kept. Resuming that parent session relaunches them idle with their full history. `subagent stop` removes a run permanently.
