@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.2.2](https://github.com/haoyiqiang/pi-extensions/compare/pi-subagent-v1.2.1...pi-subagent-v1.2.2) (2026-11-02)
+
+
+### Bug Fixes
+
+* **pi-subagent:** show the original state names in the status box ([e036200](https://github.com/haoyiqiang/pi-extensions/commit/e0362004cad645ec3a67d4f72f823bb47a911a81))
+* **pi-subagent:** show the original state names in the status box ([9753483](https://github.com/haoyiqiang/pi-extensions/commit/9753483b723f82e228ed594372a37a98179e1499))
+
 ## [1.2.1](https://github.com/haoyiqiang/pi-extensions/compare/pi-subagent-v1.2.0...pi-subagent-v1.2.1) (2026-11-02)
 
 
