@@ -68,16 +68,9 @@ function borderLine(left: string, right: string, width: number, accent: (text: s
 	return `${accent("│")}${leftText}${" ".repeat(pad)}${rightText}${accent("│")}`;
 }
 
-const STATE_LABEL = {
-	starting: "starting",
-	busy: "active",
-	idle: "waiting",
-	error: "error",
-} as const;
-
 function stateLabel(state: ReturnType<typeof effectiveRunState>, theme: Theme): string {
 	const color = state === "busy" ? "warning" : state === "idle" ? "success" : state === "error" ? "error" : "muted";
-	return theme.fg(color, STATE_LABEL[state as keyof typeof STATE_LABEL] ?? state);
+	return theme.fg(color, state);
 }
 
 function renderWidget(rows: { run: RunMetadata; state: ReturnType<typeof effectiveRunState> }[], theme: Theme, width: number): string[] {
